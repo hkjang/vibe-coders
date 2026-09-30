@@ -86,7 +86,9 @@ export function RequestSpanWaterfall({ requestId }: RequestSpanWaterfallProps): 
         <div className="request-flow-actions">
           <Button
             size="small"
-            disabled={!requestId || trace.isFetching}
+            disabled={!requestId}
+            aria-disabled={!requestId || trace.isFetching}
+            aria-busy={trace.isFetching}
             onClick={() => {
               if (requestId && !trace.isFetching) void trace.refetch();
             }}
@@ -95,7 +97,9 @@ export function RequestSpanWaterfall({ requestId }: RequestSpanWaterfallProps): 
           </Button>
           <Button
             size="small"
-            disabled={!requestId || links.isFetching}
+            disabled={!requestId}
+            aria-disabled={!requestId || links.isFetching}
+            aria-busy={links.isFetching}
             onClick={() => {
               if (requestId && !links.isFetching) void links.refetch();
             }}

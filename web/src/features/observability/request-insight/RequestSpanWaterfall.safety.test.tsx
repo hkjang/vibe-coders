@@ -423,7 +423,9 @@ describe("request flow expanded display and retry boundaries", () => {
     flow.response.trace = () => held.promise;
     const retry = screen.getByRole("button", { name: "처리 흐름 다시 조회" });
     await flow.user.click(retry);
-    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute("aria-disabled", "true");
+    expect(retry).toHaveAttribute("aria-busy", "true");
+    expect(retry).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "연결 기록 다시 조회" })).toBeEnabled();
     expect(flowCard()).toHaveTextContent("이전 처리 흐름을 표시합니다.");
     await flow.user.click(retry);
@@ -431,9 +433,46 @@ describe("request flow expanded display and retry boundaries", () => {
     expect(flow.count("links")).toBe(1);
     await act(async () => held.resolve(traceFixture({ spans: [rootSpan({ name: "다시 받은 기록" })] })));
     expect(await screen.findByText("다시 받은 기록", { selector: "code" })).toBeVisible();
-    await waitFor(() => expect(retry).toBeEnabled());
+    await waitFor(() => expect(retry).toHaveAttribute("aria-disabled", "false"));
+    expect(retry).toHaveAttribute("aria-busy", "false");
     expect(screen.queryByText("이전 처리 흐름을 표시합니다.")).not.toBeInTheDocument();
   });
+
+  it.each(["trace", "links"] as const)(
+    "keeps %s retry keyboard focus while ignoring pending Enter repeats",
+    async (kind) => {
+      const flow = setupFlow();
+      await screen.findByText(rootName, { selector: "code" });
+      await screen.findByText("MCP 1건");
+      const held = deferred<unknown>();
+      flow.response[kind] = () => held.promise;
+      const retry = screen.getByRole("button", {
+        name: kind === "trace" ? "처리 흐름 다시 조회" : "연결 기록 다시 조회",
+      });
+      // Controlled initial focus for the component test; actual mobile Tab
+      // continuity is independently exercised in the browser regression.
+      retry.focus();
+      await flow.user.keyboard("{Enter}");
+      await waitFor(() => expect(retry).toHaveAttribute("aria-disabled", "true"));
+      expect(retry).toHaveAttribute("aria-busy", "true");
+      expect(retry).not.toBeDisabled();
+      expect(retry).toHaveFocus();
+      await flow.user.keyboard("{Enter}{Enter}");
+      expect(flow.count(kind)).toBe(2);
+      expect(flow.count(kind === "trace" ? "links" : "trace")).toBe(1);
+      await act(async () => held.resolve(kind === "trace" ? traceFixture() : linksFixture()));
+      await waitFor(() => expect(retry).toHaveAttribute("aria-disabled", "false"));
+      expect(retry).toHaveAttribute("aria-busy", "false");
+      expect(retry).toHaveFocus();
+      await flow.user.tab();
+      expect(
+        kind === "trace"
+          ? screen.getByRole("button", { name: "연결 기록 다시 조회" })
+          : screen.getByRole("link", { name: "세션 흐름 보기" }),
+      ).toHaveFocus();
+      expect(flow.count(kind)).toBe(2);
+    },
+  );
 
   it("retains long public names and ordinary error text in the text alternative", async () => {
     const name = "공개긴모델이름".repeat(80);
