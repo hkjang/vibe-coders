@@ -17,7 +17,7 @@ const saved = {
   id: "view-1",
   name: "운영 오류",
   view: "xview",
-  params: "errors_only=1",
+  params: "models=fixture-model",
   created_at: "2026-09-30T00:00:00Z",
   updated_at: "2026-09-30T00:00:00Z",
 };
@@ -36,7 +36,7 @@ function setup({ readOnly = false, canWrite = true } = {}) {
         <button onClick={() => setLocked((value) => !value)}>테스트 전환</button>
         <SavedViewBar
           canWrite={canWrite}
-          currentParams="errors_only=1"
+          currentParams="models=fixture-model"
           selectedId="view-1"
           onApply={onApply}
           writeDeniedReason="쓰기 권한 없음"
@@ -59,7 +59,7 @@ describe("SavedViewBar feature access", () => {
     for (const name of [/새로 저장/u, "덮어쓰기", "삭제"])
       expect(screen.getByRole("button", { name })).toBeDisabled();
     await user.selectOptions(screen.getByRole("combobox", { name: "저장된 뷰" }), "view-1");
-    expect(onApply).toHaveBeenCalledWith("errors_only=1", "view-1");
+      expect(onApply).toHaveBeenCalledWith("models=fixture-model", "view-1");
     expect(screen.getByRole("button", { name: "링크 복사" })).toBeEnabled();
     expect(api.calls.filter((call) => !call.key.startsWith("GET "))).toEqual([]);
   });
@@ -87,7 +87,7 @@ describe("SavedViewBar feature access", () => {
     await user.click(within(dialog).getByRole("button", { name: "저장" }));
     await waitFor(() =>
       expect(api.bodies("POST /admin/saved-filters")).toEqual([
-        { view: "xview", name: "새 오류 보기", params: "errors_only=1" },
+        { view: "xview", name: "새 오류 보기", params: "models=fixture-model" },
       ]),
     );
   });
@@ -112,7 +112,7 @@ describe("SavedViewBar feature access", () => {
     await screen.findByRole("option", { name: "운영 오류" });
     await user.click(screen.getByRole("button", { name: "덮어쓰기" }));
     await waitFor(() =>
-      expect(api.bodies("PATCH /admin/saved-filters/view-1")).toEqual([{ params: "errors_only=1" }]),
+      expect(api.bodies("PATCH /admin/saved-filters/view-1")).toEqual([{ params: "models=fixture-model" }]),
     );
   });
 });
