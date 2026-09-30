@@ -171,6 +171,57 @@ describe("단일 채팅 실제 전송·수신 경계", () => {
       await act(async () => second.close());
     },
   );
+  it.each([
+    { label: "한글 조합 중 Enter", isComposing: true, keyCode: 13, shiftKey: false, sends: false },
+    { label: "조합 완료 legacy 229 Enter", isComposing: false, keyCode: 229, shiftKey: false, sends: false },
+    { label: "일반 Enter", isComposing: false, keyCode: 13, shiftKey: false, sends: true },
+    { label: "Shift+Enter", isComposing: false, keyCode: 13, shiftKey: true, sends: false },
+  ])(
+    "$label의 기본 동작과 전송·입력 보존 경계를 지킨다",
+    async ({ isComposing, keyCode, shiftKey, sends }) => {
+      const first = response(),
+        second = response();
+      const fetch = vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValueOnce(first.response)
+        .mockResolvedValueOnce(second.response);
+      globalThis.fetch = fetch;
+      const view = await setup();
+      await view.user.click(screen.getByRole("button", { name: "모델 호출" }));
+      await act(async () => {
+        first.send("공개 첫 응답");
+        first.close();
+      });
+      const followup = screen.getByLabelText("이어서 질문");
+      await view.user.type(followup, "조합을 마친 한글 질문");
+      // A native event exercises React's real onKeyDown/nativeEvent path. This is
+      // not evidence that an operating-system IME was run in JSDOM.
+      const event = new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        bubbles: true,
+        cancelable: true,
+        isComposing,
+        keyCode,
+        shiftKey,
+      });
+      fireEvent(followup, event);
+      expect(fetch).toHaveBeenCalledTimes(sends ? 2 : 1);
+      expect(event.defaultPrevented).toBe(sends);
+      expect(followup).toHaveValue(sends ? "" : "조합을 마친 한글 질문");
+      if (sends) {
+        expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body)).messages.at(-1)).toEqual({
+          role: "user",
+          content: "조합을 마친 한글 질문",
+        });
+        await act(async () => second.close());
+      } else if (shiftKey) {
+        await view.user.keyboard("{Shift>}{Enter}{/Shift}");
+        expect(followup).toHaveValue("조합을 마친 한글 질문\n");
+        expect(fetch).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
   it("단일 readonly는 기존 routing:read 미리보기와 admin:write 코드검증의 실제 API 호출을 유지한다", async () => {
     const stream = response();
     globalThis.fetch = vi.fn(async () => stream.response);

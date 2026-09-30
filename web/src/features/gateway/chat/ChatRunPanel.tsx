@@ -394,6 +394,7 @@ function SingleChatPanel({ access }: { access: ChatAccess }): React.JSX.Element 
                 onChange={(event) => setFollowup(event.target.value)}
                 disabled={streaming || turns.length === 0}
                 onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
                   if (event.key !== "Enter" || event.shiftKey) return;
                   event.preventDefault();
                   if (send(followup)) setFollowup("");
