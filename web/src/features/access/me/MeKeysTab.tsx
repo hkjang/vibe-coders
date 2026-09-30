@@ -43,6 +43,7 @@ import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
+import "@/features/access/me/me-key-scopes.css";
 
 const access = endpoints.domains.access;
 const routeId = "me.home";
@@ -227,7 +228,7 @@ export function MeKeysTab(): React.JSX.Element {
                       {row.scopes.length === 0 ? (
                         <span className="access-note">선택된 권한 없음</span>
                       ) : (
-                        <span className="badge-list">
+                        <span className="badge-list me-key-scope-badges">
                           {meKeyScopeChoices(row.scopes).map(({ value, label }) => (
                             <Badge key={value} tone="muted">
                               {label} ({value || "빈 권한 식별자"})

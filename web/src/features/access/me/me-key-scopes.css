@@ -1,0 +1,13 @@
+/* Personal grant identifiers can come from newer servers and be arbitrarily long.
+   Preserve the full value without widening the background list on mobile. */
+.me-key-scope-badges {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.me-key-scope-badges > .badge {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
