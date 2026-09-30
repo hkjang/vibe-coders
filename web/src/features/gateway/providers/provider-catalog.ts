@@ -80,6 +80,15 @@ export function displayProviderBaseURL(
   value: string,
   credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
 ): string {
+  // WHATWG URL lowercases ASCII hosts and converts Unicode hosts to punycode.
+  // Inspect the original host first, while case-sensitive configured prefixes
+  // still exist. Userinfo is deliberately excluded: it is removed below without
+  // discarding the otherwise safe URL context. The shared component check also
+  // bounds and decodes percent-encoded prefixes before inspecting them.
+  const authority = value.trim().match(/^https?:\/*([^/?#]*)/iu)?.[1];
+  if (authority === undefined) return invalidProviderURLDisplay;
+  const originalHost = authority.slice(authority.lastIndexOf("@") + 1);
+  if (providerURLComponentHasSecret(originalHost, credentialPrefixes)) return invalidProviderURLDisplay;
   const url = parseProviderURL(value);
   if (!url) return invalidProviderURLDisplay;
   url.username = "";

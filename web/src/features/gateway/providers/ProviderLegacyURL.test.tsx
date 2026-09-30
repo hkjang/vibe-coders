@@ -53,6 +53,35 @@ const row = buildProviderRows([
 if (!row) throw new Error("missing public legacy provider row");
 
 describe("비공개 기존 URL 유지", () => {
+  it.each([
+    { name: "public legacy name" },
+    { name: "p".repeat(210) },
+    { timeout_ms: 900_000 },
+    { priority: 200_000 },
+    { model_patterns: "public-".repeat(300) },
+    { failover_group: "public-".repeat(40) },
+  ])("서버에 이미 있는 값을 유지하는 변경에는 생성 제약을 재적용하지 않는다: %j", (existing) => {
+    const snapshot = {
+      ...row,
+      provider: { ...row.provider, base_url: "https://public.example/v1", ...existing },
+    };
+    const values = providerFormValues(snapshot);
+    expect(providerFormSchema.safeParse(values).success).toBe(false);
+    expect(providerEditSchema(snapshot).safeParse({ ...values, enabled: false }).success).toBe(true);
+  });
+
+  it("읽기 전용 이름을 바꾸거나 새 값을 상한 밖으로 바꾸는 것은 거절한다", () => {
+    const schema = providerEditSchema(row);
+    const values = providerFormValues(row);
+    for (const change of [
+      { name: "renamed" },
+      { priority: "200000" },
+      { timeout_ms: "900000" },
+      { model_patterns: "public-".repeat(300) },
+      { failover_group: "public-".repeat(40) },
+    ])
+      expect(schema.safeParse({ ...values, ...change }).success).toBe(false);
+  });
   it("추가 또는 공개 주소 편집에서는 비공개 표시값을 새 주소로 받지 않는다", () => {
     const values = providerFormValues(row);
     expect(providerFormSchema.safeParse(values).success).toBe(false);

@@ -91,6 +91,29 @@ function routingHealth(providerName: string): RoutingHealth {
 
 describe("provider catalog", () => {
   it.each([
+    ["uppercase", "CORP_", "CORP_"],
+    ["encoded uppercase", "CORP_", "%43%4F%52%50%5F"],
+    ["unicode", "회사_", "회사_"],
+    ["encoded unicode", "회사_", "%ED%9A%8C%EC%82%AC%5F"],
+  ])("redacts %s credential hostnames before URL canonicalization", (_name, prefix, encodedPrefix) => {
+    const value = `https://${encodedPrefix}${"A".repeat(32)}.example/v1?api-version=2026-01-01`;
+    expect(displayProviderBaseURL(value, [prefix])).toBe(invalidProviderURLDisplay);
+    expect(displayProviderBaseURL(value, [prefix])).not.toContain(new URL(value).hostname);
+  });
+
+  it("retains safe canonical host context while removing userinfo and fragments", () => {
+    const value = "https://CORP_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345:private@회사.example/v1?region=korea#hidden";
+    const displayed = displayProviderBaseURL(value, ["CORP_", "회사_"]);
+    expect(displayed).toBe(`${new URL(value).origin}/v1?region=korea`);
+    expect(displayed).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+    expect(displayed).not.toContain("private");
+    expect(displayed).not.toContain("hidden");
+    expect(displayProviderBaseURL("https://CORP_short.example/v1", ["CORP_"])).toBe(
+      "https://corp_short.example/v1",
+    );
+  });
+
+  it.each([
     "corp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
     "%63%6f%72%70%5fABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
     "%2563%256f%2572%2570%255fABCDEFGHIJKLMNOPQRSTUVWXYZ012345",

@@ -48,9 +48,17 @@ export const providerFormSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
-export function providerEditSchema(row: ProviderCatalogRow): typeof providerFormSchema {
+export function providerEditSchema(row: ProviderCatalogRow) {
+  const before = row.provider;
   return providerFormSchema.extend({
-    base_url: providerURLSchema(row.provider.base_url === redactedProviderURL),
+    // Existing rows have already been accepted by the server. The read-only
+    // identity must remain exact; creation-only limits must not break toggles.
+    name: z.string().refine((value) => value === before.name, "기존 공급자 이름은 변경할 수 없습니다."),
+    base_url: providerURLSchema(before.base_url === redactedProviderURL),
+    timeout_ms: z.literal(String(before.timeout_ms)).or(providerFormSchema.shape.timeout_ms),
+    priority: z.literal(String(before.priority)).or(providerFormSchema.shape.priority),
+    model_patterns: z.literal(before.model_patterns).or(providerFormSchema.shape.model_patterns),
+    failover_group: z.literal(before.failover_group).or(providerFormSchema.shape.failover_group),
   });
 }
 
