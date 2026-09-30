@@ -220,4 +220,57 @@ describe("provider catalog", () => {
     expect(providerSearchContainsSensitiveValue("api-version=2026-01-01")).toBe(false);
     expect(providerSearchContainsSensitiveValue("provider.example")).toBe(false);
   });
+
+  it.each([
+    "sk-proj-abcdefgh",
+    "%73%6b%2dproj%2dabcdefgh",
+    "%2573%256b%252dproj%252dabcdefgh",
+    "Bearer%20private-authorization-value",
+    "Basic%20dXNlcjpwYXNzd29yZA%3D%3D",
+    "https%3A%2F%2Fuser%3Aprivate-password%40nested.example%2Fv1",
+    "%252Ftoken%253Dprivate-assignment-value",
+  ])("masks a credential-bearing ordinary query value (%s) while keeping safe URL context", (value) => {
+    const displayed = displayProviderBaseURL(
+      `https://provider.example/v1?api-version=2026-01-01&value=${value}&region=korea`,
+    );
+    const parsed = new URL(displayed);
+    expect(parsed.origin + parsed.pathname).toBe("https://provider.example/v1");
+    expect(parsed.searchParams.get("api-version")).toBe("2026-01-01");
+    expect(parsed.searchParams.get("region")).toBe("korea");
+    expect(parsed.searchParams.get("value")).toBe("***");
+    expect(displayed).not.toContain(value);
+  });
+
+  it.each([
+    "sk-proj-abcdefgh",
+    "%73%6b%2dproj%2dabcdefgh",
+    "%2573%256b%252dproj%252dabcdefgh",
+    "token=private-path-value",
+    "%2574oken%253Dprivate-path-value",
+    "%252Ftoken%253Dprivate-path-value",
+    "Bearer%20private-path-value",
+  ])("does not display credentials in decoded path components (%s)", (path) => {
+    expect(displayProviderBaseURL(`https://provider.example/v1/${path}?api-version=2026-01-01`)).toBe(
+      invalidProviderURLDisplay,
+    );
+  });
+
+  it("removes credential-bearing query names and masks multiply encoded sensitive names", () => {
+    const displayed = displayProviderBaseURL(
+      "https://provider.example/v1?sk-proj-abcdefgh=value&%2574oken=private-value&region=korea",
+    );
+    expect(displayed).not.toContain("abcdefgh");
+    expect(displayed).not.toContain("private-value");
+    expect(new URL(displayed).searchParams.get("region")).toBe("korea");
+  });
+
+  it("preserves ordinary encoded deployment paths and repeated nonsecret parameters", () => {
+    const displayed = displayProviderBaseURL(
+      "https://provider.example/docs/tokenization/%ED%95%9C%EA%B8%80?api-version=2026-01-01&region=korea&region=japan",
+    );
+    const parsed = new URL(displayed);
+    expect(decodeURIComponent(parsed.pathname)).toBe("/docs/tokenization/한글");
+    expect(parsed.searchParams.getAll("region")).toEqual(["korea", "japan"]);
+    expect(parsed.searchParams.get("api-version")).toBe("2026-01-01");
+  });
 });
