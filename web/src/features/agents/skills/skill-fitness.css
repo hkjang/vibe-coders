@@ -1,0 +1,6 @@
+.skill-fitness-value {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
