@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.17`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.18`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.17.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.17.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.18.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.18.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.17.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.18.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.17
+export GATEWAY_VERSION=v0.86.18
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -459,9 +459,13 @@ ID의 실제 존재 여부는 이 화면에서 확인하지 않습니다. 목록
 재전송 전에 목록을 확인하세요. 참조 ID·메모는 기존 관리자 읽기 권한으로 조회되므로 비밀값이나
 프롬프트·응답 원문을 넣지 마세요. 기존 목록에 없던 메모 원문을 새로 표시하지는 않습니다.
 
-기능 전환의 읽기 전용 설정은 일부 기존 쓰기 화면에 아직 연결되지 않았습니다. 해당 설정만으로 편집이
-금지됐다고 가정하지 말고 서버 역할·scope에 따른 실제 쓰기 권한을 확인하세요. 적용 누락과 보완 계획은
-[인수 검증표](APP_UI_ACCEPTANCE.md#확인된-공통-전환-제한-누락)에 따로 관리합니다.
+`v0.86.18`의 읽기 전용 제한은 **스킬·LLM·XView**부터 적용합니다. 해당 기능의 저장·삭제·승격·
+가져오기·실제 모델 재실행과 분석은 잠그고, 조회·순수 평가 시뮬레이션·추천 조회·필터 적용은 유지합니다.
+열린 초안에 읽기 전용이 반영되면 입력과 저장을 잠그지만 초안은 보존합니다. 취소·변경 버리기는 가능하며
+다시 쓰기가 허용되어도 자동 저장하지 않습니다. 이미 서버에 보낸 작업을 취소하거나 되돌리지는 않습니다.
+브라우저가 확인한 설정을 기준으로 하므로 모든 탭·서버의 즉시 강제를 뜻하지 않습니다. 다른 기능의 전환
+설정만으로 편집 금지를 가정하지 말고 서버 역할·scope에 따른 실제 권한도 확인하세요. 적용 범위와 잔여
+작업은 [인수 검증표](APP_UI_ACCEPTANCE.md#확인된-공통-전환-제한-누락)에 따로 관리합니다.
 
 ## 4. 계정과 권한
 
