@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  containsConfiguredCredential,
   containsPotentialSecret,
   isSensitiveCredentialKey,
   secretSearchMessage,
@@ -13,6 +14,27 @@ function encoded(value: string, passes: number): string {
 }
 
 describe("secret detection", () => {
+  it.each(["%41_", "%25_", "%", "기업%41_"])(
+    "matches literal percent-containing prefix %s at every decoding layer",
+    (prefix) => {
+      const credential = `${prefix}${"B".repeat(32)}`;
+      for (const passes of [0, 1, 3, 7]) {
+        const value = encoded(credential, passes);
+        expect(containsConfiguredCredential(value, [prefix])).toBe(true);
+        expect(containsPotentialSecret(value, [prefix])).toBe(true);
+      }
+      // G avoids an invalid UTF-8 percent triplet for the literal "%" prefix;
+      // malformed encoded inputs intentionally remain fail-closed.
+      expect(containsPotentialSecret(`${prefix}${"G".repeat(31)}`, [prefix])).toBe(false);
+    },
+  );
+
+  it("does not rewrite configured prefixes into unrelated public values", () => {
+    expect(containsConfiguredCredential(`A_${"B".repeat(32)}`, ["%41_"])).toBe(false);
+    expect(containsPotentialSecret(`A_${"B".repeat(32)}`, ["%41_"])).toBe(false);
+    expect(containsPotentialSecret(encoded(`vc_sk_${"A".repeat(43)}`, 7))).toBe(true);
+  });
+
   it.each([
     "Authorization",
     "api_key",

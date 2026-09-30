@@ -6,6 +6,7 @@ import {
   filterProviderRows,
   invalidProviderURLDisplay,
   providerSearchContainsSensitiveValue,
+  providerPageNumber,
 } from "@/features/gateway/providers/provider-catalog";
 import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from "@/shared/api/schemas";
 
@@ -90,6 +91,41 @@ function routingHealth(providerName: string): RoutingHealth {
 }
 
 describe("provider catalog", () => {
+  it("keeps paging normalization unchanged", () => {
+    expect([null, "", "0", "-1", "2.5", "text", "2"].map(providerPageNumber)).toEqual([1, 1, 1, 1, 1, 1, 2]);
+  });
+
+  it.each(["corp_", "%41_"])(
+    "uses %s prefixes for safe identity and filtered display without changing editable metadata",
+    (prefix) => {
+      const credential = `${prefix}${"B".repeat(32)}`;
+      const original = {
+        ...provider("safe"),
+        base_url: `https://provider.example/v1?value=${encodeURIComponent(credential)}`,
+        model_patterns: credential,
+        failover_group: credential,
+      };
+      const rows = buildProviderRows(
+        [original, { ...original, provider_ref: providerRef("private"), name: credential }],
+        [],
+        [],
+        undefined,
+        false,
+        [prefix],
+      );
+      expect(rows[1]?.nameRedacted).toBe(true);
+      expect(rows[1]?.displayName).not.toContain(credential);
+      expect(rows[0]?.provider).toEqual(original);
+      expect(filterProviderRows(rows, "BBBB", "all", [prefix])).toEqual([]);
+      expect(providerSearchContainsSensitiveValue(credential, [prefix])).toBe(true);
+    },
+  );
+  it("redacts encoded percent-prefix URL values without decoding the configured prefix away", () => {
+    const credential = `%41_${"B".repeat(32)}`;
+    const url = `https://provider.example/v1?value=${encodeURIComponent(credential)}&region=korea`;
+    expect(displayProviderBaseURL(url, ["%41_"])).toBe("https://provider.example/v1?value=***&region=korea");
+  });
+
   it.each([
     ["uppercase", "CORP_", "CORP_"],
     ["encoded uppercase", "CORP_", "%43%4F%52%50%5F"],

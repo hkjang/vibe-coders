@@ -1,4 +1,5 @@
 import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from "@/shared/api/schemas";
+import { healthStatusLabels } from "@/config/ui-labels";
 import { isSafeLegacyProviderName, providerDisplayLabels } from "@/shared/api/provider-ref";
 import {
   containsPotentialSecret,
@@ -16,7 +17,20 @@ export const providerStatusFilters = [
 ] as const;
 
 export type ProviderStatusFilter = (typeof providerStatusFilters)[number];
+export const providerStatusLabels: Record<ProviderStatusFilter, string> = {
+  all: "전체 상태",
+  enabled: "활성",
+  disabled: "비활성",
+  healthy: healthStatusLabels.healthy,
+  degraded: healthStatusLabels.degraded,
+  unknown: healthStatusLabels.unknown,
+};
 export type ProviderHealthState = "checking" | "healthy" | "degraded" | "unknown";
+
+export function providerPageNumber(value: string | null): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
 
 export interface ProviderCatalogRow {
   displayName: string;
@@ -114,8 +128,25 @@ export function displayProviderBaseURL(
   return url.toString();
 }
 
-export function providerSearchContainsSensitiveValue(value: string): boolean {
-  return containsPotentialSecret(value);
+export function providerSearchContainsSensitiveValue(
+  value: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): boolean {
+  return containsPotentialSecret(value, credentialPrefixes);
+}
+
+export function displayProviderText(
+  value: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): string {
+  return containsPotentialSecret(value, credentialPrefixes) ? "민감한 값은 표시하지 않습니다." : value;
+}
+
+export function isSafeProviderCatalogName(
+  value: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): boolean {
+  return isSafeLegacyProviderName(value) && !containsPotentialSecret(value, credentialPrefixes);
 }
 
 export function buildProviderRows(
@@ -124,17 +155,23 @@ export function buildProviderRows(
   evaluations: readonly ProviderSLOEvaluation[] = [],
   routing?: RoutingHealth,
   healthPending = false,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
 ): ProviderCatalogRow[] {
   const sloByProvider = new Map(slos.map((item) => [item.provider_ref, item]));
   const evaluationByProvider = new Map(evaluations.map((item) => [item.provider_ref, item]));
   const routingByProvider = new Map(routing?.providers.map((item) => [item.provider_ref, item]) ?? []);
   const degradedProviders = new Set(routing?.degraded.map((item) => item.provider_ref) ?? []);
   const displayLabels = providerDisplayLabels(
-    providers.map((provider) => ({ name: provider.name, providerRef: provider.provider_ref })),
+    providers.map((provider) => ({
+      name: isSafeProviderCatalogName(provider.name, credentialPrefixes)
+        ? provider.name
+        : "[provider-name-omitted]",
+      providerRef: provider.provider_ref,
+    })),
   );
 
   return providers.map((provider) => {
-    const nameRedacted = !isSafeLegacyProviderName(provider.name);
+    const nameRedacted = !isSafeProviderCatalogName(provider.name, credentialPrefixes);
     const displayName = displayLabels.get(provider.provider_ref) ?? "공급자 확인 불가";
     const evaluation = evaluationByProvider.get(provider.provider_ref);
     const providerSlo = sloByProvider.get(provider.provider_ref);
@@ -164,6 +201,7 @@ export function filterProviderRows(
   rows: readonly ProviderCatalogRow[],
   query: string,
   status: ProviderStatusFilter,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
 ): ProviderCatalogRow[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   return rows.filter((row) => {
@@ -171,9 +209,9 @@ export function filterProviderRows(
       normalizedQuery === "" ||
       [
         row.displayName,
-        displayProviderBaseURL(row.provider.base_url),
-        row.provider.model_patterns,
-        row.provider.failover_group,
+        displayProviderBaseURL(row.provider.base_url, credentialPrefixes),
+        displayProviderText(row.provider.model_patterns, credentialPrefixes),
+        displayProviderText(row.provider.failover_group, credentialPrefixes),
       ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
     if (!matchesQuery) return false;
     if (status === "all") return true;

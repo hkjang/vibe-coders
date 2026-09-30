@@ -13,13 +13,18 @@ import { AppError } from "@/shared/api/error";
 import type { Provider, ProviderList, ProviderSLOResponse, RoutingHealth } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 
-const authRuntime = vi.hoisted(() => ({ legacyFallback: true, scopes: ["admin:read"] }));
+const authRuntime = vi.hoisted(() => ({
+  legacyFallback: true,
+  scopes: ["admin:read"],
+  credentialPrefixes: ["vc_sk_", "vc_sa_"],
+}));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     authenticationMode: "session",
     legacyFallback: authRuntime.legacyFallback,
     mode: "authenticated",
+    credentialPrefixes: authRuntime.credentialPrefixes,
     user: {
       id: "admin-1",
       role: "admin",
@@ -297,9 +302,53 @@ describe("ProviderPage", () => {
   beforeEach(() => {
     authRuntime.legacyFallback = true;
     authRuntime.scopes = ["admin:read"];
+    authRuntime.credentialPrefixes = ["vc_sk_", "vc_sa_"];
     usePreferences.setState({ refreshInterval: 0 });
     vi.restoreAllMocks();
   });
+
+  it.each(["corp_", "%41_"])(
+    "does not retain a %s credential query in the URL or initial search field",
+    async (prefix) => {
+      authRuntime.credentialPrefixes = [prefix];
+      mockApi();
+      const credential = `${prefix}${"B".repeat(32)}`;
+      renderPage(`/gateway/providers?q=${encodeURIComponent(credential)}`);
+      await screen.findByRole("link", { name: "openai" });
+      await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("B".repeat(32)));
+      expect(screen.getByLabelText("공급자 검색")).toHaveValue("");
+      expect(screen.getByRole("alert")).toHaveTextContent("비밀정보를 제거");
+    },
+  );
+
+  it.each(["corp_", "%41_"])(
+    "masks %s credentials in read-only provider rows and direct details",
+    async (prefix) => {
+      authRuntime.credentialPrefixes = [prefix];
+      const credential = `${prefix}${"B".repeat(32)}`;
+      mockApi({
+        providerData: {
+          providers: [
+            {
+              ...openAIProvider,
+              base_url: `https://read.example/v1?value=${encodeURIComponent(credential)}`,
+              model_patterns: credential,
+              failover_group: credential,
+            },
+          ],
+        },
+        sloData: { ...sloResponse, slos: sloResponse.slos.map((slo) => ({ ...slo, note: credential })) },
+      });
+      const { container } = renderPage(`/gateway/providers?provider=${providerRef("openai")}`);
+      const dialog = await screen.findByRole("dialog", { name: "openai" });
+      await waitFor(() => expect(within(dialog).getByText(/SLO 갱신/)).toBeInTheDocument());
+      expect(within(dialog).getByText("https://read.example/v1?value=***")).toBeInTheDocument();
+      expect(dialog.innerHTML).not.toContain("B".repeat(32));
+      const table = screen.getByRole("table", { name: "공급자 연결 설정과 운영 상태", hidden: true });
+      expect(table.innerHTML).not.toContain("B".repeat(32));
+      expect(container.innerHTML).not.toContain("B".repeat(32));
+    },
+  );
 
   it("filters through URL state and never requests routing health without routing:read", async () => {
     const user = userEvent.setup();

@@ -2,7 +2,10 @@ import { useId, useState, type RefObject } from "react";
 import "@/features/gateway/providers/provider-review.css";
 
 import { ProviderDraftBoundary } from "@/features/gateway/providers/ProviderDraftBoundary";
-import type { ProviderCatalogRow } from "@/features/gateway/providers/provider-catalog";
+import {
+  isSafeProviderCatalogName,
+  type ProviderCatalogRow,
+} from "@/features/gateway/providers/provider-catalog";
 import { isAppError } from "@/shared/api/error";
 import { FormField } from "@/shared/components/form/FormField";
 import { Button } from "@/shared/components/ui/Button";
@@ -10,8 +13,10 @@ import { Dialog } from "@/shared/components/ui/Dialog";
 import { Input } from "@/shared/components/ui/Input";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
+import { defaultCredentialPrefixes } from "@/shared/security/secrets";
 
 interface Props {
+  credentialPrefixes?: readonly string[];
   row: ProviderCatalogRow;
   onOpenChange: (open: boolean) => void;
   onDelete: (identifier: string) => Promise<unknown>;
@@ -27,13 +32,15 @@ export function ProviderDeleteDialog(props: Props): React.JSX.Element {
 }
 
 function ProviderDeleteConfirmation({
+  credentialPrefixes = defaultCredentialPrefixes,
   row: initialRow,
   onOpenChange,
   onDelete,
   returnFocusRef,
 }: Props): React.JSX.Element {
   const [row] = useState(initialRow);
-  const target = row.nameRedacted ? row.identity : row.provider.name;
+  const nameRedacted = row.nameRedacted || !isSafeProviderCatalogName(row.provider.name, credentialPrefixes);
+  const target = nameRedacted ? row.identity : row.provider.name;
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState<{ message: string; requestId?: string }>();
   const formId = useId();
@@ -94,7 +101,7 @@ function ProviderDeleteConfirmation({
         <FormField
           label="삭제 대상 재입력"
           description={
-            row.nameRedacted
+            nameRedacted
               ? "이름이 비공개이므로 위의 전체 공급자 참조를 그대로 입력하세요."
               : "위의 공급자 이름을 대소문자와 공백까지 정확히 입력하세요."
           }

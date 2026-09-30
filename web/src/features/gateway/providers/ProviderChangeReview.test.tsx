@@ -73,6 +73,29 @@ describe("공급자 숫자 설정의 서버 적용 의미", () => {
 });
 
 describe("공급자 URL 비교의 민감정보 차단", () => {
+  it("퍼센트 이스케이프 자체가 키 접두어인 경우도 비교 전체에서 숨긴다", () => {
+    const credential = `%41_${"B".repeat(32)}`;
+    const url = `https://review.example/v1?value=${encodeURIComponent(credential)}`;
+    const row = buildProviderRows([
+      { ...provider, base_url: url, model_patterns: credential, failover_group: credential },
+    ])[0];
+    if (!row) throw new Error("missing provider row");
+    const body = Object.freeze({
+      name: provider.name,
+      base_url: url,
+      model_patterns: credential,
+      failover_group: credential,
+      enabled: true,
+    });
+    const { container } = render(
+      <ProviderChangeReview row={row} body={body} credentialPrefixes={["%41_"]} />,
+    );
+    expect(container.innerHTML).not.toContain("B".repeat(32));
+    expect(container.textContent).not.toContain("B".repeat(32));
+    expect(body.base_url).toBe(url);
+    expect(body.model_patterns).toBe(credential);
+  });
+
   it.each([
     ["CORP_", "CORP_"],
     ["CORP_", "%43%4F%52%50%5F"],

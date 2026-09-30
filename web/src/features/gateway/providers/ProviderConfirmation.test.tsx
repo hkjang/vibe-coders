@@ -40,11 +40,13 @@ function formOf(element: HTMLElement): HTMLFormElement {
 }
 
 function Harness({
+  credentialPrefixes,
   mode = "edit",
   snapshot = row,
   save = async () => undefined,
   remove = async () => undefined,
 }: {
+  credentialPrefixes?: readonly string[];
   mode?: "edit" | "delete";
   snapshot?: ProviderCatalogRow;
   save?: (body: ProviderWriteBody) => Promise<unknown>;
@@ -60,6 +62,7 @@ function Harness({
       {open ? (
         mode === "edit" ? (
           <ProviderEditDialog
+            credentialPrefixes={credentialPrefixes}
             row={snapshot}
             onSubmit={save}
             onOpenChange={setOpen}
@@ -67,6 +70,7 @@ function Harness({
           />
         ) : (
           <ProviderDeleteDialog
+            credentialPrefixes={credentialPrefixes}
             row={snapshot}
             onDelete={remove}
             onOpenChange={setOpen}
@@ -99,6 +103,23 @@ function deferred() {
 }
 
 describe("공급자 삭제 재확인", () => {
+  it.each(["corp_", "%41_"])(
+    "현재 %s 접두어로 비밀 이름을 재검사해 전체 참조만 표시하고 전송한다",
+    async (prefix) => {
+      const user = userEvent.setup();
+      const credential = `${prefix}${"B".repeat(32)}`;
+      const original = catalogRow({ ...provider, name: credential });
+      const remove = vi.fn(async () => undefined);
+      render(<Harness mode="delete" snapshot={original} remove={remove} credentialPrefixes={[prefix]} />);
+      const dialog = await open(user);
+      expect(dialog.innerHTML).not.toContain("B".repeat(32));
+      expect(dialog).toHaveTextContent(original.identity);
+      await user.type(within(dialog).getByLabelText("삭제 대상 재입력"), original.identity);
+      await user.click(within(dialog).getByRole("button", { name: "삭제", exact: true }));
+      await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith(original.identity));
+    },
+  );
+
   it("비공개 표시명·축약 참조·공백은 거부하고 전체 참조만 전송한다", async () => {
     const user = userEvent.setup();
     const hidden = catalogRow({ ...provider, name: "[provider-name-omitted]" });
