@@ -401,7 +401,11 @@ func TestGatewayCatalogFeaturesKeepTheirRoleAndRolloutContract(t *testing.T) {
 		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
 			t.Errorf("feature %q enabled roles = %q, want %q", id, got, wantRoles)
 		}
-		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != "v0.84.0" {
+		minimumVersion := "v0.84.0"
+		if id == "gateway.providers" {
+			minimumVersion = "v0.86.9"
+		}
+		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != minimumVersion {
 			t.Errorf("feature %q rollout contract is incomplete: %+v", id, *feature)
 		}
 		if _, implemented := appUIImplementedFeatureIDs[id]; !implemented {

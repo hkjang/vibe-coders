@@ -80,8 +80,8 @@ const opsStatus = {
 };
 
 const bootstrap = {
-  backend_version: "v0.84.0",
-  ui_version: "e2e-v0.84.0",
+  backend_version: "v0.86.9",
+  ui_version: "e2e-v0.86.9",
   api_version: "v1",
   ui: {
     enabled: true,

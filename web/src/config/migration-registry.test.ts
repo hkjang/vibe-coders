@@ -35,6 +35,41 @@ const legacyOnlyAdmin: AuthUser = {
 };
 
 describe("migration registry", () => {
+  it("requires the provider impact contract even when an older server advertises availability", () => {
+    const fallback = migrationRegistry.find((feature) => feature.featureId === "gateway.providers");
+    if (!fallback) throw new Error("provider registry entry is missing");
+    const [feature] = registryFromBootstrap([
+      {
+        feature_id: fallback.featureId,
+        title: fallback.title,
+        app_path: fallback.appPath,
+        legacy_path: fallback.legacyPath,
+        status: fallback.status,
+        risk_level: fallback.riskLevel,
+        required_permission: fallback.requiredPermission,
+        read_only: false,
+        enabled_roles: [],
+        rollout_percent: 100,
+        fallback_enabled: true,
+        minimum_api_version: "v0.84.0",
+        available: true,
+      },
+    ]);
+    if (!feature) throw new Error("provider feature is missing");
+    expect(feature.minimumApiVersion).toBe("v0.86.9");
+    for (const candidate of [feature, fallback]) {
+      expect(resolveFeature(candidate, gatewayAdmin, "v0.86.8")).toMatchObject({
+        status: "legacy",
+        readOnly: true,
+        reason: "api_version",
+      });
+      expect(resolveFeature(candidate, gatewayAdmin, "v0.86.9")).toMatchObject({
+        status: "preview",
+        readOnly: false,
+      });
+    }
+  });
+
   it("requires the settings rollback CAS contract even when an older server advertises availability", () => {
     const fallback = migrationRegistry.find((feature) => feature.featureId === "system.settings");
     if (!fallback) throw new Error("settings registry entry is missing");
@@ -152,10 +187,10 @@ describe("migration registry", () => {
         enabledRoles: ["super_admin", "admin", "ai_admin"],
         rolloutPercent: 100,
         fallbackEnabled: true,
-        minimumApiVersion: "v0.84.0",
+        minimumApiVersion: featureId === "gateway.providers" ? "v0.86.9" : "v0.84.0",
       });
       expect(isAppFeatureImplemented(feature.featureId)).toBe(true);
-      expect(resolveFeature(feature, gatewayAdmin, "v0.84.0")).toMatchObject({
+      expect(resolveFeature(feature, gatewayAdmin, feature.minimumApiVersion)).toMatchObject({
         permitted: true,
         status: "preview",
         readOnly: false,
