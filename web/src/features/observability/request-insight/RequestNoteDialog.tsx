@@ -35,6 +35,16 @@ export function RequestNoteDialog({
   const modes = { note: form.watch("noteMode"), tags: form.watch("tagsMode") };
   const confirmed =
     editor.supported && Boolean(current.confirmed) && (!deleting || current.confirmed?.exists);
+  const returnFocusRef = {
+    // Read at close, after invalidation may disable the original trigger. Keep
+    // focus inside a surviving parent Sheet instead of the inert page behind it.
+    get current(): HTMLElement | null {
+      const trigger = editor.returnFocusRef.current;
+      return trigger?.isConnected && trigger.matches(":disabled")
+        ? (trigger.closest<HTMLElement>(".sheet-content") ?? trigger)
+        : trigger;
+    },
+  };
   return (
     <FormDialog
       open
@@ -47,7 +57,7 @@ export function RequestNoteDialog({
       }
       submitLabel={deleting ? "태그·메모 삭제" : "메모·태그 저장"}
       submitDisabled={!canWrite || !confirmed}
-      returnFocusRef={editor.returnFocusRef}
+      returnFocusRef={returnFocusRef}
       onOpenChange={(open) => {
         if (!open) editor.close(target.instance);
       }}

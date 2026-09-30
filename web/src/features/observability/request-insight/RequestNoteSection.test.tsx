@@ -1,13 +1,14 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RequestNoteBoundary } from "./RequestNoteBoundary";
 import { RequestNoteSection } from "./RequestNoteSection";
 import { requestNoteKey } from "./request-note-state";
 import { tokenStore } from "@/shared/auth/token-store";
+import { Sheet } from "@/shared/components/ui/Sheet";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
@@ -37,7 +38,7 @@ const note = {
 const get = "GET /admin/requests/req-1/note",
   put = "PATCH /admin/requests/req-1/note",
   remove = "DELETE /admin/requests/req-1/note";
-function setup(read: ApiHandler = () => note, overrides: Record<string, ApiHandler> = {}) {
+function setup(read: ApiHandler = () => note, overrides: Record<string, ApiHandler> = {}, inSheet = false) {
   const api = mockApi({
     [get]: read,
     [put]: () => note,
@@ -47,11 +48,28 @@ function setup(read: ApiHandler = () => note, overrides: Record<string, ApiHandl
   let refreshAuth = (): void => undefined;
   function Screen() {
     const [, refresh] = useState(0);
+    const returnFocusRef = useRef<HTMLElement | null>(null);
     refreshAuth = () => refresh((value) => value + 1);
-    return (
+    const content = (
       <RequestNoteBoundary>
         <RequestNoteSection requestId="req-1" canWrite />
       </RequestNoteBoundary>
+    );
+    return inSheet ? (
+      <>
+        <main id="main-content" tabIndex={-1} />
+        <Sheet
+          open
+          title="대상 요청 상세"
+          description="메모 편집창이 닫혀도 남아 있는 요청 상세 패널입니다."
+          onOpenChange={() => undefined}
+          returnFocusRef={returnFocusRef}
+        >
+          {content}
+        </Sheet>
+      </>
+    ) : (
+      content
     );
   }
   const view = renderScreen(<Screen />);
@@ -125,6 +143,58 @@ describe("요청 메모·태그 안전한 폼", () => {
     await user.click(screen.getByRole("button", { name: "변경 버리기" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "메모·태그 수정" })).toHaveFocus();
+    expect(api.bodies(put)).toEqual([]);
+  });
+  it.each([false, true])(
+    "정상 처리 뒤 재조회 중에는 비활성 trigger 대신 남은 Sheet 내부로 포커스를 복원한다: delete=%s",
+    async (deleting) => {
+      let saved = false;
+      let releaseRead!: (value: unknown) => void;
+      const { user, api } = setup(
+        () =>
+          saved
+            ? new Promise((resolve) => {
+                releaseRead = resolve;
+              })
+            : note,
+        {
+          [deleting ? remove : put]: () => {
+            saved = true;
+            return deleting ? { id: "req-1", status: "deleted" } : note;
+          },
+        },
+        true,
+      );
+      const dialog = await open(user, deleting);
+      await user.click(
+        within(dialog).getByRole("button", { name: deleting ? "태그·메모 삭제" : "메모·태그 저장" }),
+      );
+      await waitFor(() => expect(dialog).not.toBeInTheDocument());
+      const parent = screen.getByRole("dialog", { name: "대상 요청 상세" });
+      expect(within(parent).getByRole("button", { name: "메모·태그 수정" })).toBeDisabled();
+      await waitFor(() => expect(parent).toHaveFocus());
+      expect(document.getElementById("main-content")).not.toHaveFocus();
+      await user.tab();
+      expect(parent.contains(document.activeElement)).toBe(true);
+      expect(api.calls.filter((call) => call.key === (deleting ? remove : put))).toHaveLength(1);
+      await act(async () => releaseRead(note));
+      await waitFor(() =>
+        expect(within(parent).getByRole("button", { name: "메모·태그 수정" })).toBeEnabled(),
+      );
+    },
+  );
+  it.each([false, true])("Sheet 안에서도 취소·폐기는 정확한 trigger로 복귀한다: dirty=%s", async (dirty) => {
+    const { user, api } = setup(() => note, {}, true);
+    const dialog = await open(user);
+    if (dirty) await user.selectOptions(within(dialog).getByLabelText("메모 변경 방법"), "clear");
+    await user.click(within(dialog).getByRole("button", { name: "취소" }));
+    if (dirty) {
+      const guard = await screen.findByRole("alertdialog");
+      await user.click(within(guard).getByRole("button", { name: "변경 버리기" }));
+    }
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    const parent = screen.getByRole("dialog", { name: "대상 요청 상세" });
+    await waitFor(() => expect(within(parent).getByRole("button", { name: "메모·태그 수정" })).toHaveFocus());
     expect(api.bodies(put)).toEqual([]);
   });
   it("조회 갱신과 invalidation이 초안을 바꾸지 않고 저장만 차단한다", async () => {
