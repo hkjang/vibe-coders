@@ -17,6 +17,7 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
+import "./chat-run-action-dialog.css";
 
 export function ChatRunActionDialog({
   snapshot,
@@ -55,7 +56,7 @@ export function ChatRunActionDialog({
         </InlineNotice>
       ) : null}
       <fieldset
-        className="form-grid form-dialog-fields"
+        className="form-grid form-dialog-fields chat-run-action-draft"
         disabled={!access.write.allowed}
         aria-label="실행 작업 입력"
       >

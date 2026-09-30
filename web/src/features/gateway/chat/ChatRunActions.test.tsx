@@ -108,6 +108,9 @@ describe("비교 실행 후 작업의 고정 초안", () => {
       const current = setup();
       await current.user.click(screen.getByRole("button", { name: scenario.trigger }));
       const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByRole("group", { name: "실행 작업 입력" })).toHaveClass(
+        "chat-run-action-draft",
+      );
       await current.user.type(within(dialog).getByRole("textbox", { name: scenario.field }), scenario.draft);
       current.update({ readOnly: true });
       expect(within(dialog).getByRole("textbox", { name: scenario.field })).toHaveValue(scenario.draft);
