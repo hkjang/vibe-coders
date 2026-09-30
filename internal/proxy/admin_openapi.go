@@ -163,6 +163,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/api-keys/{id}", []string{"get", "patch", "delete"}, "admin", "API key detail / update / revoke ({id}/revoke)", false},
 	{"/admin/keys/health", []string{"get"}, "admin", "API key hygiene alerts (expiring/idle)", false},
 	{"/admin/providers", []string{"get", "post"}, "admin", "List / upsert providers", false},
+	{"/admin/provider-impact", []string{"get"}, "admin", "Inspect bounded provider configuration references without upstream calls", false},
 	{"/admin/providers/{name}", []string{"delete"}, "admin", "Delete a provider", false},
 	{"/admin/providers/slo", []string{"get", "post", "delete"}, "admin", "List, upsert, or delete provider SLOs", false},
 	{"/admin/models", []string{"get"}, "models", "Normalized admin model inventory with provider freshness and partial failures", false},
@@ -749,6 +750,13 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		}
 	case "get /admin/providers":
 		responses["200"] = successResponse("ProviderListResponse")
+	case "get /admin/provider-impact":
+		op["description"] = "Requires admin:read. Direct routing references additionally require routing:read; team-scoped callers do not receive global key/team counts. Read-only best-effort configuration assessment, not an atomic snapshot or deletion precondition. Full model catalogue, model usage, pattern-overlap failover, IP/model authorization and runtime call success are not assessed. Partial counts are confirmed lower bounds. No external/provider requests are made."
+		op["parameters"] = []any{map[string]any{"name": "provider_ref", "in": "query", "required": true, "schema": map[string]any{"type": "string", "pattern": `^prv_[A-Za-z0-9_-]{43}$`}}}
+		responses["200"] = successResponse("ProviderImpactResponse")
+		for _, status := range []string{"400", "401", "404", "503"} {
+			responses[status] = map[string]any{"description": "Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup", "content": jsonContent(schemaRef("AppError"))}
+		}
 	case "get /admin/models":
 		op["parameters"] = []any{
 			map[string]any{
@@ -963,6 +971,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range appUITelemetryOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range providerImpactOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas

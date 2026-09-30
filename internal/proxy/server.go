@@ -303,6 +303,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/api-keys", s.handleAPIKeys)
 	mux.HandleFunc("/admin/api-keys/", s.handleAPIKeyByID)
 	mux.HandleFunc("/admin/providers", s.handleProviders)
+	mux.HandleFunc("/admin/provider-impact", s.handleProviderImpact)
 	mux.HandleFunc("/admin/providers/", s.handleProviderByName)
 	mux.HandleFunc("/admin/models", s.handleAdminModels)
 	mux.HandleFunc("/admin/chat-test/targets", s.handleChatTestTargets)
