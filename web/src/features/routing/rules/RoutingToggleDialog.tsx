@@ -12,6 +12,7 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { useRoutingToggleOperation, type RoutingToggleAccess } from "./routing-toggle-access";
 import type { RoutingToggleData } from "./routing-toggle-data";
+import { useRoutingTogglePendingFocus } from "./routing-toggle-pending-focus";
 import {
   assertToggleBaseline,
   sameRoutingRule,
@@ -38,6 +39,7 @@ export function RoutingToggleDialog({
   const [baseline, setBaseline] = useState(() => ({ ...rule }));
   const approval = useRef(baseline);
   const operation = useRoutingToggleOperation(access);
+  const { reviewRef, capture: capturePendingFocus } = useRoutingTogglePendingFocus(access, operation.pending);
   const current = data.query.data?.rules.find((candidate) => candidate.id === rule.id);
   const alreadyApplied = current?.enabled === intendedEnabled;
   const reason =
@@ -68,6 +70,7 @@ export function RoutingToggleDialog({
         if (!open) onClose();
       }}
       onConfirm={async () => {
+        capturePendingFocus();
         await operation.run(
           async (assert, signal) => {
             if (approval.current !== baseline)
@@ -87,7 +90,7 @@ export function RoutingToggleDialog({
         );
       }}
     >
-      <dl className="routing-toggle-review">
+      <dl ref={reviewRef} className="routing-toggle-review">
         <dt>원본 규칙 ID</dt>
         <dd>{display(rule.id)}</dd>
         <dt>변경 전 상태</dt>
