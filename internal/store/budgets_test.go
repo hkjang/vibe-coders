@@ -161,3 +161,53 @@ func TestBudgetCRUDRoundTrip(t *testing.T) {
 		t.Fatalf("expected empty after delete, got %+v", list)
 	}
 }
+
+func TestBudgetStatusKSTMonthBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		now  time.Time
+		days float64
+	}{
+		{"utc-september-kst-october", time.Date(2026, time.September, 30, 15, 10, 0, 0, time.UTC), 31},
+		{"utc-december-kst-january", time.Date(2026, time.December, 31, 15, 10, 0, 0, time.UTC), 31},
+		{"utc-january-kst-leap-february", time.Date(2028, time.January, 31, 15, 10, 0, 0, time.UTC), 29},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openAggTestStore(t)
+			defer db.Close()
+			ctx := context.Background()
+			if err := db.UpsertBudget(ctx, Budget{ID: "boundary", Scope: "global", MonthlyKRW: 100}); err != nil {
+				t.Fatal(err)
+			}
+			// These are the original CI failure's offsets: both requests belong
+			// to the previous KST month, despite sharing now's UTC calendar date.
+			insertCost(t, db, "previous-30m", "anonymous", 10, tc.now.Add(-30*time.Minute))
+			insertCost(t, db, "previous-20m", "anonymous", 5, tc.now.Add(-20*time.Minute))
+			statuses, err := db.BudgetStatuses(ctx, tc.now)
+			if err != nil || len(statuses) != 1 {
+				t.Fatalf("before current-month usage: statuses=%+v err=%v", statuses, err)
+			}
+			st := statuses[0]
+			if st.SpentKRW != 0 || st.ProjectedKRW != 0 || st.ProjectedRatio != 0 || st.DaysInMonth != tc.days {
+				t.Fatalf("previous-month usage must not count: %+v", st)
+			}
+			// Pin the inclusive start boundary independently of kstMonthBounds.
+			start := time.Date(tc.now.Year(), tc.now.Month(), tc.now.Day(), 15, 0, 0, 0, time.UTC)
+			insertCost(t, db, "just-before-start", "anonymous", 1000, start.Add(-time.Nanosecond))
+			insertCost(t, db, "exact-start", "anonymous", 7, start)
+			insertCost(t, db, "current-month", "anonymous", 5, tc.now.Add(-time.Minute))
+			statuses, err = db.BudgetStatuses(ctx, tc.now)
+			if err != nil || len(statuses) != 1 {
+				t.Fatalf("after current-month usage: statuses=%+v err=%v", statuses, err)
+			}
+			st = statuses[0]
+			if st.SpentKRW != 12 || math.Abs(st.BurnRatio-0.12) > 1e-9 || st.ProjectedRatio <= 0 || st.DaysInMonth != tc.days {
+				t.Fatalf("only exact-start and current-month usage must count: %+v", st)
+			}
+			maxRatio, err := db.MaxBudgetProjectedRatio(ctx, tc.now)
+			if err != nil || maxRatio != st.ProjectedRatio {
+				t.Fatalf("boundary forecast maximum mismatch: ratio=%v status=%+v err=%v", maxRatio, st, err)
+			}
+		})
+	}
+}

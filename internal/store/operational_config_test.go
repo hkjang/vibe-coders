@@ -10,7 +10,10 @@ func TestOperationalConfigAlertsBudgetsAndRoutingRules(t *testing.T) {
 	db := openAggTestStore(t)
 	defer db.Close()
 	ctx := context.Background()
-	now := time.Now().UTC()
+	// These metrics and the budget intentionally share two same-month requests.
+	// A wall-clock now makes the -30m/-20m fixtures fall into the previous KST
+	// month during its first half hour. Month-boundary behavior has its own test.
+	now := time.Date(2026, time.September, 15, 3, 0, 0, 0, time.UTC)
 
 	flag, found, err := db.GetFlag(ctx, "maintenance")
 	if err != nil || found || flag.Key != "maintenance" {
