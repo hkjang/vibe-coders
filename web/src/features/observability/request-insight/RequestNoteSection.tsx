@@ -27,7 +27,7 @@ export function RequestNoteSection({
       <RequestNoteNotices supported={editor.supported} current={current} />
       {!allowed ? (
         <InlineNotice tone="warning" title="쓰기 권한이 없습니다.">
-          요청 메모 작성에는 admin:write 권한이 필요합니다.
+          {editor.writeDisabledReason ?? "요청 메모 작성에는 admin:write 권한이 필요합니다."}
         </InlineNotice>
       ) : null}
       {confirmed ? (

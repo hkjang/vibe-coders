@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { severityTone, skillStatusLabels } from "@/features/agents/skills/skill-form";
 import { apiClient } from "@/shared/api/client";
+import { isAppError } from "@/shared/api/error";
 import type { SkillImportResult } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -15,6 +16,8 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { downloadText } from "@/shared/utils/csv";
 import { formatNumber } from "@/shared/utils/format";
+import { skillMutationOwners } from "@/shared/feature-access/policy";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 
 interface SkillToolboxProps {
   canWrite: boolean;
@@ -28,11 +31,14 @@ interface SkillToolboxProps {
  * sweeps, so they only ever run from an explicit button press — never on render.
  */
 export function SkillToolbox({
-  canWrite,
+  canWrite: authorized,
   skillsKey,
   statusFilter,
-  writeDisabledReason,
+  writeDisabledReason: permissionReason,
 }: SkillToolboxProps): React.JSX.Element {
+  const mutationAccess = useFeatureMutationAccess(skillMutationOwners, authorized, permissionReason);
+  const canWrite = mutationAccess.allowed;
+  const writeDisabledReason = mutationAccess.reason ?? permissionReason;
   const queryClient = useQueryClient();
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -61,22 +67,26 @@ export function SkillToolbox({
   });
 
   const recommend = useMutation({
-    mutationFn: (apply: boolean) =>
-      apiClient.request(endpoints.domains.agents.skills.recommend, {
+    mutationFn: (apply: boolean) => {
+      if (apply) mutationAccess.assertCurrent();
+      return apiClient.request(endpoints.domains.agents.skills.recommend, {
         body: {},
         query: { min_count: 3, ...(apply ? { apply: "1" as const } : {}) },
         routeId: "agents.skills",
-      }),
+      });
+    },
     onSuccess: (_result, apply) => {
       if (apply) void queryClient.invalidateQueries({ queryKey: skillsKey });
     },
   });
 
   const seed = useMutationFeedback({
-    mutate: () =>
-      apiClient.request(endpoints.domains.agents.skills.seedRecommended, {
+    mutate: () => {
+      mutationAccess.assertCurrent();
+      return apiClient.request(endpoints.domains.agents.skills.seedRecommended, {
         routeId: "agents.skills",
-      }),
+      });
+    },
     invalidates: [skillsKey],
     successMessage: (result) =>
       `추천 스킬 ${formatNumber(result.seeded?.length ?? 0)}건을 초안으로 만들었습니다.`,
@@ -84,11 +94,13 @@ export function SkillToolbox({
   });
 
   const importBundle = useMutationFeedback({
-    mutate: (body: { version?: string; skills: ReadonlyArray<Record<string, unknown>> }) =>
-      apiClient.request(endpoints.domains.agents.skills.import, {
+    mutate: (body: { version?: string; skills: ReadonlyArray<Record<string, unknown>> }) => {
+      mutationAccess.assertCurrent();
+      return apiClient.request(endpoints.domains.agents.skills.import, {
         body,
         routeId: "agents.skills",
-      }),
+      });
+    },
     invalidates: [skillsKey],
     successMessage: "스킬 번들을 가져왔습니다.",
     errorMessage: "스킬 번들을 가져오지 못했습니다.",
@@ -96,8 +108,14 @@ export function SkillToolbox({
   });
 
   const readBundle = async (file: File): Promise<void> => {
+    // Keep the initiating owner/session across async file preparation. The
+    // mutation observer may have newer options by the time file.text resolves.
+    const assertAccess = mutationAccess.assertCurrent;
     try {
-      const parsed = JSON.parse(await file.text()) as unknown;
+      assertAccess();
+      const content = await file.text();
+      assertAccess();
+      const parsed = JSON.parse(content) as unknown;
       const skills =
         typeof parsed === "object" && parsed !== null && "skills" in parsed
           ? (parsed as { skills?: unknown }).skills
@@ -111,7 +129,21 @@ export function SkillToolbox({
           ? String((parsed as { version?: unknown }).version ?? "")
           : "";
       importBundle.mutate({ version, skills: skills as ReadonlyArray<Record<string, unknown>> });
-    } catch {
+    } catch (error) {
+      // A rejected file read skips the post-await check too. Do not let an old
+      // preparation failure notify the replacement session or departed screen.
+      let failure = error;
+      try {
+        assertAccess();
+      } catch (accessError) {
+        failure = accessError;
+      }
+      if (isAppError(failure)) {
+        if (failure.kind !== "aborted") {
+          toast.error(safeAppErrorMessage(failure, "스킬 번들을 가져오지 못했습니다."));
+        }
+        return;
+      }
       toast.error("번들 파일이 올바른 JSON이 아닙니다.");
     }
   };
@@ -285,6 +317,7 @@ export function SkillToolbox({
 
       <ConfirmDialog
         title="추천 스킬 추가"
+        confirmDisabled={!canWrite}
         description="내장 추천 스킬 3종을 초안(draft) 상태로 만듭니다. 이미 있으면 덮어쓰지 않고 갱신합니다."
         confirmLabel="시드 실행"
         open={seedOpen}
@@ -293,10 +326,13 @@ export function SkillToolbox({
           await seed.mutateAsync(undefined);
         }}
         returnFocusRef={seedButtonRef}
-      />
+      >
+        {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
+      </ConfirmDialog>
 
       <ConfirmDialog
         title="추천을 초안으로 적용"
+        confirmDisabled={!canWrite}
         description="추천된 스킬을 초안(draft) 상태로 만듭니다. 프로덕션 승격은 별도 게이트를 통과해야 합니다."
         confirmLabel="초안 생성"
         open={applyOpen}
@@ -305,7 +341,9 @@ export function SkillToolbox({
           await recommend.mutateAsync(true);
         }}
         returnFocusRef={recommendButtonRef}
-      />
+      >
+        {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
+      </ConfirmDialog>
     </>
   );
 }

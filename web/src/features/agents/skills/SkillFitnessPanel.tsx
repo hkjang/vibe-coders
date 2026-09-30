@@ -34,7 +34,7 @@ export function SkillFitnessPanel({
       <SkillFitnessNotice name={skill.name} current={current} />
       {!allowed ? (
         <InlineNotice tone="warning" title="쓰기 권한이 없습니다.">
-          스킬 근거 기록에는 admin:write 권한이 필요합니다.
+          {editor.writeDisabledReason ?? "스킬 근거 기록에는 admin:write 권한이 필요합니다."}
         </InlineNotice>
       ) : null}
       {confirmed ? (

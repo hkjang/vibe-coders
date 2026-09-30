@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { XViewPage } from "@/features/observability/xview/XViewPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
 
@@ -132,7 +133,12 @@ const scatterHandlers = {
 };
 
 function renderPage(route = "/observability/xview"): ReturnType<typeof renderScreen> {
-  return renderScreen(<XViewPage />, { path: "/observability/xview", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="observability.xview">
+      <XViewPage />
+    </FeatureAccessHarness>,
+    { path: "/observability/xview", route },
+  );
 }
 
 describe("XViewPage", () => {

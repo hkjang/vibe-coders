@@ -9,8 +9,9 @@ import { tokenStore } from "@/shared/auth/token-store";
 import { UnsavedChangesContext } from "@/shared/unsaved/context";
 import { UnsavedChangesCoordinator } from "@/shared/unsaved/coordinator";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
-const access = vi.hoisted(() => ({ write: true, version: "v0.86.16" }));
+const access = vi.hoisted(() => ({ write: true, version: "v0.86.16", readOnly: false }));
 const toast = vi.hoisted(() => ({ success: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/app/auth/AuthProvider", async () => {
@@ -36,6 +37,7 @@ const put = "PATCH /admin/requests/req-1/note",
   remove = "DELETE /admin/requests/req-1/note";
 beforeEach(() => {
   access.write = true;
+  access.readOnly = false;
   access.version = "v0.86.16";
   tokenStore.clearAll();
   toast.success.mockClear();
@@ -48,7 +50,9 @@ function setup(write: ApiHandler = () => note) {
   function Wrapper({ children }: PropsWithChildren) {
     return (
       <QueryClientProvider client={client}>
-        <UnsavedChangesContext.Provider value={coordinator}>{children}</UnsavedChangesContext.Provider>
+        <FeatureAccessHarness featureId="observability.llm" readOnly={access.readOnly}>
+          <UnsavedChangesContext.Provider value={coordinator}>{children}</UnsavedChangesContext.Provider>
+        </FeatureAccessHarness>
       </QueryClientProvider>
     );
   }
@@ -70,13 +74,17 @@ describe("요청 메모 실제 제출 경계", () => {
     ).rejects.toMatchObject({ kind: "permission" });
     expect(api.bodies(put)).toEqual([]);
   });
-  it.each(["permission", "version", "invalidation", "identity", "session"])(
+  it.each(["permission", "readonly", "version", "invalidation", "identity", "session"])(
     "최신 %s가 달라지면 직접 호출도 쓰지 않는다",
     async (boundary) => {
       const { result, target, rerender, client, api } = setup();
       const submit = result.current.submit;
       if (boundary === "permission") {
         access.write = false;
+        rerender();
+      }
+      if (boundary === "readonly") {
+        access.readOnly = true;
         rerender();
       }
       if (boundary === "version") {

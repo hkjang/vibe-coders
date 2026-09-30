@@ -10,6 +10,7 @@ import type { Skill } from "@/shared/api/domains/agents.schemas";
 import { tokenStore } from "@/shared/auth/token-store";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const auth = vi.hoisted(() => ({ write: true }));
 const toast = vi.hoisted(() => ({ success: vi.fn() }));
@@ -67,7 +68,11 @@ function setup(read: ApiHandler = () => data, write: ApiHandler = () => saved, i
     );
   }
   return {
-    ...renderScreen(<Screen />),
+    ...renderScreen(
+      <FeatureAccessHarness featureId="agents.skills">
+        <Screen />
+      </FeatureAccessHarness>,
+    ),
     api,
     callbacks,
     user: userEvent.setup(),

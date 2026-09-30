@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RequestInsightPanel } from "@/features/observability/request-insight/RequestInsightPanel";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { success: toastSpy.success, error: toastSpy.error } }));
@@ -127,11 +128,13 @@ const baseHandlers = {
 
 function renderPanel(overrides: { canInspectRaw?: boolean; canWriteNote?: boolean } = {}) {
   return renderScreen(
-    <RequestInsightPanel
-      requestId="req-1"
-      canInspectRaw={overrides.canInspectRaw ?? true}
-      canWriteNote={overrides.canWriteNote ?? true}
-    />,
+    <FeatureAccessHarness featureId="observability.llm">
+      <RequestInsightPanel
+        requestId="req-1"
+        canInspectRaw={overrides.canInspectRaw ?? true}
+        canWriteNote={overrides.canWriteNote ?? true}
+      />
+    </FeatureAccessHarness>,
   );
 }
 

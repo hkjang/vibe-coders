@@ -3,6 +3,8 @@ import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } 
 import { toast } from "sonner";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { requestMutationOwners } from "@/shared/feature-access/policy";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { canWriteRequestNote } from "./request-access";
 import {
   confirmedRequestNote,
@@ -62,7 +64,12 @@ export function useRequestNoteEditor() {
   if (!coordinator) throw new Error("Request notes require a draft coordinator");
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const supported = supportsRequestNoteContract(auth.backendVersion);
-  const writable = canWriteRequestNote(auth);
+  const mutationAccess = useFeatureMutationAccess(
+    requestMutationOwners,
+    canWriteRequestNote(auth),
+    "요청 메모 작성에는 admin:write 권한이 필요합니다.",
+  );
+  const writable = mutationAccess.allowed;
   const access = useRef({ writable, supported });
   const [selection, setSelection] = useState<RequestNoteDraft>();
   const target = selection?.epoch === epoch ? selection : undefined;
@@ -177,6 +184,7 @@ export function useRequestNoteEditor() {
     coordinator.requestClose(owner);
   };
   const submit = async (draft: RequestNoteDraft, values: RequestNoteValues): Promise<void> => {
+    mutationAccess.assertCurrent();
     if (!current(draft) || !access.current.writable)
       throw new AppError("현재 세션의 요청 메모 쓰기 권한을 확인하세요.", { kind: "permission" });
     if (!access.current.supported) throw new AppError(requestNoteContractMessage, { kind: "contract" });
@@ -228,6 +236,7 @@ export function useRequestNoteEditor() {
     epoch,
     supported,
     writable,
+    writeDisabledReason: mutationAccess.reason,
     target,
     pending: Boolean(target) && pending,
     recipientUnsupported: Boolean(target) && unsupportedInstance === target?.instance,

@@ -8,6 +8,8 @@ import { SkillAdoptDialog } from "@/features/agents/skills/SkillAdoptDialog";
 import { SkillDetailSheet } from "@/features/agents/skills/SkillDetailSheet";
 import { SkillFitnessBoundary } from "./SkillFitnessBoundary";
 import { useSkillFitnessContext } from "./skill-fitness-context";
+import { skillMutationOwners } from "@/shared/feature-access/policy";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { SkillFormDialog } from "@/features/agents/skills/SkillFormDialog";
 import { SkillGraphView } from "@/features/agents/skills/SkillGraphView";
 import { SkillReadinessPanel } from "@/features/agents/skills/SkillReadinessPanel";
@@ -55,7 +57,7 @@ import "@/features/agents/agents.css";
 const tabIds = ["catalog", "studio", "graph"] as const;
 type TabId = (typeof tabIds)[number];
 const skillsKey = ["agents", "skills"] as const;
-const writeDisabledReason = "스킬을 변경하려면 admin:write 권한이 필요합니다.";
+const scopeWriteDisabledReason = "스킬을 변경하려면 admin:write 권한이 필요합니다.";
 
 export function SkillPage(): React.JSX.Element {
   return (
@@ -67,7 +69,13 @@ export function SkillPage(): React.JSX.Element {
 function SkillPageContent(): React.JSX.Element {
   const fitnessEditor = useSkillFitnessContext();
   const auth = useAuth();
-  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
+  const mutationAccess = useFeatureMutationAccess(
+    skillMutationOwners,
+    auth.user?.scopes.includes("admin:write") ?? false,
+    scopeWriteDisabledReason,
+  );
+  const canWrite = mutationAccess.allowed;
+  const writeDisabledReason = mutationAccess.reason ?? scopeWriteDisabledReason;
   const [tab, setTab] = useTabParam<TabId>([...tabIds]);
   const [params, updateSearch] = useSearchState();
   const refreshInterval = useRefreshInterval();
@@ -140,22 +148,26 @@ function SkillPageContent(): React.JSX.Element {
   const closeSheet = useCallback((): void => updateSearch({ skill: undefined }), [updateSearch]);
 
   const save = useMutationFeedback({
-    mutate: (values: SkillFormOutput) =>
-      apiClient.request(endpoints.domains.agents.skills.upsert, {
+    mutate: (values: SkillFormOutput) => {
+      mutationAccess.assertCurrent();
+      return apiClient.request(endpoints.domains.agents.skills.upsert, {
         body: skillWriteBody(values),
         routeId: "agents.skills",
-      }),
+      });
+    },
     invalidates: [skillsKey],
     successMessage: "스킬을 저장했습니다.",
     errorMessage: "스킬을 저장하지 못했습니다.",
   });
 
   const promote = useMutationFeedback({
-    mutate: (variables: { name: string; to_status: string; note: string }) =>
-      apiClient.request(endpoints.domains.agents.skills.promote, {
+    mutate: (variables: { name: string; to_status: string; note: string }) => {
+      mutationAccess.assertCurrent();
+      return apiClient.request(endpoints.domains.agents.skills.promote, {
         body: variables,
         routeId: "agents.skills",
-      }),
+      });
+    },
     invalidates: [skillsKey],
     successMessage: (_result, variables) =>
       `스킬을 ${skillStatusLabels[variables.to_status] ?? variables.to_status} 상태로 승격했습니다.`,
@@ -163,10 +175,12 @@ function SkillPageContent(): React.JSX.Element {
   });
 
   const remove = useMutationFeedback({
-    mutate: (name: string) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.skills.remove, { name }), {
+    mutate: (name: string) => {
+      mutationAccess.assertCurrent();
+      return apiClient.request(withPathParams(endpoints.domains.agents.skills.remove, { name }), {
         routeId: "agents.skills",
-      }),
+      });
+    },
     invalidates: [skillsKey],
     successMessage: "스킬을 삭제했습니다.",
     errorMessage: "스킬을 삭제하지 못했습니다.",
@@ -174,11 +188,13 @@ function SkillPageContent(): React.JSX.Element {
   });
 
   const adopt = useMutationFeedback({
-    mutate: (body: SkillAdoptBody) =>
-      apiClient.request(endpoints.domains.agents.skills.studioAdopt, {
+    mutate: (body: SkillAdoptBody) => {
+      mutationAccess.assertCurrent();
+      return apiClient.request(endpoints.domains.agents.skills.studioAdopt, {
         body,
         routeId: "agents.skills",
-      }),
+      });
+    },
     invalidates: [skillsKey],
     successMessage: "후보를 초안 스킬로 채택했습니다.",
     errorMessage: "후보를 채택하지 못했습니다.",
@@ -541,6 +557,8 @@ function SkillPageContent(): React.JSX.Element {
       />
 
       <SkillFormDialog
+        canWrite={canWrite}
+        writeDisabledReason={writeDisabledReason}
         onOpenChange={setFormOpen}
         onSubmit={async (values) => {
           await save.mutateAsync(values);
@@ -551,6 +569,8 @@ function SkillPageContent(): React.JSX.Element {
       />
 
       <SkillAdoptDialog
+        canWrite={canWrite}
+        writeDisabledReason={writeDisabledReason}
         candidate={adoptCandidate}
         onOpenChange={setAdoptOpen}
         onSubmit={async (body) => {
@@ -562,6 +582,7 @@ function SkillPageContent(): React.JSX.Element {
 
       <ConfirmDialog
         title="스킬 승격"
+        confirmDisabled={!canWrite}
         description={`'${promoteTarget?.name ?? ""}' 스킬의 상태를 바꿉니다. 프로덕션 승격은 정책·보안 게이트를 모두 통과해야 합니다.`}
         confirmLabel="승격"
         requireReason
@@ -580,10 +601,12 @@ function SkillPageContent(): React.JSX.Element {
         }}
         returnFocusRef={rowTriggerRef}
       >
+        {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
         <label className="agents-toolbar-field" htmlFor="promote-status">
           <span>전환할 상태</span>
           <Select
             id="promote-status"
+            disabled={!canWrite}
             value={promoteStatus}
             options={allowedSkillTransitions(promoteTarget?.status).map((value) => ({
               value,
@@ -596,6 +619,7 @@ function SkillPageContent(): React.JSX.Element {
 
       <ConfirmDialog
         title="스킬 삭제"
+        confirmDisabled={!canWrite}
         description={`'${deleteTarget?.name ?? ""}' 스킬을 삭제합니다. 이 작업은 되돌릴 수 없습니다.`}
         confirmLabel="삭제"
         tone="danger"
@@ -607,7 +631,9 @@ function SkillPageContent(): React.JSX.Element {
           if (deleteTarget) await remove.mutateAsync(deleteTarget.name);
         }}
         returnFocusRef={rowTriggerRef}
-      />
+      >
+        {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
+      </ConfirmDialog>
     </div>
   );
 }
