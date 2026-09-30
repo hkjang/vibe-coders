@@ -27,11 +27,14 @@ func (s *Server) costSnapshotCached(ctx context.Context) *costSnapshot {
 	if c := s.costCache.Load(); c != nil && time.Since(c.fetchedAt) < costSnapshotTTL {
 		return c
 	}
-	s.costCacheMu.Lock()
-	defer s.costCacheMu.Unlock()
+	s.costLoadMu.Lock()
+	defer s.costLoadMu.Unlock()
 	if c := s.costCache.Load(); c != nil && time.Since(c.fetchedAt) < costSnapshotTTL {
 		return c
 	}
+	s.costCacheMu.Lock()
+	generation := s.costGeneration
+	s.costCacheMu.Unlock()
 	snap := &costSnapshot{byModel: map[string]store.ModelStat{}, fetchedAt: time.Now()}
 	if stats, err := s.db.ModelStats(ctx, time.Now().Add(-7*24*time.Hour)); err == nil {
 		snap.byModel = stats
@@ -47,13 +50,21 @@ func (s *Server) costSnapshotCached(ctx context.Context) *costSnapshot {
 			}
 		}
 	}
-	s.costCache.Store(snap)
+	// A configuration save must not wait for the rolling statistics query. Keep
+	// the generation check and publication in the same short critical section,
+	// so an earlier in-flight reader cannot republish after invalidation.
+	s.costCacheMu.Lock()
+	if generation == s.costGeneration {
+		s.costCache.Store(snap)
+	}
+	s.costCacheMu.Unlock()
 	return snap
 }
 
 func (s *Server) invalidateCostCache() {
 	s.costCacheMu.Lock()
 	defer s.costCacheMu.Unlock()
+	s.costGeneration++
 	s.costCache.Store(nil)
 }
 

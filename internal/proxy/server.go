@@ -57,7 +57,9 @@ type Server struct {
 	knowledge       atomic.Pointer[knowledgeSnapshot]
 	deprecations    atomic.Pointer[deprecationSnapshot]
 	costCache       atomic.Pointer[costSnapshot]
-	costCacheMu     sync.Mutex // serializes cache miss publication with invalidation
+	costCacheMu     sync.Mutex // protects generation, publication and invalidation only
+	costLoadMu      sync.Mutex // coalesces misses without blocking configuration invalidation
+	costGeneration  uint64     // guarded by costCacheMu
 	learnCache      atomic.Pointer[routingLearnSnapshot]
 	priceCache      atomic.Pointer[pricingSnapshot]
 	mmCache         atomic.Pointer[mattermostSnapshot]

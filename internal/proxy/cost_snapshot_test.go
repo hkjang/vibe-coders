@@ -79,7 +79,7 @@ func (c *costSnapshotReadBarrier) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func TestCostSnapshotInvalidationWaitsForMissPublication(t *testing.T) {
+func TestCostSnapshotInvalidationDoesNotWaitOrAllowStalePublication(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()
 	s := &Server{db: db}
@@ -102,19 +102,14 @@ func TestCostSnapshotInvalidationWaitsForMissPublication(t *testing.T) {
 	<-invalidating
 	select {
 	case <-invalidated:
-		t.Error("invalidation overtook an in-flight cache miss")
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(5 * time.Second):
+		t.Fatal("configuration invalidation waited for the in-flight statistics query")
 	}
 	release.Do(func() { close(ctx.release) })
 	select {
 	case <-loaded:
 	case <-time.After(5 * time.Second):
 		t.Fatal("cache miss did not finish")
-	}
-	select {
-	case <-invalidated:
-	case <-time.After(5 * time.Second):
-		t.Fatal("invalidation did not finish")
 	}
 	if s.costCache.Load() != nil {
 		t.Fatal("in-flight miss republished stale state after invalidation")
