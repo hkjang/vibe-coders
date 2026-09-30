@@ -92,7 +92,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/requests/{id}/links", []string{"get"}, "admin", "Request trace links across routing/MCP/Text2SQL/governance", false},
 	{"/admin/requests/{id}/trace", []string{"get"}, "admin", "Unified request waterfall (root + MCP/tool + Text2SQL spans)", false},
 	{"/admin/requests/{id}/explain", []string{"get"}, "admin", "Why one request was slow, costly or routed the way it was", false},
-	{"/admin/requests/{id}/note", []string{"get", "post", "put", "delete"}, "admin", "Operator note attached to one request", false},
+	{"/admin/requests/{id}/note", []string{"get", "post", "put", "patch", "delete"}, "admin", "Operator note attached to one request", false},
 	{"/admin/requests/{id}/analyze", []string{"post"}, "admin", "Model-written analysis of one request", false},
 	{"/admin/requests/{id}/replay", []string{"post"}, "admin", "Replay one request against the upstream", false},
 	{"/admin/traces/{trace_id}", []string{"get"}, "admin", "All requests + workflow/app runs sharing a trace_id", false},
@@ -684,6 +684,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["503"] = map[string]any{"description": "mattermost_config_unavailable: saved configuration could not be loaded", "content": jsonContent(schemaRef("AppError"))}
 	case "get /admin/cost", "post /admin/cost":
 		enrichCostGuardOpenAPIOperation(method, op, responses)
+	case "get /admin/requests/{id}/note", "post /admin/requests/{id}/note", "put /admin/requests/{id}/note", "patch /admin/requests/{id}/note", "delete /admin/requests/{id}/note":
+		enrichRequestNoteOpenAPIOperation(method, op, responses)
 	case "get /admin/tracking/violations", "delete /admin/tracking/violations":
 		responses["200"] = successResponse("TrackingStatusResponse")
 	case "get /admin/mcp/oauth":
@@ -971,6 +973,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range costGuardOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range requestNoteOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range modelCatalogOpenAPISchemas() {

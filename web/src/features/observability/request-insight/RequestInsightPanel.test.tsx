@@ -79,6 +79,8 @@ const note = {
   note: "재현 필요",
   created_by: "operator@example.com",
   updated_at: "2026-09-06T02:00:00Z",
+  exists: true,
+  redacted_fields: [],
 };
 
 const trace = {
@@ -180,22 +182,26 @@ describe("RequestInsightPanel", () => {
   });
 
   it("saves the operator note with its cleaned tags", async () => {
-    const api = mockApi({ ...baseHandlers, "PUT /admin/requests/req-1/note": () => note });
+    const api = mockApi({ ...baseHandlers, "PATCH /admin/requests/req-1/note": () => note });
     const user = userEvent.setup();
     renderPanel();
 
-    const tags = await screen.findByLabelText(/^태그/u);
+    const trigger = await screen.findByRole("button", { name: "메모·태그 수정" });
+    await waitFor(() => expect(trigger).toBeEnabled());
+    await user.click(trigger);
+    await user.selectOptions(screen.getByLabelText("태그 변경 방법"), "replace");
+    const tags = screen.getByLabelText("새 태그");
     await waitFor(() => expect(tags).toHaveValue("지연"));
     await user.clear(tags);
     await user.type(tags, "지연, 재현필요");
-    await user.click(screen.getByRole("button", { name: "메모 저장" }));
+    await user.click(screen.getByRole("button", { name: "메모·태그 저장" }));
 
     await waitFor(() => {
-      expect(api.bodies("PUT /admin/requests/req-1/note")).toEqual([
-        { tags: ["지연", "재현필요"], note: "재현 필요" },
+      expect(api.bodies("PATCH /admin/requests/req-1/note")).toEqual([
+        { tags: ["지연", "재현필요"], preserve_fields: ["note"] },
       ]);
     });
-    expect(toastSpy.success).toHaveBeenCalledWith("요청 메모를 저장했습니다.");
+    expect(toastSpy.success).toHaveBeenCalledWith("요청 메모·태그를 저장했습니다.");
   });
 
   it("deletes the operator note", async () => {
@@ -206,12 +212,16 @@ describe("RequestInsightPanel", () => {
     const user = userEvent.setup();
     renderPanel();
 
-    await user.click(await screen.findByRole("button", { name: "메모 삭제" }));
+    const trigger = await screen.findByRole("button", { name: "태그·메모 삭제" });
+    await waitFor(() => expect(trigger).toBeEnabled());
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "요청 태그·메모 삭제" });
+    await user.click(within(dialog).getByRole("button", { name: "태그·메모 삭제" }));
 
     await waitFor(() => {
       expect(api.calls.some((call) => call.key === "DELETE /admin/requests/req-1/note")).toBe(true);
     });
-    expect(toastSpy.success).toHaveBeenCalledWith("요청 메모를 삭제했습니다.");
+    expect(toastSpy.success).toHaveBeenCalledWith("요청 메모·태그를 삭제했습니다.");
   });
 
   it("keeps the model analysis behind a disclosure the operator opens", async () => {
@@ -269,8 +279,8 @@ describe("RequestInsightPanel", () => {
     mockApi(baseHandlers);
     renderPanel({ canWriteNote: false });
 
-    expect(await screen.findByRole("button", { name: "메모 저장" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "메모 삭제" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "메모·태그 수정" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "태그·메모 삭제" })).toBeDisabled();
     expect(screen.getByText("요청 메모 작성에는 admin:write 권한이 필요합니다.")).toBeVisible();
   });
 

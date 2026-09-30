@@ -1,33 +1,28 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import { z } from "zod";
+import { useRef, useState } from "react";
 
-import {
-  noteWriteDeniedReason,
-  rawAccessDeniedReason,
-} from "@/features/observability/request-insight/request-access";
+import { rawAccessDeniedReason } from "@/features/observability/request-insight/request-access";
 import { RequestSpanWaterfall } from "@/features/observability/request-insight/RequestSpanWaterfall";
 import { apiClient } from "@/shared/api/client";
 import type { RequestExplain } from "@/shared/api/domains/observability.schemas";
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { Input } from "@/shared/components/ui/Input";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Textarea } from "@/shared/components/ui/Textarea";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
-import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
 import "@/features/observability/request-insight/request-insight.css";
+
+import { RequestNoteBoundary } from "./RequestNoteBoundary";
+import { RequestNoteSection } from "./RequestNoteSection";
+import { useRequestNoteContext } from "./request-note-context";
 
 const routeId = "observability.request-insight";
 
@@ -38,16 +33,6 @@ interface RequestInsightPanelProps {
   canInspectRaw: boolean;
   requestId: string;
 }
-
-const noteFormSchema = z.object({
-  tags: z.string().trim().max(200, "태그는 200자까지 입력할 수 있습니다."),
-  note: z
-    .string()
-    .trim()
-    .max(2000, "메모는 2000자까지 입력할 수 있습니다.")
-    .refine((value) => !containsPotentialSecret(value), secretSearchMessage),
-});
-type NoteFormValues = z.infer<typeof noteFormSchema>;
 
 function requestErrorText(error: unknown, fallback: string): string {
   const requestId = isAppError(error) ? error.requestId : undefined;
@@ -93,18 +78,24 @@ function explainItems(explain: RequestExplain): Array<{ label: string; value: st
  * they render only inside a disclosure the operator opens, and are never put in
  * the URL or in storage.
  */
-export function RequestInsightPanel({
+export function RequestInsightPanel(props: RequestInsightPanelProps): React.JSX.Element {
+  return (
+    <RequestNoteBoundary>
+      <RequestInsightPanelContent {...props} />
+    </RequestNoteBoundary>
+  );
+}
+
+function RequestInsightPanelContent({
   canInspectRaw,
   canWriteNote,
   requestId,
 }: RequestInsightPanelProps): React.JSX.Element {
+  const noteEditor = useRequestNoteContext();
   const [analysis, setAnalysis] = useState("");
   const [replayBody, setReplayBody] = useState("");
   const [replayOpen, setReplayOpen] = useState(false);
-  const [noteFormError, setNoteFormError] = useState("");
   const replayTriggerRef = useRef<HTMLButtonElement>(null);
-  const noteForm = useZodForm<NoteFormValues, NoteFormValues>(noteFormSchema, { tags: "", note: "" });
-  const { reset: resetNoteForm } = noteForm;
 
   const explain = useQuery({
     queryKey: ["observability", "requests", requestId, "explain"],
@@ -115,54 +106,6 @@ export function RequestInsightPanel({
         signal,
         routeId,
       }),
-  });
-
-  const note = useQuery({
-    queryKey: ["observability", "requests", requestId, "note"],
-    enabled: requestId !== "",
-    staleTime: 30_000,
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(endpoints.domains.observability.requests.note, { id: requestId }), {
-        signal,
-        routeId,
-      }),
-  });
-
-  const noteData = note.data;
-  useEffect(() => {
-    resetNoteForm({ tags: (noteData?.tags ?? []).join(", "), note: noteData?.note ?? "" });
-  }, [noteData, resetNoteForm]);
-
-  const saveNote = useMutationFeedback({
-    mutate: (values: NoteFormValues) =>
-      apiClient.request(
-        withPathParams(endpoints.domains.observability.requests.saveNote, { id: requestId }),
-        {
-          body: {
-            tags: values.tags
-              .split(",")
-              .map((tag) => tag.trim())
-              .filter(Boolean),
-            note: values.note,
-          },
-          routeId,
-        },
-      ),
-    invalidates: [["observability", "requests", requestId, "note"]],
-    successMessage: "요청 메모를 저장했습니다.",
-    errorMessage: "요청 메모를 저장하지 못했습니다.",
-  });
-
-  const removeNote = useMutationFeedback({
-    mutate: () =>
-      apiClient.request(
-        withPathParams(endpoints.domains.observability.requests.removeNote, { id: requestId }),
-        { routeId },
-      ),
-    invalidates: [["observability", "requests", requestId, "note"]],
-    successMessage: "요청 메모를 삭제했습니다.",
-    errorMessage: "요청 메모를 삭제하지 못했습니다.",
-    onSuccess: () => resetNoteForm({ tags: "", note: "" }),
   });
 
   const runAnalysis = useMutationFeedback({
@@ -186,15 +129,6 @@ export function RequestInsightPanel({
     errorMessage: "요청을 재실행하지 못했습니다.",
     onSuccess: (result) =>
       setReplayBody(typeof result === "string" ? result : JSON.stringify(result, null, 2)),
-  });
-
-  const submitNote = noteForm.handleSubmit(async (values) => {
-    setNoteFormError("");
-    try {
-      await saveNote.mutateAsync(values);
-    } catch (cause) {
-      setNoteFormError(requestErrorText(cause, "요청 메모를 저장하지 못했습니다."));
-    }
   });
 
   return (
@@ -302,73 +236,7 @@ export function RequestInsightPanel({
         ) : null}
       </SectionCard>
 
-      <SectionCard
-        headingLevel={3}
-        title="운영 메모"
-        description="이 요청에 대해 팀이 공유하는 메모와 태그입니다. 프롬프트 원문은 적지 마세요."
-      >
-        {note.isError ? (
-          <InlineNotice
-            tone="warning"
-            title="메모를 불러오지 못했습니다."
-            actions={
-              <Button size="small" onClick={() => void note.refetch()}>
-                다시 시도
-              </Button>
-            }
-          >
-            {requestErrorText(note.error, "메모를 불러오지 못했습니다.")}
-          </InlineNotice>
-        ) : null}
-        {canWriteNote ? null : (
-          <InlineNotice tone="warning" title="쓰기 권한이 없습니다.">
-            {noteWriteDeniedReason}
-          </InlineNotice>
-        )}
-        <form className="obs-note-form" onSubmit={submitNote}>
-          <FormField
-            label="태그"
-            description="쉼표로 구분합니다. 예: 지연, 재현필요"
-            error={noteForm.formState.errors.tags?.message}
-          >
-            {(control) => <Input {...control} {...noteForm.register("tags")} disabled={!canWriteNote} />}
-          </FormField>
-          <FormField label="메모" error={noteForm.formState.errors.note?.message}>
-            {(control) => (
-              <Textarea {...control} rows={3} {...noteForm.register("note")} disabled={!canWriteNote} />
-            )}
-          </FormField>
-          <div className="obs-note-actions">
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={!canWriteNote || noteForm.formState.isSubmitting}
-              title={canWriteNote ? undefined : noteWriteDeniedReason}
-            >
-              {noteForm.formState.isSubmitting ? "저장 중" : "메모 저장"}
-            </Button>
-            <Button
-              type="button"
-              variant="danger"
-              disabled={!canWriteNote || removeNote.isPending || !note.data?.note}
-              title={canWriteNote ? undefined : noteWriteDeniedReason}
-              onClick={() => removeNote.mutate()}
-            >
-              메모 삭제
-            </Button>
-          </div>
-          {noteFormError ? (
-            <p className="form-error" role="alert">
-              {noteFormError}
-            </p>
-          ) : null}
-        </form>
-        {note.data?.updated_at ? (
-          <p className="obs-meta">
-            마지막 수정 {formatDateTime(note.data.updated_at)} · {note.data.created_by || "—"}
-          </p>
-        ) : null}
-      </SectionCard>
+      <RequestNoteSection requestId={noteEditor.target?.requestId ?? requestId} canWrite={canWriteNote} />
 
       <SectionCard
         headingLevel={3}

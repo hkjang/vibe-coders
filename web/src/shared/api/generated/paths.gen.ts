@@ -807,6 +807,7 @@ export const openApiOperations = [
   { method: "GET", path: "/admin/requests/{id}/links" },
   { method: "DELETE", path: "/admin/requests/{id}/note" },
   { method: "GET", path: "/admin/requests/{id}/note" },
+  { method: "PATCH", path: "/admin/requests/{id}/note" },
   { method: "POST", path: "/admin/requests/{id}/note" },
   { method: "PUT", path: "/admin/requests/{id}/note" },
   { method: "POST", path: "/admin/requests/{id}/replay" },
