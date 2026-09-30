@@ -10,10 +10,15 @@ import (
 
 func TestAppUITelemetrySummaryIsAggregateOnlyAndKeepsOptOutHistory(t *testing.T) {
 	s := newAppUITelemetryTestServer(t)
-	for _, event := range []string{"visit", "legacy_fallback"} {
-		w := appUITelemetryRequest(t, s, http.MethodPost, "/admin/ui-telemetry/events", "", appUITelemetryPayload("overview", event))
-		if w.Code != http.StatusNoContent {
-			t.Fatal(w.Code, w.Body.String())
+	// This test owns summary/opt-out/privacy, not intake timing. Seed safely
+	// inside the query window: a wall-clock correction between HTTP intake
+	// and summary can otherwise place a just-received event in the future.
+	// Dedicated HTTP intake and fixed-time store boundary tests remain intact.
+	receivedAt := time.Now().UTC().Add(-time.Minute)
+	for _, legacyOpen := range []bool{false, true} {
+		accepted, err := s.db.RecordAppUITelemetry(t.Context(), "overview", telemetryVisitID, legacyOpen, receivedAt)
+		if err != nil || !accepted {
+			t.Fatalf("summary fixture was not recorded: accepted=%v err=%v", accepted, err)
 		}
 	}
 	setAppUITelemetryTestSetting(t, s, appUITelemetryEnabledKey, "false")
