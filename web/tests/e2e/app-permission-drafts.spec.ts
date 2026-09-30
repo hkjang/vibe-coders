@@ -128,6 +128,11 @@ for (const method of ["Escape", "취소", "외부 클릭", "닫기 버튼"] as c
     await expect(guard(page).getByRole("button", { name: "계속 편집" })).toBeFocused();
     await guard(page).getByRole("button", { name: "계속 편집" }).click();
     await expect(form.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveValue(opaqueSubject);
+    if (method === "외부 클릭") {
+      // Observe async focus restoration before another physical outside click.
+      await expect(guard(page)).toBeHidden();
+      await expect(form.getByRole("textbox", { name: "팀 ID", exact: true })).toBeFocused();
+    }
     await close(page, form, method);
     await guard(page).getByRole("button", { name: "변경 버리기" }).click();
     await expect(form).toBeHidden();

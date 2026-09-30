@@ -5,6 +5,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
+  // Retain retries for diagnosis, but never let a retry-only pass release a build.
+  failOnFlakyTests: Boolean(process.env.CI),
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: process.env.APP_BASE_URL ?? "http://127.0.0.1:4173/app/",
