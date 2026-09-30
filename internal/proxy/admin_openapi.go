@@ -688,6 +688,10 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichRequestNoteOpenAPIOperation(method, op, responses)
 	case "get /admin/skills/fitness", "post /admin/skills/fitness":
 		enrichSkillFitnessOpenAPIOperation(method, op, responses)
+	case "get /admin/models/contracts", "post /admin/models/contracts", "delete /admin/models/contracts",
+		"post /admin/models/contracts/run", "get /admin/model-deprecations", "post /admin/model-deprecations",
+		"delete /admin/model-deprecations/{id}":
+		enrichModelGovernanceOpenAPIOperation(key, op, responses)
 	case "get /admin/tracking/violations", "delete /admin/tracking/violations":
 		responses["200"] = successResponse("TrackingStatusResponse")
 	case "get /admin/mcp/oauth":
@@ -984,6 +988,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range modelCatalogOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range modelGovernanceOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range requestExplorerOpenAPISchemas() {

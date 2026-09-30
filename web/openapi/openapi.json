@@ -1578,6 +1578,430 @@
         ],
         "type": "object"
       },
+      "ModelContractCheck": {
+        "properties": {
+          "actual": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "dimension": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "no_data",
+              "skip"
+            ],
+            "type": "string"
+          },
+          "threshold": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "dimension",
+          "threshold",
+          "actual",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ModelContractDeletedResponse": {
+        "properties": {
+          "ok": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "ModelContractFailureSample": {
+        "properties": {
+          "fingerprint": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fingerprint",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ModelContractListResponse": {
+        "properties": {
+          "contracts": {
+            "items": {
+              "$ref": "#/components/schemas/ModelContractRecord"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "contracts"
+        ],
+        "type": "object"
+      },
+      "ModelContractRecord": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "description": "Existing pseudonymous admin token actor, not a user ID; retained on update.",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "max_avg_cost_krw": {
+            "format": "double",
+            "type": "number"
+          },
+          "max_latency_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "min_golden_pass_rate": {
+            "format": "double",
+            "type": "number"
+          },
+          "min_quality_score": {
+            "format": "double",
+            "type": "number"
+          },
+          "min_success_rate": {
+            "format": "double",
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "task_type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "task_type",
+          "min_quality_score",
+          "min_golden_pass_rate",
+          "min_success_rate",
+          "max_latency_ms",
+          "max_avg_cost_krw",
+          "enabled",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ModelContractRunRequest": {
+        "properties": {
+          "contract_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "window": {
+            "description": "Existing parseWindow syntax (for example 1h, 24h, 7d, 30d); omitted, null or unrecognized values fall back to 30 days.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "type": "object"
+      },
+      "ModelContractRunResponse": {
+        "properties": {
+          "failing_samples": {
+            "items": {
+              "$ref": "#/components/schemas/ModelContractFailureSample"
+            },
+            "type": "array"
+          },
+          "have_metrics": {
+            "properties": {
+              "cost": {
+                "type": "boolean"
+              },
+              "latency": {
+                "type": "boolean"
+              },
+              "quality": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "quality",
+              "latency",
+              "cost"
+            ],
+            "type": "object"
+          },
+          "model": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "replaceable": {
+            "type": "boolean"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ModelContractRunResult"
+            },
+            "type": "array"
+          },
+          "window": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "window",
+          "replaceable",
+          "note",
+          "have_metrics",
+          "results",
+          "failing_samples"
+        ],
+        "type": "object"
+      },
+      "ModelContractRunResult": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ModelContractCheck"
+            },
+            "type": "array"
+          },
+          "contract_id": {
+            "type": "string"
+          },
+          "contract_name": {
+            "type": "string"
+          },
+          "replaceable": {
+            "type": "boolean"
+          },
+          "task_type": {
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "no_data"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_id",
+          "contract_name",
+          "task_type",
+          "verdict",
+          "replaceable",
+          "checks"
+        ],
+        "type": "object"
+      },
+      "ModelContractSavedResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ok": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "ok"
+        ],
+        "type": "object"
+      },
+      "ModelContractWriteRequest": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "nullable": true,
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Send the immutable original ID for editing; blank/omitted/null generates a new row.",
+            "nullable": true,
+            "type": "string"
+          },
+          "max_avg_cost_krw": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "max_latency_ms": {
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "min_golden_pass_rate": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "min_quality_score": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "min_success_rate": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "task_type": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ModelDeprecationDeletedResponse": {
+        "properties": {
+          "deleted": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "deleted"
+        ],
+        "type": "object"
+      },
+      "ModelDeprecationListResponse": {
+        "properties": {
+          "deprecations": {
+            "items": {
+              "$ref": "#/components/schemas/ModelGovernanceDeprecation"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "deprecations"
+        ],
+        "type": "object"
+      },
+      "ModelDeprecationSavedResponse": {
+        "properties": {
+          "deprecation": {
+            "$ref": "#/components/schemas/ModelGovernanceDeprecation"
+          }
+        },
+        "required": [
+          "deprecation"
+        ],
+        "type": "object"
+      },
+      "ModelDeprecationWriteRequest": {
+        "properties": {
+          "message": {
+            "nullable": true,
+            "type": "string"
+          },
+          "model_glob": {
+            "type": "string"
+          },
+          "replacement": {
+            "nullable": true,
+            "type": "string"
+          },
+          "sunset_date": {
+            "description": "Empty/omitted/null is warn-only; otherwise an actual YYYY-MM-DD calendar date in UTC.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_glob"
+        ],
+        "type": "object"
+      },
+      "ModelGovernanceDeprecation": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "model_glob": {
+            "type": "string"
+          },
+          "replacement": {
+            "type": "string"
+          },
+          "sunset_date": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model_glob",
+          "replacement",
+          "sunset_date",
+          "message",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "ModelPrice": {
         "additionalProperties": false,
         "properties": {
@@ -4175,7 +4599,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.19"
+    "version": "v0.86.20"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -8519,10 +8943,58 @@
     },
     "/admin/model-deprecations": {
       "get": {
+        "description": "Returns confirmed stored policies ordered by model_glob, including custom/imported IDs. Empty is deprecations: []; query failure is an error.",
         "operationId": "get__admin_model_deprecations",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDeprecationListResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: unsupported HTTP method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "deprecations_failed: no confirmed policy snapshot"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -8536,10 +9008,78 @@
         ]
       },
       "post": {
+        "description": "Upserts using an ID derived from ToLower(TrimSpace(model_glob)); the stored pattern retains its trimmed spelling. The same normalized pattern replaces the canonical policy; a different pattern creates another policy, not a rename. No id request field is used, so custom/imported IDs cannot be targeted by this POST. Omitted/null optional fields become empty, not preserved. Empty sunset_date is warn-only indefinitely; otherwise the date is UTC and after sunset a replacement rewrites requests or an empty replacement blocks them. Both insertion and update return 201. Only this pod's cache is invalidated immediately; other pods may retain their existing cache. No CAS or atomic audit guarantee is provided.",
         "operationId": "post__admin_model_deprecations",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelDeprecationWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDeprecationSavedResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body, missing_model_glob or invalid_sunset_date: invalid JSON, blank pattern or invalid calendar date"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: unsupported HTTP method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "deprecation_save_failed: policy storage failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -8555,6 +9095,7 @@
     },
     "/admin/model-deprecations/{id}": {
       "delete": {
+        "description": "Deletes by the supplied path ID after removing boundary slashes. A missing row is idempotent success; do not normalize an ambiguous ID into a different target. Cache invalidation is local to this pod and audit is post-write best-effort, not an atomic multi-pod operation.",
         "operationId": "delete__admin_model_deprecations_id",
         "parameters": [
           {
@@ -8568,7 +9109,64 @@
         ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDeprecationDeletedResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "missing_id: empty deprecation ID"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: unsupported HTTP method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "deprecation_delete_failed: policy deletion failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -8741,10 +9339,80 @@
     },
     "/admin/models/contracts": {
       "delete": {
+        "description": "Deletes the exact trimmed ID without a revision/CAS check. The audit entry is post-write best-effort.",
         "operationId": "delete__admin_models_contracts",
+        "parameters": [
+          {
+            "description": "Go-trimmed exact contract ID. Blank is rejected; a missing row is idempotent success.",
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelContractDeletedResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "no_id: id query parameter is blank"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: unsupported HTTP method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "delete_failed: contract deletion failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -8758,10 +9426,69 @@
         ]
       },
       "get": {
+        "description": "Returns confirmed contract rows, ordered by task type and name. No rows is contracts: []; lookup failure is an error, never a missing/null array.",
         "operationId": "get__admin_models_contracts",
+        "parameters": [
+          {
+            "description": "Exactly 1 selects enabled contracts only; other values list all contracts.",
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelContractListResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: unsupported HTTP method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "list_failed: no confirmed contract snapshot"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -8775,10 +9502,78 @@
         ]
       },
       "post": {
+        "description": "Upserts by the Go-trimmed id. An omitted, null or blank id generates a new row; editing must send the original id. All editable fields are replaced; omitted/null thresholds become 0 (not enforced), omitted/null enabled becomes true, and explicit false is preserved. Existing created_by and created_at are retained on update. Unknown IDs are inserted; this is not a conditional update and no revision/CAS is provided. Audit is existing pseudonymous admin token identity and post-write best-effort, not atomic.",
         "operationId": "post__admin_models_contracts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelContractWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelContractSavedResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body or no_name: incompatible JSON or blank trimmed name"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: unsupported HTTP method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "upsert_failed: contract storage failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -8794,10 +9589,88 @@
     },
     "/admin/models/contracts/run": {
       "post": {
+        "description": "Read-only computation over observed database metrics, not an upstream model call, stored run, policy change or audit event. Still requires existing admin write scope because it is POST. An explicit contract_id selects that contract even if disabled; omission selects enabled contracts. Missing metric queries yield have_metrics=false/no_data rather than proof of safety. No contracts means replaceable=false. Failure samples contain fingerprints and reasons, not raw responses.",
         "operationId": "post__admin_models_contracts_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelContractRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelContractRunResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body or no_model: invalid JSON or blank trimmed model"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "not_found: explicit contract_id does not exist"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: unsupported HTTP method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "contract_lookup_failed or list_failed: contracts could not be resolved"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

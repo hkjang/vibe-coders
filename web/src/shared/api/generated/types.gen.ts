@@ -437,6 +437,129 @@ export type MigrationFeature = {
     title: string;
 };
 
+export type ModelContractCheck = {
+    actual: number | null;
+    dimension: string;
+    status: 'pass' | 'warn' | 'fail' | 'no_data' | 'skip';
+    threshold: number;
+};
+
+export type ModelContractDeletedResponse = {
+    ok: true;
+};
+
+export type ModelContractFailureSample = {
+    fingerprint: string;
+    reason: string;
+};
+
+export type ModelContractListResponse = {
+    contracts: Array<ModelContractRecord>;
+};
+
+export type ModelContractRecord = {
+    created_at: string;
+    /**
+     * Existing pseudonymous admin token actor, not a user ID; retained on update.
+     */
+    created_by: string;
+    enabled: boolean;
+    id: string;
+    max_avg_cost_krw: number;
+    max_latency_ms: number;
+    min_golden_pass_rate: number;
+    min_quality_score: number;
+    min_success_rate: number;
+    name: string;
+    task_type: string;
+    updated_at: string;
+};
+
+export type ModelContractRunRequest = {
+    contract_id?: string | null;
+    model: string;
+    /**
+     * Existing parseWindow syntax (for example 1h, 24h, 7d, 30d); omitted, null or unrecognized values fall back to 30 days.
+     */
+    window?: string | null;
+};
+
+export type ModelContractRunResponse = {
+    failing_samples: Array<ModelContractFailureSample>;
+    have_metrics: {
+        cost: boolean;
+        latency: boolean;
+        quality: boolean;
+    };
+    model: string;
+    note: string;
+    replaceable: boolean;
+    results: Array<ModelContractRunResult>;
+    window: string;
+};
+
+export type ModelContractRunResult = {
+    checks: Array<ModelContractCheck>;
+    contract_id: string;
+    contract_name: string;
+    replaceable: boolean;
+    task_type: string;
+    verdict: 'pass' | 'warn' | 'fail' | 'no_data';
+};
+
+export type ModelContractSavedResponse = {
+    id: string;
+    ok: true;
+};
+
+export type ModelContractWriteRequest = {
+    enabled?: boolean | null;
+    /**
+     * Send the immutable original ID for editing; blank/omitted/null generates a new row.
+     */
+    id?: string | null;
+    max_avg_cost_krw?: number | null;
+    max_latency_ms?: number | null;
+    min_golden_pass_rate?: number | null;
+    min_quality_score?: number | null;
+    min_success_rate?: number | null;
+    name: string;
+    task_type?: string | null;
+};
+
+export type ModelDeprecationDeletedResponse = {
+    deleted: true;
+    id: string;
+};
+
+export type ModelDeprecationListResponse = {
+    deprecations: Array<ModelGovernanceDeprecation>;
+};
+
+export type ModelDeprecationSavedResponse = {
+    deprecation: ModelGovernanceDeprecation;
+};
+
+export type ModelDeprecationWriteRequest = {
+    message?: string | null;
+    model_glob: string;
+    replacement?: string | null;
+    /**
+     * Empty/omitted/null is warn-only; otherwise an actual YYYY-MM-DD calendar date in UTC.
+     */
+    sunset_date?: string | null;
+};
+
+export type ModelGovernanceDeprecation = {
+    created_at: string;
+    id: string;
+    message: string;
+    model_glob: string;
+    replacement: string;
+    sunset_date: string;
+    updated_at: string;
+};
+
 export type ModelPrice = {
     cached_input_krw_per_1m: number;
     input_krw_per_1m: number;
@@ -4138,26 +4261,76 @@ export type GetAdminModelDeprecationsData = {
     url: '/admin/model-deprecations';
 };
 
+export type GetAdminModelDeprecationsErrors = {
+    /**
+     * invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: unsupported HTTP method
+     */
+    405: AppError;
+    /**
+     * deprecations_failed: no confirmed policy snapshot
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminModelDeprecationsError = GetAdminModelDeprecationsErrors[keyof GetAdminModelDeprecationsErrors];
+
 export type GetAdminModelDeprecationsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelDeprecationListResponse;
 };
 
+export type GetAdminModelDeprecationsResponse = GetAdminModelDeprecationsResponses[keyof GetAdminModelDeprecationsResponses];
+
 export type PostAdminModelDeprecationsData = {
-    body?: never;
+    body: ModelDeprecationWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/model-deprecations';
 };
 
+export type PostAdminModelDeprecationsErrors = {
+    /**
+     * invalid_body, missing_model_glob or invalid_sunset_date: invalid JSON, blank pattern or invalid calendar date
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: unsupported HTTP method
+     */
+    405: AppError;
+    /**
+     * deprecation_save_failed: policy storage failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminModelDeprecationsError = PostAdminModelDeprecationsErrors[keyof PostAdminModelDeprecationsErrors];
+
 export type PostAdminModelDeprecationsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    201: ModelDeprecationSavedResponse;
 };
+
+export type PostAdminModelDeprecationsResponse = PostAdminModelDeprecationsResponses[keyof PostAdminModelDeprecationsResponses];
 
 export type DeleteAdminModelDeprecationsIdData = {
     body?: never;
@@ -4168,12 +4341,39 @@ export type DeleteAdminModelDeprecationsIdData = {
     url: '/admin/model-deprecations/{id}';
 };
 
+export type DeleteAdminModelDeprecationsIdErrors = {
+    /**
+     * missing_id: empty deprecation ID
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: unsupported HTTP method
+     */
+    405: AppError;
+    /**
+     * deprecation_delete_failed: policy deletion failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminModelDeprecationsIdError = DeleteAdminModelDeprecationsIdErrors[keyof DeleteAdminModelDeprecationsIdErrors];
+
 export type DeleteAdminModelDeprecationsIdResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelDeprecationDeletedResponse;
 };
+
+export type DeleteAdminModelDeprecationsIdResponse = DeleteAdminModelDeprecationsIdResponses[keyof DeleteAdminModelDeprecationsIdResponses];
 
 export type GetAdminModelMigrationData = {
     body?: never;
@@ -4281,58 +4481,176 @@ export type GetAdminModelsResponse = GetAdminModelsResponses[keyof GetAdminModel
 export type DeleteAdminModelsContractsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query: {
+        /**
+         * Go-trimmed exact contract ID. Blank is rejected; a missing row is idempotent success.
+         */
+        id: string;
+    };
     url: '/admin/models/contracts';
 };
+
+export type DeleteAdminModelsContractsErrors = {
+    /**
+     * no_id: id query parameter is blank
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: unsupported HTTP method
+     */
+    405: AppError;
+    /**
+     * delete_failed: contract deletion failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminModelsContractsError = DeleteAdminModelsContractsErrors[keyof DeleteAdminModelsContractsErrors];
 
 export type DeleteAdminModelsContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelContractDeletedResponse;
 };
+
+export type DeleteAdminModelsContractsResponse = DeleteAdminModelsContractsResponses[keyof DeleteAdminModelsContractsResponses];
 
 export type GetAdminModelsContractsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Exactly 1 selects enabled contracts only; other values list all contracts.
+         */
+        enabled?: string;
+    };
     url: '/admin/models/contracts';
 };
+
+export type GetAdminModelsContractsErrors = {
+    /**
+     * invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: unsupported HTTP method
+     */
+    405: AppError;
+    /**
+     * list_failed: no confirmed contract snapshot
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminModelsContractsError = GetAdminModelsContractsErrors[keyof GetAdminModelsContractsErrors];
 
 export type GetAdminModelsContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelContractListResponse;
 };
 
+export type GetAdminModelsContractsResponse = GetAdminModelsContractsResponses[keyof GetAdminModelsContractsResponses];
+
 export type PostAdminModelsContractsData = {
-    body?: never;
+    body: ModelContractWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/models/contracts';
 };
 
+export type PostAdminModelsContractsErrors = {
+    /**
+     * invalid_body or no_name: incompatible JSON or blank trimmed name
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: unsupported HTTP method
+     */
+    405: AppError;
+    /**
+     * upsert_failed: contract storage failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminModelsContractsError = PostAdminModelsContractsErrors[keyof PostAdminModelsContractsErrors];
+
 export type PostAdminModelsContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelContractSavedResponse;
 };
 
+export type PostAdminModelsContractsResponse = PostAdminModelsContractsResponses[keyof PostAdminModelsContractsResponses];
+
 export type PostAdminModelsContractsRunData = {
-    body?: never;
+    body: ModelContractRunRequest;
     path?: never;
     query?: never;
     url: '/admin/models/contracts/run';
 };
 
+export type PostAdminModelsContractsRunErrors = {
+    /**
+     * invalid_body or no_model: invalid JSON or blank trimmed model
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires existing admin read access; POST and DELETE require admin write access, including the read-only contract evaluation POST.
+     */
+    401: AppError;
+    /**
+     * not_found: explicit contract_id does not exist
+     */
+    404: AppError;
+    /**
+     * method_not_allowed: unsupported HTTP method
+     */
+    405: AppError;
+    /**
+     * contract_lookup_failed or list_failed: contracts could not be resolved
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminModelsContractsRunError = PostAdminModelsContractsRunErrors[keyof PostAdminModelsContractsRunErrors];
+
 export type PostAdminModelsContractsRunResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelContractRunResponse;
 };
+
+export type PostAdminModelsContractsRunResponse = PostAdminModelsContractsRunResponses[keyof PostAdminModelsContractsRunResponses];
 
 export type GetAdminModelsQualityData = {
     body?: never;
