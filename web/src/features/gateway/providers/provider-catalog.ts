@@ -49,15 +49,49 @@ function parseProviderURL(value: string): URL | undefined {
   }
 }
 
+function providerURLComponentHasSecret(value: string): boolean {
+  let candidate = value;
+  // The shared detector already bounds size and decoding. Also inspect decoded
+  // path segments: /token=value (including an encoded slash) is a credential
+  // assignment even though a slash is not an assignment separator in search text.
+  for (let pass = 0; pass <= 8; pass += 1) {
+    if (
+      containsPotentialSecret(candidate) ||
+      candidate.split("/").some((part) => containsPotentialSecret(part))
+    ) {
+      return true;
+    }
+    if (!/%[\da-f]{2}/i.test(candidate)) return false;
+    if (pass === 8) return true;
+    try {
+      candidate = decodeURIComponent(candidate);
+    } catch {
+      return true;
+    }
+  }
+  return true;
+}
+
 export function displayProviderBaseURL(value: string): string {
   const url = parseProviderURL(value);
   if (!url) return invalidProviderURLDisplay;
   url.username = "";
   url.password = "";
   url.hash = "";
-  for (const key of [...url.searchParams.keys()]) {
-    if (isSensitiveCredentialKey(key)) url.searchParams.set(key, "***");
+  if (providerURLComponentHasSecret(url.origin) || providerURLComponentHasSecret(url.pathname)) {
+    return invalidProviderURLDisplay;
   }
+  const publicQuery = new URLSearchParams();
+  for (const [key, queryValue] of url.searchParams) {
+    // A key itself can contain a token; do not retain that name in the display.
+    if (providerURLComponentHasSecret(key)) continue;
+    const privateValue =
+      isSensitiveCredentialKey(key) ||
+      containsPotentialSecret(`${key}=hidden`) ||
+      providerURLComponentHasSecret(queryValue);
+    publicQuery.append(key, privateValue ? "***" : queryValue);
+  }
+  url.search = publicQuery.toString();
   return url.toString();
 }
 
