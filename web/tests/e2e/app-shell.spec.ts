@@ -810,7 +810,7 @@ test("keeps an older backend on the provider Legacy bridge despite advertised pr
     if (path === "/admin/providers" || path === "/admin/provider-impact") providerRequests.push(path);
   });
   await mockGateway(page, {
-    bootstrapPayload: { ...bootstrap, backend_version: "v0.86.8", ui_version: "v0.86.8" },
+    bootstrapPayload: { ...bootstrap, backend_version: "v0.86.9", ui_version: "v0.86.9" },
   });
   await page.goto("gateway/providers");
   for (let attempt = 0; attempt < 2; attempt += 1) {

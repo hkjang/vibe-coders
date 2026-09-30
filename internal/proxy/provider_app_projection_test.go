@@ -24,7 +24,7 @@ func newProviderAppProjectionServer(t *testing.T) (*Server, *store.SQLStore, *ht
 	cfg := testConfig("https://unused.invalid", "")
 	cfg.Auth.APIKeyPrefix = "corp_"
 	cfg.Auth.ServiceKeyPrefix = "svc%41_"
-	cfg.Auth.HistoricalKeyPrefixes = []string{"old_", "old%42_", "MiXeD_", "tenant%key_"}
+	cfg.Auth.HistoricalKeyPrefixes = []string{"old_", "old%42_", "MiXeD_", "tenant%key_", "corp+_", "edge&_"}
 	server, err := NewServer(cfg, db, logger, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -176,6 +176,9 @@ func TestProviderAppProjectionCredentialURLBoundaries(t *testing.T) {
 		{"vendor-host", "sk-proj-abcdefgh", "https://%s.example.invalid/v1"},
 		{"case-preserved-host", "MiXeD_" + strings.Repeat("E", 40), "https://%s.example.invalid/v1"},
 		{"encoded-percent-host", "svc%2541_" + strings.Repeat("F", 40), "https://%s.example.invalid/v1"},
+		{"raw-plus-query", "corp+_" + strings.Repeat("P", 40), "https://safe.invalid/v1?value=%s"},
+		{"query-delimiter-prefix", "edge&_" + strings.Repeat("Q", 40), "https://safe.invalid/v1?value=%s"},
+		{"deep-sensitive-query-name", "synthetic-private-query-value", "https://safe.invalid/v1?%2525252574oken_value=%s"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := strings.Replace(tc.raw, "%s", tc.secret, 1)
@@ -194,10 +197,49 @@ func TestProviderAppProjectionCredentialURLBoundaries(t *testing.T) {
 			if err != nil || !found || stored.BaseURL != raw || stored.Enabled {
 				t.Error("masked URL update did not preserve existing original")
 			}
+			audits, err := db.ListAdminAudit(t.Context(), 20)
+			if err != nil {
+				t.Fatal("could not load provider projection audit")
+			}
+			if len(audits) == 0 {
+				t.Fatal("provider projection update audit missing")
+			}
+			for _, entry := range audits {
+				assertProviderProjectionNoSecrets(t, entry.BeforeValue+entry.AfterValue, tc.secret)
+			}
 			response := providerAppRequest(t, http.MethodPost, gateway.URL+"/admin/providers", map[string]any{"name": "new-" + tc.name, "base_url": raw})
 			rejected := readProviderProjectionResponse(t, response, 400)
 			assertProviderProjectionNoSecrets(t, string(rejected), tc.secret)
 		})
+	}
+}
+
+func TestProviderAppURLSensitiveQueryKeyLayers(t *testing.T) {
+	server, _, _ := newProviderAppProjectionServer(t)
+	for _, tc := range []struct{ name, encoded string }{
+		{"token-value", "%74oken_value"},
+		{"authorization-mode", "%61uthorizationMode"},
+		{"key-id", "%6bey_id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := tc.encoded
+			for depth := 1; depth <= 10; depth++ {
+				raw := "https://safe.invalid/v1?" + key + "=synthetic-private"
+				if server.validateProviderBaseURLForApp(raw) == nil || server.sanitizeProviderBaseURLForConfig(raw) != invalidProviderURLDisplay {
+					t.Errorf("sensitive query-key escaped projection at encoding depth %d", depth)
+				}
+				key = url.QueryEscape(key)
+			}
+		})
+	}
+	// Names without credential semantics keep their spelling at assessed layers.
+	key := "%64eployment"
+	for depth := 1; depth <= 8; depth++ {
+		raw := "https://safe.invalid/v1?" + key + "=chat-public"
+		if server.validateProviderBaseURLForApp(raw) != nil || server.sanitizeProviderBaseURLForConfig(raw) != raw {
+			t.Errorf("ordinary query-key changed at encoding depth %d", depth)
+		}
+		key = url.QueryEscape(key)
 	}
 }
 
@@ -209,6 +251,7 @@ func TestProviderAppURLProjectionEncodingLayers(t *testing.T) {
 		{"deep-encoded-query", "/v1?value=old%252525255f" + strings.Repeat("C", 40)},
 		{"encoded-vendor-with-literal-percent", "/100%25/sk%252dproj%252dabcdefgh"},
 		{"double-encoded-percent-prefix", "/v1?value=svc%252541_" + strings.Repeat("D", 40)},
+		{"deep-sensitive-query-key", "/v1?X%252525252dAmz%252525252dCredential=synthetic-private"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			value := "https://safe.invalid" + tc.value

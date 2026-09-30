@@ -43,6 +43,9 @@ func (s *Server) validateProviderBaseURLForApp(raw string) error {
 	// prevent decoding an unrelated credential-bearing component.
 	components := []string{raw, parsed.Host, parsed.EscapedPath(), parsed.Path, parsed.RawQuery}
 	for key, values := range parsed.Query() {
+		if providerAppURLQueryKeyIsSensitive(key) {
+			return fmt.Errorf("provider URL must not contain credential query parameters")
+		}
 		components = append(components, key)
 		components = append(components, values...)
 	}
@@ -61,6 +64,29 @@ func (s *Server) sanitizeProviderBaseURLForConfig(raw string) string {
 	}
 	parsed, _ := parseProviderBaseURL(raw)
 	return parsed.String()
+}
+
+// Query names have broader credential semantics than arbitrary URL components
+// (for example token_value). Preserve that distinction at every assessed layer;
+// decoding the key and checking only token-shaped values would miss those names.
+func providerAppURLQueryKeyIsSensitive(key string) bool {
+	if len(key) > maxProviderCredentialScanBytes {
+		return true
+	}
+	for round := 0; round <= 8; round++ {
+		if providerURLQueryKeyIsSensitive(key) {
+			return true
+		}
+		next, changed := providerAppURLDecodeLayer(key)
+		if !changed {
+			return false
+		}
+		if round == 8 {
+			return true
+		}
+		key = next
+	}
+	return false
 }
 
 // Keep each bounded decoding layer so a configured prefix containing a literal

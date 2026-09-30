@@ -25,7 +25,7 @@ const user = {
 
 function bootstrap(authenticated: boolean): UiBootstrapResponse {
   return {
-    backend_version: "v0.86.9",
+    backend_version: "v0.86.10",
     ui_version: "provider-review-fixture",
     api_version: "v1",
     ui: {

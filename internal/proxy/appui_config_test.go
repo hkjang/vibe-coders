@@ -403,7 +403,7 @@ func TestGatewayCatalogFeaturesKeepTheirRoleAndRolloutContract(t *testing.T) {
 		}
 		minimumVersion := "v0.84.0"
 		if id == "gateway.providers" {
-			minimumVersion = "v0.86.9"
+			minimumVersion = "v0.86.10"
 		}
 		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != minimumVersion {
 			t.Errorf("feature %q rollout contract is incomplete: %+v", id, *feature)
