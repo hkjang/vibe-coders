@@ -13,6 +13,7 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime } from "@/shared/utils/format";
+import "./app-permission.css";
 
 interface AppPermissionPanelProps {
   app: WorkApp;
@@ -126,6 +127,7 @@ export function AppPermissionPanel({
                         }}
                         size="small"
                         variant="danger"
+                        className="app-permission-revoke"
                         disabled={!canWrite || locked || !subject}
                         title={
                           !canWrite
