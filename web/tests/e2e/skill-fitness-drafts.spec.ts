@@ -496,6 +496,11 @@ for (const method of ["Escape", "취소", "외부 클릭", "닫기 버튼"] as c
     await close();
     await guard(page).getByRole("button", { name: "계속 편집" }).click();
     await expect(reference(dialog)).toHaveValue("public-run-new");
+    if (method === "외부 클릭") {
+      // Observe async focus restoration before another physical outside click.
+      await expect(guard(page)).toBeHidden();
+      await expect(dialog.getByRole("textbox", { name: "메모", exact: true })).toBeFocused();
+    }
     await close();
     await guard(page).getByRole("button", { name: "변경 버리기" }).click();
     await expect(dialog).toBeHidden();
