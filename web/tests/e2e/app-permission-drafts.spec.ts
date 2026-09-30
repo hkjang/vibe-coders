@@ -353,13 +353,13 @@ test("알 수 없는 유형·누락·빈 ID를 사용자 회수로 바꾸지 않
   expect(gateway.writes).toEqual([]);
 });
 
-test("기존 ID의 FEFF·공백을 정규화해 다른 권한을 회수하지 않고 정확한 Unicode 대상만 전송한다", async ({
+test("기존 ID의 FEFF·NEL·공백을 정규화해 다른 권한을 회수하지 않고 정확한 Unicode 대상만 전송한다", async ({
   page,
   gateway,
 }) => {
   const canonical = "alice";
-  const blocked = [`\uFEFF${canonical}`, ` ${canonical} `];
-  const unicode = `${opaqueSubject}\uFEFF내부 문자`;
+  const blocked = [`\uFEFF${canonical}`, ` ${canonical} `, `\u0085${canonical}`, `${canonical}\u0085`];
+  const unicode = `${opaqueSubject}\uFEFF내부\u0085문자`;
   const subjects = [canonical, ...blocked, unicode];
   gateway.replacePermissions(
     subjects.map((subject, index) => permission(`opaque-existing-${index}`, "user", subject)),
