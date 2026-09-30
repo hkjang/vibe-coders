@@ -120,7 +120,10 @@ func TestAdminSettingsLifecycle(t *testing.T) {
 	}
 
 	// Rollback: change again, then roll back to 50.
-	req(t, http.MethodPut, base+"/by-key/text2sql.default_limit", `{"value":"70"}`)
+	resp, _ = req(t, http.MethodPut, base+"/by-key/text2sql.default_limit", `{"value":"70"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("second default_limit update should 200, got %d", resp.StatusCode)
+	}
 	resp, rb := req(t, http.MethodPost, base+"/rollback", `{"key":"text2sql.default_limit","reason":"oops"}`)
 	if resp.StatusCode != http.StatusOK || rb["value"] != "50" {
 		t.Errorf("rollback should restore 50, got status %d %+v", resp.StatusCode, rb)

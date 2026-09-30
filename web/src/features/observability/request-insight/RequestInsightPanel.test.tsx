@@ -306,7 +306,7 @@ describe("RequestInsightPanel", () => {
     expect(screen.getByText("MCP 1건")).toBeVisible();
     expect(screen.getByRole("link", { name: "세션 흐름 보기" })).toHaveAttribute(
       "href",
-      "/app/observability/xview?session_id=sess-1",
+      "/observability/xview?session_id=sess-1",
     );
   });
 

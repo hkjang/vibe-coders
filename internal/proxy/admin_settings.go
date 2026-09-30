@@ -1942,6 +1942,12 @@ func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Requ
 		writeOpenAIError(w, http.StatusConflict, "setting history changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
 		return
 	}
+	// Random IDs cannot establish commit order for an equal-time history group.
+	// Reject ambiguity even if an older event's value and time match after ABA.
+	if len(hist) > 1 && sameSettingHistoryInstant(hist[0].ChangedAt, hist[1].ChangedAt) {
+		writeOpenAIError(w, http.StatusConflict, "setting history has ambiguous timestamps; review the current value and set an explicit value instead", "conflict_error", "setting_conflict")
+		return
+	}
 	if len(hist) == 0 || strings.TrimSpace(hist[0].OldValueJSON) == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "no previous value to roll back to", "invalid_request_error", "no_history")
 		return
@@ -1972,4 +1978,16 @@ func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Requ
 	s.auditCommittedSetting(r, "setting.rollback", key, auditJSON(map[string]any{"key": key}))
 	stored, _ := s.loadStoredSettings(r)
 	writeJSON(w, http.StatusOK, s.settingView(stored, d))
+}
+
+func sameSettingHistoryInstant(left, right string) bool {
+	if left == right {
+		return true
+	}
+	first, err := time.Parse(time.RFC3339Nano, left)
+	if err != nil {
+		return false
+	}
+	second, err := time.Parse(time.RFC3339Nano, right)
+	return err == nil && first.Equal(second)
 }

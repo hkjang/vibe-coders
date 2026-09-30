@@ -187,6 +187,11 @@ describe.each(cases)("$tab 설정 저장 계약", (fixture) => {
       expect(screen.getByText(pendingTitle)).toBeVisible();
       expect(screen.getByRole("textbox", { name: "변경 사유" })).toHaveValue("후속 복구 검토");
       expect(toast.success).not.toHaveBeenCalled();
+      if (outcome === "conflict") {
+        expect(screen.getByText("현재 기준으로 설정을 복구할 수 없습니다.")).toBeVisible();
+        expect(screen.queryByText("다른 작업자가 설정을 변경했습니다.")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: kind === "revert" ? "되돌리기" : "롤백" })).toBeDisabled();
+      }
     }
     expect(api.bodies(saveEndpoint)).toHaveLength(1);
     expect(api.calls.filter((call) => call.key === recoveryEndpoint)).toHaveLength(1);
@@ -529,7 +534,11 @@ describe("복구 이력 snapshot", () => {
     await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "검토한 이유");
     await user.click(screen.getByRole("button", { name: "롤백" }));
     if (status === 409) {
-      expect(await screen.findByText("다른 작업자가 설정을 변경했습니다.")).toBeVisible();
+      expect(await screen.findByText("현재 기준으로 설정을 복구할 수 없습니다.")).toBeVisible();
+      expect(screen.queryByText("다른 작업자가 설정을 변경했습니다.")).not.toBeInTheDocument();
+      expect(screen.getByText(/최신 값과 이력을 검토하세요\./u)).toBeVisible();
+      expect(screen.getByText(/이력의 순서가 모호하면 원하는 값을 명시적으로 저장하세요\./u)).toBeVisible();
+      expect(screen.getByText(/자동으로 다시 요청하지 않습니다\./u)).toBeVisible();
       expect(screen.getByRole("textbox", { name: "변경 사유" })).toHaveValue("검토한 이유");
       expect(screen.getByRole("button", { name: "롤백" })).toBeDisabled();
     } else {

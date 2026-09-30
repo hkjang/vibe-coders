@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.27`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.28`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.27.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.27.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.28.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.28.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.27.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.28.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.27
+export GATEWAY_VERSION=v0.86.28
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -350,6 +350,8 @@ Escape로 닫으면 열었던 요소로, 결과를 실행해 화면을 옮기면
 
 설정 상세에서 **되돌리기 / 롤백**을 누르면 미저장 내용을 버릴지 확인한 뒤 복구 사유를 입력합니다.
 롤백은 검토한 설정·이력 식별자·이력 개수를 검사하며, 기본값 되돌리기는 기존 버전 검사만 사용합니다.
+`v0.86.28`부터 최신 두 변경의 기록 시각이 같아 순서를 확정할 수 없으면 롤백을 거부합니다.
+이 경우 반복 실행하지 말고 최신 값과 이력을 검토한 뒤 원하는 값을 명시적으로 저장하세요.
 충돌 안내가 나타나면 최신 내용을 다시 검토하세요. 기본값 되돌리기의 버전 검사만으로 삭제 후
 같은 버전으로 재생성된 모든 경우까지 구분할 수 있는 것은 아닙니다.
 비밀 설정의 기존 값은 다시 표시하지 않으며 비밀 설정 롤백은 허용하지 않습니다.
@@ -559,6 +561,23 @@ ID의 실제 존재 여부는 이 화면에서 확인하지 않습니다. 목록
 ID가 단독 `.` 또는 `..`이면 브라우저가 URL을 다른 경로로 바꾸므로 신규 화면에서 삭제를 차단합니다.
 삭제는 용도 태그만 지우고 모델 자체는 지우지 않습니다. 검토 이후 다른 관리자가 바꾼 내용을
 서버에서 잠그거나 되돌리는 기능은 아니므로 동시 변경에 유의하세요.
+
+### 요청 처리 흐름의 조회와 해석
+
+`v0.86.28`은 LLM·XView 요청 상세의 **처리 흐름**과 **연결 기록** 조회 상태를 구분합니다.
+조회 실패는 기록이 없다는 뜻이 아닙니다. 이전 응답이 있으면 마지막으로 받은 기록이라는 안내와
+함께 유지하며, **처리 흐름 다시 조회** 또는 **연결 기록 다시 조회**로 필요한 조회만 재시도합니다.
+재조회 중에는 같은 버튼의 중복 요청을 막고 키보드 초점을 유지합니다.
+
+**건너뜀**, **오류**, **정상**, **상태 미확인**을 구분하며 캐시 정보는 별도로 표시합니다.
+연결 건수의 **미확인**은 확인된 0건과 다릅니다. 빈 응답만으로 처리 단계가 없거나 모든 기록이
+수집됐다고 판단하지 마세요. 현재 표시 보호 규칙에 해당하는 값과 안전하게 확인할 수 없는
+세션 링크는 숨기지만, 열람 권한에 따라 이름·오류 설명에 원문이나 민감한 정보가 포함될 수 있습니다.
+
+막대의 **기록된 상대 위치**와 **기록된 지연**은 서버가 저장한 참고값입니다. 실제 단계의 시작·종료,
+동시 실행, 전체 업무 시간이나 정확한 임계 경로가 아닙니다. 도구의 **소요 시간 미기록**은 0ms 실행과
+다르며 다른 단계의 기록된 0도 실측 0을 보장하지 않습니다. 좁은 화면에서는 긴 이름·설명을
+줄바꿈해 읽고 본문을 스크롤하세요. 별도 추적 탐색기 전체 이식이나 분산 추적 완성을 뜻하지 않습니다.
 
 ## 4. 계정과 권한
 

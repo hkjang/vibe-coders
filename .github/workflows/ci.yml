@@ -222,10 +222,12 @@ jobs:
         run: go test ./internal/store -run '^(TestAppRecentRequestsPostgresNaturalPlannerAtScale|TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys)$' -count=1 -timeout=5m
       - name: Verify PostgreSQL UI telemetry concurrency and retention
         run: go test -race ./internal/store -run '^TestAppUITelemetry' -count=1 -timeout=5m
-      - name: Verify PostgreSQL settings rollback snapshot and concurrency
-        # Both packages migrate isolated schemas in the same database. Serialize
-        # package setup so concurrent index migrations cannot wait on each other.
-        run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestAdminSettings?Rollback' -count=1 -timeout=5m
+      - name: Verify PostgreSQL startup lock waiters and concurrent migrations
+        run: go test -race ./internal/store -run '^TestPostgresMigration' -count=1 -timeout=2m
+      - name: Verify PostgreSQL settings history and concurrent package startup
+        # Keep package startup concurrent: waiting migration locks must not pin
+        # the snapshots that another session's concurrent indexes need to finish.
+        run: go test -race ./internal/store ./internal/proxy -run 'Test.*(Setting|ChangeSet)' -count=1 -timeout=5m
       - name: Verify PostgreSQL SSO snapshots and atomic notification settings
         run: go test -p 1 -race ./internal/store ./internal/proxy -run 'TestRuntimeFlagBatch|TestMattermost|TestKeycloak(Admin|Persisted|Config)' -count=1 -timeout=7m
       - name: Verify PostgreSQL bounded provider impact and permission projections
@@ -278,7 +280,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.27
+      SOURCE_SBOM_VERSION: v0.86.28
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

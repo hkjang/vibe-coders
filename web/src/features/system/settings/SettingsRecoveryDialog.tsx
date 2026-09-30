@@ -153,9 +153,9 @@ function RecoveryEditor({
         </InlineNotice>
       ) : null}
       {conflict ? (
-        <InlineNotice tone="warning" title="다른 작업자가 설정을 변경했습니다.">
-          입력한 사유를 확인한 뒤 대화상자를 닫고 설정을 다시 열어 최신 값과 이력을 검토하세요. 자동으로 다시
-          요청하지 않습니다.
+        <InlineNotice tone="warning" title="현재 기준으로 설정을 복구할 수 없습니다.">
+          입력한 사유를 확인한 뒤 대화상자를 닫고 설정을 다시 열어 최신 값과 이력을 검토하세요. 이력의 순서가
+          모호하면 원하는 값을 명시적으로 저장하세요. 자동으로 다시 요청하지 않습니다.
         </InlineNotice>
       ) : null}
       <fieldset
