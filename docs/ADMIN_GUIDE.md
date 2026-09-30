@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.23`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.24`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.23.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.23.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.24.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.24.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.23.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.24.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.23
+export GATEWAY_VERSION=v0.86.24
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -315,6 +315,13 @@ DB 저장은 끝났으므로 다시 저장하지 말고 최신 설정·서버 �
 Escape로 닫으면 열었던 요소로, 결과를 실행해 화면을 옮기면 본문으로 키보드 포커스가 이동합니다.
 **단축키 도움말**을 열었다 닫는 경우도 원래 요소로 돌아옵니다. 작은 화면에서는 결과 영역만
 스크롤할 수 있으며, 검색어를 별도로 저장하거나 사용 관측에 보내지 않습니다.
+
+화면 이동 중 **화면 오류**가 나타나면 오류 제목으로 키보드 초점이 이동합니다. Tab으로
+**다시 시도**를 선택하면 현재 문서를 다시 불러옵니다. 로그인 상태·관리자 조회 권한·기존 화면
+복귀 설정을 확인할 수 있을 때만 **기존 관리자 화면 열기**도 제공합니다. 기존 관리자 화면은
+별도 로그인이 필요할 수 있습니다. 오류 안내가 서버나 기존 화면의 정상 상태를 보장하지는 않습니다.
+인증 제공자를 포함한 콘솔 전체 오류에서는 권한을 확인할 수 없으므로 기존 화면 링크 대신
+**다시 불러오기**와 관리자 문의 안내를 제공합니다. 새로고침은 미저장 입력을 복구하지 않습니다.
 
 ### 3.10 편집 중 입력 보호
 
