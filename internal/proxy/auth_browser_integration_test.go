@@ -40,6 +40,7 @@ type browserAuthHarness struct {
 	adminPassword    string
 	readonlyPassword string
 	childScratch     string
+	providerChunk    string
 }
 
 func browserFixtureConfig(idp *browserOIDCFixture) config.Config {
@@ -156,6 +157,10 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	if err != nil || assetsErr != nil || len(assets) == 0 || !bytes.Contains(index, []byte("/app/assets/")) {
 		t.Fatal("build and stage the React assets before compiling the browser integration test")
 	}
+	providerChunk, err := browserAuthProviderChunk(appui.EmbeddedFS())
+	if err != nil {
+		t.Fatal("the embedded UI must contain exactly one safe ProviderPage JavaScript chunk")
+	}
 	webDir := browserAuthWebDirectory(t)
 	playwrightCLI := filepath.Join(webDir, "node_modules", "@playwright", "test", "cli.js")
 	if info, err := os.Stat(playwrightCLI); err != nil || info.IsDir() {
@@ -165,6 +170,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { slog.SetDefault(previousLog) })
 	h := newBrowserAuthHarness(t)
+	h.providerChunk = providerChunk
 	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
 	defer cancel()
 	// Invoke the already-installed CLI directly. Package-manager exec can
@@ -249,6 +255,7 @@ func (h *browserAuthHarness) childEnvironment() []string {
 		"VIBE_AUTH_READONLY_EMAIL=readonly-browser@example.invalid", "VIBE_AUTH_READONLY_PASSWORD="+h.readonlyPassword,
 		"VIBE_AUTH_SSO_EMAIL="+h.idp.email, "VIBE_AUTH_SSO_PASSWORD="+h.idp.password,
 		"VIBE_AUTH_TEAM_ID=browser-team", "VIBE_AUTH_ACCESS_TTL_SECONDS="+strconv.Itoa(int(browserAuthAccessTTL.Seconds())),
+		"VIBE_AUTH_PROVIDER_CHUNK="+h.providerChunk,
 	)
 }
 
@@ -385,15 +392,21 @@ func TestAuthBrowserFixtureChildEnvironmentIsIsolated(t *testing.T) {
 	t.Setenv("NODE_OPTIONS", "--not-an-approved-option")
 	t.Setenv("HTTPS_PROXY", "http://must-not-inherit.invalid")
 	t.Setenv("PLAYWRIGHT_NO_COPY_PROMPT", "0")
+	t.Setenv("VIBE_AUTH_PROVIDER_CHUNK", "https://must-not-inherit.invalid/ProviderPage-ambient1.js")
 	h := &browserAuthHarness{
 		gateway:       &httptest.Server{URL: "http://127.0.0.1:32123"},
 		idp:           &browserOIDCFixture{server: &httptest.Server{URL: "http://127.0.0.1:32124"}, email: "synthetic@example.invalid", password: "fixture-only"},
 		adminPassword: "fixture-only", readonlyPassword: "fixture-only",
+		providerChunk: "/app/assets/ProviderPage-fixture1.js",
 	}
 	env := map[string]string{}
+	chunkInputs := 0
 	for _, entry := range h.childEnvironment() {
 		key, value, _ := strings.Cut(entry, "=")
 		env[key] = value
+		if key == "VIBE_AUTH_PROVIDER_CHUNK" {
+			chunkInputs++
+		}
 	}
 	for _, forbidden := range []string{"AUTH_JWT_SECRET", "OPENAI_API_KEY", "NODE_OPTIONS", "HTTPS_PROXY"} {
 		if _, found := env[forbidden]; found {
@@ -403,6 +416,7 @@ func TestAuthBrowserFixtureChildEnvironmentIsIsolated(t *testing.T) {
 	if env["APP_BASE_URL"] != h.gateway.URL || env["VIBE_AUTH_IDP_ORIGIN"] != h.idp.server.URL ||
 		env["VIBE_AUTH_ACCESS_TTL_SECONDS"] != "8" || env["COREPACK_ENABLE_NETWORK"] != "0" ||
 		env["PLAYWRIGHT_NO_COPY_PROMPT"] != "1" ||
+		chunkInputs != 1 || env["VIBE_AUTH_PROVIDER_CHUNK"] != h.providerChunk ||
 		env["VIBE_AUTH_ADMIN_PASSWORD"] != h.adminPassword {
 		t.Fatal("child environment did not preserve the approved synthetic fixture contract")
 	}
