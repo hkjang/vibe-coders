@@ -610,6 +610,50 @@ export type ProviderHealthTrendBucket = {
     until: string;
 };
 
+export type ProviderImpactItem = {
+    enabled: boolean;
+    label: string;
+    model?: string;
+    provider_ref?: string;
+    reference: string;
+    relation?: 'direct_binding' | 'configured_failover_group';
+};
+
+export type ProviderImpactResponse = {
+    agent_routes: ProviderImpactSection;
+    api_keys: ProviderImpactSection;
+    bootstrap_on_restart: boolean;
+    concurrent_change_guard: false;
+    consistency: 'best_effort';
+    failover_peers: ProviderImpactSection;
+    generated_at: string;
+    is_default: boolean;
+    not_assessed: Array<'pattern_overlap' | 'full_model_catalog' | 'model_usage' | 'runtime_call_success' | 'ip_and_model_authorization' | 'concurrent_change_guard'>;
+    provider_display: string;
+    provider_ref: string;
+    read_only: true;
+    routing_rules: ProviderImpactSection;
+    teams: ProviderImpactSection;
+    upstream_calls: false;
+};
+
+/**
+ * Complete means complete only within the stated configuration scope, not full runtime impact. Partial counts are confirmed lower bounds. Denied/unavailable counts are null, never zero. Items contain only safe labels and non-reversible references.
+ */
+export type ProviderImpactSection = {
+    count_kind: 'exact' | 'lower_bound' | 'unknown';
+    items: Array<ProviderImpactItem>;
+    matched_count: number | null;
+    reason: '' | 'bounded_or_unassessable_configuration' | 'routing_read_required' | 'configuration_read_failed' | 'target_configuration_unassessable' | 'team_scoped_assessment_not_available' | 'key_configuration_unavailable' | 'team_configuration_read_failed';
+    /**
+     * Configuration records considered within the bounded scan. For teams this is the number of eligible-key team identity entries considered (including repeated and unassigned entries), not the size of the team inventory.
+     */
+    scanned_count: number | null;
+    scope: 'direct_provider_references' | 'configured_failover_group' | 'eligible_provider_access_configuration' | 'teams_of_eligible_key_configuration';
+    status: 'complete' | 'partial' | 'denied' | 'unavailable';
+    truncated: boolean;
+};
+
 export type ProviderListResponse = {
     providers: Array<ProviderPublic>;
 };
@@ -5181,6 +5225,49 @@ export type PostAdminPromptsPromotionsResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminProviderImpactData = {
+    body?: never;
+    path?: never;
+    query: {
+        provider_ref: string;
+    };
+    url: '/admin/provider-impact';
+};
+
+export type GetAdminProviderImpactErrors = {
+    /**
+     * Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup
+     */
+    400: AppError;
+    /**
+     * Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup
+     */
+    401: AppError;
+    /**
+     * Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup
+     */
+    404: AppError;
+    /**
+     * Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminProviderImpactError = GetAdminProviderImpactErrors[keyof GetAdminProviderImpactErrors];
+
+export type GetAdminProviderImpactResponses = {
+    /**
+     * OK
+     */
+    200: ProviderImpactResponse;
+};
+
+export type GetAdminProviderImpactResponse = GetAdminProviderImpactResponses[keyof GetAdminProviderImpactResponses];
 
 export type GetAdminProvidersData = {
     body?: never;

@@ -2,6 +2,7 @@ import { expect, test as base, type BrowserContext, type Locator, type Page } fr
 
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 import type { Provider } from "../../src/shared/api/schemas";
+import { impactFixture } from "./fixtures/provider-impact";
 
 // Stateful browser/API fixtures only: no live provider, credentials, or destructive operational calls.
 const publicName = "public-review-provider";
@@ -24,7 +25,7 @@ const user = {
 
 function bootstrap(authenticated: boolean): UiBootstrapResponse {
   return {
-    backend_version: "v0.86.8",
+    backend_version: "v0.86.9",
     ui_version: "provider-review-fixture",
     api_version: "v1",
     ui: {
@@ -123,6 +124,10 @@ async function installGateway(context: BrowserContext) {
   const releases = new Map<string, () => void>();
   let saveStatus = 200;
   let deleteStatus = 200;
+  let impactStatus = 200;
+  let partialImpact = false;
+  let routingDenied = false;
+  const impacts: string[] = [];
   const release = (key: string) => {
     releases.get(key)?.();
     releases.delete(key);
@@ -161,6 +166,29 @@ async function installGateway(context: BrowserContext) {
         return json({ error: { message: "fixture authentication required" } }, 401);
       }
       if (call === "GET /admin/providers") return json({ providers });
+      if (call === "GET /admin/provider-impact") {
+        const query = new URL(request.url()).searchParams;
+        const ref = query.get("provider_ref") ?? "";
+        expect([...query.keys()]).toEqual(["provider_ref"]);
+        expect([publicRef, privateRef]).toContain(ref);
+        impacts.push(ref);
+        await gates.get("impact");
+        if (impactStatus !== 200)
+          return json({ error: { message: "fixture impact unavailable" } }, impactStatus);
+        const impact = impactFixture(ref, partialImpact);
+        if (routingDenied)
+          impact.routing_rules = {
+            ...impact.routing_rules,
+            status: "denied",
+            reason: "routing_read_required",
+            count_kind: "unknown",
+            scanned_count: null,
+            matched_count: null,
+            truncated: false,
+            items: [],
+          };
+        return json(impact);
+      }
       if (call === "GET /admin/providers/slo")
         return json({ slos: [], evaluations: [], since: "2026-09-29T00:00:00Z" });
       if (call === "GET /admin/routing/balancer")
@@ -250,6 +278,12 @@ async function installGateway(context: BrowserContext) {
     unexpected,
     saves,
     deletions,
+    impacts,
+    setImpact: (status: number, partial = false, denied = false) => {
+      impactStatus = status;
+      partialImpact = partial;
+      routingDenied = denied;
+    },
     setPublicURL: (url: string) => {
       providers = providers.map((provider) =>
         provider.name === publicName ? { ...provider, base_url: url } : provider,
@@ -262,7 +296,7 @@ async function installGateway(context: BrowserContext) {
           : provider,
       );
     },
-    hold: (key: "save" | "delete") => {
+    hold: (key: "save" | "delete" | "impact") => {
       gates.set(key, new Promise<void>((resolve) => releases.set(key, resolve)));
     },
     release,
@@ -284,6 +318,7 @@ const test = base.extend<{ gateway: Gateway }>({
     } finally {
       gateway.release("save");
       gateway.release("delete");
+      gateway.release("impact");
       expect(gateway.unexpected).toEqual([]);
     }
   },
@@ -318,7 +353,95 @@ async function review(dialog: Locator) {
   await dialog.getByRole("button", { name: "변경 내용 검토", exact: true }).click();
   await expect(dialog.getByRole("table", { name: "공급자 변경 전후 비교" })).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "변경 내용 검토", exact: true })).toBeFocused();
+  await acknowledgeImpact(dialog);
 }
+
+async function acknowledgeImpact(dialog: Locator) {
+  const consent = dialog.getByRole("checkbox", {
+    name: /^조회 범위와 확인하지 못한 영향을 확인했습니다/u,
+  });
+  await expect(consent).toBeEnabled();
+  await consent.check();
+}
+
+test("참조 조회 중에는 삭제를 막고 부분 집계와 재조회 후 확인을 구분한다", async ({ page, gateway }) => {
+  gateway.setImpact(200, true);
+  gateway.hold("impact");
+  await login(page);
+  await publicRow(page).getByRole("button", { name: "삭제", exact: true }).click();
+  const dialog = deletion(page);
+  const consent = dialog.getByRole("checkbox", {
+    name: /^조회 범위와 확인하지 못한 영향을 확인했습니다/u,
+  });
+  const confirm = dialog.getByRole("button", { name: "삭제", exact: true });
+  await dialog.getByLabel("삭제 대상 재입력", { exact: true }).fill(publicName);
+  await expect.poll(() => gateway.impacts.length).toBe(1);
+  await expect(consent).toBeDisabled();
+  await expect(confirm).toBeDisabled();
+  gateway.release("impact");
+  const rules = dialog.getByRole("region", { name: "라우팅 규칙", exact: true });
+  await expect(rules).toContainText("확인된 최소 13건 · 전체 미확인");
+  await expect(rules.getByRole("listitem")).toHaveCount(10);
+  await rules.getByRole("button", { name: "다음", exact: true }).click();
+  await expect(rules.getByRole("listitem")).toHaveCount(3);
+  await expect(rules).toContainText("공개 경로 13");
+  const keys = dialog.getByRole("region", { name: "API 키 설정", exact: true });
+  await expect(keys).toContainText("확인하지 못함");
+  await expect(keys).not.toContainText("설정 참조 0건");
+  await acknowledgeImpact(dialog);
+  await expect(confirm).toBeEnabled();
+  gateway.hold("impact");
+  await dialog.getByRole("button", { name: "참조 영향 다시 조회", exact: true }).click();
+  await expect(consent).not.toBeChecked();
+  await expect(consent).toBeDisabled();
+  await expect(confirm).toBeDisabled();
+  gateway.setImpact(200);
+  gateway.release("impact");
+  await expect(rules).toContainText("설정 참조 13건");
+  await expect(rules.getByRole("listitem")).toHaveCount(10);
+  await expect(confirm).toBeDisabled();
+  await acknowledgeImpact(dialog);
+  await expect(confirm).toBeEnabled();
+  expect(gateway.impacts).toEqual([publicRef, publicRef]);
+  expect(gateway.deletions).toEqual([]);
+});
+
+test("권한 부족을 0건으로 표시하지 않고 이전 조회 성공 뒤의 실패도 새로 확인한다", async ({
+  page,
+  gateway,
+}) => {
+  gateway.setImpact(200, false, true);
+  await login(page);
+  const dialog = await openEditor(page);
+  await dialog.getByLabel(/^기본 URL/u).fill(revisedUrl);
+  await review(dialog);
+  const rules = dialog.getByRole("region", { name: "라우팅 규칙", exact: true });
+  await expect(rules).toContainText("라우팅 조회 권한(routing:read)");
+  await expect(rules).toContainText("확인하지 못함");
+  await expect(rules).not.toContainText("설정 참조 0건");
+  gateway.setImpact(503);
+  await dialog.getByRole("button", { name: "참조 영향 다시 조회", exact: true }).click();
+  await expect(dialog).toContainText("참조 영향을 조회하지 못했습니다");
+  await expect(dialog).toContainText("req-provider-review-fixture");
+  const save = dialog.getByRole("button", { name: "검토한 내용 저장", exact: true });
+  await expect(save).toBeDisabled();
+  await expect(dialog.getByRole("region", { name: "API 키 설정", exact: true })).not.toContainText(
+    "설정 참조 2건",
+  );
+  expect(gateway.saves).toEqual([]);
+  await acknowledgeImpact(dialog);
+  await expect(save).toBeEnabled();
+  // Explicitly accepting a failed assessment does not pretend it succeeded.
+  await expect(dialog).toContainText("영향이 없다는 뜻이 아닙니다");
+  gateway.setImpact(200);
+  await dialog.getByRole("button", { name: "참조 영향 다시 조회", exact: true }).click();
+  await expect(rules).toContainText("설정 참조 13건");
+  await expect(save).toBeDisabled();
+  await acknowledgeImpact(dialog);
+  await save.click();
+  await expect(dialog).toBeHidden();
+  expect(gateway.saves).toEqual([expectedSave({ base_url: revisedUrl })]);
+});
 
 for (const prefix of ["corp_", "%41_"]) {
   test(`${prefix} 접두어 비밀값을 공급자 목록·상세·비교에서 숨기고 URL 검색에 남기지 않는다`, async ({
@@ -574,6 +697,7 @@ test("저장 실패는 승인한 비교와 요청 ID를 유지하며 명시적 �
   await dialog.getByRole("button", { name: "검토한 내용 저장", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("req-provider-review-fixture");
   await expect(dialog.getByRole("table")).toContainText(revisedUrl);
+  await acknowledgeImpact(dialog);
   await expect(dialog.getByRole("button", { name: "검토한 내용 저장", exact: true })).toBeEnabled();
   expect(gateway.saves).toEqual([expectedSave({ base_url: revisedUrl })]);
   await page.keyboard.press("Escape");
@@ -603,9 +727,10 @@ test("삭제는 정확한 공개 이름 확인과 중복 방지를 적용하고 
     await input.fill(mismatch);
     await expect(button).toBeDisabled();
   }
-  await expect(dialog).toContainText("참조 영향은 조회하지 않았습니다");
+  await expect(dialog).toContainText("현재 설정의 참조 영향");
   expect(gateway.deletions).toHaveLength(0);
   await input.fill(publicName);
+  await acknowledgeImpact(dialog);
   gateway.setDeleteStatus(503);
   gateway.hold("delete");
   await button.dblclick();
@@ -618,6 +743,7 @@ test("삭제는 정확한 공개 이름 확인과 중복 방지를 적용하고 
   gateway.release("delete");
   await expect(dialog.getByRole("alert")).toContainText("req-provider-review-fixture");
   await expect(input).toHaveValue(publicName);
+  await acknowledgeImpact(dialog);
   await expect(button).toBeEnabled();
   expect(gateway.deletions).toEqual([publicName]);
   gateway.setDeleteStatus(200);
@@ -649,6 +775,7 @@ test("비공개 공급자는 전체 참조만 삭제 확인으로 받으며 다�
     await expect(button).toBeDisabled();
   }
   await input.fill(privateRef);
+  await acknowledgeImpact(dialog);
   await expect(button).toBeEnabled();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
@@ -657,6 +784,7 @@ test("비공개 공급자는 전체 참조만 삭제 확인으로 받으며 다�
   await expect(input).toHaveValue("");
   await expect(button).toBeDisabled();
   await input.fill(privateRef);
+  await acknowledgeImpact(dialog);
   await button.click();
   await expect(dialog).toBeHidden();
   expect(gateway.deletions).toEqual([privateRef]);
@@ -721,6 +849,9 @@ test("390px 다크 비교와 전체 참조 삭제 확인은 넘침과 axe 위반
   await trigger.click();
   const confirmation = deletion(page);
   await confirmation.getByLabel("삭제 대상 재입력", { exact: true }).fill(privateRef);
+  await expect(confirmation.getByRole("button", { name: "삭제", exact: true })).toBeDisabled();
+  await acknowledgeImpact(confirmation);
+  await expect(confirmation.getByRole("button", { name: "삭제", exact: true })).toBeEnabled();
   await expect(confirmation.getByRole("button", { name: "삭제", exact: true })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(await axeViolations(page)).toEqual([]);

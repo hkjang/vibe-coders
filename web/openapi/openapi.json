@@ -2320,6 +2320,216 @@
         ],
         "type": "object"
       },
+      "ProviderImpactItem": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "provider_ref": {
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "reference": {
+            "pattern": "^(impact_|prv_)[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "relation": {
+            "enum": [
+              "direct_binding",
+              "configured_failover_group"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference",
+          "label",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "ProviderImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_routes": {
+            "$ref": "#/components/schemas/ProviderImpactSection"
+          },
+          "api_keys": {
+            "$ref": "#/components/schemas/ProviderImpactSection"
+          },
+          "bootstrap_on_restart": {
+            "type": "boolean"
+          },
+          "concurrent_change_guard": {
+            "enum": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "consistency": {
+            "enum": [
+              "best_effort"
+            ],
+            "type": "string"
+          },
+          "failover_peers": {
+            "$ref": "#/components/schemas/ProviderImpactSection"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "not_assessed": {
+            "items": {
+              "enum": [
+                "pattern_overlap",
+                "full_model_catalog",
+                "model_usage",
+                "runtime_call_success",
+                "ip_and_model_authorization",
+                "concurrent_change_guard"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provider_display": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "provider_ref": {
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "read_only": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "routing_rules": {
+            "$ref": "#/components/schemas/ProviderImpactSection"
+          },
+          "teams": {
+            "$ref": "#/components/schemas/ProviderImpactSection"
+          },
+          "upstream_calls": {
+            "enum": [
+              false
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider_ref",
+          "provider_display",
+          "generated_at",
+          "consistency",
+          "is_default",
+          "bootstrap_on_restart",
+          "read_only",
+          "upstream_calls",
+          "concurrent_change_guard",
+          "not_assessed",
+          "routing_rules",
+          "agent_routes",
+          "failover_peers",
+          "api_keys",
+          "teams"
+        ],
+        "type": "object"
+      },
+      "ProviderImpactSection": {
+        "additionalProperties": false,
+        "description": "Complete means complete only within the stated configuration scope, not full runtime impact. Partial counts are confirmed lower bounds. Denied/unavailable counts are null, never zero. Items contain only safe labels and non-reversible references.",
+        "properties": {
+          "count_kind": {
+            "enum": [
+              "exact",
+              "lower_bound",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderImpactItem"
+            },
+            "maxItems": 1024,
+            "type": "array"
+          },
+          "matched_count": {
+            "maximum": 1024,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "reason": {
+            "enum": [
+              "",
+              "bounded_or_unassessable_configuration",
+              "routing_read_required",
+              "configuration_read_failed",
+              "target_configuration_unassessable",
+              "team_scoped_assessment_not_available",
+              "key_configuration_unavailable",
+              "team_configuration_read_failed"
+            ],
+            "type": "string"
+          },
+          "scanned_count": {
+            "description": "Configuration records considered within the bounded scan. For teams this is the number of eligible-key team identity entries considered (including repeated and unassigned entries), not the size of the team inventory.",
+            "maximum": 1024,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "direct_provider_references",
+              "configured_failover_group",
+              "eligible_provider_access_configuration",
+              "teams_of_eligible_key_configuration"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "partial",
+              "denied",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "scope",
+          "reason",
+          "count_kind",
+          "scanned_count",
+          "matched_count",
+          "truncated",
+          "items"
+        ],
+        "type": "object"
+      },
       "ProviderListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3570,7 +3780,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.8"
+    "version": "v0.86.9"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -9723,6 +9933,94 @@
         "summary": "Prompt version promotions",
         "tags": [
           "governance"
+        ]
+      }
+    },
+    "/admin/provider-impact": {
+      "get": {
+        "description": "Requires admin:read. Direct routing references additionally require routing:read; team-scoped callers do not receive global key/team counts. Read-only best-effort configuration assessment, not an atomic snapshot or deletion precondition. Full model catalogue, model usage, pattern-overlap failover, IP/model authorization and runtime call success are not assessed. Partial counts are confirmed lower bounds. No external/provider requests are made.",
+        "operationId": "get__admin_provider_impact",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider_ref",
+            "required": true,
+            "schema": {
+              "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderImpactResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect bounded provider configuration references without upstream calls",
+        "tags": [
+          "admin"
         ]
       }
     },

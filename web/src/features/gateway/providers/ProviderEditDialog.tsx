@@ -4,6 +4,8 @@ import "@/features/gateway/providers/provider-review.css";
 import { ProviderChangeReview } from "@/features/gateway/providers/ProviderChangeReview";
 import { ProviderDraftBoundary } from "@/features/gateway/providers/ProviderDraftBoundary";
 import { ProviderFormFields } from "@/features/gateway/providers/ProviderFormFields";
+import { ProviderImpactPanel } from "@/features/gateway/providers/ProviderImpactPanel";
+import { useProviderImpact } from "@/features/gateway/providers/use-provider-impact";
 import type { ProviderCatalogRow } from "@/features/gateway/providers/provider-catalog";
 import {
   providerEditSchema,
@@ -65,6 +67,7 @@ function ProviderEditor({
       onOpenChange(false);
     },
   });
+  const impact = useProviderImpact(row.identity, review !== undefined, guard.pending);
 
   useEffect(() => {
     if (initialEnabled !== undefined) setValue("enabled", initialEnabled, { shouldDirty: true });
@@ -83,6 +86,7 @@ function ProviderEditor({
     event.preventDefault();
     setError(undefined);
     if (review) {
+      if (!impact.canSubmit()) return;
       // Inputs are absent while reviewing. Send this exact approved object,
       // never re-read a mutable form or a refreshed row after confirmation.
       void guard.run(() => onSubmit(review), fail);
@@ -122,6 +126,7 @@ function ProviderEditor({
               variant="secondary"
               disabled={guard.pending}
               onClick={() => {
+                impact.resetAcknowledgement();
                 setReview(undefined);
                 setError(undefined);
               }}
@@ -129,7 +134,12 @@ function ProviderEditor({
               다시 편집
             </Button>
           ) : null}
-          <Button type="submit" form={formId} variant="primary" disabled={guard.pending}>
+          <Button
+            type="submit"
+            form={formId}
+            variant="primary"
+            disabled={guard.pending || (review !== undefined && !impact.canConfirm)}
+          >
             {guard.pending ? "처리 중" : review ? "검토한 내용 저장" : "변경 내용 검토"}
           </Button>
         </>
@@ -142,6 +152,11 @@ function ProviderEditor({
               변경 내용 검토
             </h3>
             <ProviderChangeReview row={row} body={review} credentialPrefixes={credentialPrefixes} />
+            <ProviderImpactPanel
+              review={impact}
+              pending={guard.pending}
+              credentialPrefixes={credentialPrefixes}
+            />
           </section>
         ) : (
           <fieldset className="form-grid form-dialog-fields" disabled={guard.pending} aria-label="입력 항목">

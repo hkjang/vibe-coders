@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.8"
+var AppVersion = "v0.86.9"
 
 type Server struct {
 	cfg      config.Config
@@ -303,6 +303,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/api-keys", s.handleAPIKeys)
 	mux.HandleFunc("/admin/api-keys/", s.handleAPIKeyByID)
 	mux.HandleFunc("/admin/providers", s.handleProviders)
+	mux.HandleFunc("/admin/provider-impact", s.handleProviderImpact)
 	mux.HandleFunc("/admin/providers/", s.handleProviderByName)
 	mux.HandleFunc("/admin/models", s.handleAdminModels)
 	mux.HandleFunc("/admin/chat-test/targets", s.handleChatTestTargets)

@@ -1,15 +1,39 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as renderComponent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRef } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { createRef, type ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProviderEditDialog } from "@/features/gateway/providers/ProviderEditDialog";
+import { providerImpactAcknowledgement } from "@/features/gateway/providers/ProviderImpactPanel";
 import { buildProviderRows } from "@/features/gateway/providers/provider-catalog";
+import { providerImpactFixture } from "@/features/gateway/providers/provider-impact-test-fixtures";
 import {
   providerEditSchema,
   providerFormSchema,
   providerFormValues,
 } from "@/features/gateway/providers/provider-form";
+import { mockApi } from "@/test/api";
+
+function render(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return renderComponent(ui, {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+}
+
+beforeEach(() => {
+  mockApi({
+    "GET /admin/provider-impact": ({ query }) =>
+      providerImpactFixture((query as { provider_ref: string }).provider_ref),
+  });
+});
+
+async function acknowledge(user: ReturnType<typeof userEvent.setup>) {
+  const checkbox = await screen.findByRole("checkbox", { name: new RegExp(providerImpactAcknowledgement) });
+  await waitFor(() => expect(checkbox).toBeEnabled());
+  await user.click(checkbox);
+}
 
 const redactedURL = "[invalid or redacted provider URL]";
 const row = buildProviderRows([
@@ -88,6 +112,8 @@ describe("비공개 기존 URL 유지", () => {
     await user.click(screen.getByRole("button", { name: "변경 내용 검토" }));
     await screen.findByRole("table", { name: "공급자 변경 전후 비교" });
     expect(submit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "검토한 내용 저장" })).toBeDisabled();
+    await acknowledge(user);
     await user.click(screen.getByRole("button", { name: "검토한 내용 저장" }));
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
     expect(submit.mock.calls[0]?.[0]).toMatchObject({
@@ -112,6 +138,7 @@ describe("비공개 기존 URL 유지", () => {
     await user.type(screen.getByLabelText(/^기본 URL/u), "https://new.example.invalid/v1");
     await user.click(screen.getByRole("button", { name: "변경 내용 검토" }));
     await screen.findByRole("table", { name: "공급자 변경 전후 비교" });
+    await acknowledge(user);
     await user.click(screen.getByRole("button", { name: "검토한 내용 저장" }));
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
     expect(submit.mock.calls[0]?.[0]).toMatchObject({ base_url: "https://new.example.invalid/v1" });

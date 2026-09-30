@@ -4,6 +4,8 @@ import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProviderPage } from "@/features/gateway/providers/ProviderPage";
+import { providerImpactAcknowledgement } from "@/features/gateway/providers/ProviderImpactPanel";
+import { providerImpactFixture } from "@/features/gateway/providers/provider-impact-test-fixtures";
 import type { Provider, ProviderList, ProviderSLOResponse } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 import { mockApi } from "@/test/api";
@@ -63,6 +65,8 @@ const sloResponse = {
 
 function handlers() {
   return {
+    "GET /admin/provider-impact": ({ query }: { query?: object }) =>
+      providerImpactFixture((query as { provider_ref: string }).provider_ref),
     "GET /admin/providers": () => providerList,
     "GET /admin/providers/slo": () => sloResponse,
     "GET /admin/routing/health": () => ({
@@ -88,6 +92,12 @@ function handlers() {
 
 function renderProviders() {
   return renderScreen(<ProviderPage />, { path: "/gateway/providers", route: "/gateway/providers" });
+}
+
+async function acknowledge(user: ReturnType<typeof userEvent.setup>) {
+  const checkbox = await screen.findByRole("checkbox", { name: new RegExp(providerImpactAcknowledgement) });
+  await waitFor(() => expect(checkbox).toBeEnabled());
+  await user.click(checkbox);
 }
 
 beforeEach(() => {
@@ -122,6 +132,7 @@ describe("ProviderPage administration", () => {
     );
     expect(dialog.innerHTML).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
     expect(api.bodies("POST /admin/providers")).toHaveLength(0);
+    await acknowledge(user);
     await user.click(within(dialog).getByRole("button", { name: "검토한 내용 저장" }));
     await waitFor(() => expect(api.bodies("POST /admin/providers")).toHaveLength(1));
     expect(api.bodies("POST /admin/providers")[0]).toMatchObject({
@@ -144,6 +155,7 @@ describe("ProviderPage administration", () => {
     expect(api.calls.filter((call) => call.key.startsWith("DELETE "))).toHaveLength(0);
     await user.clear(target);
     await user.type(target, "openai");
+    await acknowledge(user);
     await user.click(within(dialog).getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(api.calls.filter((call) => call.key.startsWith("DELETE "))).toHaveLength(1));
   });
@@ -160,6 +172,7 @@ describe("ProviderPage administration", () => {
     await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
     expect(api.bodies("POST /admin/providers")).toHaveLength(0);
     expect(within(dialog).getByRole("table", { name: "공급자 변경 전후 비교" })).toHaveTextContent("25");
+    await acknowledge(user);
     await user.click(within(dialog).getByRole("button", { name: "검토한 내용 저장" }));
     await waitFor(() => expect(api.bodies("POST /admin/providers")).toHaveLength(1));
     expect(api.bodies("POST /admin/providers")[0]).toMatchObject({ name: "openai", priority: 25 });
@@ -202,6 +215,7 @@ describe("ProviderPage administration", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("checkbox", { name: /^활성/ })).not.toBeChecked();
     await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
+    await acknowledge(user);
     await user.click(within(dialog).getByRole("button", { name: "검토한 내용 저장" }));
 
     await waitFor(() => {
@@ -220,6 +234,7 @@ describe("ProviderPage administration", () => {
 
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("삭제 대상 재입력"), "openai");
+    await acknowledge(user);
     await user.click(within(dialog).getByRole("button", { name: "삭제" }));
 
     await waitFor(() => {
@@ -290,6 +305,7 @@ describe("ProviderPage administration", () => {
     expect(api.calls.filter((call) => call.key.startsWith("DELETE "))).toHaveLength(0);
     await user.clear(within(dialog).getByLabelText("삭제 대상 재입력"));
     await user.type(within(dialog).getByLabelText("삭제 대상 재입력"), providerRef("hidden"));
+    await acknowledge(user);
     await user.click(within(dialog).getByRole("button", { name: "삭제" }));
     await waitFor(() =>
       expect(api.calls.filter((call) => call.key.startsWith("DELETE ")).map((call) => call.key)).toEqual([
@@ -309,6 +325,7 @@ describe("ProviderPage administration", () => {
     const hiddenRow = (await screen.findByText(/공급자 이름 비공개/)).closest("tr");
     await user.click(within(hiddenRow as HTMLElement).getByRole("button", { name: "삭제" }));
     await user.type(await screen.findByLabelText("삭제 대상 재입력"), providerRef("hidden"));
+    await acknowledge(user);
     await user.click(await screen.findByRole("button", { name: "삭제", hidden: false }));
 
     await waitFor(() =>
