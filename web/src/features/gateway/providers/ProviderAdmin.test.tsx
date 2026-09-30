@@ -10,6 +10,7 @@ import type { Provider, ProviderList, ProviderSLOResponse } from "@/shared/api/s
 import { usePreferences } from "@/shared/stores/preferences";
 import { mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({
   scopes: ["admin:read", "admin:write", "routing:read"],
@@ -91,7 +92,12 @@ function handlers() {
 }
 
 function renderProviders() {
-  return renderScreen(<ProviderPage />, { path: "/gateway/providers", route: "/gateway/providers" });
+  return renderScreen(
+    <FeatureAccessHarness featureId="gateway.providers">
+      <ProviderPage />
+    </FeatureAccessHarness>,
+    { path: "/gateway/providers", route: "/gateway/providers" },
+  );
 }
 
 async function acknowledge(user: ReturnType<typeof userEvent.setup>) {
@@ -248,7 +254,7 @@ describe("ProviderPage administration", () => {
     renderProviders();
 
     const row = (await screen.findByRole("link", { name: "openai" })).closest("tr");
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "SLO" }));
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "서비스 목표" }));
 
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "저장" }));
@@ -284,7 +290,7 @@ describe("ProviderPage administration", () => {
     expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "중지" })).toBeDisabled();
     // Deleting and editing the SLO resolve the opaque reference server-side.
     expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "삭제" })).toBeEnabled();
-    expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "SLO" })).toBeEnabled();
+    expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "서비스 목표" })).toBeEnabled();
   });
 
   it("switching deletion targets resets confirmation and keeps opaque identity exact", async () => {

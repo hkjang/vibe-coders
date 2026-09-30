@@ -17,7 +17,8 @@ export function useProviderAdministration(canWrite: boolean, credentialPrefixes:
   >();
   const [sloEditing, setSloEditing] = useState<ProviderCatalogRow | undefined>();
   const [removing, setRemoving] = useState<ProviderCatalogRow | undefined>();
-  const writeDeniedReason = canWrite ? undefined : "공급자 변경은 admin:write 권한이 필요합니다.";
+  const writeDeniedReason =
+    admin.access.reason ?? (canWrite ? undefined : "공급자 변경은 admin:write 권한이 필요합니다.");
   // Deleting a provider and editing its SLO key on an identifier the server resolves,
   // so the opaque reference works for a provider whose name is redacted. Saving the
   // provider itself is an upsert on the name, which a redacted row cannot supply.
@@ -51,6 +52,7 @@ export function useProviderAdministration(canWrite: boolean, credentialPrefixes:
             disabled={saveBlocked !== undefined}
             title={saveBlocked}
             onClick={(event) => {
+              if (saveBlocked) return;
               rememberAdminTrigger(event, row.identity, "edit");
               setEditing({ row });
             }}
@@ -64,6 +66,7 @@ export function useProviderAdministration(canWrite: boolean, credentialPrefixes:
             disabled={saveBlocked !== undefined || savePending}
             title={saveBlocked}
             onClick={(event) => {
+              if (saveBlocked) return;
               rememberAdminTrigger(event, row.identity, "toggle");
               setEditing({ row, initialEnabled: !row.provider.enabled });
             }}
@@ -77,11 +80,12 @@ export function useProviderAdministration(canWrite: boolean, credentialPrefixes:
             disabled={blocked !== undefined}
             title={blocked}
             onClick={(event) => {
+              if (blocked) return;
               rememberAdminTrigger(event, row.identity, "slo");
               setSloEditing(row);
             }}
           >
-            SLO
+            서비스 목표
           </Button>
           <Button
             ref={(node) => rememberMountedTrigger(node, row.identity, "delete")}
@@ -90,6 +94,7 @@ export function useProviderAdministration(canWrite: boolean, credentialPrefixes:
             disabled={blocked !== undefined}
             title={blocked}
             onClick={(event) => {
+              if (blocked) return;
               rememberAdminTrigger(event, row.identity, "delete");
               setRemoving(row);
             }}
@@ -103,6 +108,7 @@ export function useProviderAdministration(canWrite: boolean, credentialPrefixes:
   );
 
   const openCreate = (): void => {
+    if (writeDeniedReason) return;
     returnAction.current = undefined;
     adminReturnFocusRef.current = createButtonRef.current;
     setEditing({});

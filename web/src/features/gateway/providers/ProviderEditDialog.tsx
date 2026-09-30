@@ -21,6 +21,8 @@ import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { useProviderWriteAccess } from "./use-provider-write-access";
 
 interface Props {
   row: ProviderCatalogRow;
@@ -47,6 +49,7 @@ function ProviderEditor({
   onSubmit,
   returnFocusRef,
 }: Props): React.JSX.Element {
+  const access = useProviderWriteAccess();
   // Background list refreshes never replace the baseline or the reviewed payload.
   const [row] = useState(initialRow);
   const form = useZodForm<ProviderFormInput, ProviderFormOutput>(
@@ -84,12 +87,21 @@ function ProviderEditor({
     });
   const submit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
+    try {
+      access.assertCurrent();
+    } catch (cause) {
+      fail(cause);
+      return;
+    }
     setError(undefined);
     if (review) {
       if (!impact.canSubmit()) return;
       // Inputs are absent while reviewing. Send this exact approved object,
       // never re-read a mutable form or a refreshed row after confirmation.
-      void guard.run(() => onSubmit(review), fail);
+      void guard.run(() => {
+        access.assertCurrent();
+        return onSubmit(review);
+      }, fail);
     } else {
       void guard.run(
         async () => {
@@ -97,10 +109,12 @@ function ProviderEditor({
           await form.handleSubmit((values) => {
             body = providerWriteBody(values);
           })();
+          access.assertCurrent();
           return body;
         },
         fail,
         (body) => {
+          access.assertCurrent();
           if (body) setReview(body);
         },
       );
@@ -124,7 +138,7 @@ function ProviderEditor({
           {review ? (
             <Button
               variant="secondary"
-              disabled={guard.pending}
+              disabled={guard.pending || !access.allowed}
               onClick={() => {
                 impact.resetAcknowledgement();
                 setReview(undefined);
@@ -138,7 +152,7 @@ function ProviderEditor({
             type="submit"
             form={formId}
             variant="primary"
-            disabled={guard.pending || (review !== undefined && !impact.canConfirm)}
+            disabled={guard.pending || !access.allowed || (review !== undefined && !impact.canConfirm)}
           >
             {guard.pending ? "처리 중" : review ? "검토한 내용 저장" : "변경 내용 검토"}
           </Button>
@@ -146,6 +160,7 @@ function ProviderEditor({
       }
     >
       <form id={formId} className="form-grid provider-review-form" noValidate onSubmit={submit}>
+        {!access.allowed ? <InlineNotice tone="warning">{access.reason}</InlineNotice> : null}
         {review ? (
           <section className="form-grid">
             <h3 ref={heading} tabIndex={-1}>
@@ -155,11 +170,16 @@ function ProviderEditor({
             <ProviderImpactPanel
               review={impact}
               pending={guard.pending}
+              readOnly={!access.allowed}
               credentialPrefixes={credentialPrefixes}
             />
           </section>
         ) : (
-          <fieldset className="form-grid form-dialog-fields" disabled={guard.pending} aria-label="입력 항목">
+          <fieldset
+            className="form-grid form-dialog-fields"
+            disabled={guard.pending || !access.allowed}
+            aria-label="입력 항목"
+          >
             <ProviderFormFields form={form} row={row} />
           </fieldset>
         )}

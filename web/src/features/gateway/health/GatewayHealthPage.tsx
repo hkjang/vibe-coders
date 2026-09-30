@@ -1,7 +1,7 @@
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import {
   Activity,
   CheckCircle2,
@@ -39,6 +39,8 @@ import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { operationalMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
+import { featureReadonlyReason } from "@/shared/feature-access/policy";
+import { tokenStore } from "@/shared/auth/token-store";
 
 const routeId = "gateway.health";
 const scoreThreshold = 70;
@@ -91,11 +93,12 @@ interface BreakerActions {
 
 export function GatewayHealthPage(): React.JSX.Element {
   const auth = useAuth();
+  const sessionEpoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
-  const canWriteRouting = auth.user?.scopes.includes("routing:write") ?? false;
-  const routingWriteDeniedReason = canWriteRouting
-    ? undefined
-    : "회로 차단기와 세션 고정 해제는 routing:write 권한이 필요합니다.";
+  const { access, releaseSessions, resetBreaker } = useHealthActions();
+  const canWriteRouting = access.allowed;
+  const routingWriteDeniedReason = access.reason;
+  const runtimeReadonly = access.reason === featureReadonlyReason;
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const [range, setRange] = useHealthRange();
@@ -147,10 +150,9 @@ export function GatewayHealthPage(): React.JSX.Element {
         : "success";
   const refreshing = gateway.isFetching || readiness.isFetching || routing.isFetching;
 
-  const { releaseSessions, resetBreaker } = useHealthActions();
   const balancer = useBalancerState(canReadRoutingBalancer, range);
   const [confirming, setConfirming] = useState<
-    { kind: "breaker" | "sessions"; provider: string; label: string } | undefined
+    { kind: "breaker" | "sessions"; provider: string; label: string; epoch: number } | undefined
   >();
   const actionReturnFocusRef = useRef<HTMLElement | null>(null);
   const rememberActionTrigger = (): void => {
@@ -163,8 +165,9 @@ export function GatewayHealthPage(): React.JSX.Element {
     deniedReason: routingWriteDeniedReason,
     pending: resetBreaker.isPending,
     onReset: (provider, label) => {
+      if (!canWriteRouting) return;
       rememberActionTrigger();
-      setConfirming({ kind: "breaker", provider, label });
+      setConfirming({ kind: "breaker", provider, label, epoch: sessionEpoch });
     },
   };
 
@@ -176,12 +179,14 @@ export function GatewayHealthPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">{uiLabels.previewReadOnly}</div>
+          <div className="eyebrow">{runtimeReadonly ? uiLabels.previewReadOnly : "미리보기"}</div>
           <h1>게이트웨이 상태</h1>
           <p>게이트웨이 연결, 요청 준비 상태와 공급자 라우팅 상태를 안전하게 조회합니다.</p>
         </div>
         <div className="page-actions">
-          <Badge tone="info">{uiLabels.readOnly}</Badge>
+          {!canWriteRouting ? (
+            <Badge tone="info">{runtimeReadonly ? uiLabels.readOnly : "조작 권한 없음"}</Badge>
+          ) : null}
           <Badge tone={pageStatusTone}>{pageStatus}</Badge>
           {showLegacyAdmin ? (
             <LegacyLink className="button button-secondary button-default" href="/admin#/routing/health">
@@ -294,8 +299,9 @@ export function GatewayHealthPage(): React.JSX.Element {
               disabled={!canWriteRouting || releaseSessions.isPending}
               title={routingWriteDeniedReason}
               onClick={() => {
+                if (!canWriteRouting) return;
                 rememberActionTrigger();
-                setConfirming({ kind: "sessions", provider: "", label: "전체 공급자" });
+                setConfirming({ kind: "sessions", provider: "", label: "전체 공급자", epoch: sessionEpoch });
               }}
             >
               세션 고정 전체 해제
@@ -305,7 +311,9 @@ export function GatewayHealthPage(): React.JSX.Element {
       </HealthWidget>
 
       <ConfirmDialog
-        open={confirming !== undefined}
+        key={sessionEpoch}
+        confirmDisabled={!canWriteRouting}
+        open={confirming !== undefined && confirming.epoch === sessionEpoch}
         onOpenChange={(open) => {
           if (!open) setConfirming(undefined);
         }}
@@ -318,12 +326,15 @@ export function GatewayHealthPage(): React.JSX.Element {
         }
         confirmLabel="해제"
         onConfirm={async () => {
-          if (!confirming) return;
+          if (!confirming || confirming.epoch !== tokenStore.getSessionEpoch()) return;
+          access.assertCurrent();
           if (confirming.kind === "sessions") await releaseSessions.mutateAsync(confirming.provider);
           else await resetBreaker.mutateAsync(confirming.provider);
           setConfirming(undefined);
         }}
-      />
+      >
+        {!canWriteRouting ? <InlineNotice tone="warning">{routingWriteDeniedReason}</InlineNotice> : null}
+      </ConfirmDialog>
     </div>
   );
 }

@@ -16,6 +16,8 @@ import { Input } from "@/shared/components/ui/Input";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
 import { defaultCredentialPrefixes } from "@/shared/security/secrets";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { useProviderWriteAccess } from "./use-provider-write-access";
 
 interface Props {
   credentialPrefixes?: readonly string[];
@@ -40,6 +42,7 @@ function ProviderDeleteConfirmation({
   onDelete,
   returnFocusRef,
 }: Props): React.JSX.Element {
+  const access = useProviderWriteAccess();
   const [row] = useState(initialRow);
   const nameRedacted = row.nameRedacted || !isSafeProviderCatalogName(row.provider.name, credentialPrefixes);
   const target = nameRedacted ? row.identity : row.provider.name;
@@ -60,7 +63,10 @@ function ProviderDeleteConfirmation({
     if (confirmation !== target || !impact.canSubmit()) return;
     setError(undefined);
     void guard.run(
-      () => onDelete(target),
+      () => {
+        access.assertCurrent();
+        return onDelete(target);
+      },
       (cause) =>
         setError({
           message: safeAppErrorMessage(cause, "공급자를 삭제하지 못했습니다."),
@@ -86,7 +92,7 @@ function ProviderDeleteConfirmation({
             variant="danger"
             type="submit"
             form={formId}
-            disabled={guard.pending || confirmation !== target || !impact.canConfirm}
+            disabled={guard.pending || !access.allowed || confirmation !== target || !impact.canConfirm}
           >
             {guard.pending ? "삭제 중" : "삭제"}
           </Button>
@@ -94,12 +100,14 @@ function ProviderDeleteConfirmation({
       }
     >
       <form id={formId} className="form-grid provider-review-form" onSubmit={confirm}>
+        {!access.allowed ? <InlineNotice tone="warning">{access.reason}</InlineNotice> : null}
         <p>
           삭제 대상: <code className="provider-delete-target">{target}</code>
         </p>
         <ProviderImpactPanel
           review={impact}
           pending={guard.pending}
+          readOnly={!access.allowed}
           credentialPrefixes={credentialPrefixes}
         />
         <FormField
@@ -116,7 +124,7 @@ function ProviderDeleteConfirmation({
               autoComplete="off"
               spellCheck={false}
               value={confirmation}
-              disabled={guard.pending}
+              disabled={guard.pending || !access.allowed}
               onChange={(event) => setConfirmation(event.target.value)}
             />
           )}
