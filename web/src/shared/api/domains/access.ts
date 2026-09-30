@@ -250,7 +250,7 @@ export interface CreateMeKeyBody {
   scopes?: readonly string[];
   expires_at?: string;
 }
-/** An empty array clears the key's own scopes so it inherits the role's. */
+/** An explicit empty array clears all scopes; PATCH never inherits role permissions. */
 export interface UpdateMeKeyScopesBody {
   scopes: readonly string[];
 }

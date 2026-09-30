@@ -232,8 +232,8 @@ jobs:
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestProviderImpact' -count=1 -timeout=5m
       - name: Verify PostgreSQL provider redaction and masked editing
         run: go test -race ./internal/proxy -run '^TestProviderApp|^TestProviderProjectionOpenAPI' -count=1 -timeout=5m
-      - name: Verify PostgreSQL API key scope issuance and editing contracts
-        run: go test -race ./internal/proxy -run '^TestAPIKeyScopeContract' -count=1 -timeout=5m
+      - name: Verify PostgreSQL admin and personal API key scope contracts
+        run: go test -race ./internal/proxy -run '^Test(APIKey|MeKey)ScopeContract' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
@@ -264,7 +264,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.12
+      SOURCE_SBOM_VERSION: v0.86.13
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

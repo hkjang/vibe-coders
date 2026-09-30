@@ -2,7 +2,10 @@ import { useRef, useState } from "react";
 import { z } from "zod";
 
 import { severityTone, statusLabel, statusTone } from "@/features/access/access-format";
-import { QueryNotice, ScopeBadges, UpdatedAt } from "@/features/access/access-ui";
+import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
+import { MeKeyScopesDialog } from "@/features/access/me/MeKeyScopesDialog";
+import { meKeyScopeChoices } from "@/features/access/me/me-key-scopes";
+import { useMeKeyScopeDraft } from "@/features/access/me/use-me-key-scope-draft";
 import {
   meKeys,
   useMeKeysQuery,
@@ -18,7 +21,8 @@ import type {
 import type { ApiKeyPublic, MeSession } from "@/shared/api/domains/access.schemas";
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
+import { AppError, isAppError } from "@/shared/api/error";
+import { tokenStore } from "@/shared/auth/token-store";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
@@ -39,6 +43,7 @@ import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
+import "@/features/access/me/me-key-scopes.css";
 
 const access = endpoints.domains.access;
 const routeId = "me.home";
@@ -77,8 +82,13 @@ export function MeKeysTab(): React.JSX.Element {
   const [createOpen, setCreateOpen] = useState(false);
   const [issuedSecret, setIssuedSecret] = useState("");
   const [secretTitle, setSecretTitle] = useState("발급된 비밀값");
-  const [scopeEditing, setScopeEditing] = useState<ApiKeyPublic | undefined>();
-  const [scopeDraft, setScopeDraft] = useState<readonly string[]>([]);
+  const {
+    target: scopeTarget,
+    open: openScopes,
+    close: closeScopes,
+    returnFocusRef: scopeReturnFocus,
+    rememberTrigger: rememberScopeTrigger,
+  } = useMeKeyScopeDraft();
   const [rotating, setRotating] = useState<ApiKeyPublic | undefined>();
   const [revoking, setRevoking] = useState<ApiKeyPublic | undefined>();
   const [revokingSession, setRevokingSession] = useState<MeSession | undefined>();
@@ -103,7 +113,7 @@ export function MeKeysTab(): React.JSX.Element {
     mutate: ({ id, body }: { id: string; body: UpdateMeKeyScopesBody }) =>
       apiClient.request(withPathParams(access.me.updateKeyScopes, { id }), { body, routeId }),
     invalidates: [meKeys.keys],
-    successMessage: "키 스코프를 수정했습니다.",
+    successMessage: "내 API 키 권한을 수정했습니다.",
   });
   const rotateKey = useMutationFeedback({
     mutate: (id: string) => apiClient.request(withPathParams(access.me.rotateKey, { id }), { routeId }),
@@ -182,7 +192,7 @@ export function MeKeysTab(): React.JSX.Element {
 
           <SectionCard
             title="내 API 키"
-            description="발급된 비밀값은 한 번만 보여 줍니다. 스코프는 내가 가진 권한 안에서만 선택할 수 있습니다."
+            description="발급된 비밀값은 한 번만 보여 줍니다. 키 권한은 내가 가진 권한 안에서만 선택할 수 있습니다."
             actions={
               <Button
                 ref={createTrigger}
@@ -215,21 +225,28 @@ export function MeKeysTab(): React.JSX.Element {
                         ) : null}
                       </span>
                       <span className="access-list-detail mono">{row.id}</span>
-                      <ScopeBadges scopes={row.scopes} />
+                      {row.scopes.length === 0 ? (
+                        <span className="access-note">선택된 권한 없음</span>
+                      ) : (
+                        <span className="badge-list me-key-scope-badges">
+                          {meKeyScopeChoices(row.scopes).map(({ value, label }) => (
+                            <Badge key={value} tone="muted">
+                              {label} ({value || "빈 권한 식별자"})
+                            </Badge>
+                          ))}
+                        </span>
+                      )}
                       <span className="access-inline-actions">
                         <span className="access-list-detail">
                           {row.expires_at ? `만료 ${formatDateTime(row.expires_at)}` : "무기한"}
                         </span>
                         <Button
+                          ref={(node) => rememberScopeTrigger(node, row.id)}
                           size="small"
                           disabled={row.status === "revoked"}
-                          onClick={(event) => {
-                            rowTrigger.current = event.currentTarget;
-                            setScopeDraft(row.scopes);
-                            setScopeEditing(row);
-                          }}
+                          onClick={(event) => openScopes(row, event.currentTarget)}
                         >
-                          스코프 수정
+                          권한 수정
                         </Button>
                         <Button
                           size="small"
@@ -438,7 +455,7 @@ export function MeKeysTab(): React.JSX.Element {
         onOpenChange={setCreateOpen}
         returnFocusRef={createTrigger}
         title="키 발급"
-        description="비밀값은 발급 직후 한 번만 표시됩니다. 스코프를 고르지 않으면 내 역할의 권한을 상속합니다."
+        description="비밀값은 발급 직후 한 번만 표시됩니다. 권한을 고르지 않으면 발급 시점에 내가 가진 권한으로 발급합니다. 역할 권한을 계속 상속하는 것은 아닙니다."
         submitLabel="발급"
         onSubmit={async (values) => {
           await createKey.mutateAsync({
@@ -455,15 +472,18 @@ export function MeKeysTab(): React.JSX.Element {
           {(control) => <Input {...control} type="datetime-local" {...form.register("expires_at")} />}
         </FormField>
         <fieldset>
-          <legend>스코프</legend>
+          <legend>키 권한</legend>
           {grantable.length === 0 ? (
-            <p className="access-note">선택할 수 있는 스코프가 없습니다. 역할 권한을 그대로 상속합니다.</p>
+            <p className="access-note">
+              선택할 수 있는 권한이 없습니다. 미선택 발급은 서버가 확인한 발급 시점의 내 권한을 사용합니다.
+            </p>
           ) : (
             <div className="access-scope-grid">
-              {grantable.map((scope) => (
+              {meKeyScopeChoices(grantable).map(({ value: scope, label, description }) => (
                 <Checkbox
                   key={scope}
-                  label={scope}
+                  label={label}
+                  description={description}
                   checked={createScopes.includes(scope)}
                   onChange={(event) => {
                     const current = form.getValues("scopes");
@@ -502,57 +522,23 @@ export function MeKeysTab(): React.JSX.Element {
         </div>
       </Dialog>
 
-      <Dialog
-        open={scopeEditing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setScopeEditing(undefined);
-        }}
-        returnFocusRef={rowTrigger}
-        title="키 스코프 수정"
-        description="아무것도 고르지 않으면 내 역할의 권한을 그대로 상속합니다. 내가 가진 권한을 넘는 스코프는 서버가 거부합니다."
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setScopeEditing(undefined)}>
-              취소
-            </Button>
-            <Button
-              variant="primary"
-              disabled={updateScopes.isPending}
-              onClick={() => {
-                if (!scopeEditing) return;
-                updateScopes.mutate(
-                  { id: scopeEditing.id, body: { scopes: scopeDraft } },
-                  { onSuccess: () => setScopeEditing(undefined) },
-                );
-              }}
-            >
-              {updateScopes.isPending ? "저장 중" : "저장"}
-            </Button>
-          </>
-        }
-      >
-        <fieldset>
-          <legend>스코프</legend>
-          {grantable.length === 0 ? (
-            <p className="access-note">선택할 수 있는 스코프가 없습니다. 역할 권한을 그대로 상속합니다.</p>
-          ) : (
-            <div className="access-scope-grid">
-              {grantable.map((scope) => (
-                <Checkbox
-                  key={scope}
-                  label={scope}
-                  checked={scopeDraft.includes(scope)}
-                  onChange={(event) =>
-                    setScopeDraft((current) =>
-                      event.target.checked ? [...current, scope] : current.filter((item) => item !== scope),
-                    )
-                  }
-                />
-              ))}
-            </div>
-          )}
-        </fieldset>
-      </Dialog>
+      {scopeTarget ? (
+        <MeKeyScopesDialog
+          key={`${scopeTarget.epoch}:${scopeTarget.instance}`}
+          target={scopeTarget.row}
+          catalogQuery={keys}
+          onOpenChange={(open) => {
+            if (!open) closeScopes(scopeTarget.instance);
+          }}
+          returnFocusRef={scopeReturnFocus}
+          onSubmit={(id, scopes) => {
+            if (scopeTarget.epoch !== tokenStore.getSessionEpoch()) {
+              throw new AppError("인증 세션이 변경되어 이전 권한 초안을 취소했습니다.", { kind: "aborted" });
+            }
+            return updateScopes.mutateAsync({ id, body: { scopes } });
+          }}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={rotating !== undefined}
