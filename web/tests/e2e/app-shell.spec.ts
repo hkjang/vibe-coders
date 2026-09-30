@@ -607,6 +607,15 @@ test("keeps an empty search recoverable and the palette within a narrow viewport
 
 test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) => {
   const routingWindows: string[] = [];
+  const recoveryWrites: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      request.method() === "POST" &&
+      ["/admin/routing/breaker-reset", "/admin/routing/balancer"].includes(path)
+    )
+      recoveryWrites.push(path);
+  });
   await mockGateway(page, {
     onRoutingRequest: (request) => {
       routingWindows.push(new URL(request.url()).searchParams.get("window") ?? "");
@@ -621,7 +630,12 @@ test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) 
   ).toBeVisible();
   await expect(page.getByText("96점", { exact: true })).toBeVisible();
   await expect(page.getByText("session_hash", { exact: true })).toBeVisible();
-  await expect(page.locator("#main-content").getByText("읽기 전용", { exact: true })).toBeVisible();
+  // The registry is writable Preview; this user lacks routing:write. Do not
+  // mislabel a missing operation scope as runtime feature readonly.
+  await expect(page.locator("#main-content").getByText("조작 권한 없음", { exact: true })).toBeVisible();
+  await expect(page.locator("#main-content").getByText("읽기 전용", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "전체 해제", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "세션 고정 전체 해제", exact: true })).toBeDisabled();
   await expect(page.getByRole("link", { name: /기존 상태 화면 열기/ })).toHaveAttribute(
     "href",
     "/admin#/routing/health",
@@ -632,6 +646,8 @@ test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) 
   await expect(page).toHaveURL(/\/app\/gateway\/health\?range=7d$/);
   await expect(page.getByRole("heading", { name: "게이트웨이 상태", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#main-content").getByText("조작 권한 없음", { exact: true })).toBeVisible();
+  expect(recoveryWrites).toEqual([]);
 });
 
 test("restores Provider list filters, pagination, and a deep-linked dialog across reload", async ({
