@@ -96,6 +96,19 @@ describe("공급자 URL 비교의 민감정보 차단", () => {
     expect(body.model_patterns).toBe(credential);
   });
 
+  it("문자 그대로의 더하기 접두어를 쿼리 해석 전에 가리고 저장 객체는 유지한다", () => {
+    const baseURL = `https://review.example/v1?value=corp+_${"B".repeat(32)}`;
+    const row = buildProviderRows([{ ...provider, base_url: baseURL }])[0];
+    if (!row) throw new Error("missing provider row");
+    const body = Object.freeze({ name: provider.name, base_url: baseURL, enabled: true });
+    const { container } = render(
+      <ProviderChangeReview row={row} body={body} credentialPrefixes={["corp+_"]} />,
+    );
+    expect(container.innerHTML).not.toContain("B".repeat(32));
+    expect(container.textContent).toContain("value=***");
+    expect(body.base_url).toBe(baseURL);
+  });
+
   it.each([
     ["CORP_", "CORP_"],
     ["CORP_", "%43%4F%52%50%5F"],

@@ -91,6 +91,21 @@ function routingHealth(providerName: string): RoutingHealth {
 }
 
 describe("provider catalog", () => {
+  it.each(["corp+_", "+svc_"])("scans raw query pairs before form decoding for %s", (prefix) => {
+    const secret = `${prefix}${"B".repeat(32)}`;
+    const url = `https://provider.example/v1?region=korea&value=${secret}&value=${encodeURIComponent(secret)}&${secret}=public&value=ordinary+words`;
+    expect(displayProviderBaseURL(url, [prefix])).toBe(
+      "https://provider.example/v1?region=korea&value=***&value=***&value=ordinary+words",
+    );
+  });
+
+  it("does not serialize a configured credential split across query pairs", () => {
+    const secret = `corp&_${"B".repeat(32)}`;
+    expect(displayProviderBaseURL(`https://provider.example/v1?value=${secret}`, ["corp&_"])).toBe(
+      invalidProviderURLDisplay,
+    );
+  });
+
   it("keeps paging normalization unchanged", () => {
     expect([null, "", "0", "-1", "2.5", "text", "2"].map(providerPageNumber)).toEqual([1, 1, 1, 1, 1, 1, 2]);
   });

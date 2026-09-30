@@ -2,6 +2,7 @@ import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from
 import { healthStatusLabels } from "@/config/ui-labels";
 import { isSafeLegacyProviderName, providerDisplayLabels } from "@/shared/api/provider-ref";
 import {
+  containsConfiguredCredential,
   containsPotentialSecret,
   defaultCredentialPrefixes,
   isSensitiveCredentialKey,
@@ -115,16 +116,31 @@ export function displayProviderBaseURL(
     return invalidProviderURLDisplay;
   }
   const publicQuery = new URLSearchParams();
-  for (const [key, queryValue] of url.searchParams) {
+  for (const pair of url.search.slice(1).split("&")) {
+    const entry = new URLSearchParams(pair).entries().next().value;
+    if (!entry) continue;
+    const [key, queryValue] = entry;
+    const separator = pair.indexOf("=");
+    const rawKey = separator < 0 ? pair : pair.slice(0, separator);
+    const rawValue = separator < 0 ? "" : pair.slice(separator + 1);
     // A key itself can contain a token; do not retain that name in the display.
-    if (providerURLComponentHasSecret(key, credentialPrefixes)) continue;
+    // Inspect raw fields too: form decoding changes a literal '+' to a space.
+    if (
+      providerURLComponentHasSecret(rawKey, credentialPrefixes) ||
+      providerURLComponentHasSecret(key, credentialPrefixes)
+    )
+      continue;
     const privateValue =
       isSensitiveCredentialKey(key) ||
       containsPotentialSecret(`${key}=hidden`, credentialPrefixes) ||
+      providerURLComponentHasSecret(rawValue, credentialPrefixes) ||
       providerURLComponentHasSecret(queryValue, credentialPrefixes);
     publicQuery.append(key, privateValue ? "***" : queryValue);
   }
   url.search = publicQuery.toString();
+  // A configured prefix can itself contain query delimiters. Never reassemble
+  // credential fragments that could not be attributed to one parsed field.
+  if (containsConfiguredCredential(url.search, credentialPrefixes)) return invalidProviderURLDisplay;
   return url.toString();
 }
 
