@@ -1,0 +1,26 @@
+.dialog-content:has(.provider-review-form) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(48rem, calc(100dvh - var(--space-6) - var(--space-6)));
+  overflow: hidden;
+}
+
+.dialog-content:has(.provider-review-form) > .dialog-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.provider-review-form,
+.provider-review-form > section,
+.provider-review-form .data-table-scroll {
+  min-width: 0;
+}
+
+.provider-review-table td {
+  max-width: 20rem;
+  overflow-wrap: anywhere;
+}
+
+.provider-delete-target {
+  overflow-wrap: anywhere;
+}

@@ -12,8 +12,8 @@ const routingKey = ["admin", "routing", "health"];
 const gateway = endpoints.domains.gateway;
 
 /**
- * Provider administration mutations. Writes go out under the raw provider name, so
- * callers must first check that the name was not redacted by the server projection.
+ * Provider upserts require the raw public name. Delete and SLO operations also
+ * accept an opaque provider reference, resolved by the existing server handlers.
  */
 export function useProviderAdmin() {
   const save = useMutationFeedback({
