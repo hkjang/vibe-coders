@@ -954,6 +954,41 @@
         ],
         "type": "object"
       },
+      "CostGuardConfigRequest": {
+        "description": "Optional fields; an empty object or null body preserves the existing configuration.",
+        "nullable": true,
+        "properties": {
+          "enabled": {
+            "description": "Omit or null to retain the stored flag; false explicitly disables it.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "threshold_krw": {
+            "description": "Finite nonnegative decimal. Omit or null to retain the stored threshold; zero explicitly disables the global gate.",
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "CostGuardConfigResponse": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "threshold_krw": {
+            "description": "Finite nonnegative KRW threshold. Zero disables the global gate even when enabled is true.",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "threshold_krw"
+        ],
+        "type": "object"
+      },
       "EmbeddingCacheStats": {
         "additionalProperties": false,
         "properties": {
@@ -3780,7 +3815,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.14"
+    "version": "v0.86.15"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -5739,10 +5774,48 @@
     },
     "/admin/cost": {
       "get": {
+        "description": "Returns one uncached persisted flag snapshot. Missing flags default to false and zero; database failures or malformed stored flags return 503, not defaults. This is not confirmation of activation across pods.",
         "operationId": "get__admin_cost",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostGuardConfigResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: admin read scope is required for GET; admin write scope is required for POST"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "cost_guard_config_unavailable: no confirmed valid configuration snapshot; no POST changes committed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -5756,10 +5829,78 @@
         ]
       },
       "post": {
+        "description": "Atomically updates only supplied non-null fields and returns the validated snapshot from that committed transaction, without a follow-up read. Omission or null preserves a field; false and zero are explicit values. An empty object or null body is a no-op. Malformed retained flags reject the entire update; replacing all malformed flags with valid values can repair configuration. No optimistic concurrency version is provided. Runtime caches on other pods retain their existing TTL.",
         "operationId": "post__admin_cost",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CostGuardConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostGuardConfigResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body or invalid_threshold: invalid input; no fields changed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: admin read scope is required for GET; admin write scope is required for POST"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "cost_guard_save_failed: atomic storage failed; no success snapshot returned"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "cost_guard_config_unavailable: no confirmed valid configuration snapshot; no POST changes committed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
