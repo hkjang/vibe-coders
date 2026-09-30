@@ -36,9 +36,16 @@ export function ChatTestPage(): React.JSX.Element {
         legacyHref="/admin#/chat-test"
       />
 
-      <InlineNotice tone="info" title="실제 호출입니다.">
-        여기서 보내는 요청은 실제 공급자로 나가며 비용이 발생합니다. 프롬프트와 응답은 이 화면에만 남고 주소나
-        브라우저 저장소에 저장되지 않습니다.
+      <InlineNotice tone="info" title="호출과 기록 안내">
+        모델 호출은 실제 공급자로 전송되며 비용이 발생할 수 있습니다. 이 콘솔은 입력과 응답을 주소나 브라우저
+        영속 저장소에 보관하지 않으며, 서버의 감사·기록·보존은 운영 정책을 따릅니다.
+        {tab === "compare" ? (
+          <p>
+            비교 실행은 프롬프트 원문 저장을 요청하지 않지만 프롬프트 해시, 응답 일부·해시와 실행 지표는
+            서버에 기록됩니다. 평가와 라우팅 후보도 저장 작업이며, Golden 저장은 프롬프트를 워크플로 단계에
+            저장합니다.
+          </p>
+        ) : null}
       </InlineNotice>
 
       <Tabs

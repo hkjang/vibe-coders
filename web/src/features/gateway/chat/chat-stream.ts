@@ -78,6 +78,13 @@ export async function streamChatTest(
   handlers: ChatStreamHandlers = {},
   signal?: AbortSignal,
 ): Promise<ChatStreamOutcome> {
+  const assertReceiving = (received?: Response) => {
+    if (signal?.aborted) {
+      void received?.body?.cancel().catch(() => undefined);
+      throw new AppError("응답 수신을 중단했습니다.", { kind: "aborted" });
+    }
+  };
+  assertReceiving();
   let response: Response;
   try {
     response = await fetch(endpoints.domains.gateway.chat.stream.path, {
@@ -87,12 +94,15 @@ export async function streamChatTest(
       signal,
     });
   } catch (cause) {
-    if (signal?.aborted) throw new AppError("Chat 호출을 취소했습니다.", { kind: "aborted", cause });
+    if (signal?.aborted) throw new AppError("응답 수신을 중단했습니다.", { kind: "aborted", cause });
     throw new AppError("게이트웨이에 연결할 수 없습니다.", { kind: "network", retryable: true, cause });
   }
 
+  assertReceiving(response);
+
   const headers = collectHeaders(response);
   handlers.onHeaders?.(headers);
+  assertReceiving(response);
   const requestId = response.headers.get("X-Request-ID") ?? undefined;
 
   if (!response.ok || !(response.headers.get("Content-Type") ?? "").includes("event-stream")) {
@@ -176,9 +186,17 @@ export async function streamChatTest(
     }
   };
 
+  // Cancel only the browser reader. This is not a server execution/cost rollback.
+  const stopReading = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener("abort", stopReading, { once: true });
+  if (signal?.aborted) stopReading();
   try {
+    assertReceiving();
     for (;;) {
       const { done, value } = await reader.read();
+      assertReceiving();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let separator = buffer.indexOf("\n\n");
@@ -190,9 +208,10 @@ export async function streamChatTest(
     }
     if (buffer.trim() !== "") consumeEvent(buffer);
   } catch (cause) {
-    if (signal?.aborted) throw new AppError("Chat 호출을 취소했습니다.", { kind: "aborted", cause });
+    if (signal?.aborted) throw new AppError("응답 수신을 중단했습니다.", { kind: "aborted", cause });
     throw new AppError("스트리밍 응답을 읽는 중 오류가 발생했습니다.", { kind: "network", cause });
   } finally {
+    signal?.removeEventListener("abort", stopReading);
     reader.releaseLock();
   }
   return outcome;
