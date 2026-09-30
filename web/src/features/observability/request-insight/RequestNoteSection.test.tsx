@@ -11,6 +11,7 @@ import { tokenStore } from "@/shared/auth/token-store";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const auth = vi.hoisted(() => ({ version: "v0.86.16", write: true }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -72,7 +73,11 @@ function setup(read: ApiHandler = () => note, overrides: Record<string, ApiHandl
       content
     );
   }
-  const view = renderScreen(<Screen />);
+  const view = renderScreen(
+    <FeatureAccessHarness featureId="observability.llm">
+      <Screen />
+    </FeatureAccessHarness>,
+  );
   return { ...view, api, user: userEvent.setup(), refreshAuth: () => act(refreshAuth) };
 }
 async function open(user: ReturnType<typeof userEvent.setup>, deleting = false) {

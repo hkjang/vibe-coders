@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SkillPage } from "./SkillPage";
 import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
 import { mockApi } from "@/test/api";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
@@ -35,7 +36,14 @@ async function setup() {
           </UnsavedChangesProvider>
         ),
         children: [
-          { path: "/agents/skills", element: <SkillPage /> },
+          {
+            path: "/agents/skills",
+            element: (
+              <FeatureAccessHarness featureId="agents.skills">
+                <SkillPage />
+              </FeatureAccessHarness>
+            ),
+          },
           {
             path: "/away",
             element: (

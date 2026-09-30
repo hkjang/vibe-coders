@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillPage } from "@/features/agents/skills/SkillPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
 
@@ -56,7 +57,12 @@ const baseHandlers = {
 };
 
 function renderPage(route = "/agents/skills"): ReturnType<typeof renderScreen> {
-  return renderScreen(<SkillPage />, { path: "/agents/skills", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="agents.skills">
+      <SkillPage />
+    </FeatureAccessHarness>,
+    { path: "/agents/skills", route },
+  );
 }
 
 describe("SkillPage", () => {

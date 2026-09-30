@@ -17,6 +17,9 @@ import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { requestMutationOwners } from "@/shared/feature-access/policy";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
 import "@/features/observability/request-insight/request-insight.css";
 
@@ -91,6 +94,13 @@ function RequestInsightPanelContent({
   canWriteNote,
   requestId,
 }: RequestInsightPanelProps): React.JSX.Element {
+  const auth = useAuth();
+  const executionAccess = useFeatureMutationAccess(
+    requestMutationOwners,
+    canInspectRaw && auth.capabilities.raw_prompt_view,
+    rawAccessDeniedReason,
+  );
+  const canExecute = executionAccess.allowed;
   const noteEditor = useRequestNoteContext();
   const [analysis, setAnalysis] = useState("");
   const [replayBody, setReplayBody] = useState("");
@@ -109,22 +119,32 @@ function RequestInsightPanelContent({
   });
 
   const runAnalysis = useMutationFeedback({
-    mutate: () =>
-      apiClient.request(withPathParams(endpoints.domains.observability.requests.analyze, { id: requestId }), {
-        routeId,
-        timeoutMs: 60_000,
-      }),
+    mutate: () => {
+      executionAccess.assertCurrent();
+      return apiClient.request(
+        withPathParams(endpoints.domains.observability.requests.analyze, { id: requestId }),
+        {
+          routeId,
+          timeoutMs: 60_000,
+        },
+      );
+    },
     successMessage: "요청 분석을 마쳤습니다.",
     errorMessage: "요청 분석을 실행하지 못했습니다.",
     onSuccess: (result) => setAnalysis(result.analysis),
   });
 
   const runReplay = useMutationFeedback({
-    mutate: () =>
-      apiClient.request(withPathParams(endpoints.domains.observability.requests.replay, { id: requestId }), {
-        routeId,
-        timeoutMs: 60_000,
-      }),
+    mutate: () => {
+      executionAccess.assertCurrent();
+      return apiClient.request(
+        withPathParams(endpoints.domains.observability.requests.replay, { id: requestId }),
+        {
+          routeId,
+          timeoutMs: 60_000,
+        },
+      );
+    },
     successMessage: "요청을 재실행했습니다.",
     errorMessage: "요청을 재실행하지 못했습니다.",
     onSuccess: (result) =>
@@ -246,17 +266,17 @@ function RequestInsightPanelContent({
           <Button
             size="small"
             variant="primary"
-            disabled={!canInspectRaw || runAnalysis.isPending}
-            title={canInspectRaw ? undefined : rawAccessDeniedReason}
+            disabled={!canExecute || runAnalysis.isPending}
+            title={executionAccess.reason}
             onClick={() => runAnalysis.mutate()}
           >
             {runAnalysis.isPending ? "분석 중" : "분석 실행"}
           </Button>
         }
       >
-        {canInspectRaw ? null : (
+        {canExecute ? null : (
           <InlineNotice tone="warning" title="열람 권한이 없습니다.">
-            {rawAccessDeniedReason}
+            {executionAccess.reason}
           </InlineNotice>
         )}
         {analysis ? (
@@ -284,17 +304,17 @@ function RequestInsightPanelContent({
             ref={replayTriggerRef}
             size="small"
             variant="danger"
-            disabled={!canInspectRaw || runReplay.isPending}
-            title={canInspectRaw ? undefined : rawAccessDeniedReason}
+            disabled={!canExecute || runReplay.isPending}
+            title={executionAccess.reason}
             onClick={() => setReplayOpen(true)}
           >
             {runReplay.isPending ? "재실행 중" : "재실행"}
           </Button>
         }
       >
-        {canInspectRaw ? null : (
+        {canExecute ? null : (
           <InlineNotice tone="warning" title="실행 권한이 없습니다.">
-            {rawAccessDeniedReason}
+            {executionAccess.reason}
           </InlineNotice>
         )}
         {replayBody ? (
@@ -315,6 +335,7 @@ function RequestInsightPanelContent({
 
       <ConfirmDialog
         open={replayOpen}
+        confirmDisabled={!canExecute}
         onOpenChange={setReplayOpen}
         returnFocusRef={replayTriggerRef}
         tone="danger"
@@ -324,7 +345,9 @@ function RequestInsightPanelContent({
         onConfirm={async () => {
           await runReplay.mutateAsync();
         }}
-      />
+      >
+        {!canExecute ? <InlineNotice tone="warning">{executionAccess.reason}</InlineNotice> : null}
+      </ConfirmDialog>
     </div>
   );
 }

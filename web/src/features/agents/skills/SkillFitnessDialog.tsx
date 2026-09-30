@@ -67,7 +67,9 @@ export function SkillFitnessDialog({
       <p>이 건수만으로 승격 가능 여부가 확정되지는 않습니다.</p>
       <SkillFitnessNotice name={target.skill.name} current={current} />
       {!canWrite ? (
-        <InlineNotice tone="warning">스킬 근거 기록에는 admin:write 권한이 필요합니다.</InlineNotice>
+        <InlineNotice tone="warning">
+          {editor.writeDisabledReason ?? "스킬 근거 기록에는 admin:write 권한이 필요합니다."}
+        </InlineNotice>
       ) : null}
       <Button
         size="small"

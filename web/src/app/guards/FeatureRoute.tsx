@@ -4,6 +4,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { resolveFeature, type MigrationFeature } from "@/config/migration-registry";
 import { LegacyFeaturePage } from "@/features/legacy/LegacyFeaturePage";
 import { FeatureUnavailable, PermissionDenied } from "@/shared/components/state/PageStates";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 interface FeatureRouteProps {
   feature: MigrationFeature;
@@ -26,5 +27,15 @@ export function FeatureRoute({ feature, children }: FeatureRouteProps): React.JS
     );
   }
   if (effective.status === "legacy") return <LegacyFeaturePage feature={runtimeFeature} />;
-  return <>{children ?? <FeatureUnavailable />}</>;
+  return (
+    <FeatureAccessContext.Provider
+      value={{
+        featureId: runtimeFeature.featureId,
+        readOnly: effective.readOnly,
+        permitted: effective.permitted,
+      }}
+    >
+      {children ?? <FeatureUnavailable />}
+    </FeatureAccessContext.Provider>
+  );
 }

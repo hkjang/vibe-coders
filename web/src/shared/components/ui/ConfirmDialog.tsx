@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
@@ -11,6 +11,8 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   children?: ReactNode;
   confirmLabel?: string;
+  /** Optional current prerequisite; preserves the draft reason and cancel/close actions. */
+  confirmDisabled?: boolean;
   description: string;
   onConfirm: (reason: string) => Promise<unknown> | unknown;
   onOpenChange: (open: boolean) => void;
@@ -30,6 +32,7 @@ export function ConfirmDialog({
   cancelLabel = "취소",
   children,
   confirmLabel = "확인",
+  confirmDisabled = false,
   description,
   onConfirm,
   onOpenChange,
@@ -43,6 +46,10 @@ export function ConfirmDialog({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<{ message: string; requestId?: string } | undefined>();
   const mounted = useRef(true);
+  const confirmationAllowed = useRef(!confirmDisabled);
+  useLayoutEffect(() => {
+    confirmationAllowed.current = !confirmDisabled;
+  }, [confirmDisabled]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -59,7 +66,7 @@ export function ConfirmDialog({
   const reasonMissing = requireReason && reason.trim() === "";
 
   const confirm = async (): Promise<void> => {
-    if (reasonMissing || pending) return;
+    if (!confirmationAllowed.current || reasonMissing || pending) return;
     setPending(true);
     setError(undefined);
     try {
@@ -93,7 +100,7 @@ export function ConfirmDialog({
           <Button
             variant={tone === "danger" ? "danger" : "primary"}
             onClick={() => void confirm()}
-            disabled={pending || reasonMissing}
+            disabled={pending || reasonMissing || confirmDisabled}
           >
             {pending ? "처리 중" : confirmLabel}
           </Button>
@@ -108,6 +115,7 @@ export function ConfirmDialog({
               {...control}
               rows={2}
               value={reason}
+              disabled={confirmDisabled}
               onChange={(event) => setReason(event.target.value)}
               placeholder="감사 이력에 남길 사유를 입력하세요."
             />

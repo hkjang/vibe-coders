@@ -1,11 +1,13 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LLMPage } from "@/features/observability/llm/LLMPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
 
@@ -201,7 +203,22 @@ const baseHandlers = {
 };
 
 function renderPage(route = "/observability/llm"): ReturnType<typeof renderScreen> {
-  return renderScreen(<LLMPage />, { path: "/observability/llm", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="observability.llm">
+      <LLMPage />
+    </FeatureAccessHarness>,
+    { path: "/observability/llm", route },
+  );
+}
+
+function RuntimeFeedback({ initialReadOnly = false }: { initialReadOnly?: boolean }) {
+  const [readOnly, setReadOnly] = useState(initialReadOnly);
+  return (
+    <FeatureAccessHarness featureId="observability.llm" readOnly={readOnly}>
+      <button onClick={() => setReadOnly((value) => !value)}>테스트 전환</button>
+      <LLMPage />
+    </FeatureAccessHarness>
+  );
 }
 
 describe("LLMPage", () => {
@@ -256,6 +273,50 @@ describe("LLMPage", () => {
     renderPage("/observability/llm?tab=feedback");
 
     expect(await screen.findByRole("button", { name: /피드백 남기기/u })).toBeDisabled();
+  });
+
+  it("keeps feedback readable but denies writes for a read-only feature with admin:write", async () => {
+    const api = mockApi(baseHandlers);
+    renderScreen(<RuntimeFeedback initialReadOnly />, { route: "/observability/llm?tab=feedback" });
+    expect(await screen.findByRole("button", { name: /피드백 남기기/u })).toBeDisabled();
+    expect(await screen.findByText("없는 API를 만들어냈습니다")).toBeVisible();
+    expect(api.bodies("POST /admin/llm/feedback")).toEqual([]);
+  });
+
+  it("preserves and locks an open feedback draft until an explicit writable resubmission", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...baseHandlers,
+      "POST /admin/llm/feedback": () => ({ feedback: feedback.feedback[0] }),
+    });
+    renderScreen(<RuntimeFeedback />, { route: "/observability/llm?tab=feedback" });
+    await user.click(await screen.findByRole("button", { name: /피드백 남기기/u }));
+    const dialog = await screen.findByRole("dialog", { name: "피드백 남기기" });
+    const request = within(dialog).getByLabelText(/요청 ID/u);
+    const comment = within(dialog).getByLabelText("의견");
+    await user.type(request, "req-1");
+    await user.type(comment, "초안 보존");
+    fireEvent.click(screen.getByRole("button", { name: "테스트 전환", hidden: true }));
+    expect(request).toBeDisabled();
+    expect(comment).toHaveValue("초안 보존");
+    expect(within(dialog).getByRole("button", { name: "등록" })).toBeDisabled();
+    expect(within(dialog).getByText(/이 화면은 읽기 전용/u)).toBeVisible();
+    const form = dialog.querySelector("form");
+    if (!form) throw new Error("feedback form is missing");
+    fireEvent.submit(form);
+    expect(api.bodies("POST /admin/llm/feedback")).toEqual([]);
+    await user.click(within(dialog).getByRole("button", { name: "취소" }));
+    await user.click(await screen.findByRole("button", { name: "계속 편집" }));
+    expect(comment).toHaveValue("초안 보존");
+    fireEvent.click(screen.getByRole("button", { name: "테스트 전환", hidden: true }));
+    expect(request).toBeEnabled();
+    expect(api.bodies("POST /admin/llm/feedback")).toEqual([]);
+    await user.click(within(dialog).getByRole("button", { name: "등록" }));
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/llm/feedback")).toEqual([
+        { request_id: "req-1", rating: 1, comment: "초안 보존", source: "console" },
+      ]),
+    );
   });
 
   it("opens a trace detail with tool calls and code verification", async () => {

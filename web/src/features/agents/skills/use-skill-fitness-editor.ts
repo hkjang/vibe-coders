@@ -16,6 +16,8 @@ import { endpoints } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
+import { skillMutationOwners } from "@/shared/feature-access/policy";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 
 const routeId = "agents.skills";
 export interface SkillFitnessDraft {
@@ -44,7 +46,12 @@ export function useSkillFitnessQuery(name: string, epoch: number) {
 
 export function useSkillFitnessEditor() {
   const auth = useAuth();
-  const writable = auth.user?.scopes.includes("admin:write") ?? false;
+  const mutationAccess = useFeatureMutationAccess(
+    skillMutationOwners,
+    auth.user?.scopes.includes("admin:write") ?? false,
+    "스킬 근거 기록에는 admin:write 권한이 필요합니다.",
+  );
+  const writable = mutationAccess.allowed;
   const access = useRef(writable);
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const client = useQueryClient();
@@ -156,6 +163,7 @@ export function useSkillFitnessEditor() {
     coordinator.requestClose(owner);
   };
   const submit = async (draft: SkillFitnessDraft, values: FitnessFormValues): Promise<void> => {
+    mutationAccess.assertCurrent();
     if (!current(draft) || !access.current)
       throw new AppError("현재 세션의 스킬 쓰기 권한을 확인하세요.", { kind: "permission" });
     if (
@@ -188,6 +196,7 @@ export function useSkillFitnessEditor() {
     epoch,
     target,
     writable,
+    writeDisabledReason: mutationAccess.reason,
     pending: Boolean(target) && pending,
     committed: committed?.epoch === epoch ? committed : undefined,
     returnFocusRef,

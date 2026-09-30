@@ -9,6 +9,7 @@ import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 
 const adoptSchema = z
   .object({
@@ -47,6 +48,8 @@ function defaults(candidate?: SkillCandidate): AdoptInput {
 }
 
 interface SkillAdoptDialogProps {
+  canWrite: boolean;
+  writeDisabledReason: string;
   candidate: SkillCandidate | undefined;
   onOpenChange: (open: boolean) => void;
   onSubmit: (body: SkillAdoptBody) => Promise<unknown>;
@@ -56,6 +59,8 @@ interface SkillAdoptDialogProps {
 
 /** Adopts a mined candidate as a draft skill; the lifecycle gate handles the rest. */
 export function SkillAdoptDialog({
+  canWrite,
+  writeDisabledReason,
   candidate,
   onOpenChange,
   onSubmit,
@@ -78,26 +83,30 @@ export function SkillAdoptDialog({
       open={open}
       returnFocusRef={returnFocusRef}
       submitLabel="초안으로 채택"
+      submitDisabled={!canWrite}
       title="후보를 스킬로 채택"
     >
-      <FormField label="이름" required error={errors.name?.message}>
-        {(control) => <Input {...control} {...form.register("name")} />}
-      </FormField>
-      <FormField label="설명" error={errors.description?.message}>
-        {(control) => <Textarea {...control} rows={2} {...form.register("description")} />}
-      </FormField>
-      <FormField label="위험 등급" error={errors.risk_level?.message}>
-        {(control) => <Select {...control} options={skillRiskOptions} {...form.register("risk_level")} />}
-      </FormField>
-      <FormField label="허용 모델" error={errors.allowed_models?.message}>
-        {(control) => <Input {...control} {...form.register("allowed_models")} />}
-      </FormField>
-      <FormField label="허용 도구" error={errors.allowed_tools?.message}>
-        {(control) => <Input {...control} {...form.register("allowed_tools")} />}
-      </FormField>
-      <FormField label="지침(instructions)" required error={errors.instructions?.message}>
-        {(control) => <Textarea {...control} rows={10} {...form.register("instructions")} />}
-      </FormField>
+      {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
+      <fieldset className="form-grid form-dialog-fields" disabled={!canWrite}>
+        <FormField label="이름" required error={errors.name?.message}>
+          {(control) => <Input {...control} {...form.register("name")} />}
+        </FormField>
+        <FormField label="설명" error={errors.description?.message}>
+          {(control) => <Textarea {...control} rows={2} {...form.register("description")} />}
+        </FormField>
+        <FormField label="위험 등급" error={errors.risk_level?.message}>
+          {(control) => <Select {...control} options={skillRiskOptions} {...form.register("risk_level")} />}
+        </FormField>
+        <FormField label="허용 모델" error={errors.allowed_models?.message}>
+          {(control) => <Input {...control} {...form.register("allowed_models")} />}
+        </FormField>
+        <FormField label="허용 도구" error={errors.allowed_tools?.message}>
+          {(control) => <Input {...control} {...form.register("allowed_tools")} />}
+        </FormField>
+        <FormField label="지침(instructions)" required error={errors.instructions?.message}>
+          {(control) => <Textarea {...control} rows={10} {...form.register("instructions")} />}
+        </FormField>
+      </fieldset>
     </FormDialog>
   );
 }

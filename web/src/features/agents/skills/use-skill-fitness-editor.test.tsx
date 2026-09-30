@@ -9,8 +9,9 @@ import { tokenStore } from "@/shared/auth/token-store";
 import { UnsavedChangesContext } from "@/shared/unsaved/context";
 import { UnsavedChangesCoordinator } from "@/shared/unsaved/coordinator";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
-const access = vi.hoisted(() => ({ write: true }));
+const access = vi.hoisted(() => ({ write: true, readOnly: false }));
 const toast = vi.hoisted(() => ({ success: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/app/auth/AuthProvider", async () => {
@@ -24,6 +25,7 @@ const post = "POST /admin/skills/fitness";
 const values = { ...emptyFitnessForm, ref_id: "reference" };
 beforeEach(() => {
   access.write = true;
+  access.readOnly = false;
   tokenStore.clearAll();
   toast.success.mockClear();
 });
@@ -37,7 +39,9 @@ function setup(write: ApiHandler = () => ({ skill_name: "skill" })) {
   function Wrapper({ children }: PropsWithChildren) {
     return (
       <QueryClientProvider client={client}>
-        <UnsavedChangesContext.Provider value={coordinator}>{children}</UnsavedChangesContext.Provider>
+        <FeatureAccessHarness featureId="agents.skills" readOnly={access.readOnly}>
+          <UnsavedChangesContext.Provider value={coordinator}>{children}</UnsavedChangesContext.Provider>
+        </FeatureAccessHarness>
       </QueryClientProvider>
     );
   }
@@ -74,13 +78,17 @@ describe("스킬 근거 실제 제출 경계", () => {
     ).rejects.toMatchObject({ kind: "permission" });
     expect(api.bodies(post)).toEqual([]);
   });
-  it.each(["permission", "invalidation", "identity", "malformed", "session"])(
+  it.each(["permission", "readonly", "invalidation", "identity", "malformed", "session"])(
     "최신 %s가 달라지면 직접 submit도 전송하지 않는다",
     async (boundary) => {
       const { result, target, rerender, client, api } = setup();
       const submit = result.current.submit;
       if (boundary === "permission") {
         access.write = false;
+        rerender();
+      }
+      if (boundary === "readonly") {
+        access.readOnly = true;
         rerender();
       }
       await act(async () => {

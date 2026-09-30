@@ -82,7 +82,9 @@ export function RequestNoteDialog({
         현재 메모·태그 다시 조회
       </Button>
       {!canWrite ? (
-        <InlineNotice tone="warning">요청 메모 작성에는 admin:write 권한이 필요합니다.</InlineNotice>
+        <InlineNotice tone="warning">
+          {editor.writeDisabledReason ?? "요청 메모 작성에는 admin:write 권한이 필요합니다."}
+        </InlineNotice>
       ) : null}
       <p>
         조회가 갱신되어도 이 초안은 바뀌지 않습니다. 다른 관리자의 동시 변경을 막거나 이미 보낸 저장을
