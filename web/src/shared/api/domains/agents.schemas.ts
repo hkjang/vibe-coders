@@ -511,35 +511,30 @@ export const skillEvaluationSchema = looseObject({
 });
 export type SkillEvaluation = z.output<typeof skillEvaluationSchema>;
 
-export const skillFitnessSchema = looseObject({
-  skill: optionalText,
-  evidence: looseList({
-    id: optionalText,
-    skill_name: optionalText,
-    kind: optionalText,
-    ref_id: optionalText,
-    passed: optionalFlag,
-    score: optionalNumber,
-    note: optionalText,
-    created_by: optionalText,
-    created_at: optionalText,
-  }).nullish(),
-  passing_count: optionalNumber,
-  required: optionalNumber,
+const skillFitnessEvidenceSchema = z.object({
+  id: z.string().min(1),
+  skill_name: z.string().min(1),
+  kind: z.string(),
+  ref_id: z.string(),
+  passed: z.boolean(),
+  score: z.number().finite(),
+  note: z.string(),
+  created_by: z.string(),
+  created_at: z.iso.datetime({ offset: true }),
 });
-export type SkillFitnessEvidence = NonNullable<z.output<typeof skillFitnessSchema>["evidence"]>[number];
+export const skillFitnessSchema = z.object({
+  skill: z.string().min(1),
+  evidence: z.array(skillFitnessEvidenceSchema),
+  passing_count: z.number().int().nonnegative(),
+  required: z.number().int().nonnegative(),
+});
+export type SkillFitness = z.output<typeof skillFitnessSchema>;
+export type SkillFitnessEvidence = SkillFitness["evidence"][number];
 
-/** `POST /admin/skills/fitness` answers the stored evidence row (201). */
-export const skillFitnessRecordedSchema = looseObject({
-  id: optionalText,
-  skill_name: optionalText,
-  kind: optionalText,
-  ref_id: optionalText,
-  passed: optionalFlag,
-  score: optionalNumber,
-  note: optionalText,
-  created_by: optionalText,
-  created_at: optionalText,
+// Legacy POST 201 returns the submitted row with an empty created_at. The store
+// generates its timestamp internally; GET is the source of that persisted time.
+export const skillFitnessRecordedSchema = skillFitnessEvidenceSchema.extend({
+  created_at: z.union([z.literal(""), z.iso.datetime({ offset: true })]),
 });
 
 export const skillGraphNodeSchema = looseObject({

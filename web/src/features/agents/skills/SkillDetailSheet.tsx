@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type RefObject } from "react";
-import { z } from "zod";
+
+import { SkillFitnessBoundary } from "./SkillFitnessBoundary";
+import { SkillFitnessPanel } from "./SkillFitnessPanel";
+import { useSkillFitnessContext } from "./skill-fitness-context";
 
 import {
   riskTone,
@@ -12,21 +15,14 @@ import { SkillPolicyTester } from "@/features/agents/skills/SkillPolicyTester";
 import { apiClient } from "@/shared/api/client";
 import type { Skill } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { Input } from "@/shared/components/ui/Input";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Select } from "@/shared/components/ui/Select";
 import { Sheet } from "@/shared/components/ui/Sheet";
-import { Textarea } from "@/shared/components/ui/Textarea";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
 
 interface SkillDetailSheetProps {
@@ -50,35 +46,14 @@ const panelLabels: Record<DetailPanel, string> = {
   policy: "정책 시뮬레이션",
 };
 
-const fitnessKinds = ["multimodel", "golden", "testcase"] as const;
-const fitnessKindLabels: Record<(typeof fitnessKinds)[number], string> = {
-  multimodel: "멀티모델 비교",
-  golden: "Golden 세트",
-  testcase: "테스트케이스",
-};
-
-// The note is operator-written evidence, so it must never carry prompt originals.
-const fitnessFormSchema = z.object({
-  kind: z.enum(fitnessKinds),
-  ref_id: z.string().trim().min(1, "근거가 되는 실행·세트 ID를 입력하세요."),
-  passed: z.boolean(),
-  score: z
-    .string()
-    .trim()
-    .refine((value) => value === "" || Number.isFinite(Number(value)), "숫자를 입력하세요."),
-  note: z.string().trim().max(500, "메모는 500자까지 입력할 수 있습니다."),
-});
-type FitnessFormValues = z.infer<typeof fitnessFormSchema>;
-
-const emptyFitnessForm: FitnessFormValues = {
-  kind: "multimodel",
-  ref_id: "",
-  passed: true,
-  score: "",
-  note: "",
-};
-
-export function SkillDetailSheet({
+export function SkillDetailSheet(props: SkillDetailSheetProps): React.JSX.Element {
+  return (
+    <SkillFitnessBoundary>
+      <SkillDetailContent {...props} />
+    </SkillFitnessBoundary>
+  );
+}
+function SkillDetailContent({
   canWrite,
   onDelete,
   onEdit,
@@ -86,9 +61,11 @@ export function SkillDetailSheet({
   onPromote,
   open,
   returnFocusRef,
-  skill,
+  skill: selectedSkill,
   writeDisabledReason,
 }: SkillDetailSheetProps): React.JSX.Element {
+  const fitnessEditor = useSkillFitnessContext();
+  const skill = fitnessEditor.target?.skill ?? selectedSkill;
   const [panel, setPanel] = useState<DetailPanel | undefined>();
   const name = skill?.name ?? "";
 
@@ -114,48 +91,16 @@ export function SkillDetailSheet({
       }),
   });
 
-  const fitness = useQuery({
-    queryKey: ["agents", "skills", name, "fitness"],
-    enabled: open && panel === "fitness" && name !== "",
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.agents.skills.fitness, {
-        query: { skill: name },
-        signal,
-        routeId: "agents.skills",
-      }),
-  });
-
-  const fitnessForm = useZodForm<FitnessFormValues, FitnessFormValues>(fitnessFormSchema, emptyFitnessForm);
-  const recordFitness = useMutationFeedback({
-    mutate: (values: FitnessFormValues) =>
-      apiClient.request(endpoints.domains.agents.skills.recordFitness, {
-        body: {
-          skill: name,
-          kind: values.kind,
-          ref_id: values.ref_id,
-          passed: values.passed,
-          score: values.score === "" ? 0 : Number(values.score),
-          note: values.note,
-        },
-        routeId: "agents.skills",
-      }),
-    invalidates: [
-      ["agents", "skills", name, "fitness"],
-      ["agents", "skills"],
-    ],
-    successMessage: "적합성 근거를 기록했습니다.",
-    errorMessage: "적합성 근거를 기록하지 못했습니다.",
-    onSuccess: () => fitnessForm.reset(emptyFitnessForm),
-  });
-
   return (
     <Sheet
       description="스킬 정의와 실행 정책, 실행 로그와 승격 이력을 확인합니다."
       onOpenChange={(next) => {
-        if (!next) setPanel(undefined);
-        onOpenChange(next);
+        fitnessEditor.requestLeave(() => {
+          if (!next) setPanel(undefined);
+          onOpenChange(next);
+        });
       }}
-      open={open}
+      open={open || Boolean(fitnessEditor.target)}
       returnFocusRef={returnFocusRef}
       size="wide"
       title={skill?.name ?? "스킬"}
@@ -199,28 +144,39 @@ export function SkillDetailSheet({
           <div className="agents-detail-actions">
             <Button
               variant="primary"
-              onClick={onPromote}
-              disabled={!canWrite}
+              onClick={() => fitnessEditor.requestLeave(onPromote)}
+              disabled={!canWrite || fitnessEditor.pending}
               title={canWrite ? undefined : writeDisabledReason}
             >
               승격
             </Button>
-            <Button onClick={onEdit} disabled={!canWrite} title={canWrite ? undefined : writeDisabledReason}>
+            <Button
+              onClick={() => fitnessEditor.requestLeave(onEdit)}
+              disabled={!canWrite || fitnessEditor.pending}
+              title={canWrite ? undefined : writeDisabledReason}
+            >
               편집
             </Button>
             {(Object.keys(panelLabels) as DetailPanel[]).map((id) => (
               <Button
                 key={id}
                 aria-expanded={panel === id}
-                onClick={() => setPanel((current) => (current === id ? undefined : id))}
+                disabled={fitnessEditor.pending}
+                onClick={(event) => {
+                  const trigger = event.currentTarget;
+                  fitnessEditor.requestLeave(() => {
+                    fitnessEditor.returnFocusRef.current = trigger;
+                    setPanel((current) => (current === id ? undefined : id));
+                  });
+                }}
               >
                 {panelLabels[id]}
               </Button>
             ))}
             <Button
               variant="danger"
-              onClick={onDelete}
-              disabled={!canWrite}
+              onClick={() => fitnessEditor.requestLeave(onDelete)}
+              disabled={!canWrite || fitnessEditor.pending}
               title={canWrite ? undefined : writeDisabledReason}
             >
               삭제
@@ -350,144 +306,7 @@ export function SkillDetailSheet({
             </SectionCard>
           ) : null}
 
-          {panel === "fitness" ? (
-            <SectionCard
-              title="모델 적합성 근거"
-              headingLevel={3}
-              description="높은 위험도 스킬은 통과 근거가 일정 건수 이상이어야 프로덕션으로 승격됩니다."
-            >
-              {fitness.isPending ? (
-                <p role="status">적합성 근거를 불러오는 중입니다.</p>
-              ) : fitness.isError ? (
-                <InlineNotice
-                  tone="danger"
-                  title="적합성 근거를 불러오지 못했습니다."
-                  actions={
-                    <Button size="small" onClick={() => void fitness.refetch()}>
-                      다시 시도
-                    </Button>
-                  }
-                >
-                  {safeAppErrorMessage(fitness.error, "적합성 근거를 불러오지 못했습니다.")}
-                </InlineNotice>
-              ) : (
-                <>
-                  <KeyValueList
-                    columns={2}
-                    items={[
-                      { label: "통과 근거", value: formatNumber(fitness.data?.passing_count ?? 0) },
-                      { label: "필요 건수", value: formatNumber(fitness.data?.required ?? 0) },
-                    ]}
-                  />
-                  {(fitness.data?.evidence ?? []).length === 0 ? (
-                    <EmptyState
-                      title="등록된 근거가 없습니다."
-                      description="아래 ‘근거 기록’에서 멀티모델 비교·Golden·테스트케이스 결과를 남기세요."
-                    />
-                  ) : (
-                    <div className="data-table-scroll" tabIndex={0} aria-label="적합성 근거 표 영역">
-                      <table className="data-table">
-                        <caption className="sr-only">스킬 모델 적합성 근거</caption>
-                        <thead>
-                          <tr>
-                            <th scope="col">종류</th>
-                            <th scope="col">참조</th>
-                            <th scope="col">통과</th>
-                            <th scope="col">점수</th>
-                            <th scope="col">기록</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(fitness.data?.evidence ?? []).map((entry) => (
-                            <tr key={entry.id ?? `${entry.kind ?? ""}-${entry.created_at ?? ""}`}>
-                              <td>{entry.kind ?? "—"}</td>
-                              <td className="mono">{entry.ref_id || "—"}</td>
-                              <td>
-                                <Badge tone={entry.passed ? "success" : "danger"}>
-                                  {entry.passed ? "통과" : "실패"}
-                                </Badge>
-                              </td>
-                              <td className="cell-number">{formatNumber(entry.score ?? 0, 2)}</td>
-                              <td>
-                                {formatDateTime(entry.created_at)} · {entry.created_by ?? ""}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <SectionCard
-                    headingLevel={3}
-                    title="근거 기록"
-                    description="멀티모델 비교·Golden·테스트케이스 결과를 이 스킬의 승격 근거로 남깁니다."
-                  >
-                    {canWrite ? null : (
-                      <InlineNotice tone="warning" title="쓰기 권한이 없습니다.">
-                        {writeDisabledReason}
-                      </InlineNotice>
-                    )}
-                    <form
-                      className="agents-fitness-form"
-                      onSubmit={fitnessForm.handleSubmit(async (values) => {
-                        await recordFitness.mutateAsync(values);
-                      })}
-                    >
-                      <FormField
-                        label="근거 종류"
-                        required
-                        error={fitnessForm.formState.errors.kind?.message}
-                      >
-                        {(control) => (
-                          <Select
-                            {...control}
-                            {...fitnessForm.register("kind")}
-                            options={fitnessKinds.map((kind) => ({
-                              value: kind,
-                              label: fitnessKindLabels[kind],
-                            }))}
-                          />
-                        )}
-                      </FormField>
-                      <FormField
-                        label="참조 ID"
-                        required
-                        description="비교 실행 ID나 Golden 세트 이름처럼 근거를 다시 찾을 수 있는 식별자입니다."
-                        error={fitnessForm.formState.errors.ref_id?.message}
-                      >
-                        {(control) => <Input {...control} {...fitnessForm.register("ref_id")} />}
-                      </FormField>
-                      <FormField label="점수" error={fitnessForm.formState.errors.score?.message}>
-                        {(control) => (
-                          <Input {...control} inputMode="decimal" {...fitnessForm.register("score")} />
-                        )}
-                      </FormField>
-                      <FormField
-                        label="메모"
-                        description="판단 근거를 남깁니다. 프롬프트·응답 원문은 입력하지 마세요."
-                        error={fitnessForm.formState.errors.note?.message}
-                      >
-                        {(control) => <Textarea {...control} rows={2} {...fitnessForm.register("note")} />}
-                      </FormField>
-                      <Checkbox
-                        label="통과"
-                        description="통과 근거만 승격 요건 건수에 반영됩니다."
-                        {...fitnessForm.register("passed")}
-                      />
-                      <Button
-                        type="submit"
-                        variant="primary"
-                        disabled={!canWrite || fitnessForm.formState.isSubmitting}
-                        title={canWrite ? undefined : writeDisabledReason}
-                      >
-                        {fitnessForm.formState.isSubmitting ? "기록 중" : "근거 기록"}
-                      </Button>
-                    </form>
-                  </SectionCard>
-                </>
-              )}
-            </SectionCard>
-          ) : null}
+          {panel === "fitness" ? <SkillFitnessPanel skill={skill} canWrite={canWrite} /> : null}
         </div>
       )}
     </Sheet>

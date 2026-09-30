@@ -6,6 +6,8 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { SkillAdoptDialog } from "@/features/agents/skills/SkillAdoptDialog";
 import { SkillDetailSheet } from "@/features/agents/skills/SkillDetailSheet";
+import { SkillFitnessBoundary } from "./SkillFitnessBoundary";
+import { useSkillFitnessContext } from "./skill-fitness-context";
 import { SkillFormDialog } from "@/features/agents/skills/SkillFormDialog";
 import { SkillGraphView } from "@/features/agents/skills/SkillGraphView";
 import { SkillReadinessPanel } from "@/features/agents/skills/SkillReadinessPanel";
@@ -56,6 +58,14 @@ const skillsKey = ["agents", "skills"] as const;
 const writeDisabledReason = "스킬을 변경하려면 admin:write 권한이 필요합니다.";
 
 export function SkillPage(): React.JSX.Element {
+  return (
+    <SkillFitnessBoundary>
+      <SkillPageContent />
+    </SkillFitnessBoundary>
+  );
+}
+function SkillPageContent(): React.JSX.Element {
+  const fitnessEditor = useSkillFitnessContext();
   const auth = useAuth();
   const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
   const [tab, setTab] = useTabParam<TabId>([...tabIds]);
@@ -330,7 +340,7 @@ export function SkillPage(): React.JSX.Element {
           { id: "studio", label: "스튜디오" },
           { id: "graph", label: "의존성 그래프" },
         ]}
-        onChange={setTab}
+        onChange={(next) => fitnessEditor.requestLeave(() => setTab(next))}
         panelIdPrefix="skills"
         value={tab}
       />
@@ -408,8 +418,11 @@ export function SkillPage(): React.JSX.Element {
               getRowId={(row) => row.name}
               getRowActionLabel={(row) => `${row.name} 상세 열기`}
               onRowClick={(row) => {
-                rowTriggerRef.current = document.activeElement as HTMLElement | null;
-                updateSearch({ skill: row.name });
+                const trigger = document.activeElement as HTMLElement | null;
+                fitnessEditor.requestLeave(() => {
+                  rowTriggerRef.current = trigger;
+                  updateSearch({ skill: row.name });
+                });
               }}
             />
           )}

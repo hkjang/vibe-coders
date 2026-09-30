@@ -1,0 +1,19 @@
+.skill-fitness-value {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Keep the first physical save click stable when blur validation adds errors. */
+.dialog-content:has(.skill-fitness-draft) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(48rem, calc(100dvh - var(--space-6) - var(--space-6)));
+  overflow: hidden;
+}
+
+.dialog-content:has(.skill-fitness-draft) > .dialog-body {
+  min-height: 0;
+  overflow: auto;
+}

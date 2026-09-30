@@ -686,6 +686,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichCostGuardOpenAPIOperation(method, op, responses)
 	case "get /admin/requests/{id}/note", "post /admin/requests/{id}/note", "put /admin/requests/{id}/note", "patch /admin/requests/{id}/note", "delete /admin/requests/{id}/note":
 		enrichRequestNoteOpenAPIOperation(method, op, responses)
+	case "get /admin/skills/fitness", "post /admin/skills/fitness":
+		enrichSkillFitnessOpenAPIOperation(method, op, responses)
 	case "get /admin/tracking/violations", "delete /admin/tracking/violations":
 		responses["200"] = successResponse("TrackingStatusResponse")
 	case "get /admin/mcp/oauth":
@@ -976,6 +978,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range requestNoteOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range skillFitnessOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range modelCatalogOpenAPISchemas() {

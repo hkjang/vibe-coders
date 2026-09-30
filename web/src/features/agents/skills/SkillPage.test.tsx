@@ -180,10 +180,10 @@ describe("SkillPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "code-review 상세 열기" }));
     await user.click(await screen.findByRole("button", { name: "적합성 근거" }));
-
+    await user.click(await screen.findByRole("button", { name: "근거 기록" }));
     await user.type(await screen.findByLabelText(/참조 ID/u), "cmp-42");
     await user.type(screen.getByLabelText(/^점수/u), "0.9");
-    await user.click(screen.getByRole("button", { name: "근거 기록" }));
+    await user.click(screen.getByRole("button", { name: "근거 기록 저장" }));
 
     await waitFor(() => {
       expect(api.bodies("POST /admin/skills/fitness")).toEqual([
