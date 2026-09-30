@@ -7,7 +7,8 @@
 - Go 하네스: `internal/proxy/auth_browser_integration_test.go`
 - 테스트용 OIDC 공급자: `internal/proxy/oidc_browser_fixture_test.go`
 - 테스트용 모델 응답기와 키 저장·권한 검사: `internal/proxy/access_browser_fixture_test.go`
-- 브라우저 설정과 시나리오: `web/playwright.auth.config.ts`, `web/tests/auth-live/auth-live.spec.ts`, `web/tests/auth-live/access-live.spec.ts`
+- 복구용 내장 청크 선택·독립 API 세션 검사: `internal/proxy/auth_browser_recovery_fixture_test.go`
+- 브라우저 설정과 시나리오: `web/playwright.auth.config.ts`, `web/tests/auth-live/auth-live.spec.ts`, `web/tests/auth-live/access-live.spec.ts`, `web/tests/auth-live/recovery-live.spec.ts`
 - 안전 보고서: `web/tests/auth-live/safe-reporter.ts`
 - 보고서 누출 방지 회귀: `web/scripts/auth-report-sanitization.test.mjs`
 
@@ -29,6 +30,7 @@ React 화면은 Vite 개발 서버가 아니라 Go 바이너리에 포함된 정
 | `AUTH-LIVE-008` | 읽기 전용 관리자 화면의 발급·수정·폐기 비활성화, 실제 POST/PATCH 401과 공개 목록 불변 |
 | `AUTH-LIVE-009` | 실제 발급 완료 201 응답을 지연한 동안 다른 탭 로그아웃·같은 문서에서 읽기 전용 계정 로그인, 늦은 비밀값·알림·작업창 격리 |
 | `AUTH-LIVE-010` | 실제 권한 저장 완료 200 응답을 지연한 동안 같은 계정 전환, 이전 초안·알림 격리와 새 계정의 읽기 전용 권한 유지 |
+| `AUTH-LIVE-011` | 내장 공급자 청크 한 건의 실패 후 한글 오류·키보드 초점, 같은 Go의 공급자 조회와 임시 API 키 대화 호출·폐기, 실제 재시도 복구, 새 문서에서 기존 관리자 링크·자체 로그인·공급자 조회 및 렌더링 |
 
 다음 세부 조건도 증명 범위를 해석할 때 중요하다.
 
@@ -41,6 +43,9 @@ React 화면은 Vite 개발 서버가 아니라 Go 바이너리에 포함된 정
 - 005는 기존 서버 로그아웃 API로 세션을 폐기하지만 UI 로그아웃을 호출하거나 브라우저 토큰을 지우지 않는다. 실제 만료 후 화면 갱신이 서버의 refresh 거부를 발견하고 로그인으로 복귀해야 한다. 로그인 화면을 직접 열거나 401 응답을 합성하지 않는다.
 - 읽기 전용 관리자의 공급자·API 키 쓰기 거부는 기존 서버 계약인 **401**을 확인한다. 이 테스트를 맞추기 위해 제품 응답을 403으로 바꾸지 않는다.
 - 하네스는 SSO가 활성화되어 있어 로컬 로그인 뒤의 로그아웃도 `/auth/keycloak/logout`을 사용한다. 이 검증으로 `/auth/logout`의 모든 경로를 브라우저에서 검증했다고 주장하지 않는다.
+- 011은 Go에 포함된 정확한 `ProviderPage-<hash>.js` 한 파일만 브라우저에서 요청 중단한다. 공통 청크·HTML·인증·관리 API를 가로채 바꾸거나 오류 이벤트를 합성하지 않는다. 파일이 없거나 여러 개이거나 안전하지 않은 이름이면 하네스가 실패하며, 외부 환경변수로 청크 경로를 바꿀 수 없다.
+- 011의 업무 API 연속성 검사는 오류 화면이 남아 있을 때 별도의 실제 8초 로그인 세션을 메모리에서만 발급하고 임시 API 키로 로컬 모델을 호출한 뒤 키 폐기·로그아웃을 확인한다. 관리자 로그인 JWT로 `/v1` 권한을 대신하지 않으며 React 세션 저장값은 교체하지 않는다. 이 별도 세션 역시 만료 제한을 받는다.
+- 011의 기존 관리자 이동은 `/admin` HTML의 200만 검사하지 않는다. 별도 문서에서 오류 화면의 허용된 링크를 실제 클릭하고 기존 화면 자체 로그인·설정 탭 클릭·실제 공급자 GET과 목록 표시까지 확인한다. 재시도는 청크 중단을 제거한 후 키보드로 실제 버튼을 실행한다. 진입 JavaScript 자체 실패·인증 제공자 전체 오류·모든 업무 API나 MCP의 가용성은 이 시나리오의 증명 범위가 아니다.
 
 ## 준비와 정적 애셋 포함
 
@@ -103,7 +108,7 @@ docker run --rm --init --ipc=host --platform linux/amd64 --network none \
 
 이 명령은 게이트웨이와 Chromium을 같은 컨테이너에서 실행하므로 호스트 포트를 공개할 필요가 없다. 컴파일 후 실행 자체에는 패키지 설치나 Go 다운로드가 없다. 하네스는 설치된 Playwright CLI를 `node`로 직접 실행한다. `pnpm exec`가 호스트/컨테이너 차이를 감지해 의존성을 자동 재설치하는 경로를 피한다.
 
-위 예시는 **외부 네트워크 차단 + checkout·바이너리 디렉터리 읽기 전용** 조건에서 열 시나리오를 실행한다. 컨테이너 내부 loopback 통신은 계속 사용한다. 별도 전용 `AUTH_REPORTS`만 `/workspace/web/test-results`에 쓰기 가능하게 연결하며, DB·브라우저 임시 파일은 `/tmp` tmpfs를 사용한다. 컨테이너 루트 파일시스템 전체에 `--read-only`를 적용한 검증은 아니다. 브라우저 요청도 하네스의 정확한 게이트웨이·IdP origin 두 개만 허용하며, 다른 origin 요청을 발견하면 실패한다. 모델 응답기에는 Go 서버만 연결한다.
+위 예시는 **외부 네트워크 차단 + checkout·바이너리 디렉터리 읽기 전용** 조건에서 열한 시나리오를 실행한다. 컨테이너 내부 loopback 통신은 계속 사용한다. 별도 전용 `AUTH_REPORTS`만 `/workspace/web/test-results`에 쓰기 가능하게 연결하며, DB·브라우저 임시 파일은 `/tmp` tmpfs를 사용한다. 컨테이너 루트 파일시스템 전체에 `--read-only`를 적용한 검증은 아니다. 브라우저 요청도 하네스의 정확한 게이트웨이·IdP origin 두 개만 허용하며, 다른 origin 요청을 발견하면 실패한다. 모델 응답기에는 Go 서버만 연결한다.
 
 하네스가 자신의 checkout을 찾을 수 있도록 작업 디렉터리를 `/workspace`로 유지한다. `APP_BASE_URL`, 계정 정보, IdP 주소는 하네스가 생성해서 자식 프로세스에 전달한다. 사용자가 운영 주소나 비밀번호를 주입해 실행하는 방식은 지원하지 않는다. `VIBE_AUTH_BROWSER_TEST=1`이 없으면 실제 브라우저 통합 테스트는 명시적으로 건너뛴다.
 
@@ -113,9 +118,9 @@ docker run --rm --init --ipc=host --platform linux/amd64 --network none \
 
 보고서의 컨테이너 내부 경로는 `/workspace/web/test-results/auth-live-summary.json`이며, 위 명령으로 실행하면 호스트의 **`$AUTH_REPORTS/auth-live-summary.json`**에 생성된다. checkout의 기존 `web/test-results` 파일을 덮어쓰지 않는다. 직접 실행과 CI의 경로는 `web/test-results/auth-live-summary.json`이다. 전체 상태와 각 시나리오의 다음 항목만 기록한다.
 
-- 고정 허용 목록 `AUTH-LIVE-001`~`AUTH-LIVE-010` 식별자 또는 `UNKNOWN`
+- 고정 허용 목록 `AUTH-LIVE-001`~`AUTH-LIVE-011` 식별자 또는 `UNKNOWN`
 - 테스트 상태와 소요 시간
-- 진단에 필요한 경우 허용된 두 테스트 소스 파일의 숫자 행 번호만 (`lastSourceLine`, `failureSourceLine`)
+- 진단에 필요한 경우 허용된 세 테스트 소스 파일의 숫자 행 번호만 (`lastSourceLine`, `failureSourceLine`)
 
 테스트 제목 원문, 단계 설명, URL, 요청/응답 본문, 헤더, 오류 메시지·스택, 첨부 파일, 비밀번호·토큰은 보고서에 넣지 않는다. 자식 프로세스의 stdout/stderr도 버린다. trace·video·screenshot은 꺼져 있고 HAR나 storage-state 저장도 추가하지 않는다. Playwright의 실패 문맥 파일은 일반 화면 캡처와 별개이므로 복사 안내용 ARIA 스냅샷도 끄고, 비공개 출력 경로를 하네스의 임시 영역으로 분리한다. 외부 보고서 경로에는 안전 요약 JSON만 남긴다.
 
@@ -132,8 +137,9 @@ node --test scripts/auth-report-sanitization.test.mjs
 
 실제 Chromium 실패 경로 검사도 제공한다. 고정 Playwright 이미지와 설치된 브라우저가 있는 환경에서
 같은 명령에 `VIBE_AUTH_BROWSER_ARTIFACT_TEST=1`을 지정한다. 일반 Node 검사에서는 이 사례를
-명시적으로 건너뛰고, `auth-browser` CI에서는 별도 필수 단계로 실행한다. 합성 비밀 마커를 넣은
-화면을 의도적으로 실패시켜 원시 실패 문맥의 경로와 외부 요약을 확인한다. 운영 자격 증명은 사용하지 않는다.
+명시적으로 건너뛰고, `auth-browser` CI에서는 별도 필수 단계로 실행한다. 기존 키 발급과 신규 복구
+소스 파일 각각에서 합성 비밀 마커를 넣은 화면을 의도적으로 실패시켜 원시 실패 문맥의 경로와
+외부 요약을 확인한다. 운영 자격 증명은 사용하지 않는다.
 
 실패 진단은 Go 종료 상태와 안전 요약의 시나리오 ID·행 번호를 함께 확인한다. 단계 설명이나 전체 스택을 출력하도록 reporter를 바꾸어 진단하지 않는다. Playwright 실행 전 실패했다면 새 요약 파일이 없을 수 있다. 매 실행마다 새 `AUTH_REPORTS`를 만들고, 이전 실행의 요약을 이번 성공 근거로 삼지 않는다. 원문 인증 자료는 보관·업로드 대상이 아니다.
 
