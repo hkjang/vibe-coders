@@ -87,7 +87,7 @@ docker run --rm --init --ipc=host --platform linux/amd64 --network none \
 
 이 명령은 게이트웨이와 Chromium을 같은 컨테이너에서 실행하므로 호스트 포트를 공개할 필요가 없다. 컴파일 후 실행 자체에는 패키지 설치나 Go 다운로드가 없다. 하네스는 설치된 Playwright CLI를 `node`로 직접 실행한다. `pnpm exec`가 호스트/컨테이너 차이를 감지해 의존성을 자동 재설치하는 경로를 피한다.
 
-위 예시의 **외부 네트워크 차단 + checkout·바이너리 디렉터리 읽기 전용** 조건에서 네 시나리오를 검증했다. 컨테이너 내부 loopback 통신은 계속 사용한다. 별도 전용 `AUTH_REPORTS`만 `/workspace/web/test-results`에 쓰기 가능하게 연결하며, DB·브라우저 임시 파일은 `/tmp` tmpfs를 사용한다. 컨테이너 루트 파일시스템 전체에 `--read-only`를 적용한 검증은 아니다. 브라우저 요청도 하네스의 정확한 게이트웨이·IdP origin 두 개만 허용하며, 다른 origin 요청을 발견하면 실패한다.
+위 예시의 **외부 네트워크 차단 + checkout·바이너리 디렉터리 읽기 전용** 조건에서 다섯 시나리오를 검증했다. 컨테이너 내부 loopback 통신은 계속 사용한다. 별도 전용 `AUTH_REPORTS`만 `/workspace/web/test-results`에 쓰기 가능하게 연결하며, DB·브라우저 임시 파일은 `/tmp` tmpfs를 사용한다. 컨테이너 루트 파일시스템 전체에 `--read-only`를 적용한 검증은 아니다. 브라우저 요청도 하네스의 정확한 게이트웨이·IdP origin 두 개만 허용하며, 다른 origin 요청을 발견하면 실패한다.
 
 하네스가 자신의 checkout을 찾을 수 있도록 작업 디렉터리를 `/workspace`로 유지한다. `APP_BASE_URL`, 계정 정보, IdP 주소는 하네스가 생성해서 자식 프로세스에 전달한다. 사용자가 운영 주소나 비밀번호를 주입해 실행하는 방식은 지원하지 않는다. `VIBE_AUTH_BROWSER_TEST=1`이 없으면 실제 브라우저 통합 테스트는 명시적으로 건너뛴다.
 
