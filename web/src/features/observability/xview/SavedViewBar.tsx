@@ -17,6 +17,7 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 
 const nameSchema = z.object({ name: z.string().trim().min(1, "이름을 입력하세요.").max(80) });
 type NameInput = z.input<typeof nameSchema>;
@@ -34,12 +35,15 @@ interface SavedViewBarProps {
 }
 
 export function SavedViewBar({
-  canWrite,
+  canWrite: scopeCanWrite,
   currentParams,
   onApply,
   selectedId,
-  writeDeniedReason,
+  writeDeniedReason: scopeDeniedReason,
 }: SavedViewBarProps): React.JSX.Element {
+  const access = useFeatureMutationAccess(["observability.xview"], scopeCanWrite, scopeDeniedReason);
+  const canWrite = access.allowed;
+  const writeDeniedReason = access.reason;
   const [saveOpen, setSaveOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SavedFilter>();
   const saveFocusRef = useRef<HTMLElement | null>(null);
@@ -59,36 +63,42 @@ export function SavedViewBar({
   const form = useZodForm<NameInput, NameOutput>(nameSchema, { name: "" });
 
   const create = useMutationFeedback<NameOutput, unknown>({
-    mutate: (values) =>
-      apiClient.request(endpoints.domains.observability.savedFilters.create, {
+    mutate: (values) => {
+      access.assertCurrent();
+      return apiClient.request(endpoints.domains.observability.savedFilters.create, {
         body: { view: "xview", name: values.name, params: currentParams },
         routeId: "observability.xview.saved-filters.create",
-      }),
+      });
+    },
     invalidates: [savedViewsQueryKey],
     successMessage: "저장된 뷰를 만들었습니다.",
     errorMessage: "저장된 뷰를 만들지 못했습니다.",
   });
 
   const update = useMutationFeedback<SavedFilter, unknown>({
-    mutate: (view) =>
-      apiClient.request(
+    mutate: (view) => {
+      access.assertCurrent();
+      return apiClient.request(
         withPathParams(endpoints.domains.observability.savedFilters.update, { id: view.id }),
         {
           body: { params: currentParams },
           routeId: "observability.xview.saved-filters.update",
         },
-      ),
+      );
+    },
     invalidates: [savedViewsQueryKey],
     successMessage: "저장된 뷰를 현재 필터로 덮어썼습니다.",
     errorMessage: "저장된 뷰를 덮어쓰지 못했습니다.",
   });
 
   const remove = useMutationFeedback<SavedFilter, unknown>({
-    mutate: (view) =>
-      apiClient.request(
+    mutate: (view) => {
+      access.assertCurrent();
+      return apiClient.request(
         withPathParams(endpoints.domains.observability.savedFilters.remove, { id: view.id }),
         { routeId: "observability.xview.saved-filters.delete" },
-      ),
+      );
+    },
     invalidates: [savedViewsQueryKey],
     successMessage: "저장된 뷰를 삭제했습니다.",
     errorMessage: "저장된 뷰를 삭제하지 못했습니다.",
@@ -116,6 +126,7 @@ export function SavedViewBar({
       </label>
       <Button
         onClick={(event) => {
+          if (!canWrite) return;
           saveFocusRef.current = event.currentTarget;
           form.reset({ name: "" });
           setSaveOpen(true);
@@ -135,6 +146,7 @@ export function SavedViewBar({
       <Button
         variant="danger"
         onClick={(event) => {
+          if (!canWrite) return;
           deleteFocusRef.current = event.currentTarget;
           setDeleteTarget(selected);
         }}
@@ -144,6 +156,11 @@ export function SavedViewBar({
         <Trash2 aria-hidden="true" /> 삭제
       </Button>
       <CopyButton value={shareUrl} label="링크 복사" size="default" />
+      {!canWrite ? (
+        <InlineNotice tone="warning" title="저장된 뷰 변경 잠김">
+          {writeDeniedReason}
+        </InlineNotice>
+      ) : null}
       {views.isError ? (
         <InlineNotice tone="warning" title="저장된 뷰를 불러오지 못했습니다.">
           필터는 그대로 사용할 수 있습니다.
@@ -158,12 +175,18 @@ export function SavedViewBar({
         title="현재 필터를 저장"
         description="지금 적용된 XView 필터를 이름과 함께 저장합니다."
         submitLabel="저장"
+        submitDisabled={!canWrite}
         onSubmit={async (values) => {
           await create.mutateAsync(values);
         }}
       >
+        {!canWrite ? (
+          <InlineNotice tone="warning" title="저장 잠김">
+            {writeDeniedReason}
+          </InlineNotice>
+        ) : null}
         <FormField label="뷰 이름" required error={form.formState.errors.name?.message}>
-          {(control) => <Input {...control} {...form.register("name")} />}
+          {(control) => <Input {...control} {...form.register("name")} disabled={!canWrite} />}
         </FormField>
       </FormDialog>
 
@@ -177,12 +200,19 @@ export function SavedViewBar({
         title="저장된 뷰 삭제"
         description={`"${deleteTarget?.name ?? ""}" 뷰를 삭제합니다. 되돌릴 수 없습니다.`}
         confirmLabel="삭제"
+        confirmDisabled={!canWrite}
         onConfirm={async () => {
           if (!deleteTarget) return;
           await remove.mutateAsync(deleteTarget);
           onApply("", "");
         }}
-      />
+      >
+        {!canWrite ? (
+          <InlineNotice tone="warning" title="삭제 잠김">
+            {writeDeniedReason}
+          </InlineNotice>
+        ) : null}
+      </ConfirmDialog>
     </div>
   );
 }

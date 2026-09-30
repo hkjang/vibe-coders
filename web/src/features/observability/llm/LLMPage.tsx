@@ -31,6 +31,7 @@ import { TabPanel, Tabs } from "@/shared/components/ui/Tabs";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import { useSearchState } from "@/shared/hooks/use-search-state";
@@ -85,8 +86,13 @@ function LLMPageContent(): React.JSX.Element {
   const interval = useRefreshInterval();
   const [params, updateParams] = useSearchState();
   const [tab, setTab] = useTabParam<TabId>(tabIds);
-  const canWrite = auth.mode !== "authenticated" || (auth.user?.scopes.includes("admin:write") ?? false);
-  const writeDeniedReason = "피드백 등록에는 admin:write 권한이 필요합니다.";
+  const feedbackAccess = useFeatureMutationAccess(
+    ["observability.llm"],
+    auth.mode !== "authenticated" || (auth.user?.scopes.includes("admin:write") ?? false),
+    "피드백 등록에는 admin:write 권한이 필요합니다.",
+  );
+  const canWrite = feedbackAccess.allowed;
+  const writeDeniedReason = feedbackAccess.reason ?? "피드백을 등록할 수 없습니다.";
 
   const rawWindow = params.get("window") ?? "";
   const activeWindow = (windows as readonly string[]).includes(rawWindow)
@@ -196,8 +202,9 @@ function LLMPageContent(): React.JSX.Element {
   });
 
   const submitFeedback = useMutationFeedback<FeedbackOutput, unknown>({
-    mutate: (values) =>
-      apiClient.request(endpoints.domains.observability.llm.submitFeedback, {
+    mutate: (values) => {
+      feedbackAccess.assertCurrent();
+      return apiClient.request(endpoints.domains.observability.llm.submitFeedback, {
         body: {
           request_id: values.request_id,
           rating: values.rating,
@@ -207,7 +214,8 @@ function LLMPageContent(): React.JSX.Element {
           source: "console",
         },
         routeId: "observability.llm.feedback.create",
-      }),
+      });
+    },
     invalidates: [
       ["observability", "llm", "feedback"],
       ["observability", "llm", "trace"],
@@ -923,18 +931,25 @@ function LLMPageContent(): React.JSX.Element {
         title="피드백 남기기"
         description="이 호출의 품질을 평가합니다. 프롬프트 원문은 입력하지 마세요."
         submitLabel="등록"
+        submitDisabled={!canWrite}
         onSubmit={async (values) => {
           await submitFeedback.mutateAsync(values);
         }}
       >
+        {!canWrite ? (
+          <InlineNotice tone="warning" title="피드백 등록 잠김">
+            {writeDeniedReason}
+          </InlineNotice>
+        ) : null}
         <FormField label="요청 ID" required error={feedbackForm.formState.errors.request_id?.message}>
-          {(control) => <Input {...control} {...feedbackForm.register("request_id")} />}
+          {(control) => <Input {...control} {...feedbackForm.register("request_id")} disabled={!canWrite} />}
         </FormField>
         <FormField label="평점" required error={feedbackForm.formState.errors.rating?.message}>
           {(control) => (
             <Select
               {...control}
               {...feedbackForm.register("rating")}
+              disabled={!canWrite}
               options={[
                 { value: "1", label: "긍정 (+1)" },
                 { value: "0", label: "보통 (0)" },
@@ -945,11 +960,18 @@ function LLMPageContent(): React.JSX.Element {
         </FormField>
         <FormField label="라벨" error={feedbackForm.formState.errors.label?.message}>
           {(control) => (
-            <Input {...control} {...feedbackForm.register("label")} placeholder="예: hallucination" />
+            <Input
+              {...control}
+              {...feedbackForm.register("label")}
+              placeholder="예: 근거 부족"
+              disabled={!canWrite}
+            />
           )}
         </FormField>
         <FormField label="의견" error={feedbackForm.formState.errors.comment?.message}>
-          {(control) => <Textarea {...control} rows={3} {...feedbackForm.register("comment")} />}
+          {(control) => (
+            <Textarea {...control} rows={3} {...feedbackForm.register("comment")} disabled={!canWrite} />
+          )}
         </FormField>
       </FormDialog>
 
