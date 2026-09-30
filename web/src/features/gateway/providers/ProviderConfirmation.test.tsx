@@ -115,7 +115,7 @@ describe("공급자 삭제 재확인", () => {
       expect(dialog.innerHTML).not.toContain("B".repeat(32));
       expect(dialog).toHaveTextContent(original.identity);
       await user.type(within(dialog).getByLabelText("삭제 대상 재입력"), original.identity);
-      await user.click(within(dialog).getByRole("button", { name: "삭제", exact: true }));
+      await user.click(within(dialog).getByRole("button", { name: "삭제" }));
       await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith(original.identity));
     },
   );
