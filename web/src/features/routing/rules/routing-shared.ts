@@ -8,7 +8,7 @@ export const routingDecisionsQueryKey = ["routing", "decisions"] as const;
 export const routingLearningQueryKey = ["routing", "learning"] as const;
 export const routingDomainQueryKey = ["routing", "domain"] as const;
 export const routingPatternsQueryKey = ["routing", "pattern-conflicts"] as const;
-export const routingCostGuardQueryKey = ["routing", "cost-guard"] as const;
+export const routingCostGuardQueryKey = costGuardQueryKeys.routing;
 
 export function severityTone(severity: string): "danger" | "warning" | "info" {
   if (severity === "critical") return "danger";
@@ -21,3 +21,4 @@ export function scoreTone(score: number, threshold: number): "success" | "warnin
   if (score < threshold) return "warning";
   return "success";
 }
+import { costGuardQueryKeys } from "@/shared/api/domains/cost-guard";

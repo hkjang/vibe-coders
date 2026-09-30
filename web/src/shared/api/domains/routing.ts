@@ -3,6 +3,8 @@
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
 
+import { costGuardSchema } from "./cost-guard";
+
 import type {
   DeleteAdminRoutingRulesIdData,
   GetAdminCostData,
@@ -352,8 +354,6 @@ const domainReviewSchema = looseObject({
 const domainReviewActionSchema = looseObject({ id: text, status: text });
 
 // ---------------------------------------------------------- cost guard / predict
-
-const costGuardSchema = looseObject({ enabled: flag, threshold_krw: count });
 
 const costEstimateSchema = looseObject({
   model: text,
