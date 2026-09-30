@@ -1,0 +1,51 @@
+.request-flow-card .section-card-header,
+.request-flow-card .section-card-header > div,
+.request-flow-card .section-card-body {
+  min-width: 0;
+}
+
+.request-flow-actions,
+.request-flow-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.request-flow-card .obs-span-heading {
+  flex-wrap: wrap;
+}
+
+.request-flow-card .obs-span-heading > span:first-child {
+  flex-wrap: wrap;
+}
+
+.request-flow-card .obs-span-heading code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.request-flow-card .obs-span-error,
+.request-flow-card .inline-notice-body,
+.request-flow-card .obs-span-heading small,
+.request-flow-card .obs-span-facts > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.request-flow-note {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+@media (max-width: 42rem) {
+  .request-flow-card .section-card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .request-flow-card .section-card-actions {
+    width: 100%;
+  }
+}
