@@ -73,6 +73,27 @@ describe("공급자 숫자 설정의 서버 적용 의미", () => {
 });
 
 describe("공급자 URL 비교의 민감정보 차단", () => {
+  it.each([
+    ["CORP_", "CORP_"],
+    ["CORP_", "%43%4F%52%50%5F"],
+    ["회사_", "회사_"],
+    ["회사_", "%ED%9A%8C%EC%82%AC%5F"],
+  ])("호스트의 %s 접두어 비밀값이 소문자·퓨니코드로 바뀌기 전에 숨긴다 (%s)", (prefix, encodedPrefix) => {
+    const baseURL = `https://${encodedPrefix}${"A".repeat(32)}.example/v1`;
+    const row = buildProviderRows([{ ...provider, base_url: baseURL }])[0];
+    if (!row) throw new Error("missing provider row");
+    const body = Object.freeze({ name: provider.name, base_url: baseURL, enabled: true });
+    const { container } = render(
+      <ProviderChangeReview row={row} body={body} credentialPrefixes={[prefix]} />,
+    );
+    for (const value of [baseURL, new URL(baseURL).hostname, "A".repeat(32), "a".repeat(32)]) {
+      expect(container.innerHTML).not.toContain(value);
+      expect(container.textContent).not.toContain(value);
+    }
+    expect(body.base_url).toBe(baseURL);
+    expect(row.provider.base_url).toBe(baseURL);
+  });
+
   it("서버가 가린 기존 주소의 유지와 새 공개 주소로 교체를 구분한다", () => {
     const row = buildProviderRows([{ ...provider, base_url: redactedProviderURL }])[0];
     if (!row) throw new Error("missing provider row");
