@@ -223,6 +223,8 @@ jobs:
         run: go test -p 1 -race ./internal/store ./internal/proxy -run 'TestRuntimeFlagBatch|TestMattermost|TestKeycloak(Admin|Persisted|Config)' -count=1 -timeout=7m
       - name: Verify PostgreSQL bounded provider impact and permission projections
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestProviderImpact' -count=1 -timeout=5m
+      - name: Verify PostgreSQL provider redaction and masked editing
+        run: go test -race ./internal/proxy -run '^TestProviderApp|^TestProviderProjectionOpenAPI' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck

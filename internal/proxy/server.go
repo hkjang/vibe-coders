@@ -1282,7 +1282,7 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		failoverGroup := strings.TrimSpace(payload.FailoverGroup)
 		if appProjection && found {
 			public := s.providerEditableFieldsForApp(before.Name, before.BaseURL, before.ModelPatterns, before.FailoverGroup)
-			preserveRedactedURL = before.BaseURL != public.BaseURL && payload.BaseURL == strings.TrimRight(public.BaseURL, "/")
+			preserveRedactedURL = (before.BaseURL != public.BaseURL || public.BaseURL == invalidProviderURLDisplay) && payload.BaseURL == strings.TrimRight(public.BaseURL, "/")
 			modelPatterns = providerAppMetadataWriteValue(payload.ModelPatterns, before.ModelPatterns, public.ModelPatterns)
 			failoverGroup = providerAppMetadataWriteValue(payload.FailoverGroup, before.FailoverGroup, public.FailoverGroup)
 		}
