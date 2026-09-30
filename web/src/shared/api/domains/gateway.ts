@@ -100,9 +100,9 @@ import {
   routingPreviewSchema,
 } from "@/shared/api/domains/gateway.schemas";
 
-// Request bodies below mirror the Go handlers' decode structs: the legacy admin API
-// is documented without request schemas, so the generated `Data` types carry
-// `body?: never` and each operation states the body it actually sends.
+// Bodies for still-untyped legacy operations mirror the Go decode structs below.
+// Model governance instead uses the explicit generated OpenAPI body/response
+// contracts, retaining their existing optional/null replacement semantics.
 
 export interface ChatTestRunBody {
   readonly target_id?: string;

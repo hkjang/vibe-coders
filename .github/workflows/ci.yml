@@ -242,6 +242,8 @@ jobs:
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestRequestNote' -count=1 -timeout=5m
       - name: Verify PostgreSQL existing skill fitness append and promotion contracts
         run: go test -p 1 -race ./internal/proxy -run '^Test(SkillFitness|ModelFitness)' -count=1 -timeout=5m
+      - name: Verify PostgreSQL model contract identity and deprecation upsert semantics
+        run: go test -race ./internal/proxy -run '^TestModelGovernanceContract' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
