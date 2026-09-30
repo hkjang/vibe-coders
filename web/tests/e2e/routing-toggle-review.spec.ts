@@ -342,8 +342,8 @@ for (const status of [200, 503]) {
     await confirm(next.dialog).click();
     await expect(next.dialog).toBeHidden();
     expect(writes(gateway).at(-1)?.userId).toBe("routing-two");
-    // An old aborted HTTP response may never reach JS. Overlapping old-finally
-    // versus new-flight protection remains independently controlled unit proof.
+    // An old aborted HTTP response may never reach JS. This scenario does not
+    // establish overlap between an old completion and a new pending flight.
     await other.close();
   });
 }
