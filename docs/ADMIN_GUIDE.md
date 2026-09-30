@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.24`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.25`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.24.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.24.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.25.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.25.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.24.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.25.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.24
+export GATEWAY_VERSION=v0.86.25
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -1590,6 +1590,17 @@ curl -X POST http://<host>:8080/admin/routing-rules \
   -H "Content-Type: application/json" \
   -d '{ "match_pattern":"gpt-*", "min_complexity":0, "max_complexity":34, "target_model":"gpt-4.1-mini", "priority":10 }'
 ```
+
+신규 콘솔 `/app/routing/rules`의 **사용·중지**는 원본 규칙 ID와 변경 전후 상태를 확인한 뒤
+실행합니다. 모델·공급자·조건·우선순위·메모를 함께 검토하세요. 확인창을 연 뒤 읽기 전용이나
+권한·목록 상태가 바뀌면 실행이 잠깁니다. **목록 다시 조회** 후 내용이 달라졌다면
+**최신 기준 다시 확인**을 누르고 원래 작업을 직접 실행하세요. 이미 의도한 상태라면 자동으로
+반대 작업을 하지 않습니다. 창을 닫고 해당 규칙을 다시 선택해야 합니다.
+
+변경 완료 뒤 목록 조회가 실패해도 이미 저장된 상태를 다시 변경하지 마세요. 요청 ID를 확인하고
+목록만 재조회합니다. 실제 라우팅 선택은 전체 라우팅 활성 여부·조건·우선순위에 따르며,
+다른 서버가 설정을 읽기 전까지 반영이 지연될 수 있습니다. 검토 중 다른 관리자의 저장을
+원자적으로 막는 기능은 아닙니다. 이 보호는 사용·중지 작업에 한정되며 규칙 편집 전체와는 구분합니다.
 
 ### 9.2.2 라우팅 학습 추천 (Routing Learning Engine)
 
