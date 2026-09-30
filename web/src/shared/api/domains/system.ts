@@ -147,10 +147,10 @@ export interface KeycloakConfigBody {
   issuer_url: string;
   client_id: string;
   redirect_uri: string;
-  scopes?: readonly string[];
-  default_role?: string;
-  role_claim?: string;
-  group_claim?: string;
+  scopes: readonly string[];
+  default_role: string;
+  role_claim: string;
+  group_claim: string;
   allow_local_login: boolean;
   /** Silent (prompt=none) sign-in from the console when a Keycloak session exists. */
   auto_login: boolean;

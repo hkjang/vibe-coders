@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-import { NotificationForm, type NotificationSaveInput } from "@/features/system/settings/NotificationForm";
+import { NotificationForm } from "@/features/system/settings/NotificationForm";
 import { QueryNotice } from "@/features/system/settings/SettingsParts";
 import {
   routeId,
@@ -40,25 +40,8 @@ export function OperationsTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Re
   const replayFallback = useMutationFeedback({
     mutate: async () => apiClient.request(system.fallback.replay, { routeId }),
     invalidates: [systemSettingsKeys.fallback],
-    successMessage: "Fallback 로그를 DB로 재처리했습니다.",
-    errorMessage: "Fallback 로그를 재처리하지 못했습니다.",
-  });
-
-  const saveNotifications = useMutationFeedback({
-    mutate: async (input: NotificationSaveInput) =>
-      apiClient.request(system.notifications.save, {
-        body: {
-          enabled: input.enabled,
-          channel: input.channel,
-          events: input.events,
-          // Only send the webhook when the operator typed a new one.
-          ...(input.webhookUrl ? { webhook_url: input.webhookUrl } : {}),
-        },
-        routeId,
-      }),
-    invalidates: [systemSettingsKeys.notifications],
-    successMessage: "알림 설정을 저장했습니다.",
-    errorMessage: "알림 설정을 저장하지 못했습니다.",
+    successMessage: "저장 실패 로그를 DB로 재처리했습니다.",
+    errorMessage: "저장 실패 로그를 재처리하지 못했습니다.",
   });
 
   const testNotification = useMutationFeedback({
@@ -115,7 +98,7 @@ export function OperationsTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Re
       </SectionCard>
 
       <SectionCard
-        title="Fallback 로그 재처리"
+        title="저장 실패 로그 재처리"
         headingLevel={3}
         description="DB 저장에 실패해 파일로 남은 요청 로그를 다시 적재합니다."
         actions={
@@ -133,11 +116,11 @@ export function OperationsTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Re
           <QueryNotice
             error={fallback.error}
             hasPreviousData={Boolean(fallback.data)}
-            label="Fallback 로그"
+            label="저장 실패 로그"
             onRetry={() => void fallback.refetch()}
           />
         ) : null}
-        {fallback.isPending ? <p role="status">Fallback 로그 상태를 불러오는 중입니다.</p> : null}
+        {fallback.isPending ? <p role="status">저장 실패 로그 상태를 불러오는 중입니다.</p> : null}
         {fallback.data ? (
           <KeyValueList
             columns={3}
@@ -160,9 +143,9 @@ export function OperationsTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Re
       </SectionCard>
 
       <SectionCard
-        title="알림 Webhook (Mattermost)"
+        title="알림 웹훅 (Mattermost)"
         headingLevel={3}
-        description="비용·비밀정보·승인·공급자 이벤트를 채널로 보냅니다."
+        description="비용·비밀정보·승인·공급자 이벤트를 채널로 보냅니다. 테스트 메시지는 저장된 설정을 사용하며 초안을 저장하지 않습니다."
         actions={
           <Button
             size="small"
@@ -183,13 +166,7 @@ export function OperationsTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Re
         ) : null}
         {notifications.isPending ? <p role="status">알림 설정을 불러오는 중입니다.</p> : null}
         {notifications.data ? (
-          <NotificationForm
-            key={notifications.dataUpdatedAt}
-            config={notifications.data}
-            hasAdminWrite={hasAdminWrite}
-            onSubmit={(input) => saveNotifications.mutate(input)}
-            pending={saveNotifications.isPending}
-          />
+          <NotificationForm config={notifications.data} hasAdminWrite={hasAdminWrite} />
         ) : null}
       </SectionCard>
 
@@ -210,7 +187,7 @@ export function OperationsTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Re
       <ConfirmDialog
         open={confirmFallback}
         onOpenChange={setConfirmFallback}
-        title="Fallback 로그 재처리"
+        title="저장 실패 로그 재처리"
         description="파일에 남은 요청 로그를 DB로 다시 적재합니다. 이미 적재된 항목은 중복으로 건너뜁니다."
         confirmLabel="재처리 실행"
         returnFocusRef={fallbackTriggerRef}

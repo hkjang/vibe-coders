@@ -670,7 +670,7 @@ export const migrationRegistry = [
     enabledRoles: [],
     rolloutPercent: 100,
     fallbackEnabled: true,
-    minimumApiVersion: "v0.86.5",
+    minimumApiVersion: "v0.86.6",
   },
 ] as const satisfies readonly MigrationFeature[];
 

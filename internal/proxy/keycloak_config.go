@@ -35,6 +35,23 @@ func (s *Server) loadKeycloakConfig(ctx context.Context) (config.KeycloakConfig,
 		return eff, nil
 	}
 
+	eff := keycloakStoredFields(rec)
+	if rec.ClientSecretEnc != "" {
+		plain, err := s.secrets.Load().Decrypt(rec.ClientSecretEnc)
+		if err != nil {
+			return config.KeycloakConfig{}, fmt.Errorf("decrypt Keycloak client secret: %w", err)
+		}
+		eff.ClientSecret = plain
+	}
+	if !s.cfg.Auth.Enabled {
+		eff.Enabled = false
+	}
+	return eff, nil
+}
+
+// keycloakStoredFields maps one stored revision without decrypting credentials or
+// publishing a login runtime. Admin GET must not mix cached fields with a new CAS version.
+func keycloakStoredFields(rec store.SSOProviderConfig) config.KeycloakConfig {
 	eff := config.KeycloakConfig{
 		Enabled:         rec.Enabled,
 		IssuerURL:       strings.TrimRight(rec.IssuerURL, "/"),
@@ -60,17 +77,7 @@ func (s *Server) loadKeycloakConfig(ctx context.Context) (config.KeycloakConfig,
 	if eff.GroupClaim == "" {
 		eff.GroupClaim = "groups"
 	}
-	if rec.ClientSecretEnc != "" {
-		plain, err := s.secrets.Load().Decrypt(rec.ClientSecretEnc)
-		if err != nil {
-			return config.KeycloakConfig{}, fmt.Errorf("decrypt Keycloak client secret: %w", err)
-		}
-		eff.ClientSecret = plain
-	}
-	if !s.cfg.Auth.Enabled {
-		eff.Enabled = false
-	}
-	return eff, nil
+	return eff
 }
 
 // reloadKeycloakConfig atomically publishes a fully validated snapshot. On a transient DB or

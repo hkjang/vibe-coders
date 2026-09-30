@@ -255,6 +255,62 @@ export type HealthResponse = {
     status: 'ok';
 };
 
+/**
+ * Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.
+ */
+export type KeycloakConfigRequest = {
+    allow_local_login: boolean;
+    auto_login: boolean;
+    client_id: string;
+    default_role: string;
+    enabled: boolean;
+    /**
+     * Version reviewed with the draft; 0 when no stored override exists. Omit or null for legacy requests without a client version precondition.
+     */
+    expected_version?: number | null;
+    group_claim: string;
+    issuer_url: string;
+    redirect_uri: string;
+    role_claim: string;
+    /**
+     * Omit or null to retain the stored mapping; an empty object restores built-in defaults.
+     */
+    role_map?: {
+        [key: string]: string;
+    } | null;
+    /**
+     * Send null or an empty list to use default scopes; this does not retain a previous custom list.
+     */
+    scopes: Array<string> | null;
+};
+
+export type KeycloakConfigResponse = {
+    allow_local_login: boolean;
+    auto_login: boolean;
+    client_id: string;
+    client_secret_set: boolean;
+    db_backed: boolean;
+    default_role: string;
+    enabled: boolean;
+    group_claim: string;
+    issuer_url: string;
+    note: string;
+    redirect_uri: string;
+    role_claim: string;
+    role_map: {
+        [key: string]: string;
+    };
+    role_map_custom: boolean;
+    role_map_default: {
+        [key: string]: string;
+    };
+    scopes: Array<string> | null;
+    source: 'db' | 'env';
+    updated_at: string;
+    updated_by: string;
+    version: number;
+};
+
 export type KeycloakLogoutRequest = {
     id_token_hint?: string;
     refresh_token?: string;
@@ -314,6 +370,32 @@ export type McpoAuthStatusResponse = {
     resource: string;
     resource_source: 'setting' | 'derived';
     scopes: Array<string>;
+};
+
+export type MattermostConfigRequest = {
+    channel?: string | null;
+    enabled?: boolean | null;
+    /**
+     * Omit or null to retain the stored selection; an empty list disables every event category.
+     */
+    events?: Array<string> | null;
+};
+
+export type MattermostConfigResponse = {
+    available_events: Array<string>;
+    channel: string;
+    enabled: boolean;
+    events: Array<string>;
+    /**
+     * Presence mask only, never the stored URL.
+     */
+    webhook_url: '' | '********';
+    webhook_url_set: boolean;
+};
+
+export type MattermostTestResponse = {
+    status: 'sent';
+    webhook_status: number;
 };
 
 export type MigrationFeature = {
@@ -848,6 +930,52 @@ export type UserSummary = {
     status: string;
     team: string;
     tokens: number;
+};
+
+/**
+ * Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.
+ */
+export type KeycloakConfigRequestWritable = {
+    allow_local_login: boolean;
+    auto_login: boolean;
+    client_id: string;
+    /**
+     * Omit or null to retain the stored secret; empty string explicitly clears it.
+     */
+    client_secret?: string | null;
+    default_role: string;
+    enabled: boolean;
+    /**
+     * Version reviewed with the draft; 0 when no stored override exists. Omit or null for legacy requests without a client version precondition.
+     */
+    expected_version?: number | null;
+    group_claim: string;
+    issuer_url: string;
+    redirect_uri: string;
+    role_claim: string;
+    /**
+     * Omit or null to retain the stored mapping; an empty object restores built-in defaults.
+     */
+    role_map?: {
+        [key: string]: string;
+    } | null;
+    /**
+     * Send null or an empty list to use default scopes; this does not retain a previous custom list.
+     */
+    scopes: Array<string> | null;
+};
+
+export type MattermostConfigRequestWritable = {
+    channel?: string | null;
+    enabled?: boolean | null;
+    /**
+     * Omit or null to retain the stored selection; an empty list disables every event category.
+     */
+    events?: Array<string> | null;
+    /**
+     * Input-only webhook URL. Omit or null to keep; empty string clears it.
+     */
+    webhook_url?: string | null;
 };
 
 export type GetWellKnownOauthProtectedResourceData = {
@@ -3985,26 +4113,60 @@ export type GetAdminNotificationsMattermostData = {
     url: '/admin/notifications/mattermost';
 };
 
+export type GetAdminNotificationsMattermostErrors = {
+    /**
+     * mattermost_config_unavailable: no configuration snapshot returned
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminNotificationsMattermostError = GetAdminNotificationsMattermostErrors[keyof GetAdminNotificationsMattermostErrors];
+
 export type GetAdminNotificationsMattermostResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MattermostConfigResponse;
 };
 
+export type GetAdminNotificationsMattermostResponse = GetAdminNotificationsMattermostResponses[keyof GetAdminNotificationsMattermostResponses];
+
 export type PostAdminNotificationsMattermostData = {
-    body?: never;
+    body: MattermostConfigRequestWritable;
     path?: never;
     query?: never;
     url: '/admin/notifications/mattermost';
 };
 
+export type PostAdminNotificationsMattermostErrors = {
+    /**
+     * Invalid request or invalid_webhook_url; no fields changed
+     */
+    400: AppError;
+    /**
+     * mattermost_config_save_failed: atomic storage failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminNotificationsMattermostError = PostAdminNotificationsMattermostErrors[keyof PostAdminNotificationsMattermostErrors];
+
 export type PostAdminNotificationsMattermostResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MattermostConfigResponse;
 };
+
+export type PostAdminNotificationsMattermostResponse = PostAdminNotificationsMattermostResponses[keyof PostAdminNotificationsMattermostResponses];
 
 export type PostAdminNotificationsMattermostTestData = {
     body?: never;
@@ -4013,12 +4175,35 @@ export type PostAdminNotificationsMattermostTestData = {
     url: '/admin/notifications/mattermost/test';
 };
 
+export type PostAdminNotificationsMattermostTestErrors = {
+    /**
+     * Webhook missing or malformed
+     */
+    400: AppError;
+    /**
+     * webhook_failed: transport failed or the receiver rejected the test message; response body and URL are not echoed
+     */
+    502: AppError;
+    /**
+     * mattermost_config_unavailable: saved configuration could not be loaded
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminNotificationsMattermostTestError = PostAdminNotificationsMattermostTestErrors[keyof PostAdminNotificationsMattermostTestErrors];
+
 export type PostAdminNotificationsMattermostTestResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MattermostTestResponse;
 };
+
+export type PostAdminNotificationsMattermostTestResponse = PostAdminNotificationsMattermostTestResponses[keyof PostAdminNotificationsMattermostTestResponses];
 
 export type GetAdminOkfDocumentsData = {
     body?: never;
@@ -7250,21 +7435,40 @@ export type GetAdminSsoKeycloakConfigData = {
     url: '/admin/sso/keycloak/config';
 };
 
+export type GetAdminSsoKeycloakConfigErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSsoKeycloakConfigError = GetAdminSsoKeycloakConfigErrors[keyof GetAdminSsoKeycloakConfigErrors];
+
 export type GetAdminSsoKeycloakConfigResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: KeycloakConfigResponse;
 };
 
+export type GetAdminSsoKeycloakConfigResponse = GetAdminSsoKeycloakConfigResponses[keyof GetAdminSsoKeycloakConfigResponses];
+
 export type PostAdminSsoKeycloakConfigData = {
-    body?: never;
+    body: KeycloakConfigRequestWritable;
     path?: never;
     query?: never;
     url: '/admin/sso/keycloak/config';
 };
 
 export type PostAdminSsoKeycloakConfigErrors = {
+    /**
+     * sso_config_conflict or auth_required_for_sso: configuration not saved
+     */
+    409: AppError;
+    /**
+     * Inspect error.code: sso_reload_failed means already persisted but runtime activation pending; do not retry blindly. Other failures do not imply persistence.
+     */
+    500: AppError;
     /**
      * Error
      */
@@ -7283,13 +7487,21 @@ export type PostAdminSsoKeycloakConfigResponses = {
 export type PostAdminSsoKeycloakConfigResponse = PostAdminSsoKeycloakConfigResponses[keyof PostAdminSsoKeycloakConfigResponses];
 
 export type PutAdminSsoKeycloakConfigData = {
-    body?: never;
+    body: KeycloakConfigRequestWritable;
     path?: never;
     query?: never;
     url: '/admin/sso/keycloak/config';
 };
 
 export type PutAdminSsoKeycloakConfigErrors = {
+    /**
+     * sso_config_conflict or auth_required_for_sso: configuration not saved
+     */
+    409: AppError;
+    /**
+     * Inspect error.code: sso_reload_failed means already persisted but runtime activation pending; do not retry blindly. Other failures do not imply persistence.
+     */
+    500: AppError;
     /**
      * Error
      */
