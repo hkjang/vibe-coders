@@ -258,7 +258,7 @@ gh auth status
 
 ```powershell
 # 스크립트를 사용하여 릴리즈 업로드
-pwsh -File scripts/gh_release.ps1 -Version v0.86.9 -PrevVersion v0.86.7
+pwsh -File scripts/gh_release.ps1 -Version v0.86.9 -PrevVersion v0.86.8
 ```
 
 raw `gh release create`로 직접 게시하지 않습니다. 위 스크립트는 clean tree, annotated tag,
