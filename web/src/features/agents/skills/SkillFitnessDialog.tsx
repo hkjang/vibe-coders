@@ -60,7 +60,7 @@ export function SkillFitnessDialog({
         return editor.submit(target, values);
       }}
     >
-      <p className="skill-fitness-value">대상 스킬: {target.skill.name}</p>
+      <p className="skill-fitness-value skill-fitness-draft">대상 스킬: {target.skill.name}</p>
       <p>
         열 때 확인한 통과 근거 {target.baseline.passing_count}건 · 승격 기준 {target.baseline.required}건
       </p>

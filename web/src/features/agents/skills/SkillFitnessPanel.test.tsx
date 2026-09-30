@@ -130,6 +130,7 @@ describe("스킬 적합성 근거 공통 폼", () => {
   it("빈 참조/NEL과 비유한 점수는 첫 submit에서 오류를 보이고 전송하지 않는다", async () => {
     const { user, api } = setup();
     const { dialog } = await open(user);
+    expect(dialog.querySelector(".skill-fitness-draft")).toHaveTextContent("대상 스킬: 검토/skill");
     fireEvent.change(within(dialog).getByRole("textbox", { name: "참조 ID" }), {
       target: { value: " \u0085 " },
     });
