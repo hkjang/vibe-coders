@@ -95,6 +95,11 @@ export function displayProviderBaseURL(
   value: string,
   credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
 ): string {
+  // A configured prefix may contain URL delimiters and span components. Inspect
+  // that original representation before parsing can split it or fold host case.
+  const structuralPrefixes = credentialPrefixes.filter((prefix) => /[/:?&#=@]/u.test(prefix));
+  if (structuralPrefixes.length && containsConfiguredCredential(value, structuralPrefixes))
+    return invalidProviderURLDisplay;
   // WHATWG URL lowercases ASCII hosts and converts Unicode hosts to punycode.
   // Inspect the original host first, while case-sensitive configured prefixes
   // still exist. Userinfo is deliberately excluded: it is removed below without
@@ -140,8 +145,8 @@ export function displayProviderBaseURL(
   url.search = publicQuery.toString();
   // A configured prefix can itself contain query delimiters. Never reassemble
   // credential fragments that could not be attributed to one parsed field.
-  if (containsConfiguredCredential(url.search, credentialPrefixes)) return invalidProviderURLDisplay;
-  return url.toString();
+  const displayed = url.toString();
+  return containsConfiguredCredential(displayed, credentialPrefixes) ? invalidProviderURLDisplay : displayed;
 }
 
 export function providerSearchContainsSensitiveValue(
