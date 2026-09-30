@@ -11,8 +11,10 @@ import {
   buildProviderRows,
   filterProviderRows,
   isProviderStatusFilter,
+  isSafeProviderCatalogName,
+  providerStatusLabels as statusLabels,
+  providerPageNumber as positivePage,
   type ProviderCatalogRow,
-  type ProviderStatusFilter,
 } from "@/features/gateway/providers/provider-catalog";
 import {
   ProviderTable,
@@ -25,27 +27,14 @@ import { isHealthRange, type HealthRange } from "@/features/health/health-utils"
 import { TimeRangePicker } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { healthStatusLabels, uiLabels } from "@/config/ui-labels";
+import { uiLabels } from "@/config/ui-labels";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
-import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-ref";
+import { isProviderRef } from "@/shared/api/provider-ref";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 
 const pageSize = 10;
 const defaultRange: HealthRange = "24h";
-const statusLabels: Record<ProviderStatusFilter, string> = {
-  all: "전체 상태",
-  enabled: "활성",
-  disabled: "비활성",
-  healthy: healthStatusLabels.healthy,
-  degraded: healthStatusLabels.degraded,
-  unknown: healthStatusLabels.unknown,
-};
-
-function positivePage(value: string | null): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-}
 
 export function ProviderPage(): React.JSX.Element {
   const auth = useAuth();
@@ -57,9 +46,13 @@ export function ProviderPage(): React.JSX.Element {
   const requestedQuery = searchParams.get("q") ?? "";
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isProviderStatusFilter(requestedStatus) ? requestedStatus : "all";
-  const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
+  const unsafeStoredQuery = containsPotentialSecret(requestedQuery, auth.credentialPrefixes);
   const query = unsafeStoredQuery ? "" : requestedQuery;
   const requestedProvider = searchParams.get("provider")?.trim() ?? "";
+  const invalidRequestedProvider =
+    requestedProvider !== "" &&
+    !isProviderRef(requestedProvider) &&
+    !isSafeProviderCatalogName(requestedProvider, auth.credentialPrefixes);
   const selectedRef = isProviderRef(requestedProvider) ? requestedProvider : "";
   const currentPage = positivePage(requestedPage);
   const canReadRouting = auth.user?.scopes.includes("routing:read") ?? false;
@@ -85,14 +78,14 @@ export function ProviderPage(): React.JSX.Element {
   const updateSearch = useCallback(
     (updates: Readonly<Record<string, string | undefined>>, replace = true, state?: unknown): void => {
       const next = new URLSearchParams(searchParams);
-      if (containsPotentialSecret(next.get("q") ?? "")) next.delete("q");
+      if (containsPotentialSecret(next.get("q") ?? "", auth.credentialPrefixes)) next.delete("q");
       for (const [key, value] of Object.entries(updates)) {
         if (value === undefined || value === "") next.delete(key);
         else next.set(key, value);
       }
       setSearchParams(next, { replace, state });
     },
-    [searchParams, setSearchParams],
+    [searchParams, setSearchParams, auth.credentialPrefixes],
   );
 
   useEffect(() => {
@@ -100,27 +93,24 @@ export function ProviderPage(): React.JSX.Element {
     if (requestedRange !== null && !isHealthRange(requestedRange)) updates.range = defaultRange;
     if (requestedStatus !== null && !isProviderStatusFilter(requestedStatus)) updates.status = undefined;
     if (unsafeStoredQuery) updates.q = undefined;
-    if (
-      requestedProvider !== "" &&
-      !isProviderRef(requestedProvider) &&
-      !isSafeLegacyProviderName(requestedProvider)
-    ) {
-      updates.provider = undefined;
-    }
+    if (invalidRequestedProvider) updates.provider = undefined;
     if (requestedPage !== null && positivePage(requestedPage) === 1 && requestedPage !== "1") {
       updates.page = undefined;
     }
     if (Object.keys(updates).length > 0) {
       updateSearch(updates, true, {
         ...(unsafeStoredQuery ? { providerSearchRejected: true } : {}),
-        ...(requestedProvider !== "" &&
-        !isProviderRef(requestedProvider) &&
-        !isSafeLegacyProviderName(requestedProvider)
-          ? { providerDetailRejected: true }
-          : {}),
+        ...(invalidRequestedProvider ? { providerDetailRejected: true } : {}),
       });
     }
-  }, [requestedPage, requestedProvider, requestedRange, requestedStatus, unsafeStoredQuery, updateSearch]);
+  }, [
+    requestedPage,
+    invalidRequestedProvider,
+    requestedRange,
+    requestedStatus,
+    unsafeStoredQuery,
+    updateSearch,
+  ]);
 
   useEffect(() => {
     if (visibleSearchError) searchInputRef.current?.focus();
@@ -138,6 +128,7 @@ export function ProviderPage(): React.JSX.Element {
         slo.data?.evaluations,
         canReadRouting ? routing.data : undefined,
         healthPending,
+        auth.credentialPrefixes,
       ).sort(
         (left, right) =>
           left.provider.priority - right.provider.priority ||
@@ -150,9 +141,13 @@ export function ProviderPage(): React.JSX.Element {
       routing.data,
       slo.data?.evaluations,
       slo.data?.slos,
+      auth.credentialPrefixes,
     ],
   );
-  const filteredRows = useMemo(() => filterProviderRows(allRows, query, status), [allRows, query, status]);
+  const filteredRows = useMemo(
+    () => filterProviderRows(allRows, query, status, auth.credentialPrefixes),
+    [allRows, query, status, auth.credentialPrefixes],
+  );
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const page = Math.min(currentPage, pageCount);
   const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
@@ -167,7 +162,7 @@ export function ProviderPage(): React.JSX.Element {
   useEffect(() => {
     if (requestedProvider === "" || isProviderRef(requestedProvider)) return;
     if (!providers.data) return;
-    const legacyMatches = isSafeLegacyProviderName(requestedProvider)
+    const legacyMatches = isSafeProviderCatalogName(requestedProvider, auth.credentialPrefixes)
       ? allRows.filter((row) => !row.nameRedacted && row.provider.name === requestedProvider)
       : [];
     updateSearch(
@@ -175,7 +170,7 @@ export function ProviderPage(): React.JSX.Element {
       true,
       legacyMatches.length === 1 ? undefined : { providerDetailRejected: true },
     );
-  }, [allRows, providers.data, requestedProvider, updateSearch]);
+  }, [allRows, providers.data, requestedProvider, updateSearch, auth.credentialPrefixes]);
 
   const { closeProvider, rememberRowTrigger, rememberTrigger, returnFocusRef } = useProviderDialogFocus(
     selectedRef,
@@ -191,11 +186,11 @@ export function ProviderPage(): React.JSX.Element {
   const detailSearch = useCallback(
     (provider: string): string => {
       const next = new URLSearchParams(searchParams);
-      if (containsPotentialSecret(next.get("q") ?? "")) next.delete("q");
+      if (containsPotentialSecret(next.get("q") ?? "", auth.credentialPrefixes)) next.delete("q");
       next.set("provider", provider);
       return `?${next.toString()}`;
     },
-    [searchParams],
+    [searchParams, auth.credentialPrefixes],
   );
   const refreshAll = (): void => {
     void Promise.all([providers.refetch(), slo.refetch(), ...(canReadRouting ? [routing.refetch()] : [])]);
@@ -253,7 +248,7 @@ export function ProviderPage(): React.JSX.Element {
             event.preventDefault();
             const submittedQuery = new FormData(event.currentTarget).get("q");
             const nextQuery = typeof submittedQuery === "string" ? submittedQuery.trim() : "";
-            if (containsPotentialSecret(nextQuery)) {
+            if (containsPotentialSecret(nextQuery, auth.credentialPrefixes)) {
               setSearchError(secretSearchMessage);
               searchInputRef.current?.focus();
               return;
@@ -342,6 +337,7 @@ export function ProviderPage(): React.JSX.Element {
         canReadRouting={canReadRouting}
       />
       <ProviderTable
+        credentialPrefixes={auth.credentialPrefixes}
         allRowCount={allRows.length}
         detailSearch={detailSearch}
         filteredRowCount={filteredRows.length}
@@ -360,6 +356,7 @@ export function ProviderPage(): React.JSX.Element {
       />
 
       <ProviderDetailDialog
+        credentialPrefixes={auth.credentialPrefixes}
         canReadRouting={canReadRouting}
         onOpenChange={(open) => {
           if (!open) {
