@@ -434,10 +434,17 @@ test("390px 다크 상세는 긴 한글 원문 줄바꿈·실제 키보드 재�
   expect(await row(page, longName).getByText(longReason, { exact: true }).textContent()).toBe(longReason);
   await noOverflow(page);
   expect(await axe(page)).toEqual([]);
+  gateway.hold("trace", 2);
   await fullHit(retry(page, "trace"));
   await retry(page, "trace").click();
   await expect.poll(() => gateway.count("trace")).toBe(2);
+  await expect(retry(page, "trace")).toBeDisabled();
+  await expect(card(page).getByText("이전 처리 흐름을 표시합니다.", { exact: true })).toBeVisible();
+  await expect(retry(page, "trace")).toBeFocused();
+  await release(gateway, "trace", 2);
   await expect(retry(page, "trace")).toBeEnabled();
+  await expect(card(page).getByText("이전 처리 흐름을 표시합니다.", { exact: true })).toBeHidden();
+  await expect(retry(page, "trace")).toBeFocused();
   // Reach the adjacent independent query using a real Tab, then hold that
   // keyboard-triggered request. Do not focus it using script.
   await page.keyboard.press("Tab");
