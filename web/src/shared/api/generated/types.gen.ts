@@ -943,6 +943,76 @@ export type SettingsBatchResponse = {
     ok: boolean;
 };
 
+export type SkillFitnessAppendRequest = {
+    /**
+     * multimodel, golden or testcase; omitted/null/unknown values normalize to multimodel, not an enum validation error.
+     */
+    kind?: string | null;
+    note?: string | null;
+    passed?: boolean | null;
+    ref_id?: string | null;
+    score?: number | null;
+    /**
+     * Must remain nonblank after Go TrimSpace; not required to exist.
+     */
+    skill: string;
+};
+
+export type SkillFitnessEvidence = {
+    created_at: string;
+    /**
+     * Existing skill actor, normally the JWT subject; distinct from the pseudonymous admin audit actor.
+     */
+    created_by: string;
+    id: string;
+    /**
+     * Known kinds are multimodel, golden and testcase. Existing stored values are not rewritten.
+     */
+    kind: string;
+    note: string;
+    passed: boolean;
+    ref_id: string;
+    /**
+     * Recorded finite score, including zero, negative values and fractional values; no 0–100 range is imposed by this API.
+     */
+    score: number;
+    skill_name: string;
+};
+
+export type SkillFitnessRecordedResponse = {
+    /**
+     * Legacy successful POST returns an empty timestamp. A persisted timestamp is read via GET; do not treat the empty 201 timestamp as a failed append and retry.
+     */
+    created_at: '' | string;
+    /**
+     * Existing skill actor, normally the JWT subject; distinct from the pseudonymous admin audit actor.
+     */
+    created_by: string;
+    id: string;
+    /**
+     * Known kinds are multimodel, golden and testcase. Existing stored values are not rewritten.
+     */
+    kind: string;
+    note: string;
+    passed: boolean;
+    ref_id: string;
+    /**
+     * Recorded finite score, including zero, negative values and fractional values; no 0–100 range is imposed by this API.
+     */
+    score: number;
+    skill_name: string;
+};
+
+export type SkillFitnessResponse = {
+    evidence: Array<SkillFitnessEvidence>;
+    passing_count: number;
+    /**
+     * Existing gate threshold; not a per-skill promotion-readiness decision.
+     */
+    required: number;
+    skill: string;
+};
+
 export type StatusBucket = {
     class: string;
     requests: number;
@@ -7743,30 +7813,89 @@ export type GetAdminSkillsExportResponses = {
 export type GetAdminSkillsFitnessData = {
     body?: never;
     path?: never;
-    query?: never;
+    query: {
+        /**
+         * Skill name after Go TrimSpace; blank names are rejected. Names are not otherwise normalized or required to exist in the skill registry.
+         */
+        skill: string;
+    };
     url: '/admin/skills/fitness';
 };
+
+export type GetAdminSkillsFitnessErrors = {
+    /**
+     * missing_skill: skill query parameter is blank
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires admin read scope; POST requires admin write scope. Existing admin-read access includes note and reference text; no separate raw-prompt permission is applied.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: only GET and POST are supported
+     */
+    405: AppError;
+    /**
+     * list_failed: no confirmed evidence snapshot
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSkillsFitnessError = GetAdminSkillsFitnessErrors[keyof GetAdminSkillsFitnessErrors];
 
 export type GetAdminSkillsFitnessResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: SkillFitnessResponse;
 };
 
+export type GetAdminSkillsFitnessResponse = GetAdminSkillsFitnessResponses[keyof GetAdminSkillsFitnessResponses];
+
 export type PostAdminSkillsFitnessData = {
-    body?: never;
+    body: SkillFitnessAppendRequest;
     path?: never;
     query?: never;
     url: '/admin/skills/fitness';
 };
 
+export type PostAdminSkillsFitnessErrors = {
+    /**
+     * bad_request: invalid JSON, incompatible field types or blank skill; no row appended
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires admin read scope; POST requires admin write scope. Existing admin-read access includes note and reference text; no separate raw-prompt permission is applied.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: only GET and POST are supported
+     */
+    405: AppError;
+    /**
+     * add_failed: evidence could not be stored
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminSkillsFitnessError = PostAdminSkillsFitnessErrors[keyof PostAdminSkillsFitnessErrors];
+
 export type PostAdminSkillsFitnessResponses = {
     /**
      * OK
      */
-    200: unknown;
+    201: SkillFitnessRecordedResponse;
 };
+
+export type PostAdminSkillsFitnessResponse = PostAdminSkillsFitnessResponses[keyof PostAdminSkillsFitnessResponses];
 
 export type PostAdminSkillsImportData = {
     body?: never;

@@ -16,6 +16,7 @@ import type {
   GetAdminSkillsDependencyGraphData,
   GetAdminSkillsExportData,
   GetAdminSkillsFitnessData,
+  GetAdminSkillsFitnessResponse,
   GetAdminSkillsPromotionsData,
   GetAdminSkillsRunsData,
   GetAdminSkillsScanData,
@@ -39,6 +40,7 @@ import type {
   PostAdminSkillsData,
   PostAdminSkillsEvaluateData,
   PostAdminSkillsFitnessData,
+  PostAdminSkillsFitnessResponse,
   PostAdminSkillsImportData,
   PostAdminSkillsPromoteData,
   PostAdminSkillsRecommendData,
@@ -96,8 +98,6 @@ import {
   type SkillAdoptBody,
   type SkillEvaluateBody,
   type SkillExportQuery,
-  type SkillFitnessBody,
-  type SkillFitnessQuery,
   type SkillGraphQuery,
   type SkillImportBody,
   type SkillListQuery,
@@ -321,13 +321,13 @@ export const agentsEndpoints = {
       "/admin/skills/evaluate",
       skillEvaluationSchema,
     ),
-    fitness: operation<WithQuery<GetAdminSkillsFitnessData, SkillFitnessQuery>, unknown>()(
+    fitness: operation<GetAdminSkillsFitnessData, GetAdminSkillsFitnessResponse>()(
       "GET",
       "/admin/skills/fitness",
       skillFitnessSchema,
       z.object({ skill: z.string() }),
     ),
-    recordFitness: operation<WithBody<PostAdminSkillsFitnessData, SkillFitnessBody>, unknown>()(
+    recordFitness: operation<PostAdminSkillsFitnessData, PostAdminSkillsFitnessResponse>()(
       "POST",
       "/admin/skills/fitness",
       skillFitnessRecordedSchema,

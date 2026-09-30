@@ -3429,6 +3429,184 @@
         ],
         "type": "object"
       },
+      "SkillFitnessAppendRequest": {
+        "properties": {
+          "kind": {
+            "description": "multimodel, golden or testcase; omitted/null/unknown values normalize to multimodel, not an enum validation error.",
+            "nullable": true,
+            "type": "string"
+          },
+          "note": {
+            "nullable": true,
+            "type": "string"
+          },
+          "passed": {
+            "default": false,
+            "nullable": true,
+            "type": "boolean"
+          },
+          "ref_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "score": {
+            "default": 0,
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "skill": {
+            "description": "Must remain nonblank after Go TrimSpace; not required to exist.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill"
+        ],
+        "type": "object"
+      },
+      "SkillFitnessEvidence": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "description": "Existing skill actor, normally the JWT subject; distinct from the pseudonymous admin audit actor.",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "description": "Known kinds are multimodel, golden and testcase. Existing stored values are not rewritten.",
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "ref_id": {
+            "type": "string"
+          },
+          "score": {
+            "description": "Recorded finite score, including zero, negative values and fractional values; no 0–100 range is imposed by this API.",
+            "format": "double",
+            "type": "number"
+          },
+          "skill_name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "skill_name",
+          "kind",
+          "ref_id",
+          "passed",
+          "score",
+          "note",
+          "created_by",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SkillFitnessRecordedResponse": {
+        "properties": {
+          "created_at": {
+            "description": "Legacy successful POST returns an empty timestamp. A persisted timestamp is read via GET; do not treat the empty 201 timestamp as a failed append and retry.",
+            "oneOf": [
+              {
+                "enum": [
+                  ""
+                ],
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              }
+            ]
+          },
+          "created_by": {
+            "description": "Existing skill actor, normally the JWT subject; distinct from the pseudonymous admin audit actor.",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "description": "Known kinds are multimodel, golden and testcase. Existing stored values are not rewritten.",
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "ref_id": {
+            "type": "string"
+          },
+          "score": {
+            "description": "Recorded finite score, including zero, negative values and fractional values; no 0–100 range is imposed by this API.",
+            "format": "double",
+            "type": "number"
+          },
+          "skill_name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "skill_name",
+          "kind",
+          "ref_id",
+          "passed",
+          "score",
+          "note",
+          "created_by",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SkillFitnessResponse": {
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/SkillFitnessEvidence"
+            },
+            "type": "array"
+          },
+          "passing_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "required": {
+            "description": "Existing gate threshold; not a per-skill promotion-readiness decision.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "skill": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill",
+          "evidence",
+          "passing_count",
+          "required"
+        ],
+        "type": "object"
+      },
       "StatusBucket": {
         "additionalProperties": false,
         "properties": {
@@ -14235,10 +14413,80 @@
     },
     "/admin/skills/fitness": {
       "get": {
+        "description": "Returns confirmed evidence rows and the number of passing rows for the exact Go-trimmed skill name. An unknown skill returns an empty array, not 404. Duplicate references count as separate rows. required is the existing production-gate threshold, not a claim that this skill requires the gate or can be promoted. Listing performs no model execution, reference verification or promotion.",
         "operationId": "get__admin_skills_fitness",
+        "parameters": [
+          {
+            "description": "Skill name after Go TrimSpace; blank names are rejected. Names are not otherwise normalized or required to exist in the skill registry.",
+            "in": "query",
+            "name": "skill",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillFitnessResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "missing_skill: skill query parameter is blank"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires admin read scope; POST requires admin write scope. Existing admin-read access includes note and reference text; no separate raw-prompt permission is applied."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: only GET and POST are supported"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "list_failed: no confirmed evidence snapshot"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -14252,10 +14500,78 @@
         ]
       },
       "post": {
+        "description": "Appends one new evidence row on every successful request, including duplicate references; no idempotency or automatic retry guarantee is provided. The skill and reference need not exist and are not verified. kind is Go-trimmed and defaults to multimodel when omitted, null or unrecognized. Omitted/null passed is false and omitted/null score is 0; zero is a real recorded score, not an unscored marker. Skill, reference and note are Go-trimmed; names are otherwise opaque. Success returns the submitted row with created_at empty under the existing legacy contract; GET returns the timestamp generated by storage. created_by is the existing skill actor, whereas audit uses its existing pseudonymous token actor and kind/passed/ref payload. Audit is post-write best-effort, not atomic. Recording does not execute a model or promote a skill.",
         "operationId": "post__admin_skills_fitness",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillFitnessAppendRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillFitnessRecordedResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "bad_request: invalid JSON, incompatible field types or blank skill; no row appended"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: GET requires admin read scope; POST requires admin write scope. Existing admin-read access includes note and reference text; no separate raw-prompt permission is applied."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: only GET and POST are supported"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "add_failed: evidence could not be stored"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
