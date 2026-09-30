@@ -4,6 +4,8 @@ import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RoutingPage } from "@/features/routing/rules/RoutingPage";
+import { FeatureRoute } from "@/app/guards/FeatureRoute";
+import { migrationRegistry } from "@/config/migration-registry";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
@@ -336,7 +338,17 @@ afterEach(() => {
 });
 
 function render(route = "/routing/rules") {
-  return renderScreen(<RoutingPage />, { route, path: "/routing/rules/*" });
+  const feature = migrationRegistry.find((candidate) => candidate.featureId === "routing.rules");
+  if (!feature) throw new Error("missing routing.rules registry entry");
+  return renderScreen(
+    <FeatureRoute feature={feature}>
+      <RoutingPage />
+    </FeatureRoute>,
+    {
+      route,
+      path: "/routing/rules/*",
+    },
+  );
 }
 
 describe("RoutingPage", () => {
