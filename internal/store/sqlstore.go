@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -331,16 +332,47 @@ func (s *SQLStore) acquireMigrationLock(ctx context.Context) (func(), error) {
 		return nil, fmt.Errorf("open PostgreSQL migration lock connection: %w", err)
 	}
 	const migrationLockID int64 = 864260796
-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockID); err != nil {
+	discard := func() {
+		// Close alone returns a leased connection to the pool. An uncertain
+		// session lock must not be inherited by unrelated work.
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		_ = conn.Close()
-		return nil, fmt.Errorf("acquire PostgreSQL migration lock: %w", err)
 	}
-	return func() {
+	for {
+		if err := ctx.Err(); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("acquire PostgreSQL migration lock: %w", err)
+		}
+		var locked bool
+		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, migrationLockID).Scan(&locked); err != nil {
+			discard()
+			return nil, fmt.Errorf("acquire PostgreSQL migration lock: %w", err)
+		}
+		if locked {
+			break
+		}
+		// A blocking advisory-lock SELECT retains its statement snapshot while
+		// waiting. Concurrent index DDL on the current owner's other connection
+		// can then wait for that snapshot. Finish each try before waiting in Go.
+		wait := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			_ = conn.Close()
+			return nil, fmt.Errorf("acquire PostgreSQL migration lock: %w", ctx.Err())
+		case <-wait.C:
+		}
+	}
+	return sync.OnceFunc(func() {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = conn.ExecContext(releaseCtx, `SELECT pg_advisory_unlock($1)`, migrationLockID)
+		var unlocked bool
+		if err := conn.QueryRowContext(releaseCtx, `SELECT pg_advisory_unlock($1)`, migrationLockID).Scan(&unlocked); err != nil || !unlocked {
+			discard()
+			return
+		}
 		_ = conn.Close()
-	}, nil
+	}), nil
 }
 
 // renderForDialect turns a declared statement into the one this dialect actually runs.

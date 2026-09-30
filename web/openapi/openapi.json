@@ -15015,7 +15015,7 @@
     },
     "/admin/settings/rollback": {
       "post": {
-        "description": "Restore the previous non-secret value from the reviewed timestamp-ordered history event. Send expected_version, expected_updated_at, expected_history_id, and expected_history_count together to guard the entire snapshot, including deleted overrides (version 0 and empty timestamp). The count detects later appends even with clock skew; it does not define commit order. Omitted guards retain Legacy compatibility. Current state and history are rechecked atomically before persistence. A 409 setting_conflict means nothing was changed; a 503 setting_reload_pending means the rollback was stored but runtime reload is pending, so do not blindly retry.",
+        "description": "Restore the previous non-secret value from the reviewed timestamp-ordered history event. Send expected_version, expected_updated_at, expected_history_id, and expected_history_count together to guard the entire snapshot, including deleted overrides (version 0 and empty timestamp). The count detects later appends even with clock skew; it does not define commit order. Omitted guards retain Legacy compatibility. If the latest two history events have the same instant, rollback is rejected regardless of guards because their order is ambiguous; review the current value and set an explicit value instead. Current state and history are rechecked atomically before persistence. A 409 setting_conflict means nothing was changed; a 503 setting_reload_pending means the rollback was stored but runtime reload is pending, so do not blindly retry.",
         "operationId": "post__admin_settings_rollback",
         "requestBody": {
           "content": {
@@ -15046,7 +15046,7 @@
                 }
               }
             },
-            "description": "setting_conflict: reviewed setting or history changed; no write"
+            "description": "setting_conflict: reviewed setting or history changed, or latest history order is ambiguous; no write"
           },
           "503": {
             "content": {

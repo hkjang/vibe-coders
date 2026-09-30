@@ -363,6 +363,11 @@ fail closed로 중단합니다.
 
 ### 6.3 PostgreSQL 사용 시
 
+`v0.86.28`은 여러 인스턴스가 동시에 시작할 때 마이그레이션 잠금 대기가 다른 인스턴스의
+동시 인덱스 생성을 막는 순환을 방지하도록 보강합니다. 마이그레이션의 상호 배제와 스키마는
+유지합니다. 잠금 대기에서 호출자가 전달한 취소를 처리하지만, 전체 시작 시간 제한을 새로
+설정하거나 다른 장기 트랜잭션 때문에 생기는 모든 대기를 제거하는 변경은 아닙니다.
+
 `POSTGRES_DSN=postgres://user:pass@host:5432/db?sslmode=disable` 또는 `DATABASE_URL` 을 설정하면 자동으로 PostgreSQL 을 사용합니다. SQLite 와 동일한 스키마가 자동 생성됩니다. 백업은 운영 중인 Postgres 의 표준 백업(pg_basebackup/pg_dump) 으로 수행하세요.
 
 ---

@@ -55,6 +55,11 @@ type AdminSettingHistory struct {
 	HistoryCount int64  `json:"history_count"`
 }
 
+// Store writers use canonical UTC RFC3339Nano, whose fractional width varies.
+// Removing the terminal Z keeps prefix timestamps in chronological order without
+// changing stored precision. Equal timestamps and clock skew are not commit order.
+const adminSettingHistoryOrderSQL = "RTRIM(changed_at, 'Z') DESC, id DESC"
+
 // AdminSettingsChangeToken returns a token for all DB-backed settings consumed by the runtime
 // reload loop. The admin_settings aggregate changes on upserts and deletes. The SSO digest covers
 // every provider field so a Keycloak update made on one pod also reloads every other pod, even if
@@ -264,7 +269,7 @@ func (s *SQLStore) upsertAdminSettingTx(ctx context.Context, tx *sql.Tx, a Admin
 	}
 	if a.ExpectedHistoryID != nil {
 		var latestID string
-		err := tx.QueryRowContext(ctx, s.bind(`SELECT id FROM admin_setting_history WHERE key = ? ORDER BY changed_at DESC, id DESC LIMIT 1`), a.Key).Scan(&latestID)
+		err := tx.QueryRowContext(ctx, s.bind(`SELECT id FROM admin_setting_history WHERE key = ? ORDER BY `+adminSettingHistoryOrderSQL+` LIMIT 1`), a.Key).Scan(&latestID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -401,7 +406,7 @@ func (s *SQLStore) ListAdminSettingHistory(ctx context.Context, key string, limi
 	// The window count is evaluated before LIMIT in the same read snapshot as
 	// the reviewed rows. It is a per-key append generation, not commit order.
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, key, COALESCE(old_value_json, ''), COALESCE(new_value_json, ''), is_secret, COALESCE(changed_by, ''), COALESCE(reason, ''), changed_at, COUNT(*) OVER (PARTITION BY key)
-		FROM admin_setting_history `+where+` ORDER BY changed_at DESC, id DESC LIMIT ?`), args...)
+		FROM admin_setting_history `+where+` ORDER BY `+adminSettingHistoryOrderSQL+` LIMIT ?`), args...)
 	if err != nil {
 		return nil, err
 	}

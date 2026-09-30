@@ -7935,7 +7935,7 @@ export type PostAdminSettingsRollbackData = {
 
 export type PostAdminSettingsRollbackErrors = {
     /**
-     * setting_conflict: reviewed setting or history changed; no write
+     * setting_conflict: reviewed setting or history changed, or latest history order is ambiguous; no write
      */
     409: AppError;
     /**
