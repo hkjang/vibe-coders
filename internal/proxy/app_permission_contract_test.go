@@ -91,6 +91,52 @@ func TestAppPermissionContractAdditiveVisibilityAndIdempotence(t *testing.T) {
 	}
 }
 
+func TestAppPermissionContractOpaqueTargetsRemainDistinct(t *testing.T) {
+	f := newAppPermissionContractFixture(t)
+	app := f.app(t, "permission-active")
+	const canonical = "permission-user"
+	const prefixed = "\uFEFFpermission-user"
+	const unicodeTarget = "사용자-한글"
+	grant := func(subject string) {
+		t.Helper()
+		body, err := json.Marshal(map[string]string{"subject_type": "user", "subject_id": subject})
+		if err != nil {
+			t.Fatal("opaque target fixture encoding failed")
+		}
+		f.request(t, http.MethodPost, f.path, f.adminToken, string(body), http.StatusOK)
+	}
+	assertTargets := func(want ...string) {
+		t.Helper()
+		permissions := f.permissions(t)
+		if len(permissions) != len(want) {
+			t.Fatal("opaque permission targets must remain separate stored tuples")
+		}
+		for _, subject := range want {
+			if !slices.ContainsFunc(permissions, func(permission store.AppPermission) bool {
+				return permission.SubjectType == "user" && permission.SubjectID == subject
+			}) {
+				t.Fatal("permission API normalized or removed a different opaque target")
+			}
+		}
+	}
+	// ECMAScript trim removes U+FEFF, but the existing Go API preserves it.
+	// A UI must never normalize a stored revocation target into another tuple.
+	for _, subject := range []string{canonical, prefixed, unicodeTarget} {
+		grant(subject)
+	}
+	assertTargets(canonical, prefixed, unicodeTarget)
+	f.revoke(t, "user", canonical)
+	assertTargets(prefixed, unicodeTarget)
+	grant(canonical)
+	f.revoke(t, "user", prefixed)
+	assertTargets(canonical, unicodeTarget)
+	f.revoke(t, "user", unicodeTarget)
+	assertTargets(canonical)
+	if !reflect.DeepEqual(app, f.app(t, "permission-active")) {
+		t.Fatal("opaque permission target changes must not alter the base app")
+	}
+}
+
 func TestAppPermissionContractWriteDenialsPreserveState(t *testing.T) {
 	f := newAppPermissionContractFixture(t)
 	f.request(t, http.MethodPost, f.path, f.adminToken,
