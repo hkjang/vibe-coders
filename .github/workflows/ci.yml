@@ -266,7 +266,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.13
+      SOURCE_SBOM_VERSION: v0.86.14
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0
