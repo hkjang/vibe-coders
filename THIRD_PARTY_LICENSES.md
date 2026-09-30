@@ -189,7 +189,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `balanced-match` | 4.0.4 | MIT | transitive |
 | `baseline-browser-mapping` | 2.11.20 | Apache-2.0 | transitive |
 | `bidi-js` | 1.0.3 | MIT | transitive |
-| `brace-expansion` | 5.0.9 | MIT | transitive |
+| `brace-expansion` | 5.0.12 | MIT | transitive |
 | `browserslist` | 4.28.8 | MIT | transitive |
 | `bundle-name` | 4.1.0 | MIT | transitive |
 | `c12` | 3.3.4 | MIT | transitive |
@@ -391,7 +391,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `typescript-eslint` | 8.69.0 | MIT | build/test direct |
 | `typescript` | 6.0.3 | Apache-2.0 | build/test direct |
 | `undici-types` | 7.18.2 | MIT | transitive |
-| `undici` | 8.10.1 | MIT | transitive |
+| `undici` | 8.10.2 | MIT | transitive |
 | `update-browserslist-db` | 1.3.2 | MIT | transitive |
 | `uri-js` | 4.4.1 | BSD-2-Clause | transitive |
 | `use-callback-ref` | 1.3.3 | MIT | transitive |
