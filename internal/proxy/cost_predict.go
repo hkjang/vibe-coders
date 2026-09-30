@@ -27,23 +27,46 @@ func (s *Server) costSnapshotCached(ctx context.Context) *costSnapshot {
 	if c := s.costCache.Load(); c != nil && time.Since(c.fetchedAt) < costSnapshotTTL {
 		return c
 	}
+	s.costLoadMu.Lock()
+	defer s.costLoadMu.Unlock()
+	if c := s.costCache.Load(); c != nil && time.Since(c.fetchedAt) < costSnapshotTTL {
+		return c
+	}
+	s.costCacheMu.Lock()
+	generation := s.costGeneration
+	s.costCacheMu.Unlock()
 	snap := &costSnapshot{byModel: map[string]store.ModelStat{}, fetchedAt: time.Now()}
 	if stats, err := s.db.ModelStats(ctx, time.Now().Add(-7*24*time.Hour)); err == nil {
 		snap.byModel = stats
 	}
-	if f, found, err := s.db.GetFlag(ctx, "cost_guard_enabled"); err == nil && found {
-		snap.guardEnabled = f.Value == "true" || f.Value == "1"
-	}
-	if f, found, err := s.db.GetFlag(ctx, "cost_guard_threshold_krw"); err == nil && found {
-		if v, perr := parseFloat(f.Value); perr == nil {
-			snap.guardThreshold = v
+	// Runtime behavior deliberately retains its historical permissive parsing and
+	// defaults on read failures. Strict validation belongs to the admin editor.
+	if flags, err := s.db.GetRuntimeFlagSnapshot(ctx, costGuardFlagKeys); err == nil {
+		value := flags["cost_guard_enabled"].Value
+		snap.guardEnabled = value == "true" || value == "1"
+		if f, found := flags["cost_guard_threshold_krw"]; found {
+			if v, perr := parseFloat(f.Value); perr == nil {
+				snap.guardThreshold = v
+			}
 		}
 	}
-	s.costCache.Store(snap)
+	// A configuration save must not wait for the rolling statistics query. Keep
+	// the generation check and publication in the same short critical section,
+	// so an earlier in-flight reader cannot republish after invalidation.
+	s.costCacheMu.Lock()
+	if generation == s.costGeneration {
+		s.costCache.Store(snap)
+	}
+	s.costCacheMu.Unlock()
 	return snap
 }
 
-func (s *Server) invalidateCostCache() { s.costCache.Store(nil) }
+func (s *Server) invalidateCostCache() {
+	s.costCacheMu.Lock()
+	defer s.costCacheMu.Unlock()
+	s.costGeneration++
+	s.costCache.Store(nil)
+}
 
 // CostEstimate is a pre-call prediction for one chat request.
 type CostEstimate struct {

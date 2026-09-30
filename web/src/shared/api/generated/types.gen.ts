@@ -230,6 +230,28 @@ export type CategoryScore = {
     samples: number;
 };
 
+/**
+ * Optional fields; an empty object or null body preserves the existing configuration.
+ */
+export type CostGuardConfigRequest = {
+    /**
+     * Omit or null to retain the stored flag; false explicitly disables it.
+     */
+    enabled?: boolean | null;
+    /**
+     * Finite nonnegative decimal. Omit or null to retain the stored threshold; zero explicitly disables the global gate.
+     */
+    threshold_krw?: number | null;
+} | null;
+
+export type CostGuardConfigResponse = {
+    enabled: boolean;
+    /**
+     * Finite nonnegative KRW threshold. Zero disables the global gate even when enabled is true.
+     */
+    threshold_krw: number;
+};
+
 export type EmbeddingCacheStats = {
     bytes: number;
     entries: number;
@@ -2289,26 +2311,72 @@ export type GetAdminCostData = {
     url: '/admin/cost';
 };
 
+export type GetAdminCostErrors = {
+    /**
+     * invalid_api_key: admin read scope is required for GET; admin write scope is required for POST
+     */
+    401: AppError;
+    /**
+     * cost_guard_config_unavailable: no confirmed valid configuration snapshot; no POST changes committed
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminCostError = GetAdminCostErrors[keyof GetAdminCostErrors];
+
 export type GetAdminCostResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: CostGuardConfigResponse;
 };
 
+export type GetAdminCostResponse = GetAdminCostResponses[keyof GetAdminCostResponses];
+
 export type PostAdminCostData = {
-    body?: never;
+    body: CostGuardConfigRequest;
     path?: never;
     query?: never;
     url: '/admin/cost';
 };
 
+export type PostAdminCostErrors = {
+    /**
+     * invalid_body or invalid_threshold: invalid input; no fields changed
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: admin read scope is required for GET; admin write scope is required for POST
+     */
+    401: AppError;
+    /**
+     * cost_guard_save_failed: atomic storage failed; no success snapshot returned
+     */
+    500: AppError;
+    /**
+     * cost_guard_config_unavailable: no confirmed valid configuration snapshot; no POST changes committed
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminCostError = PostAdminCostErrors[keyof PostAdminCostErrors];
+
 export type PostAdminCostResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: CostGuardConfigResponse;
 };
+
+export type PostAdminCostResponse = PostAdminCostResponses[keyof PostAdminCostResponses];
 
 export type GetAdminCostAllocationData = {
     body?: never;

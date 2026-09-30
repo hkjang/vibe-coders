@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.14"
+var AppVersion = "v0.86.15"
 
 type Server struct {
 	cfg      config.Config
@@ -57,6 +57,9 @@ type Server struct {
 	knowledge       atomic.Pointer[knowledgeSnapshot]
 	deprecations    atomic.Pointer[deprecationSnapshot]
 	costCache       atomic.Pointer[costSnapshot]
+	costCacheMu     sync.Mutex // protects generation, publication and invalidation only
+	costLoadMu      sync.Mutex // coalesces misses without blocking configuration invalidation
+	costGeneration  uint64     // guarded by costCacheMu
 	learnCache      atomic.Pointer[routingLearnSnapshot]
 	priceCache      atomic.Pointer[pricingSnapshot]
 	mmCache         atomic.Pointer[mattermostSnapshot]

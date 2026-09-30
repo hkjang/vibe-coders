@@ -682,6 +682,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["400"] = map[string]any{"description": "Webhook missing or malformed", "content": jsonContent(schemaRef("AppError"))}
 		responses["502"] = map[string]any{"description": "webhook_failed: transport failed or the receiver rejected the test message; response body and URL are not echoed", "content": jsonContent(schemaRef("AppError"))}
 		responses["503"] = map[string]any{"description": "mattermost_config_unavailable: saved configuration could not be loaded", "content": jsonContent(schemaRef("AppError"))}
+	case "get /admin/cost", "post /admin/cost":
+		enrichCostGuardOpenAPIOperation(method, op, responses)
 	case "get /admin/tracking/violations", "delete /admin/tracking/violations":
 		responses["200"] = successResponse("TrackingStatusResponse")
 	case "get /admin/mcp/oauth":
@@ -966,6 +968,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range settingsEditorOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range costGuardOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range modelCatalogOpenAPISchemas() {

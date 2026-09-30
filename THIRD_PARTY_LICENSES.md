@@ -1,6 +1,6 @@
 # Third-party licenses
 
-이 문서는 Vibe Coders v0.86.14의 Go 실행 바이너리와 pnpm 잠금 그래프를 기준으로 생성한 통합 의존성 목록입니다.
+이 문서는 Vibe Coders v0.86.15의 Go 실행 바이너리와 pnpm 잠금 그래프를 기준으로 생성한 통합 의존성 목록입니다.
 React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포함하며, 전체 라이선스 원문과 저작권 표시는 각 배포 패키지의 `LICENSE*` 파일을 따릅니다.
 
 ## Go gateway dependencies
@@ -189,7 +189,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `balanced-match` | 4.0.4 | MIT | transitive |
 | `baseline-browser-mapping` | 2.11.20 | Apache-2.0 | transitive |
 | `bidi-js` | 1.0.3 | MIT | transitive |
-| `brace-expansion` | 5.0.9 | MIT | transitive |
+| `brace-expansion` | 5.0.12 | MIT | transitive |
 | `browserslist` | 4.28.8 | MIT | transitive |
 | `bundle-name` | 4.1.0 | MIT | transitive |
 | `c12` | 3.3.4 | MIT | transitive |
@@ -391,7 +391,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `typescript-eslint` | 8.69.0 | MIT | build/test direct |
 | `typescript` | 6.0.3 | Apache-2.0 | build/test direct |
 | `undici-types` | 7.18.2 | MIT | transitive |
-| `undici` | 8.10.1 | MIT | transitive |
+| `undici` | 8.10.2 | MIT | transitive |
 | `update-browserslist-db` | 1.3.2 | MIT | transitive |
 | `uri-js` | 4.4.1 | BSD-2-Clause | transitive |
 | `use-callback-ref` | 1.3.3 | MIT | transitive |
@@ -423,4 +423,4 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 - 최종 Distroless 이미지의 운영체제 구성요소는 릴리스 이미지 digest를 대상으로 별도 Syft 스캔해야 합니다.
 - `seed.sql`, `.gitframe/`, `output/`은 릴리스 및 커밋 범위에서 제외됩니다.
 
-재생성: `scripts/generate-source-sbom.sh v0.86.14`
+재생성: `scripts/generate-source-sbom.sh v0.86.15`

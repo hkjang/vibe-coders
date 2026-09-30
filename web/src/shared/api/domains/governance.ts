@@ -3,6 +3,7 @@
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
 
+import { costGuardSchema } from "./cost-guard";
 import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
   DeleteAdminAlertsIdData,
@@ -110,11 +111,7 @@ export interface AlertRuleUpdateBody {
 
 // ---------- cost guard (legacy `#/safety`) ----------
 
-const costGuardSchema = looseObject({
-  enabled: z.boolean().optional(),
-  threshold_krw: numberish.optional(),
-});
-export type CostGuard = z.infer<typeof costGuardSchema>;
+export type { CostGuard } from "./cost-guard";
 
 export interface CostGuardBody {
   readonly enabled: boolean;

@@ -1,122 +1,101 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
-import { z } from "zod";
+import { useSyncExternalStore } from "react";
 
-import { PanelFailure } from "@/features/governance/policies/governance-parts";
-import { apiClient } from "@/shared/api/client";
-import { endpoints } from "@/shared/api/endpoints";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
+import { CostGuardDialog } from "./CostGuardDialog";
+import { costGuardDescription, costGuardException } from "./cost-guard-state";
+import { useCostGuard } from "./use-cost-guard";
+import { PanelFailure } from "./governance-parts";
+import { tokenStore } from "@/shared/auth/token-store";
+import { CostGuardContractNotice } from "@/shared/components/form/CostGuardContractNotice";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { Input } from "@/shared/components/ui/Input";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Switch } from "@/shared/components/ui/Switch";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
-import { formatKRW } from "@/shared/utils/format";
+import { formatCostGuardThreshold } from "@/shared/utils/cost-guard";
 
-const routeId = "governance.policies";
-
-const costGuardFormSchema = z.object({
-  enabled: z.boolean(),
-  thresholdKrw: z.coerce.number().min(0, "임계값은 0 이상이어야 합니다."),
-});
-type CostGuardFormValues = z.output<typeof costGuardFormSchema>;
-type CostGuardFormInput = z.input<typeof costGuardFormSchema>;
-
-/**
- * Pre-call cost guard (legacy `#/safety`): blocks a request whose predicted cost
- * exceeds the per-request limit. Spend reporting itself lives in FinOps.
- */
 export function CostGuardSection({ canWrite }: { canWrite: boolean }): React.JSX.Element {
-  const guard = useQuery({
-    queryKey: ["governance", "cost-guard"],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.governance.costGuard.get, { signal, routeId }),
-  });
+  const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
+  // Security transitions dispose the editor and its late callbacks. Ordinary
+  // refresh never remounts the baseline or the dirty form.
+  return <CostGuardSession key={epoch} canWrite={canWrite} epoch={epoch} />;
+}
 
-  const form = useZodForm<CostGuardFormInput, CostGuardFormValues>(costGuardFormSchema, {
-    enabled: false,
-    thresholdKrw: 0,
-  });
-
-  const { reset } = form;
-  const loaded = guard.data;
-  useEffect(() => {
-    if (loaded) reset({ enabled: loaded.enabled === true, thresholdKrw: Number(loaded.threshold_krw ?? 0) });
-  }, [loaded, reset]);
-
-  const saveGuard = useMutationFeedback({
-    mutate: (values: CostGuardFormValues) =>
-      apiClient.request(endpoints.domains.governance.costGuard.save, {
-        body: { enabled: values.enabled, threshold_krw: values.thresholdKrw },
-        routeId,
-      }),
-    invalidates: [["governance", "cost-guard"]],
-    successMessage: "비용 가드를 저장했습니다.",
-    errorMessage: "비용 가드를 저장하지 못했습니다.",
-  });
-
-  const enabled = form.watch("enabled");
-
+function CostGuardSession({ canWrite, epoch }: { canWrite: boolean; epoch: number }): React.JSX.Element {
+  const editor = useCostGuard(canWrite, epoch);
+  const { query, confirmed, target } = editor;
   return (
     <SectionCard
-      title="비용 가드"
-      description="호출 전 예상 비용이 한도를 넘으면 요청을 차단합니다. 지출 분석과 예산은 FinOps 화면에서 봅니다."
+      title="예상 비용 보호"
+      description={costGuardDescription}
       actions={
-        guard.data?.enabled ? (
-          <Badge tone="success">{`사용 중 · 요청당 ${formatKRW(guard.data.threshold_krw)}`}</Badge>
-        ) : (
-          <Badge tone="muted">중지</Badge>
-        )
+        <Badge
+          tone={
+            !confirmed ? "warning" : confirmed.enabled && confirmed.threshold_krw > 0 ? "success" : "muted"
+          }
+        >
+          {!confirmed
+            ? "설정 미확인"
+            : confirmed.enabled && confirmed.threshold_krw > 0
+              ? "사용 중"
+              : "비용 검사 제한 없음"}
+        </Badge>
       }
     >
-      {guard.isError ? (
+      <p>{costGuardException}</p>
+      <CostGuardContractNotice />
+      <KeyValueList
+        items={[
+          {
+            label: "보호 사용",
+            value: confirmed ? (confirmed.enabled ? "사용" : "사용 안 함") : "확인되지 않음",
+          },
+          {
+            label: "요청당 임계값",
+            value: confirmed ? formatCostGuardThreshold(confirmed.threshold_krw) : "확인되지 않음",
+          },
+        ]}
+      />
+      {query.isError ? (
         <PanelFailure
-          error={guard.error}
-          hasData={Boolean(guard.data)}
-          label="비용 가드 설정"
-          onRetry={() => void guard.refetch()}
+          error={query.error}
+          hasData={false}
+          label="비용 보호 설정"
+          onRetry={() => void query.refetch()}
         />
+      ) : editor.supported && !confirmed ? (
+        <p role="status">
+          {query.isFetching || query.isPending
+            ? "비용 보호 설정을 불러오는 중입니다."
+            : "설정 조회가 필요합니다. 사용 여부와 임계값을 확인한 뒤 수정할 수 있습니다."}
+        </p>
       ) : null}
-      <form
-        className="governance-actions"
-        onSubmit={form.handleSubmit(async (values) => {
-          await saveGuard.mutateAsync(values);
-        })}
-      >
-        <Switch
-          checked={enabled}
-          disabled={!canWrite}
-          title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-          label="비용 가드 사용"
-          onCheckedChange={(checked) => form.setValue("enabled", checked, { shouldDirty: true })}
-        />
-        <FormField
-          label="요청당 임계값 (KRW)"
-          description="0이면 제한하지 않습니다."
-          error={form.formState.errors.thresholdKrw?.message}
-        >
-          {(control) => (
-            <Input
-              {...control}
-              type="number"
-              min={0}
-              step="1"
-              disabled={!canWrite}
-              {...form.register("thresholdKrw")}
-            />
-          )}
-        </FormField>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={!canWrite || saveGuard.isPending}
-          title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-        >
-          비용 가드 저장
+      {editor.committed && !confirmed ? (
+        <InlineNotice tone="warning" title="설정 저장은 완료됐습니다.">
+          후속 조회를 확인하지 못했거나 진행 중입니다. 저장을 다시 전송하지 말고 현재 설정을 다시 조회하세요.
+        </InlineNotice>
+      ) : null}
+      <div className="governance-actions">
+        <Button disabled={query.isFetching || editor.pending} onClick={() => void query.refetch()}>
+          비용 보호 설정 새로고침
         </Button>
-      </form>
+        <Button
+          variant="primary"
+          disabled={!canWrite || !confirmed || editor.pending || Boolean(target)}
+          title={
+            !canWrite
+              ? "설정 변경 권한(admin:write)이 필요합니다."
+              : !confirmed
+                ? "현재 설정을 먼저 확인하세요."
+                : undefined
+          }
+          onClick={(event) => editor.open(event.currentTarget)}
+        >
+          비용 보호 설정 수정
+        </Button>
+      </div>
+      {target ? (
+        <CostGuardDialog key={target.instance} target={target} editor={editor} canWrite={canWrite} />
+      ) : null}
     </SectionCard>
   );
 }

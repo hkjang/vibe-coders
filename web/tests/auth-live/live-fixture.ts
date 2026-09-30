@@ -1,5 +1,7 @@
 import { expect, test as base, type Page } from "@playwright/test";
 
+import { waitForAccessRejection } from "./expiry-sync";
+
 // Only the isolated Go harness supplies these values. Keep credentials in
 // memory; no storage-state, screenshots, traces or raw response reports.
 export const required = (key: string): string => {
@@ -88,4 +90,54 @@ export async function refreshStatus(page: Page, refresh: string): Promise<number
     });
     return response.status;
   }, refresh);
+}
+
+export async function waitForActualAccessExpiry(
+  page: Page,
+  access: string,
+  ttlSeconds: number,
+): Promise<void> {
+  await waitForAccessRejection(
+    (remainingMs) =>
+      page.evaluate(
+        async ({ token, ttl, timeout }) => {
+          let expiry = 0;
+          let validClaims = false;
+          try {
+            const segment = token.split(".")[1] ?? "";
+            const claims: unknown = JSON.parse(atob(segment.replaceAll("-", "+").replaceAll("_", "/")));
+            if (typeof claims === "object" && claims !== null && "exp" in claims && "iat" in claims) {
+              const exp = claims.exp;
+              const iat = claims.iat;
+              validClaims =
+                typeof exp === "number" &&
+                typeof iat === "number" &&
+                Number.isSafeInteger(exp) &&
+                Number.isSafeInteger(iat) &&
+                iat > 0 &&
+                exp - iat === ttl;
+              if (validClaims) expiry = exp as number;
+            }
+          } catch {
+            // No decoded claims or parse error details leave browser memory.
+          }
+          if (!validClaims)
+            return { status: 0, validClaims: false, validServerDate: false, expiredAtServer: false };
+          const response = await fetch("/auth/me", {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: "no-store",
+            signal: AbortSignal.timeout(timeout),
+          });
+          const serverTime = Date.parse(response.headers.get("date") ?? "");
+          return {
+            status: response.status,
+            validClaims: true,
+            validServerDate: Number.isFinite(serverTime),
+            expiredAtServer: Number.isFinite(serverTime) && serverTime >= expiry * 1_000,
+          };
+        },
+        { token: access, ttl: ttlSeconds, timeout: remainingMs },
+      ),
+    { ttlSeconds },
+  );
 }

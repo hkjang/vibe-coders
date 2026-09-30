@@ -9,12 +9,15 @@ import { renderScreen } from "@/test/render";
 
 const authRuntime = vi.hoisted(() => ({
   scopes: ["admin:read", "admin:write", "security:read"] as string[],
+  backendVersion: undefined as string | undefined,
 }));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return {
+    useAuth: () => testAuth({ scopes: authRuntime.scopes, backendVersion: authRuntime.backendVersion }),
+  };
 });
 
 vi.mock("sonner", () => ({ toast: { success: toastSpy.success, error: toastSpy.error } }));
@@ -301,6 +304,7 @@ function mockAllEndpoints(overrides: Record<string, () => unknown> = {}) {
 
 beforeEach(() => {
   authRuntime.scopes = ["admin:read", "admin:write", "security:read"];
+  authRuntime.backendVersion = undefined;
   toastSpy.success.mockClear();
   toastSpy.error.mockClear();
 });
@@ -314,6 +318,15 @@ function render(route = "/governance/policies") {
 }
 
 describe("PoliciesPage", () => {
+  it("구버전에서는 비용 설정만 막고 기존 정책 편집은 유지한다", async () => {
+    authRuntime.backendVersion = "v0.86.14";
+    const api = mockAllEndpoints();
+    render();
+    expect(await screen.findByText("비용 보호 설정의 서버 버전을 확인하세요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "비용 보호 설정 수정" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "정책 추가" })).toBeEnabled();
+    expect(api.bodies("POST /admin/cost")).toEqual([]);
+  });
   it("안전 정책 탭에 긴급 정지 상태와 정책·승인·알림을 표시한다", async () => {
     mockAllEndpoints();
     render();
@@ -409,7 +422,7 @@ describe("PoliciesPage", () => {
     expect(await screen.findByRole("button", { name: "승인 요청 apr_1 승인" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "오류율 경보 사용" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "오류율 경보 알림 규칙 수정" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "비용 가드 저장" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "비용 보호 설정 수정" })).toBeDisabled();
     expect(screen.getByText("읽기 전용으로 열려 있습니다.")).toBeInTheDocument();
   });
 
@@ -476,22 +489,25 @@ describe("PoliciesPage", () => {
     await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("알림 규칙을 중지했습니다."));
   });
 
-  it("비용 가드 한도를 저장한다", async () => {
+  it("확인된 비용 보호 설정을 대화상자에서 저장한다", async () => {
     const api = mockAllEndpoints();
     const user = userEvent.setup();
     render();
 
+    const edit = await screen.findByRole("button", { name: "비용 보호 설정 수정" });
+    await waitFor(() => expect(edit).toBeEnabled());
+    await user.click(edit);
     const threshold = await screen.findByLabelText(/요청당 임계값/u);
     await waitFor(() => expect(threshold).toHaveValue(500));
-    await user.click(screen.getByRole("switch", { name: "비용 가드 사용" }));
+    await user.click(screen.getByRole("switch", { name: "예상 비용 보호 사용" }));
     await user.clear(threshold);
     await user.type(threshold, "900");
-    await user.click(screen.getByRole("button", { name: "비용 가드 저장" }));
+    await user.click(screen.getByRole("button", { name: "비용 보호 설정 저장" }));
 
     await waitFor(() =>
       expect(api.bodies("POST /admin/cost")).toEqual([{ enabled: true, threshold_krw: 900 }]),
     );
-    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("비용 가드를 저장했습니다."));
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("비용 보호 설정을 저장했습니다."));
   });
 
   it("URL 쿼리에서 탭과 조회 조건을 복원한다", async () => {
