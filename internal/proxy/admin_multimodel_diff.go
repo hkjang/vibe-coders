@@ -122,7 +122,7 @@ func (s *Server) handleMultiRunDiff(w http.ResponseWriter, r *http.Request, runI
 	}
 	mds := []*modelDiff{}
 	for _, res := range results {
-		if res.Status != "ok" || strings.TrimSpace(res.ResponsePreview) == "" {
+		if !successfulStoredMultiModelStatus(res.Status) || strings.TrimSpace(res.ResponsePreview) == "" {
 			// Keep failed/empty models visible but with no blocks.
 			mds = append(mds, &modelDiff{Model: res.Model, Blocks: []segBlock{}, keys: map[string]segBlock{},
 				Stats: map[string]any{"available": false}})

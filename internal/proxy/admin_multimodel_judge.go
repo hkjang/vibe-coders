@@ -71,7 +71,7 @@ func (s *Server) handleMultiRunJudge(w http.ResponseWriter, r *http.Request) {
 	// Cost range across answered models (for relative cost-efficiency scoring).
 	minCost, maxCost, maxLen := -1.0, 0.0, 1
 	for _, res := range results {
-		if res.Status != "ok" {
+		if !successfulStoredMultiModelStatus(res.Status) {
 			continue
 		}
 		if minCost < 0 || res.CostKRW < minCost {
@@ -106,7 +106,7 @@ func (s *Server) handleMultiRunJudge(w http.ResponseWriter, r *http.Request) {
 			ID: newID("mmj"), RunID: req.RunID, Model: res.Model, Method: method, Rubric: req.Rubric,
 			ResponseHash: res.ResponseHash, CreatedBy: actor,
 		}
-		if res.Status != "ok" || strings.TrimSpace(res.ResponsePreview) == "" {
+		if !successfulStoredMultiModelStatus(res.Status) || strings.TrimSpace(res.ResponsePreview) == "" {
 			j.Verdict = "fail"
 			j.ReasonSummary = "응답 없음/실패 — 평가 제외"
 			judgements = append(judgements, j)
@@ -331,7 +331,7 @@ func buildJudgePrompt(run store.MultiModelTestRun, results []store.MultiModelTes
 		b.WriteString("PROMPT: (original not stored; judge each answer on internal consistency, completeness, format, and safety)\n\n")
 	}
 	for _, res := range results {
-		if res.Status != "ok" || strings.TrimSpace(res.ResponsePreview) == "" {
+		if !successfulStoredMultiModelStatus(res.Status) || strings.TrimSpace(res.ResponsePreview) == "" {
 			continue
 		}
 		b.WriteString("=== MODEL: " + res.Model + " ===\n" + res.ResponsePreview + "\n\n")
