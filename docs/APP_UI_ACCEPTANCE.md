@@ -61,7 +61,7 @@
 | E2E-009 | 라우팅 미리보기 | 간접 | `RoutingPage.test.tsx`; 초안 영향 검토와 현재 설정 미리보기를 구분 |
 | E2E-010 | 정책 시뮬레이션 | 간접 | `PoliciesPage.test.tsx`; 실제 브라우저 시나리오 필요 |
 | E2E-011 | API Key 최초 발급 | 실제 서버 흐름 | `AUTH-LIVE-006`: 실제 발급 201·기본 권한·비밀 일회 표시·저장소 비저장·닫기/새로고침/재로그인 후 비노출·공개 GET. `009`: 발급 후 늦은 실제 응답을 다른 계정에서 격리. 회전·소유권의 모든 조합은 별도 |
-| E2E-012 | 미저장 변경 경고 | 부분 UI 흐름 | `unsaved-changes.spec.ts`의 공통 폼, `settings-unsaved.spec.ts`의 콘솔 전환·개별 설정, `settings-inline-unsaved.spec.ts`의 SSO·알림, `provider-review.spec.ts`의 공급자 검토·뒤로가기, `key-scope-drafts.spec.ts`의 관리자 API 키와 `me-key-scope-drafts.spec.ts`의 개인 키 권한, `app-permission-drafts.spec.ts`의 앱 추가 접근 권한, `cost-guard-drafts.spec.ts`의 확인된 비용 설정 편집 보호. 닫기·이동·저장 잠금·세션 격리·좁은 다크 화면을 확인하며 다른 자체 편집창은 잔여 |
+| E2E-012 | 미저장 변경 경고 | 부분 UI 흐름 | `unsaved-changes.spec.ts`의 공통 폼, `settings-unsaved.spec.ts`의 콘솔 전환·개별 설정, `settings-inline-unsaved.spec.ts`의 SSO·알림, `provider-review.spec.ts`의 공급자 검토·뒤로가기, `key-scope-drafts.spec.ts`의 관리자 API 키와 `me-key-scope-drafts.spec.ts`의 개인 키 권한, `app-permission-drafts.spec.ts`의 앱 추가 접근 권한, `cost-guard-drafts.spec.ts`의 확인된 비용 설정, `request-note-drafts.spec.ts`의 원본 유지·상위 상세창 보호. 닫기·이동·저장 잠금·세션 격리·좁은 다크 화면을 확인하며 다른 자체 편집창은 잔여 |
 | E2E-013 | 오류 후 재시도 | UI 흐름 | `app-shell.spec.ts` |
 | E2E-014 | 기존 화면 이동 | UI 흐름 | `app-shell.spec.ts`; 가로챈 기존 화면 도착으로 실제 `/admin` 건전성을 입증하지 않음 |
 | E2E-015 | React 오류 후 기존 화면 정상 | 간접 | 오류 경계·Go route 격리 검사; 실제 Go 인스턴스와 브라우저 연속 흐름 필요 |
@@ -168,7 +168,10 @@
   감사와 메타데이터를 확인한다. 구버전 v0.86.15의 실제 핸들러에서도 PATCH 거부와 DB 불변을
   별도로 확인했다. 쓰기·스냅샷·커밋 오류 및 자기 커밋 응답 검사는 브라우저 검사가 아니다.
   실제 메모 편집 UI+Go E2E, 동시 편집 CAS·진행 중 저장 취소·운영 승격은 잔여다.
-  브라우저 fixture 검증 결과는 해당 커밋의 실행 후 별도로 반영한다.
+  `request-note-drafts.spec.ts`의 40개 API fixture 시나리오는 필드 의도·구버전 PATCH 거부·
+  초안 고정·권한/세션·LLM/XView의 상위 닫기/접기/선택 변경과 390px 다크 접근성·넘침을 검사한다.
+  정상 저장 후 재조회로 원래 버튼이 잠겨 있어도 열린 상세창 안으로 포커스가 복귀하고,
+  취소·폐기는 원래 버튼으로 돌아가는 회귀를 구분한다. 실제 Go 저장을 수행한 브라우저 근거는 아니다.
 - 스킬 평가 근거와 레드팀 일정도 영속 저장 초안이다.
   런타임 설정의 검색 폼, 필터, 시뮬레이션과 실행 확인창은 별도 분류한다.
 - 기존 `/admin`의 마스킹된 메모 재저장 방식은 호환을 위해 유지한다. 신규 계약을 추가한 것을
