@@ -9,11 +9,34 @@
   overflow: auto;
 }
 .model-tag-draft,
-.model-tag-draft .data-table-scroll {
+.model-tag-comparison {
   min-width: 0;
 }
-.model-tag-draft td {
-  max-width: 20rem;
+.model-tag-comparison .data-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+.model-tag-comparison th,
+.model-tag-comparison td {
+  padding: var(--space-2);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.model-tag-comparison th {
+  position: static;
+}
+.model-tag-comparison th:first-child {
+  width: 24%;
+}
+.model-tag-delete-target {
+  min-width: 0;
+  margin: 0;
+}
+.model-tag-delete-target dt {
+  font-weight: 600;
+}
+.model-tag-delete-target dd {
+  margin: var(--space-2) 0 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }

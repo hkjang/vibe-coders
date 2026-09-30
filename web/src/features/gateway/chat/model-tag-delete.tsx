@@ -19,6 +19,7 @@ import {
   tagDeleteIdentityReason,
   tagListReason,
 } from "./model-tag-state";
+import "./model-tag.css";
 
 export function ModelTagDelete({
   row,
@@ -47,7 +48,7 @@ export function ModelTagDelete({
     <ConfirmDialog
       open
       title="모델 용도 태그 삭제"
-      description={`원본 모델 ID ${displayTagModel(row.model)}의 태그만 삭제합니다. 공백·FEFF는 문자 코드로, 역슬래시는 두 번 표시합니다. 모델 자체를 삭제하는 작업은 아닙니다.`}
+      description="선택한 원본 모델 ID의 용도 태그만 삭제합니다. 모델 자체를 삭제하는 작업은 아닙니다."
       tone="danger"
       confirmLabel="삭제"
       confirmDisabled={operation.pending || !!reason}
@@ -71,6 +72,11 @@ export function ModelTagDelete({
         );
       }}
     >
+      <dl className="model-tag-delete-target">
+        <dt>삭제할 원본 모델 ID</dt>
+        <dd>{displayTagModel(row.model)}</dd>
+      </dl>
+      <p>공백·FEFF는 문자 코드로, 역슬래시는 두 번 표시합니다.</p>
       {reason ? (
         <InlineNotice tone="warning" title="태그 삭제 잠김">
           {reason} 선택한 원본 ID는 유지됩니다.

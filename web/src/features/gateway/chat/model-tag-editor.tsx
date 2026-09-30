@@ -170,6 +170,23 @@ export function ModelTagEditor({ original, access, data, onClose, returnFocusRef
       }}
     >
       <div className="model-tag-draft form-grid">
+        <div className="toolbar-start" role="group" aria-label="태그 검토 도구">
+          <Button disabled={operation.pending || !!reason} onClick={() => void prepare()}>
+            변경 내용 검토
+          </Button>
+          <Button
+            disabled={operation.pending || data.query.isFetching || !access.readAllowed}
+            onClick={() => void data.refresh().catch(fail)}
+          >
+            목록 다시 조회
+          </Button>
+          <Button
+            disabled={operation.pending || !data.confirmed || !access.write.allowed || !!identityReason}
+            onClick={rebase}
+          >
+            최신 기준 다시 선택
+          </Button>
+        </div>
         {reason ? (
           <InlineNotice tone="warning" title="태그 저장 잠김">
             {reason} 초안은 유지됩니다.
@@ -189,20 +206,6 @@ export function ModelTagEditor({ original, access, data, onClose, returnFocusRef
             ) : null}
           </InlineNotice>
         ) : null}
-        <div className="toolbar-start">
-          <Button
-            disabled={operation.pending || data.query.isFetching || !access.readAllowed}
-            onClick={() => void data.refresh().catch(fail)}
-          >
-            목록 다시 조회
-          </Button>
-          <Button
-            disabled={operation.pending || !data.confirmed || !access.write.allowed || !!identityReason}
-            onClick={rebase}
-          >
-            최신 기준 다시 선택
-          </Button>
-        </div>
         <fieldset className="form-grid form-dialog-fields" disabled={operation.pending || !!reason}>
           {tagFields.map(([key, label]) => (
             <FormField
@@ -227,7 +230,6 @@ export function ModelTagEditor({ original, access, data, onClose, returnFocusRef
               }
             </FormField>
           ))}
-          <Button onClick={() => void prepare()}>변경 내용 검토</Button>
         </fieldset>
         {review ? (
           <section className="form-grid">
@@ -243,7 +245,7 @@ export function ModelTagEditor({ original, access, data, onClose, returnFocusRef
                 ? "기존 모델의 태그 전체를 덮어씁니다. 빈 값은 기존 내용을 지웁니다."
                 : "이 ID의 새 태그를 추가합니다."}
             </InlineNotice>
-            <div className="data-table-scroll" tabIndex={0} aria-label="태그 변경 비교 표 영역">
+            <div className="model-tag-comparison" role="region" aria-label="태그 변경 비교 표 영역">
               <table className="data-table">
                 <caption className="sr-only">태그 변경 전후 비교</caption>
                 <thead>
