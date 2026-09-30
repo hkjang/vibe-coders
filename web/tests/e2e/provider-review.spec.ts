@@ -42,7 +42,7 @@ function bootstrap(authenticated: boolean): UiBootstrapResponse {
       keycloak_enabled: false,
       allow_local_login: true,
       sso_login_url: "/auth/keycloak/login",
-      credential_prefixes: ["corp_"],
+      credential_prefixes: ["corp_", "%41_"],
     },
     ...(authenticated ? { user } : {}),
     capabilities: { raw_prompt_view: false },
@@ -289,6 +289,13 @@ async function installGateway(context: BrowserContext) {
         provider.name === publicName ? { ...provider, base_url: url } : provider,
       );
     },
+    setPublicReadOnlyFields: (url: string, privateText: string) => {
+      providers = providers.map((provider) =>
+        provider.name === publicName
+          ? { ...provider, base_url: url, model_patterns: privateText, failover_group: privateText }
+          : provider,
+      );
+    },
     hold: (key: "save" | "delete" | "impact") => {
       gates.set(key, new Promise<void>((resolve) => releases.set(key, resolve)));
     },
@@ -435,6 +442,40 @@ test("권한 부족을 0건으로 표시하지 않고 이전 조회 성공 뒤�
   await expect(dialog).toBeHidden();
   expect(gateway.saves).toEqual([expectedSave({ base_url: revisedUrl })]);
 });
+
+for (const prefix of ["corp_", "%41_"]) {
+  test(`${prefix} 접두어 비밀값을 공급자 목록·상세·비교에서 숨기고 URL 검색에 남기지 않는다`, async ({
+    page,
+    gateway,
+  }) => {
+    const credential = `${prefix}${"B".repeat(32)}`;
+    gateway.setPublicReadOnlyFields(
+      `https://readonly.example.invalid/v1?value=${encodeURIComponent(credential)}`,
+      credential,
+    );
+    await login(page);
+    const listing = page.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
+    await expect(listing).toContainText("https://readonly.example.invalid/v1?value=***");
+    expect(await listing.evaluate((element) => element.outerHTML)).not.toContain("B".repeat(32));
+    await publicRow(page).getByRole("link", { name: publicName, exact: true }).click();
+    const details = page.getByRole("dialog", { name: publicName, exact: true });
+    await expect(details).toBeVisible();
+    expect(await details.evaluate((element) => element.outerHTML)).not.toContain("B".repeat(32));
+    await page.keyboard.press("Escape");
+    await expect(details).toBeHidden();
+    await page.getByLabel("공급자 검색", { exact: true }).fill(credential);
+    await page.getByRole("button", { name: "검색", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("비밀정보를 제거");
+    expect(page.url()).not.toContain("B".repeat(32));
+    const dialog = await openEditor(page);
+    await review(dialog);
+    expect(await dialog.getByRole("table").evaluate((element) => element.outerHTML)).not.toContain(
+      "B".repeat(32),
+    );
+    expect(gateway.saves).toEqual([]);
+    expect(gateway.deletions).toEqual([]);
+  });
+}
 
 test("사용자 지정 비밀키 접두사를 로그인 설정에서 받아 비교 화면 전체에 적용한다", async ({
   page,

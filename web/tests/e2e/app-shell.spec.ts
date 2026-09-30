@@ -801,6 +801,32 @@ test("removes secret and arbitrary route query state before rendering the Provid
   await expect(page).toHaveURL(/\/app\/gateway\/providers\?status=enabled$/);
 });
 
+test("keeps an older backend on the provider Legacy bridge despite advertised preview availability", async ({
+  page,
+}) => {
+  const providerRequests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/admin/providers" || path === "/admin/provider-impact") providerRequests.push(path);
+  });
+  await mockGateway(page, {
+    bootstrapPayload: { ...bootstrap, backend_version: "v0.86.8", ui_version: "v0.86.8" },
+  });
+  await page.goto("gateway/providers");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await expect(
+      page.getByRole("heading", { name: "이 기능은 안정 운영 화면에서 제공됩니다." }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: /기존 화면에서 AI 공급자 열기/ })).toHaveAttribute(
+      "href",
+      "/admin#/settings",
+    );
+    await expect(page.getByRole("button", { name: "공급자 추가", exact: true })).toHaveCount(0);
+    expect(providerRequests).toEqual([]);
+    if (attempt === 0) await page.reload();
+  }
+});
+
 test("opens and reloads the read-only System Health deep link", async ({ page }) => {
   await mockGateway(page);
   await page.goto("system/health");

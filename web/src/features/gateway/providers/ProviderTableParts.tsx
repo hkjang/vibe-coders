@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import {
   displayProviderBaseURL,
+  displayProviderText,
   type ProviderCatalogRow,
   type ProviderHealthState,
 } from "@/features/gateway/providers/provider-catalog";
@@ -17,6 +18,7 @@ import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { healthStatusLabels } from "@/config/ui-labels";
 import type { useProviderCatalogQueries } from "@/features/gateway/providers/use-provider-catalog";
+import { defaultCredentialPrefixes } from "@/shared/security/secrets";
 
 export function ProviderSummary({
   rows,
@@ -147,6 +149,7 @@ function ProviderHealthBadge({ health }: { health: ProviderHealthState }): React
 function createProviderColumns(
   detailSearch: (provider: string) => string,
   rememberTrigger: (trigger: HTMLElement, provider: string) => void,
+  credentialPrefixes: readonly string[],
   renderActions?: (row: ProviderCatalogRow) => ReactNode,
 ): ReadonlyArray<DataTableColumn<ProviderCatalogRow>> {
   const column = createDataTableColumnHelper<ProviderCatalogRow>();
@@ -163,7 +166,7 @@ function createProviderColumns(
           >
             {row.original.displayName}
           </Link>
-          <span>{displayProviderBaseURL(row.original.provider.base_url)}</span>
+          <span>{displayProviderBaseURL(row.original.provider.base_url, credentialPrefixes)}</span>
         </div>
       ),
     }),
@@ -188,12 +191,12 @@ function createProviderColumns(
         return value === undefined || row.original.health === "unknown" ? "-" : formatMilliseconds(value);
       },
     }),
-    column.accessor((row) => row.provider.model_patterns, {
+    column.accessor((row) => displayProviderText(row.provider.model_patterns, credentialPrefixes), {
       id: "patterns",
       header: "모델 패턴",
       cell: ({ getValue }) => <code className="provider-patterns">{getValue() || "모든 모델"}</code>,
     }),
-    column.accessor((row) => row.provider.failover_group, {
+    column.accessor((row) => displayProviderText(row.provider.failover_group, credentialPrefixes), {
       id: "failover",
       header: "장애 전환 / 우선순위",
       cell: ({ getValue, row }) => `${getValue() || "-"} / ${formatInteger(row.original.provider.priority)}`,
@@ -221,6 +224,7 @@ function createProviderColumns(
 }
 
 interface ProviderTableProps {
+  credentialPrefixes?: readonly string[];
   allRowCount: number;
   detailSearch: (provider: string) => string;
   filteredRowCount: number;
@@ -238,6 +242,7 @@ interface ProviderTableProps {
 }
 
 export function ProviderTable({
+  credentialPrefixes = defaultCredentialPrefixes,
   allRowCount,
   detailSearch,
   filteredRowCount,
@@ -253,8 +258,8 @@ export function ProviderTable({
   updatedAt,
 }: ProviderTableProps): React.JSX.Element {
   const columns = useMemo(
-    () => createProviderColumns(detailSearch, rememberTrigger, renderActions),
-    [detailSearch, rememberTrigger, renderActions],
+    () => createProviderColumns(detailSearch, rememberTrigger, credentialPrefixes, renderActions),
+    [detailSearch, rememberTrigger, credentialPrefixes, renderActions],
   );
   return (
     <section className="provider-list-section" aria-labelledby="provider-list-title">
