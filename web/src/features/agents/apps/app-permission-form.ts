@@ -13,10 +13,12 @@ export const appPermissionTypes = [
   { value: "team", label: "팀" },
 ];
 
-/** Unknown rows are displayable, but must never be coerced into a DELETE target. */
+/** Existing opaque IDs must survive validation exactly, not become another DELETE tuple.
+ * In particular, JavaScript trim removes U+FEFF while Go strings.TrimSpace does not.
+ */
 export function appPermissionTarget(permission: AppPermission): AppPermissionValues | undefined {
   const parsed = appPermissionSchema.safeParse(permission);
-  return parsed.success ? parsed.data : undefined;
+  return parsed.success && parsed.data.subject_id === permission.subject_id ? parsed.data : undefined;
 }
 
 export const appPermissionDescription =

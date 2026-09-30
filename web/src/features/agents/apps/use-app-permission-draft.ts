@@ -2,7 +2,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
-import { appPermissionKey, appPermissionSchema, type AppPermissionValues } from "./app-permission-form";
+import {
+  appPermissionKey,
+  appPermissionSchema,
+  appPermissionTarget,
+  type AppPermissionValues,
+} from "./app-permission-form";
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { apiClient } from "@/shared/api/client";
 import type { WorkApp } from "@/shared/api/domains/agents.schemas";
@@ -126,7 +131,11 @@ export function useAppPermissionDraft(canWrite: boolean) {
     }
     if (flight.current?.instance === draft.instance)
       throw new AppError("처리 중입니다.", { kind: "aborted" });
-    const tuple = appPermissionSchema.parse(draft.subject ?? values);
+    const tuple =
+      draft.kind === "revoke" ? appPermissionTarget(draft.subject ?? {}) : appPermissionSchema.parse(values);
+    if (!tuple) {
+      throw new AppError("대상 ID를 변경하지 않고 확인할 수 없어 회수할 수 없습니다.", { kind: "contract" });
+    }
     flight.current = draft;
     setPending(true);
     try {
