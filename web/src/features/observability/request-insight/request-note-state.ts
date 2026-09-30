@@ -27,6 +27,24 @@ export function confirmedRequestNote(state: QueryState | undefined, id: string):
 }
 
 const mode = z.enum(["preserve", "replace", "clear"]);
+const goWhitespaceOnly = /^\p{White_Space}*$/u;
+function replacementTags(input: string): string[] {
+  return input
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function hasStoredTagValue(input: string): boolean {
+  // Check emptiness only: Go cleanTags removes exactly one leading #, then
+  // strings.TrimSpace (Unicode White_Space, including NEL but not FEFF).
+  // Keep the existing outbound tags untouched; server normalization owns the
+  // stored values, and preserved fields never pass through this predicate.
+  return replacementTags(input).some(
+    (tag) => !goWhitespaceOnly.test(tag.startsWith("#") ? tag.slice(1) : tag),
+  );
+}
+
 export const requestNoteFormSchema = z
   .object({ noteMode: mode, tagsMode: mode, note: z.string(), tags: z.string() })
   .superRefine((values, context) => {
@@ -34,7 +52,7 @@ export const requestNoteFormSchema = z
       if (values[`${field}Mode`] !== "replace") continue;
       const value = values[field].trim();
       const label = field === "note" ? "메모" : "태그";
-      if (!value)
+      if (!value || (field === "tags" ? !hasStoredTagValue(values.tags) : goWhitespaceOnly.test(value)))
         context.addIssue({
           code: "custom",
           path: [field],
@@ -66,15 +84,7 @@ export function requestNoteBody(values: RequestNoteValues): RequestNoteBody {
   if (parsed.noteMode === "preserve") preserve_fields.push("note");
   else body.note = parsed.noteMode === "clear" ? "" : parsed.note.trim();
   if (parsed.tagsMode === "preserve") preserve_fields.push("tags");
-  else
-    body.tags = Object.freeze(
-      parsed.tagsMode === "clear"
-        ? []
-        : parsed.tags
-            .split(",")
-            .map((tag) => tag.trim())
-            .filter(Boolean),
-    );
+  else body.tags = Object.freeze(parsed.tagsMode === "clear" ? [] : replacementTags(parsed.tags));
   Object.freeze(preserve_fields);
   return Object.freeze(body);
 }

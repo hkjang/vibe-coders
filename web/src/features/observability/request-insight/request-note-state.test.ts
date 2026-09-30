@@ -86,4 +86,79 @@ describe("요청 메모 앱 계약", () => {
       false,
     );
   });
+  it.each([",", ", , ,", "#", "# , #", "\u0085", "#\u0085", "\u0085, #\u0085", "#\uFEFF"])(
+    "태그 전체 교체 %j가 서버 정리 후 비우기로 바뀌지 않는다",
+    (tags) => {
+      const values = {
+        ...requestNoteDefaults(requestNoteSchema.parse(note)),
+        tagsMode: "replace" as const,
+        tags,
+      };
+      const parsed = requestNoteFormSchema.safeParse(values);
+      expect(parsed.success).toBe(false);
+      if (!parsed.success)
+        expect(parsed.error.issues).toContainEqual(
+          expect.objectContaining({ path: ["tags"], message: "새 태그를 입력하거나 ‘비우기’를 선택하세요." }),
+        );
+      expect(() => requestNoteBody(values)).toThrow();
+    },
+  );
+  it.each(["\u0085", " \u0085\t"])("메모 교체 %j도 서버 공백 정리 후 빈 값이면 거부한다", (noteText) => {
+    const values = {
+      ...requestNoteDefaults(requestNoteSchema.parse(note)),
+      noteMode: "replace" as const,
+      note: noteText,
+    };
+    const parsed = requestNoteFormSchema.safeParse(values);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success)
+      expect(parsed.error.issues).toContainEqual(
+        expect.objectContaining({ path: ["note"], message: "새 메모를 입력하거나 ‘비우기’를 선택하세요." }),
+      );
+    expect(() => requestNoteBody(values)).toThrow();
+  });
+  it.each(["##", "#한글", "#, 새태그", "\u0085#", "#\uFEFF한글", "#\uFEFF\u0085"])(
+    "서버 정리 후 실제 값이 남는 %j는 기존 전송값을 바꾸지 않는다",
+    (tags) => {
+      const values = {
+        ...requestNoteDefaults(requestNoteSchema.parse(note)),
+        tagsMode: "replace" as const,
+        tags,
+      };
+      expect(requestNoteFormSchema.safeParse(values).success).toBe(true);
+      expect(requestNoteBody(values)).toEqual({
+        preserve_fields: ["note"],
+        tags: tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      });
+    },
+  );
+  it("서버 공백 정리 후 FEFF가 남는 메모의 기존 전송값을 유지한다", () => {
+    const noteText = "\u0085\uFEFF\u0085";
+    const values = {
+      ...requestNoteDefaults(requestNoteSchema.parse(note)),
+      noteMode: "replace" as const,
+      note: noteText,
+    };
+    expect(requestNoteFormSchema.safeParse(values).success).toBe(true);
+    expect(requestNoteBody(values)).toEqual({ preserve_fields: ["tags"], note: noteText });
+  });
+  it("유지·비우기는 입력란의 정리 결과와 관계없이 명시된 필드 의미를 보존한다", () => {
+    const values = {
+      ...requestNoteDefaults(requestNoteSchema.parse(note)),
+      tags: "# , \u0085",
+      note: "\u0085",
+    };
+    expect(requestNoteBody(values)).toEqual({ preserve_fields: ["note", "tags"] });
+    expect(requestNoteBody({ ...values, tagsMode: "clear" })).toEqual({
+      preserve_fields: ["note"],
+      tags: [],
+    });
+    expect(requestNoteBody({ ...values, noteMode: "clear" })).toEqual({
+      preserve_fields: ["tags"],
+      note: "",
+    });
+  });
 });

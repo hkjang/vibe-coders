@@ -179,6 +179,70 @@ for (const field of ["메모", "태그"] as const) {
   });
 }
 
+test("전체 교체는 정리 후 비는 메모·태그를 저장하지 않고 명시적 비우기와 구별한다", async ({
+  page,
+  gateway,
+}) => {
+  await login(page);
+  await showNote(page);
+  const dialog = await open(page);
+  await dialog.getByLabel("메모 변경 방법", { exact: true }).selectOption("replace");
+  const noteInput = dialog.getByLabel("새 메모", { exact: true });
+  await dialog.locator("form").evaluate((element) => {
+    element.setAttribute("data-fixture-submits", "0");
+    element.addEventListener("submit", () =>
+      element.setAttribute(
+        "data-fixture-submits",
+        String(Number(element.getAttribute("data-fixture-submits")) + 1),
+      ),
+    );
+  });
+  const nativeSubmissions = async () =>
+    Number(await dialog.locator("form").getAttribute("data-fixture-submits"));
+  const clickInvalidSave = async () => {
+    const submitted = await nativeSubmissions();
+    await save(dialog).scrollIntoViewIfNeeded();
+    const before = await save(dialog).boundingBox();
+    expect(before).not.toBeNull();
+    // Count the real native submit; never dispatch it or add a second click to
+    // hide a blur-validation layout jump between pointerdown and pointerup.
+    await save(dialog).click();
+    await expect.poll(nativeSubmissions).toBe(submitted + 1);
+    await expect(save(dialog)).toBeEnabled();
+    expect((await save(dialog).boundingBox())?.y).toBe(before?.y);
+  };
+  for (const value of ["\u0085", " \u0085\t"]) {
+    await noteInput.fill(value);
+    await clickInvalidSave();
+    await expect(dialog).toContainText("새 메모를 입력하거나 ‘비우기’를 선택하세요.");
+    await expect(noteInput).toBeFocused();
+    await expect(noteInput).toHaveValue(value);
+    expect(gateway.writes).toEqual([]);
+  }
+  await dialog.getByLabel("메모 변경 방법", { exact: true }).selectOption("preserve");
+  await dialog.getByLabel("태그 변경 방법", { exact: true }).selectOption("replace");
+  const input = dialog.getByLabel("새 태그", { exact: true });
+  for (const value of [", , ,", "# , #", "\u0085", "#\uFEFF"]) {
+    await input.fill(value);
+    await clickInvalidSave();
+    await expect(dialog).toContainText("새 태그를 입력하거나 ‘비우기’를 선택하세요.");
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue(value);
+    expect(gateway.writes).toEqual([]);
+  }
+  await input.fill("새태그");
+  await save(dialog).click();
+  await expect(dialog).toBeHidden();
+  expect(gateway.writes[0]?.body).toEqual({ preserve_fields: ["note"], tags: ["새태그"] });
+  const clear = await open(page);
+  await clear.getByLabel("메모 변경 방법", { exact: true }).selectOption("clear");
+  await expect(clear).toContainText("마스킹된 원본도 보존하지 않습니다.");
+  await save(clear).click();
+  await expect(clear).toBeHidden();
+  expect(gateway.writes).toHaveLength(2);
+  expect(gateway.writes[1]?.body).toEqual({ preserve_fields: ["tags"], note: "" });
+});
+
 for (const [name, note] of [
   ["태그만 있는 행", { ...initial, note: "" }],
   ["완전히 빈 행", { ...initial, note: "", tags: [] }],
