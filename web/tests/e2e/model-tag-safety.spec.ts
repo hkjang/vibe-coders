@@ -618,6 +618,13 @@ for (const close of ["취소", "Escape", "바깥"] as const) {
     await expect(page.getByRole("button", { name: "계속 편집", exact: true })).toBeFocused();
     await page.getByRole("button", { name: "계속 편집", exact: true }).click();
     await expect(guidance(dialog)).toHaveValue(revised);
+    if (close === "바깥") {
+      // Observe async focus restoration before another physical outside click.
+      await expect(
+        page.getByRole("alertdialog", { name: "저장하지 않은 변경사항이 있습니다", exact: true }),
+      ).toBeHidden();
+      await expect(guidance(dialog)).toBeFocused();
+    }
     await requestClose();
     await page.getByRole("button", { name: "변경 버리기", exact: true }).click();
     await expect(dialog).toBeHidden();

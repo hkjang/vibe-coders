@@ -25,6 +25,7 @@ AI 코딩 프록시 게이트웨이의 빌드·태깅·GitHub 릴리즈·오프�
 - [ ] `go test ./...` 전체 테스트 통과
 - [ ] `go build ./cmd/gateway` 빌드 오류 없음
 - [ ] `pnpm --dir web install --frozen-lockfile` 및 `pnpm --dir web check` 통과
+- [ ] React 브라우저 검사 전체가 첫 시도에 통과. CI는 진단용 재시도 1회를 유지하지만, 재시도로만 통과한 검사가 있으면 실패 처리하고 최초 실패 자료를 보존
 - [ ] `web/dist/index.html`과 hashed `web/dist/assets/*` 생성 확인
 - [ ] v0.80.0 이상은 Go+npm 통합 `SBOM.spdx.json`과 Frontend 포함 `THIRD_PARTY_LICENSES.md` 갱신
 - [ ] 최종 이미지 `scripts/container-smoke.sh` 검증 통과

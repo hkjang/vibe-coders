@@ -528,6 +528,11 @@ for (const way of ["취소", "Escape", "바깥"] as const) {
     await expect(guard).toBeVisible();
     await guard.getByRole("button", { name: "계속 편집", exact: true }).click();
     await expect(current.field).toHaveValue(forms[0].value);
+    if (way === "바깥") {
+      // Observe async focus restoration before another physical outside click.
+      await expect(guard).toBeHidden();
+      await expect(current.field).toBeFocused();
+    }
     await close();
     await guard.getByRole("button", { name: "변경 버리기", exact: true }).click();
     await expect(current.dialog).toBeHidden();
