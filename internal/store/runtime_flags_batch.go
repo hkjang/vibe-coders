@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"sort"
 	"strings"
@@ -43,7 +44,14 @@ func (s *SQLStore) SaveRuntimeFlagBatchValidated(ctx context.Context, updates []
 	}
 	ordered := append([]RuntimeFlag(nil), updates...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Key < ordered[j].Key })
-	tx, err := s.db.BeginTx(ctx, nil)
+	// Retain the connection until cleanup: some SQLite driver COMMIT failures
+	// leave the SQL transaction open after database/sql has marked its Tx done.
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +78,14 @@ func (s *SQLStore) SaveRuntimeFlagBatchValidated(ctx context.Context, updates []
 		}
 	}
 	if err := tx.Commit(); err != nil {
+		_ = tx.Rollback()
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if _, cleanupErr := conn.ExecContext(cleanupCtx, "ROLLBACK"); cleanupErr != nil {
+			// Close alone returns a connection to the pool. Discard it instead
+			// when we cannot confirm the failed transaction was cleaned up.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
 		return nil, err
 	}
 	return snapshot, nil
