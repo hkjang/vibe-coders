@@ -434,7 +434,7 @@ test("390px 다크 상세는 긴 한글 원문 줄바꿈·실제 키보드 재�
   expect(await row(page, longName).getByText(longReason, { exact: true }).textContent()).toBe(longReason);
   await noOverflow(page);
   expect(await axe(page)).toEqual([]);
-  gateway.hold("trace", 2);
+  gateway.hold("trace", 2, { body });
   await fullHit(retry(page, "trace"));
   await retry(page, "trace").click();
   await expect.poll(() => gateway.count("trace")).toBe(2);
@@ -461,6 +461,8 @@ test("390px 다크 상세는 긴 한글 원문 줄바꿈·실제 키보드 재�
   await row(page, toolName).scrollIntoViewIfNeeded();
   await expect(row(page, toolName)).toBeInViewport({ ratio: 1 });
   await noOverflow(page);
+  expect(await row(page, longName).locator("code").textContent()).toBe(longName);
+  expect(await row(page, longName).getByText(longReason, { exact: true }).textContent()).toBe(longReason);
   await page.screenshot({ path: info.outputPath("request-flow-long-records-explicit-scroll.png") });
   await fullHit(sheet(page).getByRole("button", { name: "패널 닫기", exact: true }));
   await sheet(page).getByRole("button", { name: "패널 닫기", exact: true }).click();
