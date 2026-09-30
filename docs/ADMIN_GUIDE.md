@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.16`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.17`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.16.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.16.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.17.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.17.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.16.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.17.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.16
+export GATEWAY_VERSION=v0.86.17
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -444,6 +444,24 @@ ID의 실제 존재 여부는 이 화면에서 확인하지 않습니다. 목록
 요청 로그는 삭제하지 않습니다. 저장 성공 뒤 조회만 실패하면 같은 변경을 재저장하지 말고 다시 조회하세요.
 다른 관리자의 동시 편집 차단이나 이미 진행 중인 서버 저장 취소 기능은 아닙니다. 기존 `/admin`의
 마스킹 값 재저장 방식은 바꾸지 않았으므로 원본 보존이 필요한 편집은 지원 버전의 새 콘솔을 사용하세요.
+
+`v0.86.17`의 **스킬 → 상세 → 적합성 근거 → 근거 기록**은 새 평가 근거를 추가하는 편집창입니다.
+열 때 확인한 스킬과 기준을 유지하며 조회가 갱신되거나 다른 항목이 선택되어도 작성 중인 입력을
+다른 스킬로 옮기지 않습니다. **여러 모델 비교 / 기준 답안 세트 / 테스트 사례**와 참조 ID를 입력하고,
+점수와 **통과** 여부를 각각 확인하세요. 점수를 비우면 기존 방식대로 **0점**이 저장됩니다.
+
+같은 참조를 다시 기록해도 별도 근거로 추가되며 통과한 기록은 중복 참조도 승격 요건 건수에 반영됩니다.
+서버가 참조의 존재나 평가 결과를 검증하는 기능은 아닙니다. 근거를 기록하는 것만으로 스킬이 승격되거나
+모델이 호출되지 않으며, 표시된 건수만으로 승격 가능 여부가 확정되지 않습니다.
+
+닫기·영역 접기·화면 이동에는 초안 폐기 확인을 제공하고 저장 중에는 중복 요청을 막습니다. 기록 성공 뒤
+목록 조회만 실패했다면 다시 기록하지 말고 **적합성 근거 새로고침**을 사용하세요. 응답이 불명확할 때도
+재전송 전에 목록을 확인하세요. 참조 ID·메모는 기존 관리자 읽기 권한으로 조회되므로 비밀값이나
+프롬프트·응답 원문을 넣지 마세요. 기존 목록에 없던 메모 원문을 새로 표시하지는 않습니다.
+
+기능 전환의 읽기 전용 설정은 일부 기존 쓰기 화면에 아직 연결되지 않았습니다. 해당 설정만으로 편집이
+금지됐다고 가정하지 말고 서버 역할·scope에 따른 실제 쓰기 권한을 확인하세요. 적용 누락과 보완 계획은
+[인수 검증표](APP_UI_ACCEPTANCE.md#확인된-공통-전환-제한-누락)에 따로 관리합니다.
 
 ## 4. 계정과 권한
 
