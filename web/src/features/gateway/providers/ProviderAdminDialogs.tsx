@@ -22,6 +22,7 @@ import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
 
 interface ProviderFormDialogProps {
+  credentialPrefixes?: readonly string[];
   onOpenChange: (open: boolean) => void;
   onSubmit: (body: ProviderWriteBody) => Promise<unknown>;
   open: boolean;

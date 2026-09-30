@@ -19,6 +19,19 @@ const integerText = (label: string, max: number) =>
     message: `${label}은(는) 정수여야 합니다.`,
   });
 
+// Exact public representation accepted by the Go handler only for an existing
+// unsafe legacy URL. It must not be accepted for a new or normally visible URL.
+export const redactedProviderURL = "[invalid or redacted provider URL]";
+const providerURLSchema = (allowPreservedURL = false) =>
+  z
+    .string()
+    .trim()
+    .min(1, "기본 URL을 입력하세요.")
+    .refine(
+      (value) => /^https?:\/\//u.test(value) || (allowPreservedURL && value === redactedProviderURL),
+      "http 또는 https로 시작하는 URL이어야 합니다.",
+    );
+
 export const providerFormSchema = z.object({
   name: z
     .string()
@@ -26,11 +39,7 @@ export const providerFormSchema = z.object({
     .min(1, "공급자 이름을 입력하세요.")
     .max(200)
     .refine((value) => !/[,\s]/u.test(value), "공급자 이름에는 공백과 쉼표를 넣을 수 없습니다."),
-  base_url: z
-    .string()
-    .trim()
-    .min(1, "기본 URL을 입력하세요.")
-    .refine((value) => /^https?:\/\//u.test(value), "http 또는 https로 시작하는 URL이어야 합니다."),
+  base_url: providerURLSchema(),
   api_key: z.string().default(""),
   timeout_ms: integerText("제한 시간", 600_000),
   model_patterns: z.string().trim().max(2000).default(""),
@@ -38,6 +47,12 @@ export const providerFormSchema = z.object({
   priority: integerText("우선순위", 100_000),
   enabled: z.boolean().default(true),
 });
+
+export function providerEditSchema(row: ProviderCatalogRow): typeof providerFormSchema {
+  return providerFormSchema.extend({
+    base_url: providerURLSchema(row.provider.base_url === redactedProviderURL),
+  });
+}
 
 export type ProviderFormInput = z.input<typeof providerFormSchema>;
 export type ProviderFormOutput = z.output<typeof providerFormSchema>;

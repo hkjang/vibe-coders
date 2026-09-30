@@ -1,7 +1,11 @@
 import type { UseFormReturn } from "react-hook-form";
 
 import type { ProviderCatalogRow } from "@/features/gateway/providers/provider-catalog";
-import type { ProviderFormInput, ProviderFormOutput } from "@/features/gateway/providers/provider-form";
+import {
+  redactedProviderURL,
+  type ProviderFormInput,
+  type ProviderFormOutput,
+} from "@/features/gateway/providers/provider-form";
 import { FormField } from "@/shared/components/form/FormField";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { Input } from "@/shared/components/ui/Input";
@@ -19,7 +23,16 @@ export function ProviderFormFields({
       <FormField label="이름" required error={form.formState.errors.name?.message}>
         {(control) => <Input {...control} readOnly={row !== undefined} {...form.register("name")} />}
       </FormField>
-      <FormField label="기본 URL" required error={form.formState.errors.base_url?.message}>
+      <FormField
+        label="기본 URL"
+        required
+        error={form.formState.errors.base_url?.message}
+        description={
+          row?.provider.base_url === redactedProviderURL
+            ? "서버가 기존 주소를 숨겼습니다. 표시값을 그대로 두면 기존 주소를 유지하고, 새 URL을 입력하면 교체합니다."
+            : undefined
+        }
+      >
         {(control) => <Input {...control} {...form.register("base_url")} />}
       </FormField>
       <FormField

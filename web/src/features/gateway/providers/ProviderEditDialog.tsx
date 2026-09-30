@@ -8,7 +8,7 @@ import { ProviderImpactPanel } from "@/features/gateway/providers/ProviderImpact
 import { useProviderImpact } from "@/features/gateway/providers/use-provider-impact";
 import type { ProviderCatalogRow } from "@/features/gateway/providers/provider-catalog";
 import {
-  providerFormSchema,
+  providerEditSchema,
   providerFormValues,
   providerWriteBody,
   type ProviderFormInput,
@@ -24,6 +24,7 @@ import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
 
 interface Props {
   row: ProviderCatalogRow;
+  credentialPrefixes?: readonly string[];
   initialEnabled?: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (body: ProviderWriteBody) => Promise<unknown>;
@@ -40,6 +41,7 @@ export function ProviderEditDialog(props: Props): React.JSX.Element {
 
 function ProviderEditor({
   row: initialRow,
+  credentialPrefixes,
   initialEnabled,
   onOpenChange,
   onSubmit,
@@ -47,7 +49,10 @@ function ProviderEditor({
 }: Props): React.JSX.Element {
   // Background list refreshes never replace the baseline or the reviewed payload.
   const [row] = useState(initialRow);
-  const form = useZodForm<ProviderFormInput, ProviderFormOutput>(providerFormSchema, providerFormValues(row));
+  const form = useZodForm<ProviderFormInput, ProviderFormOutput>(
+    providerEditSchema(row),
+    providerFormValues(row),
+  );
   const { setValue, setFocus } = form;
   const [review, setReview] = useState<ProviderWriteBody>();
   const [error, setError] = useState<{ message: string; requestId?: string }>();
@@ -146,7 +151,7 @@ function ProviderEditor({
             <h3 ref={heading} tabIndex={-1}>
               변경 내용 검토
             </h3>
-            <ProviderChangeReview row={row} body={review} />
+            <ProviderChangeReview row={row} body={review} credentialPrefixes={credentialPrefixes} />
             <ProviderImpactPanel review={impact} pending={guard.pending} />
           </section>
         ) : (

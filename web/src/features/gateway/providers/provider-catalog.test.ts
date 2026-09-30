@@ -90,6 +90,34 @@ function routingHealth(providerName: string): RoutingHealth {
 }
 
 describe("provider catalog", () => {
+  it.each([
+    "corp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+    "%63%6f%72%70%5fABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+    "%2563%256f%2572%2570%255fABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+  ])("runtime credential prefixes redact URL components without changing safe context (%s)", (secret) => {
+    const prefixes = ["corp_"];
+    expect(displayProviderBaseURL(`https://provider.example/v1/${secret}`, prefixes)).toBe(
+      invalidProviderURLDisplay,
+    );
+    const displayed = displayProviderBaseURL(
+      `https://provider.example/v1?api-version=2026-01-01&value=${secret}&${secret}=public&region=korea`,
+      prefixes,
+    );
+    expect(displayed).toBe("https://provider.example/v1?api-version=2026-01-01&value=***&region=korea");
+    expect(displayed).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+  });
+
+  it("runtime credential prefixes preserve ordinary names and do not alter default-prefix checks", () => {
+    expect(displayProviderBaseURL("https://provider.example/corp_short?value=corp_report", ["corp_"])).toBe(
+      "https://provider.example/corp_short?value=corp_report",
+    );
+    expect(
+      displayProviderBaseURL("https://provider.example/v1?value=vc_sk_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", [
+        "corp_",
+      ]),
+    ).toBe("https://provider.example/v1?value=***");
+  });
+
   it("uses available SLO evidence without treating disabled or unevaluated providers as healthy", () => {
     const rows = buildProviderRows(
       [provider("healthy"), provider("degraded"), provider("unknown"), provider("disabled", false)],

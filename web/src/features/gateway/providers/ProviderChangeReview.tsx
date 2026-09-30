@@ -2,28 +2,47 @@ import {
   displayProviderBaseURL,
   type ProviderCatalogRow,
 } from "@/features/gateway/providers/provider-catalog";
+import { redactedProviderURL } from "@/features/gateway/providers/provider-form";
 import type { ProviderWriteBody } from "@/shared/api/domains/gateway";
-import { containsPotentialSecret } from "@/shared/security/secrets";
+import { containsPotentialSecret, defaultCredentialPrefixes } from "@/shared/security/secrets";
 
-function publicText(value: string | undefined): string {
+function publicText(value: string | undefined, credentialPrefixes: readonly string[]): string {
   if (!value) return "미설정";
-  return containsPotentialSecret(value) ? "민감한 값은 비교에 표시하지 않습니다." : value;
+  return containsPotentialSecret(value, credentialPrefixes) ? "민감한 값은 비교에 표시하지 않습니다." : value;
 }
 
 export function ProviderChangeReview({
   row,
   body,
+  credentialPrefixes = defaultCredentialPrefixes,
 }: {
   row: ProviderCatalogRow;
   body: ProviderWriteBody;
+  credentialPrefixes?: readonly string[];
 }): React.JSX.Element {
   const before = row.provider;
   const rows = [
-    ["이름", publicText(before.name), publicText(body.name)],
-    ["기본 URL", displayProviderBaseURL(before.base_url), displayProviderBaseURL(body.base_url)],
+    ["이름", publicText(before.name, credentialPrefixes), publicText(body.name, credentialPrefixes)],
+    [
+      "기본 URL",
+      before.base_url === redactedProviderURL
+        ? "비공개 주소"
+        : displayProviderBaseURL(before.base_url, credentialPrefixes),
+      before.base_url === redactedProviderURL && body.base_url === redactedProviderURL
+        ? "기존 비공개 주소 유지"
+        : displayProviderBaseURL(body.base_url, credentialPrefixes),
+    ],
     ["API 키", before.api_key_configured ? "설정됨" : "미설정", body.api_key === undefined ? "유지" : "교체"],
-    ["모델 패턴", publicText(before.model_patterns), publicText(body.model_patterns)],
-    ["장애 전환 그룹", publicText(before.failover_group), publicText(body.failover_group)],
+    [
+      "모델 패턴",
+      publicText(before.model_patterns, credentialPrefixes),
+      publicText(body.model_patterns, credentialPrefixes),
+    ],
+    [
+      "장애 전환 그룹",
+      publicText(before.failover_group, credentialPrefixes),
+      publicText(body.failover_group, credentialPrefixes),
+    ],
     [
       "우선순위",
       String(before.priority),

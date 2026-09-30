@@ -11,11 +11,19 @@ import { usePreferences } from "@/shared/stores/preferences";
 import { mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
-const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write", "routing:read"] }));
+const authRuntime = vi.hoisted(() => ({
+  scopes: ["admin:read", "admin:write", "routing:read"],
+  credentialPrefixes: ["vc_sk_", "vc_sa_"],
+}));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return {
+    useAuth: () => ({
+      ...testAuth({ scopes: authRuntime.scopes }),
+      credentialPrefixes: authRuntime.credentialPrefixes,
+    }),
+  };
 });
 
 const providerRef = (seed: string): string =>
@@ -94,10 +102,46 @@ async function acknowledge(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   authRuntime.scopes = ["admin:read", "admin:write", "routing:read"];
+  authRuntime.credentialPrefixes = ["vc_sk_", "vc_sa_"];
   usePreferences.setState({ refreshInterval: 0 });
 });
 
 describe("ProviderPage administration", () => {
+  it("threads runtime authentication prefixes into edit review without mutating the submitted values", async () => {
+    authRuntime.credentialPrefixes = ["corp_"];
+    const secret = "corp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+    const baseURL = `https://review.example/v1?value=${secret}`;
+    const user = userEvent.setup();
+    const api = mockApi({ ...handlers(), "POST /admin/providers": () => ({ provider: { name: "openai" } }) });
+    renderProviders();
+    const row = (await screen.findByRole("link", { name: "openai" })).closest("tr");
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "수정" }));
+    const dialog = await screen.findByRole("dialog");
+    for (const [label, value] of [
+      [/^기본 URL/u, baseURL],
+      ["모델 패턴", secret],
+      ["장애 전환 그룹", secret],
+    ] as const) {
+      const input = within(dialog).getByLabelText(label);
+      await user.clear(input);
+      await user.type(input, value);
+    }
+    await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
+    expect(within(dialog).getByRole("table", { name: "공급자 변경 전후 비교" })).not.toHaveTextContent(
+      secret,
+    );
+    expect(dialog.innerHTML).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+    expect(api.bodies("POST /admin/providers")).toHaveLength(0);
+    await acknowledge(user);
+    await user.click(within(dialog).getByRole("button", { name: "검토한 내용 저장" }));
+    await waitFor(() => expect(api.bodies("POST /admin/providers")).toHaveLength(1));
+    expect(api.bodies("POST /admin/providers")[0]).toMatchObject({
+      base_url: baseURL,
+      model_patterns: secret,
+      failover_group: secret,
+    });
+  });
+
   it("requires the exact deletion target before sending any request", async () => {
     const user = userEvent.setup();
     const api = mockApi({ ...handlers(), "DELETE /admin/providers/openai": () => ({ deleted: "openai" }) });

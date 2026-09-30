@@ -207,7 +207,7 @@ export function ProviderPage(): React.JSX.Element {
     renderRowActions,
     dialogs: adminDialogs,
     writeDeniedReason,
-  } = useProviderAdministration(canWrite);
+  } = useProviderAdministration(canWrite, auth.credentialPrefixes);
   const providerSummaryUnavailable = providers.isPending || (providers.isError && !providers.data);
 
   return (
