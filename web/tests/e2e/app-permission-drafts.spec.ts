@@ -566,12 +566,26 @@ test("390px 다크 앱 접근 추가·회수와 중첩 폐기 확인은 키보�
   await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await login(page);
   const sheet = await openPermissions(page);
+  await revokeTrigger(sheet).scrollIntoViewIfNeeded();
+  for (const button of await sheet.getByRole("button", { name: /권한 회수$/u }).all()) {
+    const lineCount = await button.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return new Set(
+        Array.from(range.getClientRects())
+          .filter((rect) => rect.width > 0 && rect.height > 0)
+          .map((rect) => Math.round(rect.top * 10)),
+      ).size;
+    });
+    expect(lineCount).toBe(1);
+  }
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
   expect(await axeViolations(page)).toEqual([]);
+  await page.screenshot({ path: info.outputPath("app-permission-table-mobile-dark.png") });
   const form = await openGrant(page, sheet);
   await fillGrant(form, longSubject);
   await expect(add(form)).toBeInViewport();
