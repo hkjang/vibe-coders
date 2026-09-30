@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.25`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.26`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.25.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.25.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.26.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.26.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.25.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.26.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.25
+export GATEWAY_VERSION=v0.86.26
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -1601,6 +1601,20 @@ curl -X POST http://<host>:8080/admin/routing-rules \
 목록만 재조회합니다. 실제 라우팅 선택은 전체 라우팅 활성 여부·조건·우선순위에 따르며,
 다른 서버가 설정을 읽기 전까지 반영이 지연될 수 있습니다. 검토 중 다른 관리자의 저장을
 원자적으로 막는 기능은 아닙니다. 이 보호는 사용·중지 작업에 한정되며 규칙 편집 전체와는 구분합니다.
+
+#### 현재 설정의 라우팅 미리보기
+
+`/app/routing/rules/preview`에서 요청 모델·정책 API 키 ID·샘플을 입력하고 **미리보기 실행**을
+누릅니다. 키 원문이 아니라 식별자를 사용하세요. 알려진 비밀키 형태는 전송 전에 차단합니다.
+샘플은 계산을 위해 서버에 전송되지만 실제 모델은 호출하지 않습니다. 실행한 모델과 키 정책을
+현재 입력과 구분하며, 입력을 바꾸면 **입력이 달라졌습니다** 안내가 표시됩니다. 변경한 입력은
+자동으로 다시 실행하지 않습니다. 샘플 원문은 결과나 URL·브라우저 저장소에 추가로 남기지 않습니다.
+
+이 계산은 기존 `routing:read` 권한으로 기능 읽기 전용 상태에서도 사용합니다. 서버의 기존 인증
+규칙은 유지하므로 Legacy 읽기 전용 토큰의 POST까지 허용하는 변경은 아닙니다. 오류의 요청 ID를
+확인한 뒤 직접 재실행하세요. 예상 계획은 실제 호출 권한·성공·장애 전환 이력을 보장하지 않으며,
+서버 설정·캐시·호출 시점 상태에 따라 실제 선택이 달라질 수 있습니다. 서버·프록시 전체의 정보
+비저장이나 요청 취소를 보장하지 않습니다. 인접한 비용 예측과 규칙 변경 작업은 별도 기능입니다.
 
 ### 9.2.2 라우팅 학습 추천 (Routing Learning Engine)
 
