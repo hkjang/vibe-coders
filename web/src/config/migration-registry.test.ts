@@ -35,7 +35,7 @@ const legacyOnlyAdmin: AuthUser = {
 };
 
 describe("migration registry", () => {
-  it("requires the provider impact contract even when an older server advertises availability", () => {
+  it("requires provider impact and masked round-trip contracts despite older server availability", () => {
     const fallback = migrationRegistry.find((feature) => feature.featureId === "gateway.providers");
     if (!fallback) throw new Error("provider registry entry is missing");
     const [feature] = registryFromBootstrap([
@@ -56,14 +56,14 @@ describe("migration registry", () => {
       },
     ]);
     if (!feature) throw new Error("provider feature is missing");
-    expect(feature.minimumApiVersion).toBe("v0.86.9");
+    expect(feature.minimumApiVersion).toBe("v0.86.10");
     for (const candidate of [feature, fallback]) {
-      expect(resolveFeature(candidate, gatewayAdmin, "v0.86.8")).toMatchObject({
+      expect(resolveFeature(candidate, gatewayAdmin, "v0.86.9")).toMatchObject({
         status: "legacy",
         readOnly: true,
         reason: "api_version",
       });
-      expect(resolveFeature(candidate, gatewayAdmin, "v0.86.9")).toMatchObject({
+      expect(resolveFeature(candidate, gatewayAdmin, "v0.86.10")).toMatchObject({
         status: "preview",
         readOnly: false,
       });
@@ -187,7 +187,7 @@ describe("migration registry", () => {
         enabledRoles: ["super_admin", "admin", "ai_admin"],
         rolloutPercent: 100,
         fallbackEnabled: true,
-        minimumApiVersion: featureId === "gateway.providers" ? "v0.86.9" : "v0.84.0",
+        minimumApiVersion: featureId === "gateway.providers" ? "v0.86.10" : "v0.84.0",
       });
       expect(isAppFeatureImplemented(feature.featureId)).toBe(true);
       expect(resolveFeature(feature, gatewayAdmin, feature.minimumApiVersion)).toMatchObject({

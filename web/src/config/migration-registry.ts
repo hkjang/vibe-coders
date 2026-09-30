@@ -119,7 +119,7 @@ export const migrationRegistry = [
     enabledRoles: ["super_admin", "admin", "ai_admin"],
     rolloutPercent: 100,
     fallbackEnabled: true,
-    minimumApiVersion: "v0.86.9",
+    minimumApiVersion: "v0.86.10",
   },
   {
     featureId: "gateway.models",

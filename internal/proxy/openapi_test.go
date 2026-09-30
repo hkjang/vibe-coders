@@ -17,6 +17,28 @@ import (
 	"vibe-coders/internal/store"
 )
 
+func TestProviderProjectionOpenAPIDescribesPreservationWithoutLosingSuccess(t *testing.T) {
+	paths := buildOpenAPISpec()["paths"].(map[string]any)
+	operations := paths["/admin/providers"].(map[string]any)
+	for _, method := range []string{"get", "post"} {
+		operation := operations[method].(map[string]any)
+		responses := operation["responses"].(map[string]any)
+		if _, exists := responses["200"]; !exists {
+			t.Errorf("provider %s success response was lost", method)
+		}
+		description, _ := operation["description"].(string)
+		if !strings.Contains(description, "X-Vibe-UI: app") || !strings.Contains(description, "Legacy") {
+			t.Errorf("provider %s projection boundary is not documented", method)
+		}
+	}
+	postDescription := operations["post"].(map[string]any)["description"].(string)
+	for _, boundary := range []string{"exactly matching", "empty or omitted", "not a version check"} {
+		if !strings.Contains(postDescription, boundary) {
+			t.Errorf("provider POST preservation contract is missing %q", boundary)
+		}
+	}
+}
+
 func TestOpenAPISwaggerAndVersion(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

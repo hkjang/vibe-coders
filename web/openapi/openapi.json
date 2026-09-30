@@ -3780,7 +3780,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.9"
+    "version": "v0.86.10"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -10026,6 +10026,7 @@
     },
     "/admin/providers": {
       "get": {
+        "description": "With X-Vibe-UI: app, URL, model_patterns and failover_group are bounded public projections; credential-bearing values may be replaced with a non-secret display marker. Original secrets are not returned to support editing. Legacy response behavior and server authorization remain unchanged.",
         "operationId": "get__admin_providers",
         "responses": {
           "200": {
@@ -10060,6 +10061,7 @@
         ]
       },
       "post": {
+        "description": "Existing provider upsert. With X-Vibe-UI: app, a submitted URL, model_patterns or failover_group exactly matching its current masked public projection preserves that stored original. Different values replace it; empty or omitted model_patterns and failover_group retain full-upsert clear semantics. New app URLs containing credentials are rejected. The response and audit use public projections. This is not a version check or compare-and-swap; coordinate concurrent edits. Legacy write behavior remains unchanged.",
         "operationId": "post__admin_providers",
         "responses": {
           "200": {

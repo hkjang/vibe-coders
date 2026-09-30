@@ -749,7 +749,11 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			},
 		}
 	case "get /admin/providers":
+		op["description"] = "With X-Vibe-UI: app, URL, model_patterns and failover_group are bounded public projections; credential-bearing values may be replaced with a non-secret display marker. Original secrets are not returned to support editing. Legacy response behavior and server authorization remain unchanged."
 		responses["200"] = successResponse("ProviderListResponse")
+	case "post /admin/providers":
+		op["description"] = "Existing provider upsert. With X-Vibe-UI: app, a submitted URL, model_patterns or failover_group exactly matching its current masked public projection preserves that stored original. Different values replace it; empty or omitted model_patterns and failover_group retain full-upsert clear semantics. New app URLs containing credentials are rejected. The response and audit use public projections. This is not a version check or compare-and-swap; coordinate concurrent edits. Legacy write behavior remains unchanged."
+		return // Describe preservation without replacing the existing success response.
 	case "get /admin/provider-impact":
 		op["description"] = "Requires admin:read. Direct routing references additionally require routing:read; team-scoped callers do not receive global key/team counts. Read-only best-effort configuration assessment, not an atomic snapshot or deletion precondition. Full model catalogue, model usage, pattern-overlap failover, IP/model authorization and runtime call success are not assessed. Partial counts are confirmed lower bounds. No external/provider requests are made."
 		op["parameters"] = []any{map[string]any{"name": "provider_ref", "in": "query", "required": true, "schema": map[string]any{"type": "string", "pattern": `^prv_[A-Za-z0-9_-]{43}$`}}}

@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.9"
+var AppVersion = "v0.86.10"
 
 type Server struct {
 	cfg      config.Config
@@ -1212,15 +1212,21 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		for i := range providers {
 			rawName := providers[i].Name
 			if appProjection {
+				public := s.providerEditableFieldsForApp(rawName, providers[i].BaseURL, providers[i].ModelPatterns, providers[i].FailoverGroup)
 				providers[i].ProviderRef = providerRef(rawName)
-			}
-			if appProjection || !s.canViewRawPrompts(r) {
-				projectionArgs := s.externalCredentialProjectionArgs(rawName)
 				providers[i].Name = s.boundedModelsProviderLabelForConfig(rawName)
-				providers[i].ModelPatterns = boundedExternalProviderText(providers[i].ModelPatterns, projectionArgs...)
-				providers[i].FailoverGroup = boundedExternalProviderText(providers[i].FailoverGroup, projectionArgs...)
+				providers[i].BaseURL = public.BaseURL
+				providers[i].ModelPatterns = public.ModelPatterns
+				providers[i].FailoverGroup = public.FailoverGroup
+			} else {
+				if !s.canViewRawPrompts(r) {
+					projectionArgs := s.externalCredentialProjectionArgs(rawName)
+					providers[i].Name = s.boundedModelsProviderLabelForConfig(rawName)
+					providers[i].ModelPatterns = boundedExternalProviderText(providers[i].ModelPatterns, projectionArgs...)
+					providers[i].FailoverGroup = boundedExternalProviderText(providers[i].FailoverGroup, projectionArgs...)
+				}
+				providers[i].BaseURL = sanitizeProviderBaseURL(providers[i].BaseURL)
 			}
-			providers[i].BaseURL = sanitizeProviderBaseURL(providers[i].BaseURL)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
 	case http.MethodPost:
@@ -1272,9 +1278,21 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		legacyURLIsUnsafe := found && validateProviderBaseURL(before.BaseURL) != nil
 		publicLegacyURL := strings.TrimRight(sanitizeProviderBaseURL(before.BaseURL), "/")
 		preserveRedactedURL := legacyURLIsUnsafe && payload.BaseURL == publicLegacyURL
+		modelPatterns := strings.TrimSpace(payload.ModelPatterns)
+		failoverGroup := strings.TrimSpace(payload.FailoverGroup)
+		if appProjection && found {
+			public := s.providerEditableFieldsForApp(before.Name, before.BaseURL, before.ModelPatterns, before.FailoverGroup)
+			preserveRedactedURL = (before.BaseURL != public.BaseURL || public.BaseURL == invalidProviderURLDisplay) && payload.BaseURL == strings.TrimRight(public.BaseURL, "/")
+			modelPatterns = providerAppMetadataWriteValue(payload.ModelPatterns, before.ModelPatterns, public.ModelPatterns)
+			failoverGroup = providerAppMetadataWriteValue(payload.FailoverGroup, before.FailoverGroup, public.FailoverGroup)
+		}
+		validateURL := validateProviderBaseURL
+		if appProjection {
+			validateURL = s.validateProviderBaseURLForApp
+		}
 		if preserveRedactedURL {
 			payload.BaseURL = before.BaseURL
-		} else if err := validateProviderBaseURL(payload.BaseURL); err != nil {
+		} else if err := validateURL(payload.BaseURL); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_base_url")
 			return
 		}
@@ -1301,8 +1319,8 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			EncryptedAPIKey: encryptedKey,
 			TimeoutMS:       payload.TimeoutMS,
 			Enabled:         enabled,
-			ModelPatterns:   strings.TrimSpace(payload.ModelPatterns),
-			FailoverGroup:   strings.TrimSpace(payload.FailoverGroup),
+			ModelPatterns:   modelPatterns,
+			FailoverGroup:   failoverGroup,
 			Priority:        store.DefaultProviderPriority,
 		}
 		if payload.Priority != nil && *payload.Priority > 0 {
@@ -1333,6 +1351,10 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		}
 		if appProjection {
 			responseProvider["provider_ref"] = providerRef(provider.Name)
+			public := s.providerEditableFieldsForApp(provider.Name, provider.BaseURL, provider.ModelPatterns, provider.FailoverGroup)
+			responseProvider["base_url"] = public.BaseURL
+			responseProvider["model_patterns"] = public.ModelPatterns
+			responseProvider["failover_group"] = public.FailoverGroup
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"provider": responseProvider})
 	default:
@@ -2149,15 +2171,15 @@ func (s *Server) providerAuditJSONForConfig(provider store.ProviderConfig) strin
 	if provider.Name == "" {
 		return ""
 	}
-	projectionArgs := s.externalCredentialProjectionArgs(provider.Name)
+	public := s.providerEditableFieldsForApp(provider.Name, provider.BaseURL, provider.ModelPatterns, provider.FailoverGroup)
 	return auditJSON(map[string]any{
 		"name":               s.boundedModelsProviderLabelForConfig(provider.Name),
-		"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
+		"base_url":           public.BaseURL,
 		"api_key_configured": provider.EncryptedAPIKey != "",
 		"timeout_ms":         provider.TimeoutMS,
 		"enabled":            provider.Enabled,
-		"model_patterns":     boundedExternalProviderText(provider.ModelPatterns, projectionArgs...),
-		"failover_group":     boundedExternalProviderText(provider.FailoverGroup, projectionArgs...),
+		"model_patterns":     public.ModelPatterns,
+		"failover_group":     public.FailoverGroup,
 		"priority":           provider.Priority,
 	})
 }
