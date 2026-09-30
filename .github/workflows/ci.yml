@@ -238,6 +238,8 @@ jobs:
         run: go test -race ./internal/proxy -run '^TestAppPermissionContract' -count=1 -timeout=5m
       - name: Verify PostgreSQL atomic cost guard configuration and cache
         run: go test -race ./internal/proxy -run '^TestCost(Guard|Snapshot)' -count=1 -timeout=5m
+      - name: Verify PostgreSQL request note preservation and team scope
+        run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestRequestNote' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
