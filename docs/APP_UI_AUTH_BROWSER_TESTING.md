@@ -56,9 +56,12 @@ docker pull "$AUTH_IMAGE"
 
 mkdir -p "$AUTH_CHECKOUT/internal/appui/dist"
 cp -R "$AUTH_CHECKOUT/web/dist/." "$AUTH_CHECKOUT/internal/appui/dist/"
+mkdir -p "$AUTH_CHECKOUT/web/test-results"
 ```
 
 `pnpm-lock.yaml`은 변경하지 않는다. `web/dist`와 embed staging은 생성물이다. 이미 실행 중인 다른 작업의 checkout에서 이 복사를 수행하지 않는다. 하네스는 포함된 `index.html`과 `/app/assets/` 파일이 없으면 개발 서버로 대체하지 않고 실패한다.
+
+새 checkout의 `web/test-results`는 외부 보고서 디렉터리를 연결할 빈 mountpoint로 미리 만든다. checkout을 읽기 전용으로 연결한 뒤에는 Docker가 이 경로를 생성할 수 없다. 실제 보고서는 아래의 별도 쓰기 mount인 `AUTH_REPORTS`에만 생성된다.
 
 ## 오프라인 컴파일과 고정 브라우저 실행
 
