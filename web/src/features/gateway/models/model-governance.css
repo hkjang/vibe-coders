@@ -1,0 +1,36 @@
+.dialog-content:has(.model-contract-form),
+.dialog-content:has(.model-deprecation-form) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(48rem, calc(100dvh - var(--space-6) - var(--space-6)));
+  overflow: hidden;
+}
+
+.dialog-content:has(.model-contract-form) > .dialog-body,
+.dialog-content:has(.model-deprecation-form) > .dialog-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.model-contract-form,
+.model-contract-form > section,
+.model-contract-form .data-table-scroll {
+  min-width: 0;
+}
+
+.model-contract-diff td,
+.model-governance-value {
+  max-width: 20rem;
+  overflow-wrap: anywhere;
+}
+
+.dialog-content:has(.model-contract-form) > .dialog-footer {
+  flex-wrap: wrap;
+}
+
+.model-contract-lock {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
