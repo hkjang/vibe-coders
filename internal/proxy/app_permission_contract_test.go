@@ -137,6 +137,40 @@ func TestAppPermissionContractOpaqueTargetsRemainDistinct(t *testing.T) {
 	}
 }
 
+func TestAppPermissionContractImportedWhitespaceTargets(t *testing.T) {
+	f := newAppPermissionContractFixture(t)
+	const canonical = "permission-user"
+	const imported = "\u0085permission-user"
+	f.request(t, http.MethodPost, f.path, f.adminToken,
+		`{"subject_type":"user","subject_id":"permission-user"}`, http.StatusOK)
+	// NEL edges cannot be created through the current HTTP grant API, but old
+	// or imported records can exist in the store and are returned without edits.
+	if err := f.db.GrantAppPermission(t.Context(), store.AppPermission{
+		ID: "permission-imported-nel", AppID: "permission-active",
+		SubjectType: "user", SubjectID: imported, GrantedBy: "synthetic-import",
+	}); err != nil {
+		t.Fatal("imported permission fixture seed failed")
+	}
+	before := f.permissions(t)
+	if len(before) != 2 || !slices.ContainsFunc(before, func(permission store.AppPermission) bool {
+		return permission.SubjectID == imported
+	}) {
+		t.Fatal("public list must retain imported opaque identifiers exactly")
+	}
+	// Preserve the old API's Go TrimSpace contract; do not pretend it accepts
+	// an exact imported target. The UI must reject this row before DELETE,
+	// since forwarding it would remove the canonical grant instead.
+	f.revoke(t, "user", imported)
+	after := f.permissions(t)
+	if len(after) != 1 || after[0].SubjectID != imported {
+		t.Fatal("existing Go whitespace normalization contract changed")
+	}
+	f.revoke(t, "user", canonical)
+	if !reflect.DeepEqual(after, f.permissions(t)) {
+		t.Fatal("canonical repeat revocation must not remove the imported tuple")
+	}
+}
+
 func TestAppPermissionContractWriteDenialsPreserveState(t *testing.T) {
 	f := newAppPermissionContractFixture(t)
 	f.request(t, http.MethodPost, f.path, f.adminToken,
