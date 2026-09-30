@@ -761,6 +761,67 @@ export type ReadyResponse = {
     status: 'ready';
 };
 
+export type RequestNoteAppResponse = {
+    /**
+     * Existing last-writer audit identity (token hash label, or anonymous), not a user ID; subject to the caller's projection.
+     */
+    created_by: string;
+    /**
+     * Whether the note row exists; an existing row may have both note and tags empty.
+     */
+    exists: boolean;
+    note: string;
+    /**
+     * Editable fields actually changed by the caller-visible projection. An unchanged literal marker does not imply redaction; tags are one complete field, never reverse-mapped individually. Always an array, including when empty.
+     */
+    redacted_fields: Array<'note' | 'tags'>;
+    request_id: string;
+    tags: Array<string>;
+    /**
+     * Actual stored time for app save responses. Missing notes and legacy save responses can contain the zero timestamp.
+     */
+    updated_at: string;
+};
+
+export type RequestNoteDeletedResponse = {
+    id: string;
+    status: 'deleted';
+};
+
+export type RequestNoteLegacyResponse = {
+    /**
+     * Existing last-writer audit identity (token hash label, or anonymous), not a user ID; subject to the caller's projection.
+     */
+    created_by: string;
+    note: string;
+    request_id: string;
+    tags: Array<string>;
+    /**
+     * Actual stored time for app save responses. Missing notes and legacy save responses can contain the zero timestamp.
+     */
+    updated_at: string;
+};
+
+/**
+ * X-Vibe-UI: app selects RequestNoteAppResponse; other clients receive RequestNoteLegacyResponse.
+ */
+export type RequestNoteResponse = RequestNoteAppResponse | RequestNoteLegacyResponse;
+
+/**
+ * Existing optional/null replacement semantics apply unless an app request explicitly preserves that field. Unknown fields remain ignored for compatibility; preserve_fields validation applies only with X-Vibe-UI: app.
+ */
+export type RequestNoteWriteRequest = {
+    /**
+     * Replacement text with surrounding Go whitespace trimmed. Omitted/null means empty unless explicitly preserved; must be absent when preserved.
+     */
+    note?: string | null;
+    preserve_fields?: Array<'note' | 'tags'>;
+    /**
+     * Complete replacement with existing leading-# removal, whitespace trimming, comma replacement and exact deduplication. Omitted/null means empty unless explicitly preserved; must be absent when preserved.
+     */
+    tags?: Array<string> | null;
+} | null;
+
 export type RoutingBreakerState = {
     failures: number;
     last_failure_at?: string;
@@ -6259,54 +6320,183 @@ export type GetAdminRequestsIdLinksResponses = {
 
 export type DeleteAdminRequestsIdNoteData = {
     body?: never;
+    headers?: {
+        /**
+         * Exactly app selects the app response metadata and preserve_fields write extension. Other values retain the legacy contract. This is not an authorization credential.
+         */
+        'X-Vibe-UI'?: string;
+    };
     path: {
         id: string;
     };
     query?: never;
     url: '/admin/requests/{id}/note';
 };
+
+export type DeleteAdminRequestsIdNoteErrors = {
+    /**
+     * invalid_request_id or invalid_body: invalid path or payload; no write
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires admin read scope; POST, PUT and DELETE require admin write scope. Raw-view permission is separate.
+     */
+    401: AppError;
+    /**
+     * cross_team_access_denied: request is outside the caller's team scope
+     */
+    403: AppError;
+    /**
+     * request_not_found: the underlying request does not exist, even if an operator note remains
+     */
+    404: AppError;
+    /**
+     * method_not_allowed: only GET, POST, PUT and DELETE are supported
+     */
+    405: AppError;
+    /**
+     * request_lookup_failed or note_delete_failed: lookup or deletion failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminRequestsIdNoteError = DeleteAdminRequestsIdNoteErrors[keyof DeleteAdminRequestsIdNoteErrors];
 
 export type DeleteAdminRequestsIdNoteResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RequestNoteDeletedResponse;
 };
+
+export type DeleteAdminRequestsIdNoteResponse = DeleteAdminRequestsIdNoteResponses[keyof DeleteAdminRequestsIdNoteResponses];
 
 export type GetAdminRequestsIdNoteData = {
     body?: never;
+    headers?: {
+        /**
+         * Exactly app selects the app response metadata and preserve_fields write extension. Other values retain the legacy contract. This is not an authorization credential.
+         */
+        'X-Vibe-UI'?: string;
+    };
     path: {
         id: string;
     };
     query?: never;
     url: '/admin/requests/{id}/note';
 };
+
+export type GetAdminRequestsIdNoteErrors = {
+    /**
+     * invalid_request_id or invalid_body: invalid path or payload; no write
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires admin read scope; POST, PUT and DELETE require admin write scope. Raw-view permission is separate.
+     */
+    401: AppError;
+    /**
+     * cross_team_access_denied: request is outside the caller's team scope
+     */
+    403: AppError;
+    /**
+     * request_not_found: the underlying request does not exist, even if an operator note remains
+     */
+    404: AppError;
+    /**
+     * method_not_allowed: only GET, POST, PUT and DELETE are supported
+     */
+    405: AppError;
+    /**
+     * request_lookup_failed or note_failed: request/note lookup failed; no confirmed snapshot
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRequestsIdNoteError = GetAdminRequestsIdNoteErrors[keyof GetAdminRequestsIdNoteErrors];
 
 export type GetAdminRequestsIdNoteResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RequestNoteResponse;
 };
 
+export type GetAdminRequestsIdNoteResponse = GetAdminRequestsIdNoteResponses[keyof GetAdminRequestsIdNoteResponses];
+
 export type PostAdminRequestsIdNoteData = {
-    body?: never;
+    body: RequestNoteWriteRequest;
+    headers?: {
+        /**
+         * Exactly app selects the app response metadata and preserve_fields write extension. Other values retain the legacy contract. This is not an authorization credential.
+         */
+        'X-Vibe-UI'?: string;
+    };
     path: {
         id: string;
     };
     query?: never;
     url: '/admin/requests/{id}/note';
 };
+
+export type PostAdminRequestsIdNoteErrors = {
+    /**
+     * invalid_request_id or invalid_body: invalid path or payload; no write
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires admin read scope; POST, PUT and DELETE require admin write scope. Raw-view permission is separate.
+     */
+    401: AppError;
+    /**
+     * cross_team_access_denied: request is outside the caller's team scope
+     */
+    403: AppError;
+    /**
+     * request_not_found: the underlying request does not exist, even if an operator note remains
+     */
+    404: AppError;
+    /**
+     * method_not_allowed: only GET, POST, PUT and DELETE are supported
+     */
+    405: AppError;
+    /**
+     * request_lookup_failed or note_save_failed: lookup or storage failed; no success snapshot returned
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRequestsIdNoteError = PostAdminRequestsIdNoteErrors[keyof PostAdminRequestsIdNoteErrors];
 
 export type PostAdminRequestsIdNoteResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RequestNoteResponse;
 };
 
+export type PostAdminRequestsIdNoteResponse = PostAdminRequestsIdNoteResponses[keyof PostAdminRequestsIdNoteResponses];
+
 export type PutAdminRequestsIdNoteData = {
-    body?: never;
+    body: RequestNoteWriteRequest;
+    headers?: {
+        /**
+         * Exactly app selects the app response metadata and preserve_fields write extension. Other values retain the legacy contract. This is not an authorization credential.
+         */
+        'X-Vibe-UI'?: string;
+    };
     path: {
         id: string;
     };
@@ -6314,12 +6504,47 @@ export type PutAdminRequestsIdNoteData = {
     url: '/admin/requests/{id}/note';
 };
 
+export type PutAdminRequestsIdNoteErrors = {
+    /**
+     * invalid_request_id or invalid_body: invalid path or payload; no write
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires admin read scope; POST, PUT and DELETE require admin write scope. Raw-view permission is separate.
+     */
+    401: AppError;
+    /**
+     * cross_team_access_denied: request is outside the caller's team scope
+     */
+    403: AppError;
+    /**
+     * request_not_found: the underlying request does not exist, even if an operator note remains
+     */
+    404: AppError;
+    /**
+     * method_not_allowed: only GET, POST, PUT and DELETE are supported
+     */
+    405: AppError;
+    /**
+     * request_lookup_failed or note_save_failed: lookup or storage failed; no success snapshot returned
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PutAdminRequestsIdNoteError = PutAdminRequestsIdNoteErrors[keyof PutAdminRequestsIdNoteErrors];
+
 export type PutAdminRequestsIdNoteResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RequestNoteResponse;
 };
+
+export type PutAdminRequestsIdNoteResponse = PutAdminRequestsIdNoteResponses[keyof PutAdminRequestsIdNoteResponses];
 
 export type PostAdminRequestsIdReplayData = {
     body?: never;
