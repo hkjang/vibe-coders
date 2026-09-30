@@ -236,6 +236,8 @@ jobs:
         run: go test -race ./internal/proxy -run '^Test(APIKey|MeKey)ScopeContract' -count=1 -timeout=5m
       - name: Verify PostgreSQL additive app permission contracts
         run: go test -race ./internal/proxy -run '^TestAppPermissionContract' -count=1 -timeout=5m
+      - name: Verify PostgreSQL atomic cost guard configuration and cache
+        run: go test -race ./internal/proxy -run '^TestCost(Guard|Snapshot)' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
