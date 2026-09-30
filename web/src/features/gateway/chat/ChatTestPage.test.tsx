@@ -6,13 +6,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatTestPage } from "@/features/gateway/chat/ChatTestPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
+import { FeatureRoute } from "@/app/guards/FeatureRoute";
+import { migrationRegistry } from "@/config/migration-registry";
 
-const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write", "routing:read"] }));
+const authRuntime = vi.hoisted(() => ({
+  scopes: ["admin:read", "admin:write", "routing:read"],
+  mode: "writable",
+}));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return {
+    useAuth: () => {
+      const auth = testAuth({ scopes: authRuntime.scopes });
+      return {
+        ...auth,
+        features: auth.features.map((feature) =>
+          feature.featureId === "gateway.chat"
+            ? {
+                ...feature,
+                status: authRuntime.mode === "preview_read_only" ? "preview_read_only" : "preview",
+                readOnly: authRuntime.mode === "read_only",
+              }
+            : feature,
+        ),
+      };
+    },
+  };
 });
 
 vi.mock("sonner", () => ({ toast: { success: toastSpy.success, error: toastSpy.error } }));
@@ -133,6 +155,7 @@ afterEach(() => {
 
 beforeEach(() => {
   authRuntime.scopes = ["admin:read", "admin:write", "routing:read"];
+  authRuntime.mode = "writable";
   toastSpy.success.mockClear();
   toastSpy.error.mockClear();
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:test" });
@@ -140,10 +163,46 @@ beforeEach(() => {
 });
 
 function renderChat(route = "/gateway/chat") {
-  return renderScreen(<ChatTestPage />, { path: "/gateway/chat", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="gateway.chat">
+      <ChatTestPage />
+    </FeatureAccessHarness>,
+    { path: "/gateway/chat", route },
+  );
 }
 
 describe("ChatTestPage", () => {
+  it.each(["read_only", "preview_read_only"])(
+    "실제 FeatureRoute %s는 단일 호출과 이어질문 사유를 함께 표시한다",
+    async (mode) => {
+      authRuntime.mode = mode;
+      mockApi({ "GET /admin/chat-test/targets": () => targetsFixture });
+      const feature = migrationRegistry.find((item) => item.featureId === "gateway.chat");
+      if (!feature) throw new Error("missing actual chat feature");
+      renderScreen(
+        <FeatureRoute feature={feature}>
+          <ChatTestPage />
+        </FeatureRoute>,
+        { path: "/gateway/chat", route: "/gateway/chat" },
+      );
+      expect(await screen.findByRole("button", { name: "모델 호출" })).toBeDisabled();
+      expect(screen.getByLabelText("이어서 질문")).toHaveAccessibleDescription(
+        "읽기 전용에서는 새 질문을 전송할 수 없습니다. 입력은 유지됩니다.",
+      );
+      expect(screen.getByRole("button", { name: "라우팅 미리보기" })).toBeEnabled();
+    },
+  );
+
+  it("서버 기록 안내는 비교의 해시·미리보기와 Golden 원문 저장을 구분한다", async () => {
+    mockApi(compareHandlers());
+    renderChat("/gateway/chat?tab=compare");
+    expect(
+      await screen.findByText(/프롬프트 해시, 응답 일부·해시와 실행 지표는 서버에 기록됩니다/u),
+    ).toBeVisible();
+    expect(screen.getByText(/Golden 저장은 프롬프트를 워크플로 단계에 저장합니다/u)).toBeVisible();
+    expect(screen.queryByText(/프롬프트와 응답은 이 화면에만 남고/u)).not.toBeInTheDocument();
+  });
+
   it("shows the call form with the target catalogue", async () => {
     mockApi({ "GET /admin/chat-test/targets": () => targetsFixture });
     renderChat();
@@ -151,7 +210,7 @@ describe("ChatTestPage", () => {
     expect(await screen.findByRole("heading", { name: "채팅 테스트", level: 1 })).toBeInTheDocument();
     const targetSelect = await screen.findByLabelText("테스트 대상");
     expect(within(targetSelect).getByRole("option", { name: /Intelligent Router/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Chat 호출/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /모델 호출/ })).toBeEnabled();
     expect(screen.getByText(/아직 호출한 응답이 없습니다/)).toBeInTheDocument();
   });
 
@@ -165,7 +224,7 @@ describe("ChatTestPage", () => {
     const prompt = await screen.findByLabelText(/^프롬프트/);
     await user.clear(prompt);
     await user.type(prompt, "핑");
-    await user.click(screen.getByRole("button", { name: /Chat 호출/ }));
+    await user.click(screen.getByRole("button", { name: /모델 호출/ }));
 
     expect(await screen.findByText("안녕하세요")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -191,7 +250,7 @@ describe("ChatTestPage", () => {
 
     renderChat();
     await screen.findByLabelText(/^프롬프트/);
-    await user.click(screen.getByRole("button", { name: /Chat 호출/ }));
+    await user.click(screen.getByRole("button", { name: /모델 호출/ }));
 
     const alert = await screen.findByRole("alert");
     // Upstream messages are replaced by an operational message; the request ID stays.
@@ -204,8 +263,15 @@ describe("ChatTestPage", () => {
     mockApi({ "GET /admin/chat-test/targets": () => targetsFixture });
     renderChat();
 
-    expect(await screen.findByRole("button", { name: /Chat 호출/ })).toBeDisabled();
-    expect(screen.getByText(/admin:write 권한이 필요합니다/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /모델 호출/ })).toBeDisabled();
+    expect(
+      screen.getByText("이 작업은 admin:write 권한이 필요합니다. 관리자에게 권한을 요청하세요.", {
+        exact: true,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("이어서 질문")).toHaveAccessibleDescription(
+      "새 질문 전송에는 admin:write 권한이 필요합니다. 입력은 유지됩니다.",
+    );
   });
 
   it("restores the selected tab from the URL and runs a comparison", async () => {

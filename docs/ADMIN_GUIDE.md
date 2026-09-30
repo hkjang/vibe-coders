@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.20`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.21`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.20.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.20.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.21.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.21.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.20.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.21.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.20
+export GATEWAY_VERSION=v0.86.21
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -496,6 +496,20 @@ ID의 실제 존재 여부는 이 화면에서 확인하지 않습니다. 목록
 안전하다는 뜻이 아니며, 검증 결과만으로 실제 호출 성공이나 모델 교체를 보장하지 않습니다.
 이번 보호 범위는 모델 계약·지원 종료의 기존 변경 기능이며 채팅 테스트 전체 전환이나 운영 정식
 승격을 뜻하지 않습니다. 검증 진행 상태는 [전환 로드맵](APP_UI_ROADMAP.md)을 확인하세요.
+
+`v0.86.21`의 **채팅 테스트 → 단일 호출**에서는 **모델 호출**과 이어질문 전송 전에 기존
+`admin:write` 권한과 현재 화면의 읽기 전용 상태를 함께 확인합니다. 허가되지 않은 이어질문은
+지우지 않으며 제한이 풀려도 자동 전송하지 않습니다. 단일 호출에도 공급자 비용이 발생합니다.
+
+**응답 수신 중단**은 이 브라우저에서 응답을 그만 받는 기능입니다. 이미 전달한 요청의 서버 실행이나
+공급자 비용 취소를 보장하지 않습니다. 읽기 전용으로 전환되어도 이미 시작한 응답의 수신과 수동
+수신 중단은 유지하며, 계정·화면 변경 뒤 이전 응답을 새 대화에 이어 붙이지 않습니다.
+
+**라우팅 미리보기**와 **코드 검증**은 새 모델 호출이 아닌 계산입니다. 읽기 전용에서도 각각 기존
+`routing:read`·`admin:write` 권한을 별도로 요구합니다. 브라우저 주소·저장소에 입력을 남기지 않는
+것과 서버의 기록·감사·보존 정책은 별개입니다. 여러 모델 비교 결과의 미리보기·해시와 기준
+워크플로 등록 시의 프롬프트 저장도 구분하세요. 이번 보호는 단일 호출에 한정되며 비교·평가·승격·
+태그 등 채팅 전체의 읽기 전용 강제나 운영 승격을 완료한 것은 아닙니다.
 
 ## 4. 계정과 권한
 

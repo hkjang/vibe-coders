@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import { CircleStop, Play, Route, ShieldCheck, Trash2 } from "lucide-react";
 
 import {
@@ -7,13 +7,14 @@ import {
   riskLabels,
   type ChatTargetOption,
 } from "@/features/gateway/chat/chat-console";
-import { streamChatTest } from "@/features/gateway/chat/chat-stream";
+import { useChatAccess, type ChatAccess } from "./use-chat-access";
+import { useChatRun } from "./use-chat-run";
+import { useChatComputation } from "./use-chat-computation";
 import { chatRouteId, useChatTargets } from "@/features/gateway/chat/use-chat-console";
 import { apiClient } from "@/shared/api/client";
 import type { ChatTestRunBody } from "@/shared/api/domains/gateway";
 import type { CodeVerifyReport, RoutingPreview } from "@/shared/api/domains/gateway.schemas";
 import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
@@ -25,17 +26,7 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { FormField } from "@/shared/components/form/FormField";
-import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatNumber } from "@/shared/utils/format";
-
-interface ChatTurn {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  reasoning?: string;
-  pending?: boolean;
-  failed?: boolean;
-}
 
 interface ChatRunPanelProps {
   canWrite: boolean;
@@ -45,15 +36,14 @@ interface ChatRunPanelProps {
 
 const defaultPrompt = "Reply with pong in one short sentence.";
 
-function turnId(): string {
-  return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+export function ChatRunPanel(props: ChatRunPanelProps): React.JSX.Element {
+  const access = useChatAccess(props.canWrite, props.canPreviewRouting, props.writeDeniedReason);
+  // Security ownership resets ephemeral credentials/drafts. Runtime readonly
+  // is deliberately not a key: it must not discard an admitted response.
+  return <SingleChatPanel key={`${access.epoch}:${access.owner ?? "unknown"}`} access={access} />;
 }
 
-export function ChatRunPanel({
-  canPreviewRouting,
-  canWrite,
-  writeDeniedReason,
-}: ChatRunPanelProps): React.JSX.Element {
+function SingleChatPanel({ access }: { access: ChatAccess }): React.JSX.Element {
   const targets = useChatTargets();
   const fieldPrefix = useId();
   const [targetId, setTargetId] = useState("");
@@ -65,17 +55,11 @@ export function ChatRunPanel({
   const [bearerToken, setBearerToken] = useState("");
   const [noRoute, setNoRoute] = useState(false);
   const [prompt, setPrompt] = useState(defaultPrompt);
-  const [turns, setTurns] = useState<readonly ChatTurn[]>([]);
-  const [streaming, setStreaming] = useState(false);
-  const [runError, setRunError] = useState<{ message: string; requestId?: string } | undefined>();
-  const [preview, setPreview] = useState<RoutingPreview | undefined>();
-  const [previewError, setPreviewError] = useState<string | undefined>();
-  const [previewPending, setPreviewPending] = useState(false);
-  const [headers, setHeaders] = useState<Readonly<Record<string, string>>>({});
-  const [usage, setUsage] = useState<{ prompt?: number; completion?: number; total?: number }>({});
-  const [codeReport, setCodeReport] = useState<CodeVerifyReport | undefined>();
-  const [codeError, setCodeError] = useState<string | undefined>();
-  const abortRef = useRef<AbortController | undefined>(undefined);
+  const [followup, setFollowup] = useState("");
+  const previewCall = useChatComputation<RoutingPreview>(access, "preview");
+  const codeCall = useChatComputation<CodeVerifyReport>(access, "code");
+  const { result: preview, error: previewError, pending: previewPending } = previewCall;
+  const { result: codeReport, error: codeError } = codeCall;
 
   const options = useMemo<ChatTargetOption[]>(
     () => chatTargetOptions(targets.data?.grouped, targets.data?.targets ?? []),
@@ -121,97 +105,34 @@ export function ChatRunPanel({
     [apiKeyId, bearerToken, maxTokens, model, noRoute, provider, targetId, temperature],
   );
 
-  const runPreview = useCallback(async (): Promise<void> => {
-    setPreviewPending(true);
-    setPreviewError(undefined);
-    try {
-      const result = await apiClient.request(endpoints.domains.gateway.chat.routingPreview, {
+  const session = useChatRun(access, requestBody);
+  const { turns, streaming, error: runError, headers, usage } = session;
+  const send = (text: string): boolean => {
+    const admitted = session.send(text);
+    if (admitted) codeCall.clear();
+    return admitted;
+  };
+  const runPreview = () =>
+    previewCall.run(() =>
+      apiClient.request(endpoints.domains.gateway.chat.routingPreview, {
         body: {
           model: model.trim() || "vibe/auto",
           messages: [{ role: "user", content: prompt }],
           api_key_id: apiKeyId.trim() || undefined,
         },
         routeId: chatRouteId,
-      });
-      setPreview(result);
-    } catch (cause) {
-      setPreviewError(safeAppErrorMessage(cause, "라우팅 미리보기를 실행하지 못했습니다."));
-    } finally {
-      setPreviewPending(false);
-    }
-  }, [apiKeyId, model, prompt]);
-
-  const send = useCallback(
-    async (text: string): Promise<void> => {
-      const trimmed = text.trim();
-      if (trimmed === "" || streaming) return;
-      setRunError(undefined);
-      setCodeReport(undefined);
-      setCodeError(undefined);
-      const history = turns
-        .filter((turn) => !turn.failed && turn.content !== "")
-        .map((turn) => ({ role: turn.role, content: turn.content }));
-      const messages = [...history, { role: "user", content: trimmed }];
-      const answerId = turnId();
-      setTurns((previous) => [
-        ...previous,
-        { id: turnId(), role: "user", content: trimmed },
-        { id: answerId, role: "assistant", content: "", pending: true },
-      ]);
-      setStreaming(true);
-      const controller = new AbortController();
-      abortRef.current = controller;
-      const appendTo = (patch: (turn: ChatTurn) => ChatTurn): void => {
-        setTurns((previous) => previous.map((turn) => (turn.id === answerId ? patch(turn) : turn)));
-      };
-      try {
-        const outcome = await streamChatTest(
-          requestBody(messages),
-          {
-            onContent: (delta) => appendTo((turn) => ({ ...turn, content: turn.content + delta })),
-            onReasoning: (delta) =>
-              appendTo((turn) => ({ ...turn, reasoning: (turn.reasoning ?? "") + delta })),
-            onUsage: (value) =>
-              setUsage({
-                prompt: value.promptTokens,
-                completion: value.completionTokens,
-                total: value.totalTokens,
-              }),
-            onHeaders: setHeaders,
-          },
-          controller.signal,
-        );
-        appendTo((turn) => ({ ...turn, content: outcome.content || turn.content, pending: false }));
-      } catch (cause) {
-        appendTo((turn) => ({ ...turn, pending: false, failed: true }));
-        if (!(isAppError(cause) && cause.kind === "aborted")) {
-          setRunError({
-            message: safeAppErrorMessage(cause, "Chat 호출에 실패했습니다."),
-            requestId: isAppError(cause) ? cause.requestId : undefined,
-          });
-        }
-      } finally {
-        abortRef.current = undefined;
-        setStreaming(false);
-      }
-    },
-    [requestBody, streaming, turns],
-  );
-
-  const verifyLastAnswer = useCallback(async (): Promise<void> => {
+      }),
+    );
+  const verifyLastAnswer = async (): Promise<void> => {
     const answer = [...turns].reverse().find((turn) => turn.role === "assistant" && turn.content !== "");
     if (!answer) return;
-    setCodeError(undefined);
-    try {
-      const report = await apiClient.request(endpoints.domains.gateway.chat.codeVerify, {
+    await codeCall.run(() =>
+      apiClient.request(endpoints.domains.gateway.chat.codeVerify, {
         body: { text: answer.content },
         routeId: chatRouteId,
-      });
-      setCodeReport(report);
-    } catch (cause) {
-      setCodeError(safeAppErrorMessage(cause, "코드 검증을 실행하지 못했습니다."));
-    }
-  }, [turns]);
+      }),
+    );
+  };
 
   const lastAnswer = [...turns].reverse().find((turn) => turn.role === "assistant" && turn.content !== "");
 
@@ -219,7 +140,7 @@ export function ChatRunPanel({
     <div className="page-stack">
       <SectionCard
         title="호출 설정"
-        description="게이트웨이를 통해 모델을 직접 호출합니다. 프롬프트와 응답은 화면에만 남고 주소나 브라우저 저장소에 기록되지 않습니다."
+        description="모델 호출은 실제 공급자로 전송되며 비용이 발생할 수 있습니다. 이 폼은 입력과 응답을 주소나 브라우저 영속 저장소에 보관하지 않으며, 서버의 감사·기록·보존은 운영 정책을 따릅니다."
       >
         <div className="form-grid gateway-form-grid">
           <FormField label="테스트 대상" id={`${fieldPrefix}-target`}>
@@ -264,7 +185,7 @@ export function ChatRunPanel({
               />
             )}
           </FormField>
-          <FormField label="Temperature" id={`${fieldPrefix}-temperature`}>
+          <FormField label="응답 다양성 (Temperature)" id={`${fieldPrefix}-temperature`}>
             {(control) => (
               <Input
                 {...control}
@@ -278,7 +199,7 @@ export function ChatRunPanel({
             )}
           </FormField>
           <FormField
-            label="API Key ID"
+            label="API 키 ID"
             id={`${fieldPrefix}-api-key-id`}
             description="해당 키의 정책으로 호출합니다. 키 원문이 아닌 식별자입니다."
           >
@@ -287,7 +208,7 @@ export function ChatRunPanel({
             )}
           </FormField>
           <FormField
-            label="Proxy Bearer 토큰"
+            label="프록시 인증 토큰 (Bearer)"
             id={`${fieldPrefix}-bearer`}
             description="입력 전용입니다. 저장하거나 다시 표시하지 않습니다."
           >
@@ -326,30 +247,35 @@ export function ChatRunPanel({
             </Button>
           </InlineNotice>
         ) : null}
-        {!canWrite ? (
-          <InlineNotice tone="warning" title="호출 권한이 없습니다.">
-            {writeDeniedReason}
+        {access.write.reason ? (
+          <InlineNotice tone="warning" title="새 모델 호출을 시작할 수 없습니다.">
+            {access.write.reason}
           </InlineNotice>
         ) : null}
         <div className="toolbar">
           <div className="toolbar-start">
             <Button
               variant="primary"
-              disabled={!canWrite || streaming || prompt.trim() === ""}
+              disabled={!access.write.allowed || streaming || prompt.trim() === ""}
               onClick={() => void send(prompt)}
             >
-              <Play aria-hidden="true" /> {streaming ? "스트리밍 중" : "Chat 호출"}
+              <Play aria-hidden="true" /> {streaming ? "스트리밍 중" : "모델 호출"}
             </Button>
             <Button
               variant="secondary"
-              disabled={!canPreviewRouting || previewPending}
+              disabled={!access.previewAllowed || previewPending}
+              title={
+                !access.previewAllowed
+                  ? "라우팅 미리보기는 현재 화면의 routing:read 권한이 필요합니다."
+                  : undefined
+              }
               onClick={() => void runPreview()}
             >
               <Route aria-hidden="true" /> 라우팅 미리보기
             </Button>
             {streaming ? (
-              <Button variant="danger" onClick={() => abortRef.current?.abort()}>
-                <CircleStop aria-hidden="true" /> 취소
+              <Button variant="danger" onClick={session.stop}>
+                <CircleStop aria-hidden="true" /> 응답 수신 중단
               </Button>
             ) : null}
           </div>
@@ -358,17 +284,17 @@ export function ChatRunPanel({
               variant="ghost"
               disabled={turns.length === 0 || streaming}
               onClick={() => {
-                setTurns([]);
-                setUsage({});
-                setHeaders({});
-                setCodeReport(undefined);
-                setRunError(undefined);
+                session.clear();
+                codeCall.clear();
               }}
             >
               <Trash2 aria-hidden="true" /> 대화 지우기
             </Button>
           </div>
         </div>
+        <p className="metric-note">
+          응답 수신 중단은 이 화면의 수신을 멈춥니다. 공급자의 실행이나 비용 발생이 중단된다는 뜻은 아닙니다.
+        </p>
         {runError ? (
           <p className="form-error" role="alert">
             {runError.message}
@@ -379,7 +305,10 @@ export function ChatRunPanel({
 
       {previewError ? (
         <InlineNotice tone="warning" title="라우팅 미리보기 실패">
-          {previewError}
+          {previewError.message}
+          {previewError.requestId ? (
+            <span className="request-id"> 요청 ID: {previewError.requestId}</span>
+          ) : null}
         </InlineNotice>
       ) : null}
       {preview ? (
@@ -406,7 +335,8 @@ export function ChatRunPanel({
           <Button
             size="small"
             variant="secondary"
-            disabled={!lastAnswer}
+            disabled={!lastAnswer || !access.codeAllowed || codeCall.pending}
+            title={!access.codeAllowed ? "코드 검증은 현재 화면의 admin:write 권한이 필요합니다." : undefined}
             onClick={() => void verifyLastAnswer()}
           >
             <ShieldCheck aria-hidden="true" /> 코드 검증
@@ -416,7 +346,7 @@ export function ChatRunPanel({
         {turns.length === 0 ? (
           <EmptyState
             title="아직 호출한 응답이 없습니다."
-            description="위에서 모델과 프롬프트를 지정하고 Chat 호출을 실행하면 대화가 여기에 쌓입니다."
+            description="위에서 모델과 프롬프트를 지정하고 모델 호출을 실행하면 대화가 여기에 쌓입니다."
           />
         ) : (
           <ol className="chat-transcript">
@@ -435,7 +365,11 @@ export function ChatRunPanel({
                     응답을 받는 중입니다.
                   </span>
                 ) : null}
-                {turn.failed ? (
+                {turn.stopped ? (
+                  <span role="status" className="chat-turn-status">
+                    응답 수신을 중단했습니다.
+                  </span>
+                ) : turn.failed ? (
                   <span role="status" className="chat-turn-status">
                     응답을 완료하지 못했습니다.
                   </span>
@@ -450,20 +384,20 @@ export function ChatRunPanel({
           </p>
         ) : null}
         <div className="chat-followup">
-          <FormField label="이어서 질문" id={`${fieldPrefix}-followup`}>
+          <FormField label="이어서 질문" id={`${fieldPrefix}-followup`} description={access.followupReason}>
             {(control) => (
               <Textarea
                 {...control}
                 rows={2}
                 placeholder="Enter로 전송, Shift+Enter로 줄바꿈"
-                disabled={!canWrite || streaming || turns.length === 0}
+                value={followup}
+                onChange={(event) => setFollowup(event.target.value)}
+                disabled={streaming || turns.length === 0}
                 onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
                   if (event.key !== "Enter" || event.shiftKey) return;
                   event.preventDefault();
-                  const input = event.currentTarget;
-                  const value = input.value;
-                  input.value = "";
-                  void send(value);
+                  if (send(followup)) setFollowup("");
                 }}
               />
             )}
@@ -473,7 +407,8 @@ export function ChatRunPanel({
 
       {codeError ? (
         <InlineNotice tone="warning" title="코드 검증 실패">
-          {codeError}
+          {codeError.message}
+          {codeError.requestId ? <span className="request-id"> 요청 ID: {codeError.requestId}</span> : null}
         </InlineNotice>
       ) : null}
       {codeReport ? (
