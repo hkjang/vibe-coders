@@ -2184,6 +2184,57 @@
         ],
         "type": "object"
       },
+      "ModelUsageTagDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "deleted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "ModelUsageTagWriteRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "avoid_for": {
+            "nullable": true,
+            "type": "string"
+          },
+          "good_for": {
+            "nullable": true,
+            "type": "string"
+          },
+          "model": {
+            "description": "Normalized using Go TrimSpace; the resulting identifier must be nonempty.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "risk_note": {
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Legacy accepted input; replaced by the server timestamp.",
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_by": {
+            "description": "Legacy accepted input; replaced by the authenticated server actor.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "type": "object"
+      },
       "ModelUsageTagsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -9235,10 +9286,38 @@
         ]
       },
       "post": {
+        "description": "Upsert the complete tag row for a Go TrimSpace-normalized model identifier, not a rename. Omitted or null optional strings replace existing values with empty strings. Unknown fields are ignored. Supplied updated_by and updated_at are decoded as nullable strings but replaced by the server actor and timestamp. This is not a conditional update or version check.",
         "operationId": "post__admin_model_tags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelUsageTagWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelUsageTag"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -9254,6 +9333,7 @@
     },
     "/admin/model-tags/{id}": {
       "delete": {
+        "description": "Delete by the exact decoded model path identifier without POST trimming. The existing 200 acknowledgment also covers an absent row; it does not report an affected-row count or successful admin audit.",
         "operationId": "delete__admin_model_tags_id",
         "parameters": [
           {
@@ -9267,7 +9347,24 @@
         ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelUsageTagDeleteResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

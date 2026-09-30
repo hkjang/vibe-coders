@@ -606,6 +606,29 @@ export type ModelUsageTag = {
     updated_by: string;
 };
 
+export type ModelUsageTagDeleteResponse = {
+    status: 'deleted';
+};
+
+export type ModelUsageTagWriteRequest = {
+    avoid_for?: string | null;
+    good_for?: string | null;
+    /**
+     * Normalized using Go TrimSpace; the resulting identifier must be nonempty.
+     */
+    model: string;
+    risk_note?: string | null;
+    /**
+     * Legacy accepted input; replaced by the server timestamp.
+     */
+    updated_at?: string | null;
+    /**
+     * Legacy accepted input; replaced by the authenticated server actor.
+     */
+    updated_by?: string | null;
+    [key: string]: unknown;
+};
+
 export type ModelUsageTagsResponse = {
     tags: Array<ModelUsageTag>;
 };
@@ -4415,18 +4438,29 @@ export type GetAdminModelTagsResponses = {
 export type GetAdminModelTagsResponse = GetAdminModelTagsResponses[keyof GetAdminModelTagsResponses];
 
 export type PostAdminModelTagsData = {
-    body?: never;
+    body: ModelUsageTagWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/model-tags';
 };
 
+export type PostAdminModelTagsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminModelTagsError = PostAdminModelTagsErrors[keyof PostAdminModelTagsErrors];
+
 export type PostAdminModelTagsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelUsageTag;
 };
+
+export type PostAdminModelTagsResponse = PostAdminModelTagsResponses[keyof PostAdminModelTagsResponses];
 
 export type DeleteAdminModelTagsIdData = {
     body?: never;
@@ -4437,12 +4471,23 @@ export type DeleteAdminModelTagsIdData = {
     url: '/admin/model-tags/{id}';
 };
 
+export type DeleteAdminModelTagsIdErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminModelTagsIdError = DeleteAdminModelTagsIdErrors[keyof DeleteAdminModelTagsIdErrors];
+
 export type DeleteAdminModelTagsIdResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelUsageTagDeleteResponse;
 };
+
+export type DeleteAdminModelTagsIdResponse = DeleteAdminModelTagsIdResponses[keyof DeleteAdminModelTagsIdResponses];
 
 export type GetAdminModelsData = {
     body?: never;

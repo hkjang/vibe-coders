@@ -86,6 +86,7 @@ func TestModelTagContractOptionalNullAndInvalidInputs(t *testing.T) {
 		`{}`, `{"model":null}`, `{"model":" \t\u0085 "}`, `{"model":1}`,
 		`{"model":"optional-model","good_for":[]}`, `{"model":"optional-model","avoid_for":false}`,
 		`{"model":"optional-model","risk_note":{}}`, `{"model":`,
+		`{"model":"optional-model","updated_by":false}`, `{"model":"optional-model","updated_at":123}`,
 	} {
 		f.request(t, http.MethodPost, "/admin/model-tags", f.adminToken, body, http.StatusBadRequest)
 	}

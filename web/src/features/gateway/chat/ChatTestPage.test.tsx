@@ -451,7 +451,14 @@ describe("ChatTestPage", () => {
     const user = userEvent.setup();
     const api = mockApi({
       "GET /admin/model-tags": () => tagsFixture,
-      "POST /admin/model-tags": () => ({ model: "claude-4", good_for: "sql" }),
+      "POST /admin/model-tags": () => ({
+        model: "claude-4",
+        good_for: "sql",
+        avoid_for: "",
+        risk_note: "",
+        updated_by: "public-operator",
+        updated_at: "2026-09-30T01:00:00Z",
+      }),
     });
 
     renderChat("/gateway/chat?tab=tags");
