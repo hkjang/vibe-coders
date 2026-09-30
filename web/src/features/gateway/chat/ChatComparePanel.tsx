@@ -1,29 +1,21 @@
 import { useCallback, useId, useMemo, useState } from "react";
-import { Calculator, Gavel, History, Layers, ShieldAlert } from "lucide-react";
+import { Calculator, Gavel, Layers, ShieldAlert } from "lucide-react";
 
 import {
   chatStatusLabel,
   judgeVerdictLabels,
   maxCompareModels,
   parseCompareModels,
+  riskLabels,
   safeModelLabel,
 } from "@/features/gateway/chat/chat-console";
 import { ChatRunActions } from "@/features/gateway/chat/ChatRunActions";
-import { chatRouteId, useMultiRunHistory } from "@/features/gateway/chat/use-chat-console";
-import { apiClient } from "@/shared/api/client";
+import { useCompareAccess, type CompareAccess } from "./use-compare-access";
+import { useComparisonConsole } from "./use-comparison-console";
+import { ChatComparisonHistory } from "./ChatComparisonHistory";
 import type { MultiRunBody } from "@/shared/api/domains/gateway";
-import type {
-  MultiRunCodeVerify,
-  MultiRunJudge,
-  MultiRunPredict,
-  MultiRunResponse,
-} from "@/shared/api/domains/gateway.schemas";
-import { withPathParams } from "@/shared/api/endpoint-factory";
-import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
@@ -31,8 +23,7 @@ import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { FormField } from "@/shared/components/form/FormField";
-import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
+import { formatKRW, formatNumber } from "@/shared/utils/format";
 
 interface ChatComparePanelProps {
   canWrite: boolean;
@@ -40,8 +31,31 @@ interface ChatComparePanelProps {
 }
 
 const defaultModels = "vibe/auto\n";
+const judgeMethodLabels: Readonly<Record<string, string>> = { rule: "규칙 기반", model: "심사 모델" };
+
+function resultLabel(labels: Readonly<Record<string, string>>, value: string | null | undefined): string {
+  return value != null && Object.hasOwn(labels, value) ? (labels[value] ?? value) : (value ?? "-");
+}
 
 export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePanelProps): React.JSX.Element {
+  const access = useCompareAccess(canWrite, writeDeniedReason);
+  return (
+    <ComparisonSession
+      key={`${access.epoch}:${access.owner ?? "missing"}:${String(access.known)}`}
+      access={access}
+      canWrite={canWrite}
+      writeDeniedReason={writeDeniedReason}
+    />
+  );
+}
+
+// Only security ownership remounts this state. Run, scope and readonly changes
+// keep the user's inputs and open result-action drafts in the same instance.
+function ComparisonSession({
+  access,
+  canWrite,
+  writeDeniedReason,
+}: ChatComparePanelProps & { access: CompareAccess }): React.JSX.Element {
   const fieldPrefix = useId();
   const [title, setTitle] = useState("");
   const [modelLines, setModelLines] = useState(defaultModels);
@@ -51,15 +65,8 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
   const [temperature, setTemperature] = useState("0");
   const [judgeMethod, setJudgeMethod] = useState<"rule" | "model">("rule");
   const [judgeModel, setJudgeModel] = useState("");
-  const [run, setRun] = useState<MultiRunResponse | undefined>();
-  const [predict, setPredict] = useState<MultiRunPredict | undefined>();
-  const [judge, setJudge] = useState<MultiRunJudge | undefined>();
-  const [codeRisk, setCodeRisk] = useState<MultiRunCodeVerify | undefined>();
-  const [pending, setPending] = useState<"" | "run" | "predict" | "judge" | "code">("");
-  const [error, setError] = useState<{ message: string; requestId?: string } | undefined>();
 
   const parsed = useMemo(() => parseCompareModels(modelLines), [modelLines]);
-  const history = useMultiRunHistory(true);
 
   const body = useCallback((): MultiRunBody => {
     const messages = [
@@ -76,65 +83,14 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
         max_tokens: Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined,
         temperature: Number.isFinite(parsedTemperature) ? parsedTemperature : undefined,
       },
-      // Prompt text is never persisted server side unless the operator opts in; the
-      // console keeps the default (off) so comparison prompts stay on this screen.
+      // Raw prompt storage is off for this run; hashes/response previews follow
+      // server policy and an explicit Golden write separately stores the prompt.
       save_prompt: false,
     };
   }, [maxTokens, parsed.models, systemPrompt, temperature, title, userPrompt]);
 
-  const call = useCallback(
-    async (kind: "run" | "predict" | "judge" | "code"): Promise<void> => {
-      setError(undefined);
-      setPending(kind);
-      try {
-        if (kind === "predict") {
-          setPredict(
-            await apiClient.request(endpoints.domains.gateway.chat.multiRunPredict, {
-              body: body(),
-              routeId: chatRouteId,
-            }),
-          );
-        } else if (kind === "run") {
-          const result = await apiClient.request(endpoints.domains.gateway.chat.multiRun, {
-            body: body(),
-            routeId: chatRouteId,
-          });
-          setRun(result);
-          setJudge(undefined);
-          setCodeRisk(undefined);
-          void history.refetch();
-        } else if (kind === "code" && run?.run_id) {
-          setCodeRisk(
-            await apiClient.request(
-              withPathParams(endpoints.domains.gateway.chat.multiRunCodeVerify, {
-                id: run.run_id,
-              }),
-              { routeId: chatRouteId },
-            ),
-          );
-        } else if (run?.run_id) {
-          setJudge(
-            await apiClient.request(endpoints.domains.gateway.chat.multiRunJudge, {
-              body: {
-                run_id: run.run_id,
-                method: judgeMethod,
-                judge_model: judgeMethod === "model" ? judgeModel.trim() : undefined,
-              },
-              routeId: chatRouteId,
-            }),
-          );
-        }
-      } catch (cause) {
-        setError({
-          message: safeAppErrorMessage(cause, "요청을 완료하지 못했습니다."),
-          requestId: isAppError(cause) ? cause.requestId : undefined,
-        });
-      } finally {
-        setPending("");
-      }
-    },
-    [body, history, judgeMethod, judgeModel, run],
-  );
+  const { run, runPrompt, predict, judge, codeRisk, pending, error, history, refreshHistory, call } =
+    useComparisonConsole(access, { body, judgeMethod, judgeModel });
 
   const judgeByModel = useMemo(
     () => new Map((judge?.judgements ?? []).map((item) => [item.model ?? "", item])),
@@ -164,7 +120,7 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
               />
             )}
           </FormField>
-          <FormField label="Temperature" id={`${fieldPrefix}-temperature`}>
+          <FormField label="응답 다양성 (Temperature)" id={`${fieldPrefix}-temperature`}>
             {(control) => (
               <Input
                 {...control}
@@ -198,7 +154,7 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
             {`${maxCompareModels}개까지만 실행합니다. ${formatNumber(parsed.overflow)}개는 제외됩니다.`}
           </InlineNotice>
         ) : null}
-        <FormField label="System 프롬프트" id={`${fieldPrefix}-system`}>
+        <FormField label="시스템 지침" id={`${fieldPrefix}-system`}>
           {(control) => (
             <Textarea
               {...control}
@@ -208,7 +164,7 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
             />
           )}
         </FormField>
-        <FormField label="User 프롬프트" id={`${fieldPrefix}-user`} required>
+        <FormField label="사용자 질문" id={`${fieldPrefix}-user`} required>
           {(control) => (
             <Textarea
               {...control}
@@ -218,23 +174,28 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
             />
           )}
         </FormField>
-        {!canWrite ? (
-          <InlineNotice tone="warning" title="실행 권한이 없습니다.">
-            {writeDeniedReason}
+        {!access.write.allowed ? (
+          <InlineNotice tone="warning" title="새 실행과 저장이 제한됩니다.">
+            {access.write.reason} 입력은 유지되며, 권한을 복구한 뒤 수동으로 다시 실행할 수 있습니다.
           </InlineNotice>
         ) : null}
         <div className="toolbar">
           <div className="toolbar-start">
             <Button
               variant="secondary"
-              disabled={!canWrite || pending !== "" || parsed.models.length === 0}
+              disabled={!access.predictAllowed || pending !== "" || parsed.models.length === 0}
               onClick={() => void call("predict")}
             >
               <Calculator aria-hidden="true" /> 예상 비용
             </Button>
             <Button
               variant="primary"
-              disabled={!canWrite || pending !== "" || parsed.models.length === 0 || userPrompt.trim() === ""}
+              disabled={
+                !access.write.allowed ||
+                pending !== "" ||
+                parsed.models.length === 0 ||
+                userPrompt.trim() === ""
+              }
               onClick={() => void call("run")}
             >
               <Layers aria-hidden="true" /> {pending === "run" ? "실행 중" : "멀티 실행"}
@@ -269,7 +230,7 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
               models={run.results.map((result) => result.model)}
               canWrite={canWrite}
               writeDeniedReason={writeDeniedReason}
-              prompt={userPrompt}
+              prompt={runPrompt}
             />
           ) : null}
 
@@ -302,7 +263,7 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
               <Button
                 variant="secondary"
                 disabled={
-                  !canWrite ||
+                  !access.write.allowed ||
                   pending !== "" ||
                   !run.run_id ||
                   (judgeMethod === "model" && judgeModel.trim() === "")
@@ -313,7 +274,7 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
               </Button>
               <Button
                 variant="secondary"
-                disabled={pending !== "" || !run.run_id}
+                disabled={!access.readAllowed || pending !== "" || !run.run_id}
                 onClick={() => void call("code")}
               >
                 <ShieldAlert aria-hidden="true" /> 코드 위험 비교
@@ -322,16 +283,16 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
           </div>
           {judge ? (
             <InlineNotice tone="info" title="자동 평가 완료">
-              {`방식 ${judge.method ?? judgeMethod} · 최고 점수 모델 ${safeModelLabel(judge.best_model)}`}
+              {`방식 ${resultLabel(judgeMethodLabels, judge.method ?? judgeMethod)} · 최고 점수 모델 ${safeModelLabel(judge.best_model)}`}
             </InlineNotice>
           ) : null}
-          {codeRisk ? (
+          {codeRisk && access.readAllowed ? (
             <ul className="gateway-list">
               {(codeRisk.leaderboard ?? []).map((row, index) => (
                 <li key={`${row.model ?? "model"}-${index}`}>
                   <strong>{safeModelLabel(row.model)}</strong>
                   <span>
-                    {`위험도 ${row.risk ?? "-"} · 코드 블록 ${formatNumber(row.block_count ?? 0)} · 높음 ${formatNumber(row.high ?? 0)} · 보통 ${formatNumber(row.medium ?? 0)}`}
+                    {`위험도 ${resultLabel(riskLabels, row.risk)} · 코드 블록 ${formatNumber(row.block_count ?? 0)} · 높음 ${formatNumber(row.high ?? 0)} · 보통 ${formatNumber(row.medium ?? 0)}`}
                   </span>
                 </li>
               ))}
@@ -388,54 +349,7 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
         </SectionCard>
       ) : null}
 
-      <SectionCard
-        title="최근 실행 이력"
-        description="저장된 멀티 모델 비교 실행입니다. 프롬프트 원문은 저장을 선택한 실행에만 남습니다."
-        actions={
-          <Button size="small" variant="ghost" onClick={() => void history.refetch()}>
-            <History aria-hidden="true" /> 새로고침
-          </Button>
-        }
-      >
-        {history.isError ? (
-          <InlineNotice tone="warning" title="이력을 불러오지 못했습니다.">
-            {safeAppErrorMessage(history.error, "권한 또는 네트워크 상태를 확인하세요.")}
-          </InlineNotice>
-        ) : (history.data?.runs.length ?? 0) === 0 ? (
-          <EmptyState
-            title="저장된 비교 실행이 없습니다."
-            description="멀티 실행을 한 번 수행하면 이력이 쌓입니다."
-          />
-        ) : (
-          <div className="data-table-scroll" tabIndex={0} aria-label="최근 멀티 모델 실행 표 영역">
-            <table className="data-table">
-              <caption className="sr-only">최근 멀티 모델 비교 실행</caption>
-              <thead>
-                <tr>
-                  <th scope="col">제목</th>
-                  <th scope="col">모델</th>
-                  <th scope="col">성공/실패</th>
-                  <th scope="col">실행자</th>
-                  <th scope="col">시각</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(history.data?.runs ?? []).map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.title || item.id}</td>
-                    <td className="cell-number">{formatNumber(item.model_count ?? 0)}</td>
-                    <td className="cell-number">
-                      {formatNumber(item.success ?? 0)} / {formatNumber(item.failed ?? 0)}
-                    </td>
-                    <td>{item.created_by || "-"}</td>
-                    <td>{formatDateTime(item.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionCard>
+      <ChatComparisonHistory history={history} refresh={refreshHistory} access={access} />
     </div>
   );
 }

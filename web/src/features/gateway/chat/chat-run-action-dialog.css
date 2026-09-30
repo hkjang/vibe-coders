@@ -1,0 +1,12 @@
+/* Blur validation must not move the save button between pointerdown and click. */
+.dialog-content:has(.chat-run-action-draft) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(48rem, calc(100dvh - var(--space-6) - var(--space-6)));
+  overflow: hidden;
+}
+
+.dialog-content:has(.chat-run-action-draft) > .dialog-body {
+  min-height: 0;
+  overflow: auto;
+}

@@ -69,7 +69,7 @@ async function runComparison(user: ReturnType<typeof userEvent.setup>): Promise<
   const models = await screen.findByLabelText(/^비교할 모델/);
   await user.clear(models);
   await user.type(models, "gpt-4.1:openai");
-  await user.type(screen.getByLabelText(/^User 프롬프트/), "요약해줘");
+  await user.type(screen.getByLabelText(/^사용자 질문/), "요약해줘");
   await user.click(screen.getByRole("button", { name: /멀티 실행/ }));
   await screen.findByText("비교 응답");
 }
@@ -363,7 +363,7 @@ describe("ChatTestPage", () => {
     renderChat("/gateway/chat?tab=compare");
     await runComparison(user);
 
-    await user.click(screen.getByRole("button", { name: /Golden 답변으로 저장/ }));
+    await user.click(screen.getByRole("button", { name: /골든 답변으로 저장/ }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "저장" }));
     expect(

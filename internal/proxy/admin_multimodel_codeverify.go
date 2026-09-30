@@ -37,7 +37,7 @@ func (s *Server) handleMultiRunCodeVerify(w http.ResponseWriter, r *http.Request
 	verdicts := make([]*modelVerdict, 0, len(results))
 	withCode := 0
 	for _, res := range results {
-		if res.Status != "ok" || strings.TrimSpace(res.ResponsePreview) == "" {
+		if !successfulStoredMultiModelStatus(res.Status) || strings.TrimSpace(res.ResponsePreview) == "" {
 			verdicts = append(verdicts, &modelVerdict{Model: res.Model, Available: false})
 			continue
 		}

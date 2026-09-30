@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.21`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.22`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.21.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.21.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.22.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.22.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.21.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.22.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.21
+export GATEWAY_VERSION=v0.86.22
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -508,8 +508,29 @@ ID의 실제 존재 여부는 이 화면에서 확인하지 않습니다. 목록
 **라우팅 미리보기**와 **코드 검증**은 새 모델 호출이 아닌 계산입니다. 읽기 전용에서도 각각 기존
 `routing:read`·`admin:write` 권한을 별도로 요구합니다. 브라우저 주소·저장소에 입력을 남기지 않는
 것과 서버의 기록·감사·보존 정책은 별개입니다. 여러 모델 비교 결과의 미리보기·해시와 기준
-워크플로 등록 시의 프롬프트 저장도 구분하세요. 이번 보호는 단일 호출에 한정되며 비교·평가·승격·
+워크플로 등록 시의 프롬프트 저장도 구분하세요. v0.86.21의 보호는 단일 호출에 한정되며 비교·평가·승격·
 태그 등 채팅 전체의 읽기 전용 강제나 운영 승격을 완료한 것은 아닙니다.
+
+`v0.86.22`는 **여러 모델 비교와 결과 작업**으로 보호를 확대합니다. 비교 실행·자동 평가·평가 기록·
+라우팅 후보·골든 답변 저장은 실제 전송 직전 기존 권한과 읽기 전용 상태를 다시 확인합니다.
+제한이 생겨도 열린 폼의 입력은 유지하고 저장을 잠급니다. 복구 후에는 직접 다시 저장해야 합니다.
+이미 전달한 요청은 뒤늦은 읽기 전용 전환만으로 취소되거나 저장 실패로 바뀌지 않습니다.
+
+골든 답변에는 **실행 당시 사용자 질문**을 저장합니다. 결과가 나온 뒤 질문을 고쳤더라도 그 미실행
+초안을 이전 결과에 붙이지 않습니다. 편집창에 표시된 실행 ID와 선택 가능한 모델은 열 때 고정됩니다.
+다른 비교 결과가 도착해도 열린 폼은 원래 대상을 유지하므로 새 결과를 저장하려면 기존 폼을 닫고
+다시 여세요. 골든 저장은 서버에 질문을 기록하는 명시적 변경이며 브라우저 비저장과 별개입니다.
+
+좁은 화면에서는 편집창의 본문을 스크롤하며 아래쪽 취소·저장 버튼을 사용할 수 있습니다.
+본문 끝의 키보드 안내에 초점을 두면 위·아래 방향키로 내용을 살펴볼 수 있습니다. 저장 중에는
+입력을 잠그되 키보드로 내용을 계속 읽을 수 있습니다. 검증 오류가 있으면 첫 오류 입력으로
+이동하며, 읽기 전용 잠금 사유가 위쪽에 있으면 본문을 위로 스크롤해 확인하세요.
+
+**예상 비용**은 순수 계산이지만 기존 `admin:write`가 필요합니다. 저장된 실행 이력·답변 비교·
+코드 위험·내보내기는 `admin:read`와 원문 조회 권한을 함께 요구합니다. 읽기 전용 설정이 이 권한을
+추가로 부여하지 않습니다. 계정이나 화면이 바뀌면 이전 작업의 늦은 표시·알림·다운로드를 막습니다.
+서버가 반환한 실행 ID만으로 실행 이력 저장·감사의 확정 완료를 보장하지 않으며, 결과가 불명확할 때
+유료 모델 호출을 자동 재실행하지 않습니다. 모델 태그·전 기능 보호와 운영 승격은 후속 범위입니다.
 
 ## 4. 계정과 권한
 
