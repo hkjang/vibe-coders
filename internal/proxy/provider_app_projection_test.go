@@ -214,6 +214,59 @@ func TestProviderAppProjectionCredentialURLBoundaries(t *testing.T) {
 	}
 }
 
+func TestProviderAppProjectionPreservesLiteralLegacyURLMarker(t *testing.T) {
+	server, db, gateway := newProviderAppProjectionServer(t)
+	const name = "legacy-literal-url-marker"
+	addAdminModelsProvider(t, server, db, store.ProviderConfig{
+		Name: name, BaseURL: invalidProviderURLDisplay, Enabled: true, TimeoutMS: 30000,
+	}, "synthetic-marker-provider-key")
+	before, _, err := db.GetProvider(t.Context(), name)
+	if err != nil {
+		t.Fatal("could not read synthetic provider")
+	}
+	listed := readProviderProjectionResponse(t, providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/providers", nil), 200)
+	public := listedProviderProjection(t, listed, server.providerRef(name))
+	if public.BaseURL != invalidProviderURLDisplay {
+		t.Fatal("literal legacy marker projection changed")
+	}
+	updated := readProviderProjectionResponse(t, providerAppRequest(t, http.MethodPost, gateway.URL+"/admin/providers", map[string]any{
+		"name": name, "base_url": public.BaseURL, "enabled": false, "timeout_ms": 41000,
+	}), 200)
+	var response struct {
+		Provider store.ProviderPublic `json:"provider"`
+	}
+	if json.Unmarshal(updated, &response) != nil || response.Provider.BaseURL != public.BaseURL || response.Provider.ProviderRef != public.ProviderRef {
+		t.Error("literal marker POST projection or opaque identity changed")
+	}
+	stored, found, err := db.GetProvider(t.Context(), name)
+	if err != nil || !found || stored.BaseURL != before.BaseURL || stored.EncryptedAPIKey != before.EncryptedAPIKey || stored.Enabled || stored.TimeoutMS != 41000 {
+		t.Error("literal legacy marker blocked unrelated changes or replaced stored values")
+	}
+	audits, err := db.ListAdminAudit(t.Context(), 20)
+	if err != nil || len(audits) != 1 || audits[0].Action != "provider.upsert" {
+		t.Fatal("literal marker update audit missing")
+	}
+	for _, snapshot := range []string{audits[0].BeforeValue, audits[0].AfterValue} {
+		var fields map[string]any
+		if json.Unmarshal([]byte(snapshot), &fields) != nil || fields["base_url"] != invalidProviderURLDisplay {
+			t.Error("literal marker audit projection changed")
+		}
+		assertProviderProjectionNoSecrets(t, snapshot, "synthetic-marker-provider-key")
+	}
+	// Preservation is for an existing masked URL, never permission to create a
+	// marker or replace an otherwise valid URL with one.
+	addAdminModelsProvider(t, server, db, store.ProviderConfig{Name: "valid-public-url", BaseURL: "https://safe.invalid/v1", Enabled: true}, "")
+	for _, target := range []string{"new-literal-url-marker", "valid-public-url"} {
+		readProviderProjectionResponse(t, providerAppRequest(t, http.MethodPost, gateway.URL+"/admin/providers", map[string]any{
+			"name": target, "base_url": invalidProviderURLDisplay,
+		}), 400)
+	}
+	valid, _, err := db.GetProvider(t.Context(), "valid-public-url")
+	if err != nil || valid.BaseURL != "https://safe.invalid/v1" {
+		t.Error("rejected marker replaced a valid stored URL")
+	}
+}
+
 func TestProviderAppURLSensitiveQueryKeyLayers(t *testing.T) {
 	server, _, _ := newProviderAppProjectionServer(t)
 	for _, tc := range []struct{ name, encoded string }{
