@@ -39,6 +39,37 @@ func TestProviderProjectionOpenAPIDescribesPreservationWithoutLosingSuccess(t *t
 	}
 }
 
+func TestModelTagMutationOpenAPIBoundaries(t *testing.T) {
+	spec := buildOpenAPISpec()
+	paths := spec["paths"].(map[string]any)
+	assertJSONRequestSchema(t, paths, "/admin/model-tags", "post", "ModelUsageTagWriteRequest")
+	assertJSONOperationSchema(t, paths, "/admin/model-tags", "post", "200", "ModelUsageTag")
+	assertJSONOperationSchema(t, paths, "/admin/model-tags/{id}", "delete", "200", "ModelUsageTagDeleteResponse")
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	request := schemas["ModelUsageTagWriteRequest"].(map[string]any)
+	if request["additionalProperties"] != true {
+		t.Fatal("the existing decoder ignores unknown fields rather than rejecting them")
+	}
+	properties := request["properties"].(map[string]any)
+	for _, field := range []string{"good_for", "avoid_for", "risk_note", "updated_by", "updated_at"} {
+		if properties[field].(map[string]any)["nullable"] != true {
+			t.Errorf("%s must document the existing null-to-empty replacement", field)
+		}
+	}
+	post := paths["/admin/model-tags"].(map[string]any)["post"].(map[string]any)
+	for _, boundary := range []string{"not a rename", "TrimSpace", "null", "ignored", "not a conditional update"} {
+		if !strings.Contains(post["description"].(string), boundary) {
+			t.Errorf("tag POST description is missing %q", boundary)
+		}
+	}
+	remove := paths["/admin/model-tags/{id}"].(map[string]any)["delete"].(map[string]any)
+	for _, boundary := range []string{"exact decoded", "absent row", "audit"} {
+		if !strings.Contains(remove["description"].(string), boundary) {
+			t.Errorf("tag DELETE description is missing %q", boundary)
+		}
+	}
+}
+
 func TestOpenAPISwaggerAndVersion(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.22`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.23`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.22.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.22.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.23.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.23.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.22.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.23.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.22
+export GATEWAY_VERSION=v0.86.23
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -531,6 +531,27 @@ ID의 실제 존재 여부는 이 화면에서 확인하지 않습니다. 목록
 추가로 부여하지 않습니다. 계정이나 화면이 바뀌면 이전 작업의 늦은 표시·알림·다운로드를 막습니다.
 서버가 반환한 실행 ID만으로 실행 이력 저장·감사의 확정 완료를 보장하지 않으며, 결과가 불명확할 때
 유료 모델 호출을 자동 재실행하지 않습니다. 모델 태그·전 기능 보호와 운영 승격은 후속 범위입니다.
+
+### 모델 용도 태그의 변경 검토
+
+`v0.86.23`부터 **태그 추가** 또는 **수정**에서 입력한 뒤 **변경 내용 검토**를 선택하고,
+변경 전후 값을 읽은 후 **대상과 변경 내용을 확인했습니다.**에 체크해 **검토한 태그 저장**을
+실행합니다. 같은 모델 ID로 추가하면 기존 태그 전체를 덮어쓰고 빈 값은 기존 내용을 지웁니다.
+기존 태그의 수정은 원래 모델 ID로 고정되며 모델 이름 변경 기능이 아닙니다.
+
+검토 도구는 입력 위에 있고 저장·취소는 창 하단에 유지됩니다. 긴 변경 값은 비교표에서 생략하지
+않고 줄바꿈합니다. 내용이 길면 본문 안내에 초점을 두고 위·아래 방향키로 읽을 수 있으며,
+저장 중에도 본문을 살펴볼 수 있습니다. 삭제창의 긴 원본 ID는 본문에서 줄바꿈해 표시합니다.
+
+조회 실패나 다른 변경을 발견하면 초안은 유지한 채 **목록 다시 조회**, **최신 기준 다시 선택**을
+사용해 다시 검토하세요. 읽기 전용·권한 제한이 풀려도 자동으로 저장하지 않습니다. 저장 성공 뒤
+목록 조회만 실패했다면 저장을 다시 실행하지 말고 목록을 재조회하세요. 오류의 요청 ID로 추적할 수 있습니다.
+
+공백과 FEFF 문자는 원본 ID를 구별하도록 문자 코드로, 원래 역슬래시는 두 번 표시합니다.
+저장 시 다른 ID로 바뀌는 기존 항목은 수정하지 않으며, 삭제는 별도로 원본 ID를 확인합니다.
+ID가 단독 `.` 또는 `..`이면 브라우저가 URL을 다른 경로로 바꾸므로 신규 화면에서 삭제를 차단합니다.
+삭제는 용도 태그만 지우고 모델 자체는 지우지 않습니다. 검토 이후 다른 관리자가 바꾼 내용을
+서버에서 잠그거나 되돌리는 기능은 아니므로 동시 변경에 유의하세요.
 
 ## 4. 계정과 권한
 

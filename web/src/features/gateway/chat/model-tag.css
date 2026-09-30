@@ -1,0 +1,42 @@
+.dialog-content:has(.model-tag-draft) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(48rem, calc(100dvh - var(--space-6) - var(--space-6)));
+  overflow: hidden;
+}
+.dialog-content:has(.model-tag-draft) > .dialog-body {
+  min-height: 0;
+  overflow: auto;
+}
+.model-tag-draft,
+.model-tag-comparison {
+  min-width: 0;
+}
+.model-tag-comparison .data-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+.model-tag-comparison th,
+.model-tag-comparison td {
+  padding: var(--space-2);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.model-tag-comparison th {
+  position: static;
+}
+.model-tag-comparison th:first-child {
+  width: 24%;
+}
+.model-tag-delete-target {
+  min-width: 0;
+  margin: 0;
+}
+.model-tag-delete-target dt {
+  font-weight: 600;
+}
+.model-tag-delete-target dd {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

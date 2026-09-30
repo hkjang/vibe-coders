@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { looseList, looseObject, numberish, unknownRecord } from "@/shared/api/loose";
+import type { ModelUsageTagDeleteResponse, PostAdminModelTagsResponse } from "@/shared/api/generated";
+import { modelUsageTagSchema } from "@/shared/api/schemas";
 
 // Response contracts for the AI gateway domain. The legacy admin API documents no
 // response bodies, so the Go handlers in `internal/proxy/admin_*.go` are the source
@@ -298,13 +300,10 @@ export {
   type ModelDeprecation,
 } from "@/shared/api/domains/model-governance.schemas";
 
-export const modelUsageTagWriteSchema = looseObject({
-  model: z.string().nullish(),
-  good_for: z.string().nullish(),
-  avoid_for: z.string().nullish(),
-  risk_note: z.string().nullish(),
-  updated_at: z.string().nullish(),
-});
+export const modelUsageTagWriteSchema = modelUsageTagSchema satisfies z.ZodType<PostAdminModelTagsResponse>;
+export const modelUsageTagDeleteSchema = z
+  .object({ status: z.literal("deleted") })
+  .strict() satisfies z.ZodType<ModelUsageTagDeleteResponse>;
 
 /* ── provider administration ───────────────────────────────────────────────── */
 

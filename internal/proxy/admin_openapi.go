@@ -869,6 +869,13 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["201"] = map[string]any{"description": "Created", "content": jsonContent(schemaRef("PricingWriteResponse"))}
 	case "get /admin/model-tags", "get /v1/model-tags":
 		responses["200"] = successResponse("ModelUsageTagsResponse")
+	case "post /admin/model-tags":
+		op["description"] = "Upsert the complete tag row for a Go TrimSpace-normalized model identifier, not a rename. Omitted or null optional strings replace existing values with empty strings. Unknown fields are ignored. Supplied updated_by and updated_at are decoded as nullable strings but replaced by the server actor and timestamp. This is not a conditional update or version check."
+		op["requestBody"] = requestBody("ModelUsageTagWriteRequest")
+		responses["200"] = successResponse("ModelUsageTag")
+	case "delete /admin/model-tags/{id}":
+		op["description"] = "Delete by the exact decoded model path identifier without POST trimming. The existing 200 acknowledgment also covers an absent row; it does not report an affected-row count or successful admin audit."
+		responses["200"] = successResponse("ModelUsageTagDeleteResponse")
 	default:
 		return
 	}
@@ -1292,6 +1299,21 @@ func modelCatalogOpenAPISchemas() map[string]any {
 		"ModelUsageTagsResponse": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"tags"},
 			"properties": map[string]any{"tags": map[string]any{"type": "array", "items": schemaRef("ModelUsageTag")}},
+		},
+		"ModelUsageTagWriteRequest": map[string]any{
+			"type": "object", "additionalProperties": true, "required": []string{"model"},
+			"properties": map[string]any{
+				"model":      map[string]any{"type": "string", "minLength": 1, "description": "Normalized using Go TrimSpace; the resulting identifier must be nonempty."},
+				"good_for":   map[string]any{"type": "string", "nullable": true},
+				"avoid_for":  map[string]any{"type": "string", "nullable": true},
+				"risk_note":  map[string]any{"type": "string", "nullable": true},
+				"updated_by": map[string]any{"type": "string", "nullable": true, "description": "Legacy accepted input; replaced by the authenticated server actor."},
+				"updated_at": map[string]any{"type": "string", "nullable": true, "description": "Legacy accepted input; replaced by the server timestamp."},
+			},
+		},
+		"ModelUsageTagDeleteResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"status"},
+			"properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"deleted"}}},
 		},
 	}
 }

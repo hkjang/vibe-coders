@@ -4,6 +4,7 @@ import type {
   DeleteAdminModelDeprecationsIdData,
   DeleteAdminModelDeprecationsIdResponse,
   DeleteAdminModelTagsIdData,
+  DeleteAdminModelTagsIdResponse,
   DeleteAdminModelsContractsData,
   DeleteAdminModelsContractsResponse,
   DeleteAdminPromptLabExperimentsIdData,
@@ -40,6 +41,7 @@ import type {
   PostAdminModelDeprecationsData,
   PostAdminModelDeprecationsResponse,
   PostAdminModelTagsData,
+  PostAdminModelTagsResponse,
   PostAdminModelsContractsData,
   PostAdminModelsContractsResponse,
   PostAdminModelsContractsRunData,
@@ -72,6 +74,7 @@ import {
   modelDeprecationListSchema,
   modelDeprecationSaveSchema,
   modelUsageTagWriteSchema,
+  modelUsageTagDeleteSchema,
   multiRunCodeVerifySchema,
   multiRunDiffSchema,
   multiRunFeedbackSchema,
@@ -190,12 +193,7 @@ export interface ProviderSLOWriteBody {
 export type ModelContractWriteBody = Readonly<PostAdminModelsContractsData["body"]>;
 export type ModelDeprecationWriteBody = Readonly<PostAdminModelDeprecationsData["body"]>;
 
-export interface ModelUsageTagWriteBody {
-  readonly model: string;
-  readonly good_for?: string;
-  readonly avoid_for?: string;
-  readonly risk_note?: string;
-}
+export type ModelUsageTagWriteBody = Readonly<PostAdminModelTagsData["body"]>;
 
 export interface PromptExperimentWriteBody {
   readonly title: string;
@@ -395,15 +393,15 @@ export const gatewayEndpoints = {
       ),
     },
     tags: {
-      save: operation<WithBody<PostAdminModelTagsData, ModelUsageTagWriteBody>, unknown>()(
+      save: operation<PostAdminModelTagsData, PostAdminModelTagsResponse>()(
         "POST",
         "/admin/model-tags",
         modelUsageTagWriteSchema,
       ),
-      remove: operation<DeleteAdminModelTagsIdData, unknown>()(
+      remove: operation<DeleteAdminModelTagsIdData, DeleteAdminModelTagsIdResponse>()(
         "DELETE",
         "/admin/model-tags/{id}",
-        gatewayAcknowledgementSchema,
+        modelUsageTagDeleteSchema,
       ),
     },
   },
