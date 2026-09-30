@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.10`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.11`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.10.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.10.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.11.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.11.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.10.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.11.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.10
+export GATEWAY_VERSION=v0.86.11
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -385,8 +385,18 @@ SSO 저장 후 재적재 실패나 후속 조회 실패 안내가 나오면 저�
 새 URL에 비밀정보가 포함되면 저장을 거부합니다. 이 규칙은 기존 `/admin`의 저장 방식을
 바꾸거나 동시 편집을 차단하지 않으며, 원본 비밀값을 브라우저로 다시 내려보내지 않습니다.
 
-이미 발급된 API 키의 별도 권한 변경창 등 모든 자체 편집 폼까지 보호한 것은 아닙니다.
-각 화면에서 저장 여부를 확인한 뒤 이동하세요.
+`v0.86.11`부터 **API 키 → 권한 수정**에서도 한글 권한명·설명과 미저장 변경 보호를 제공합니다.
+창을 연 시점의 대상과 권한을 기준으로 편집하며 자동 조회가 입력을 덮어쓰지 않습니다.
+기타 기존 권한도 표시하고 자동으로 해제하지 않습니다. 현재 서버의 지원 권한 목록을 조회한 뒤 저장하며,
+지원하지 않는 권한이 선택되어 있으면 이를 직접 해제하거나 변경을 취소해야 합니다. 목록 조회가 실패하면
+재시도하세요. 한글 설명이 없는 권한도 서버가 지원하면 유지할 수 있으며 서버는 저장 시 다시 검증합니다.
+**모든 권한을 해제하면 빈 권한 목록을 저장**합니다. 역할 권한을 자동 상속하지 않으며 인증이 활성화된
+환경에서는 해당 권한이 필요한 호출이 거부됩니다. 키의 모든 사용을 중단하려면 별도 **중지** 작업을
+사용하세요. 새 키 발급에서 권한을 선택하지 않아 기본값을 적용하는 동작과는 다릅니다.
+수정 후 닫기·화면 이동에는 폐기 확인이 필요하며, 저장 중 중복 제출을 막습니다. 오류 시 초안과
+요청 ID를 확인하고 재시도할 수 있습니다. 로그아웃·새 로그인 뒤에는 이전 초안을 복원하지 않습니다.
+다른 관리자의 동시 편집을 차단하는 기능은 아닙니다. 비용 보호 등 아직 이전하지 않은 자체 편집
+폼까지 모두 보호한 것은 아니므로 각 화면에서 저장 여부를 확인한 뒤 이동하세요.
 
 ## 4. 계정과 권한
 
@@ -414,7 +424,7 @@ SSO 로 들어온 계정의 역할은 클레임 매핑(`SSO_KEYCLOAK_ROLE_CLAIM`
 - **상태 점검**: `GET /health`(프로세스), `GET /ready`(DB 포함), `GET /metrics`(Prometheus). 콘솔 **시스템 → 시스템 상태**가 같은 신호를 사람 눈으로 보여 줍니다.
 - **콘솔 홈**: **개요 → 통합 현황**에서 게이트웨이 상태·보존 비용·P95 지연·라우팅·운영 위험을 봅니다. 상단 **자동 갱신**을 켜면 주기적으로 다시 읽습니다.
 - **로그 위치**: 컨테이너 stdout(`docker compose logs -f gateway`), 저장 실패 로그 `/data/fallback.ndjson`(DB 기록 실패분; 콘솔 **시스템 설정 → 저장 실패 로그 재처리**로 되살립니다).
-- **백업·복구**: `/data` 볼륨이 전부입니다. `backup-volume-v0.86.10.sh` 로 tar 백업, 복구는 볼륨을 유지한 채 컨테이너만 교체합니다 — [OPERATIONS.md 6](OPERATIONS.md#6-백업--복구).
+- **백업·복구**: `/data` 볼륨이 전부입니다. `backup-volume-v0.86.11.sh` 로 tar 백업, 복구는 볼륨을 유지한 채 컨테이너만 교체합니다 — [OPERATIONS.md 6](OPERATIONS.md#6-백업--복구).
 - **업그레이드**: 새 tar.gz 를 `docker load` → `GATEWAY_VERSION` 만 올려 `docker compose up -d`. 마이그레이션은 기동 시 자동입니다. **되돌리기**: 업그레이드 전 백업을 복구하고 `GATEWAY_VERSION` 을 이전 값으로 되돌려 `up -d`. 새 버전이 추가한 컬럼은 이전 바이너리가 무시합니다.
 - **보존**: `RETENTION_*` 일수를 넘긴 요청·프롬프트·응답은 `RETENTION_INTERVAL` 마다 지워집니다. 콘솔 **시스템 설정 → 데이터 보존**에서 무엇이 함께 삭제되는지 볼 수 있습니다(9.3 절).
 

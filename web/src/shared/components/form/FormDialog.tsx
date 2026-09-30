@@ -18,6 +18,8 @@ interface FormDialogProps<Input extends FieldValues, Output> {
   open: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
   submitLabel?: string;
+  /** External prerequisites may block submission without locking draft edits. */
+  submitDisabled?: boolean;
   title: string;
 }
 
@@ -48,6 +50,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   open,
   returnFocusRef,
   submitLabel = "저장",
+  submitDisabled = false,
   title,
 }: FormDialogProps<Input, Output>): React.JSX.Element {
   const coordinator = useUnsavedChanges();
@@ -55,11 +58,15 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   const formId = useId();
   const [guardId] = useState(() => Symbol("form"));
   const submitting = useRef(false);
+  const submissionAllowed = useRef(!submitDisabled);
   const epoch = useRef(0);
   const mounted = useRef(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<{ message: string; requestId?: string } | undefined>();
   const dirty = form.formState.isDirty;
+  useLayoutEffect(() => {
+    submissionAllowed.current = !submitDisabled;
+  }, [submitDisabled]);
   const close = useCallback((): void => {
     // Invalidate immediately, including a logout and mutation resolution in the
     // same tick before React commits the closed state.
@@ -87,14 +94,14 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
 
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (submitting.current || !coordinator.startSubmission(guardId)) return;
+    if (!submissionAllowed.current || submitting.current || !coordinator.startSubmission(guardId)) return;
     submitting.current = true;
     setPending(true);
     const submissionEpoch = epoch.current;
     const isCurrent = (): boolean => mounted.current && epoch.current === submissionEpoch;
     try {
       await form.handleSubmit(async (values) => {
-        if (!isCurrent()) return;
+        if (!isCurrent() || !submissionAllowed.current) return;
         setError(undefined);
         try {
           await onSubmit(values);
@@ -132,7 +139,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
           <Button variant="secondary" onClick={() => coordinator.requestClose(guardId)} disabled={pending}>
             취소
           </Button>
-          <Button form={formId} type="submit" variant="primary" disabled={pending}>
+          <Button form={formId} type="submit" variant="primary" disabled={pending || submitDisabled}>
             {pending ? "저장 중" : submitLabel}
           </Button>
         </>
