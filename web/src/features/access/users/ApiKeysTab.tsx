@@ -1,20 +1,30 @@
 import { useMemo, useRef, useState } from "react";
-import { z } from "zod";
 
-import { statusLabel, statusTone } from "@/features/access/access-format";
-import { QueryNotice, ScopeBadges, UpdatedAt } from "@/features/access/access-ui";
+import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
+import { ApiKeyCreateFields } from "@/features/access/users/ApiKeyCreateFields";
+import { ApiKeyScopesDialog } from "@/features/access/users/ApiKeyScopesDialog";
+import { apiKeyColumns } from "@/features/access/users/api-key-columns";
+import {
+  createKeySchema,
+  editKeySchema,
+  splitList,
+  type CreateKeyForm,
+  type EditKeyForm,
+} from "@/features/access/users/api-key-form";
 import { accessKeys, useApiKeysQuery } from "@/features/access/users/use-access-admin";
+import { useApiKeyScopeDraft } from "@/features/access/users/use-api-key-scope-draft";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
 import type { CreateApiKeyBody, UpdateApiKeyBody } from "@/shared/api/domains/access";
 import type { ApiKeyPublic } from "@/shared/api/domains/access.schemas";
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
+import { AppError } from "@/shared/api/error";
+import { tokenStore } from "@/shared/auth/token-store";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { LoadingState } from "@/shared/components/state/PageStates";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
@@ -26,149 +36,12 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
-import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
-import { formatDateTime, shortId } from "@/shared/utils/format";
 
 const access = endpoints.domains.access;
 const routeId = "access.users";
-
-const allScopes = [
-  "chat:completion",
-  "embeddings:create",
-  "models:read",
-  "admin:read",
-  "admin:write",
-  "routing:read",
-  "routing:write",
-  "observability:read",
-  "costs:read",
-  "security:read",
-  "mcp:use",
-  "mcp:admin",
-  "team:read",
-] as const;
-
-const createKeySchema = z.object({
-  name: z.string().min(1, "키 이름을 입력하세요."),
-  owner: z.string(),
-  team: z.string(),
-  role: z.string(),
-  allowed_ips: z.string(),
-  allowed_models: z.string(),
-  denied_models: z.string(),
-  budget_limit_krw: z.string(),
-  expires_at: z.string(),
-  scopes: z.array(z.string()),
-});
-type CreateKeyForm = z.infer<typeof createKeySchema>;
-
-const editKeySchema = z.object({
-  name: z.string(),
-  owner: z.string(),
-  team: z.string(),
-  role: z.string(),
-  status: z.enum(["active", "disabled"]),
-});
-type EditKeyForm = z.infer<typeof editKeySchema>;
-
-function splitList(value: string): string[] {
-  return value
-    .split(/[\s,]+/u)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function keyColumns(
-  onEdit: (row: ApiKeyPublic, trigger: HTMLElement) => void,
-  onScopes: (row: ApiKeyPublic, trigger: HTMLElement) => void,
-  onRevoke: (row: ApiKeyPublic, trigger: HTMLElement) => void,
-  canWrite: boolean,
-  writeDeniedReason: string,
-): ReadonlyArray<DataTableColumn<ApiKeyPublic>> {
-  const column = createDataTableColumnHelper<ApiKeyPublic>();
-  return column.columns([
-    column.accessor((row) => row.name, {
-      id: "name",
-      header: "이름",
-      cell: ({ row }) => (
-        <div>
-          <strong className="truncate">{row.original.name || "이름 없음"}</strong>
-          <div className="access-list-detail mono" title={row.original.id}>
-            {shortId(row.original.id, 18)}
-          </div>
-        </div>
-      ),
-    }),
-    column.accessor((row) => row.owner, { id: "owner", header: "소유자" }),
-    column.accessor((row) => row.team, { id: "team", header: "팀" }),
-    column.accessor((row) => row.role, {
-      id: "role",
-      header: "역할",
-      cell: ({ getValue }) => (getValue() ? <Badge tone="info">{getValue()}</Badge> : "—"),
-    }),
-    column.accessor((row) => row.status, {
-      id: "status",
-      header: "상태",
-      cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{statusLabel(getValue())}</Badge>,
-    }),
-    column.accessor((row) => row.scopes.join(" "), {
-      id: "scopes",
-      header: "스코프",
-      cell: ({ row }) => <ScopeBadges scopes={row.original.scopes} />,
-    }),
-    column.accessor((row) => row.allowed_ips.join(" "), {
-      id: "allowed_ips",
-      header: "허용 IP",
-      cell: ({ row }) =>
-        row.original.allowed_ips.length === 0 ? (
-          <span className="access-note">제한 없음</span>
-        ) : (
-          <span className="mono truncate">{row.original.allowed_ips.join(", ")}</span>
-        ),
-    }),
-    column.accessor((row) => row.expires_at, {
-      id: "expires_at",
-      header: "만료",
-      cell: ({ getValue }) => (getValue() ? formatDateTime(getValue()) : "무기한"),
-    }),
-    column.display({
-      id: "actions",
-      header: "작업",
-      cell: ({ row }) => (
-        <div className="table-actions">
-          <Button
-            size="small"
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeDeniedReason}
-            onClick={(event) => onEdit(row.original, event.currentTarget)}
-          >
-            수정
-          </Button>
-          <Button
-            size="small"
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeDeniedReason}
-            onClick={(event) => onScopes(row.original, event.currentTarget)}
-          >
-            스코프
-          </Button>
-          <Button
-            size="small"
-            variant="danger"
-            disabled={!canWrite || row.original.status === "revoked"}
-            title={canWrite ? undefined : writeDeniedReason}
-            onClick={(event) => onRevoke(row.original, event.currentTarget)}
-          >
-            폐기
-          </Button>
-        </div>
-      ),
-    }),
-  ]);
-}
 
 interface ApiKeysTabProps {
   canWrite: boolean;
@@ -187,8 +60,13 @@ export function ApiKeysTab({
   const [statusFilter, setStatusFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<ApiKeyPublic | undefined>();
-  const [scopeTarget, setScopeTarget] = useState<ApiKeyPublic | undefined>();
-  const [scopeDraft, setScopeDraft] = useState<readonly string[]>([]);
+  const {
+    target: scopeTarget,
+    open: openScopes,
+    close: closeScopes,
+    returnFocusRef: scopeReturnFocus,
+    rememberTrigger: rememberScopeTrigger,
+  } = useApiKeyScopeDraft();
   const [revoking, setRevoking] = useState<ApiKeyPublic | undefined>();
   const [hardDelete, setHardDelete] = useState(false);
   const [issuedSecret, setIssuedSecret] = useState("");
@@ -207,7 +85,6 @@ export function ApiKeysTab({
     expires_at: "",
     scopes: [],
   });
-  const createScopes = createForm.watch("scopes");
   const editForm = useZodForm<EditKeyForm, EditKeyForm>(editKeySchema, {
     name: "",
     owner: "",
@@ -341,7 +218,7 @@ export function ApiKeysTab({
         ) : null}
         <DataTable
           caption="프록시 API 키 목록"
-          columns={keyColumns(
+          columns={apiKeyColumns(
             (row, trigger) => {
               rememberRowTrigger(trigger);
               editForm.reset({
@@ -353,11 +230,7 @@ export function ApiKeysTab({
               });
               setEditing(row);
             },
-            (row, trigger) => {
-              rememberRowTrigger(trigger);
-              setScopeDraft(row.scopes);
-              setScopeTarget(row);
-            },
+            openScopes,
             (row, trigger) => {
               rememberRowTrigger(trigger);
               setHardDelete(false);
@@ -365,6 +238,7 @@ export function ApiKeysTab({
             },
             canWrite,
             writeDeniedReason,
+            rememberScopeTrigger,
           )}
           data={rows}
           getRowId={(row) => row.id}
@@ -397,61 +271,7 @@ export function ApiKeysTab({
           });
         }}
       >
-        <FormField label="이름" required error={createForm.formState.errors.name?.message}>
-          {(control) => <Input {...control} {...createForm.register("name")} />}
-        </FormField>
-        <FormField label="소유자">
-          {(control) => <Input {...control} {...createForm.register("owner")} />}
-        </FormField>
-        <FormField label="팀">
-          {(control) => <Input {...control} {...createForm.register("team")} />}
-        </FormField>
-        <FormField label="역할" description="비우면 기본 역할을 사용합니다.">
-          {(control) => <Input {...control} {...createForm.register("role")} />}
-        </FormField>
-        <FormField
-          label="허용 IP"
-          description="쉼표 또는 공백으로 구분합니다. 비우면 IP 제한이 없습니다. 발급 후에는 바꿀 수 없습니다."
-        >
-          {(control) => <Input {...control} {...createForm.register("allowed_ips")} />}
-        </FormField>
-        <FormField label="허용 모델" description="쉼표 또는 공백으로 구분합니다.">
-          {(control) => <Input {...control} {...createForm.register("allowed_models")} />}
-        </FormField>
-        <FormField label="차단 모델" description="쉼표 또는 공백으로 구분합니다.">
-          {(control) => <Input {...control} {...createForm.register("denied_models")} />}
-        </FormField>
-        <FormField label="월 예산 한도(원)">
-          {(control) => (
-            <Input {...control} type="number" min={0} {...createForm.register("budget_limit_krw")} />
-          )}
-        </FormField>
-        <FormField label="만료" description="비우면 무기한입니다.">
-          {(control) => <Input {...control} type="datetime-local" {...createForm.register("expires_at")} />}
-        </FormField>
-        <fieldset>
-          <legend>스코프</legend>
-          <p className="access-note">선택하지 않으면 역할의 스코프를 그대로 상속합니다.</p>
-          <div className="access-scope-grid">
-            {allScopes.map((scope) => (
-              <Checkbox
-                key={scope}
-                label={scope}
-                checked={createScopes.includes(scope)}
-                onChange={(event) => {
-                  const current = createForm.getValues("scopes");
-                  createForm.setValue(
-                    "scopes",
-                    event.target.checked
-                      ? [...current, scope].sort()
-                      : current.filter((item) => item !== scope),
-                    { shouldDirty: true },
-                  );
-                }}
-              />
-            ))}
-          </div>
-        </fieldset>
+        <ApiKeyCreateFields form={createForm} />
       </FormDialog>
 
       <FormDialog
@@ -497,49 +317,22 @@ export function ApiKeysTab({
         </FormField>
       </FormDialog>
 
-      <Dialog
-        open={scopeTarget !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setScopeTarget(undefined);
-        }}
-        returnFocusRef={rowTrigger}
-        title="스코프 변경"
-        description={`${scopeTarget?.name ?? ""} 키가 사용할 수 있는 스코프를 선택합니다. 모두 해제하면 역할 스코프를 상속합니다.`}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setScopeTarget(undefined)}>
-              취소
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (!scopeTarget) return;
-                updateKey.mutate(
-                  { id: scopeTarget.id, body: { scopes: scopeDraft } },
-                  { onSuccess: () => setScopeTarget(undefined) },
-                );
-              }}
-            >
-              저장
-            </Button>
-          </>
-        }
-      >
-        <div className="access-scope-grid">
-          {allScopes.map((scope) => (
-            <Checkbox
-              key={scope}
-              label={scope}
-              checked={scopeDraft.includes(scope)}
-              onChange={(event) =>
-                setScopeDraft((current) =>
-                  event.target.checked ? [...current, scope] : current.filter((item) => item !== scope),
-                )
-              }
-            />
-          ))}
-        </div>
-      </Dialog>
+      {scopeTarget ? (
+        <ApiKeyScopesDialog
+          key={`${scopeTarget.row.id}:${scopeTarget.epoch}`}
+          target={scopeTarget.row}
+          onOpenChange={(open) => {
+            if (!open) closeScopes();
+          }}
+          returnFocusRef={scopeReturnFocus}
+          onSubmit={(id, scopes) => {
+            if (scopeTarget.epoch !== tokenStore.getSessionEpoch()) {
+              throw new AppError("인증 세션이 변경되어 이전 권한 초안을 취소했습니다.", { kind: "aborted" });
+            }
+            return updateKey.mutateAsync({ id, body: { scopes } });
+          }}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={revoking !== undefined}
