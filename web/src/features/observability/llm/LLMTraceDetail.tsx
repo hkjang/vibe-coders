@@ -1,5 +1,6 @@
+import { useRequestNoteContext } from "@/features/observability/request-insight/request-note-context";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   canInspectRawRequest,
@@ -44,6 +45,8 @@ export function LLMTraceDetail({
   writeDeniedReason,
 }: LLMTraceDetailProps): React.JSX.Element {
   const auth = useAuth();
+  const noteEditor = useRequestNoteContext();
+  const insightTrigger = useRef<HTMLButtonElement>(null);
   // The explanation and its actions are fetched only when the operator asks for
   // them: the analysis and replay answers can quote the captured prompt.
   const [insightOpen, setInsightOpen] = useState(false);
@@ -123,7 +126,17 @@ export function LLMTraceDetail({
         title="원인 설명과 조치"
         description="이 호출이 느리거나 비쌌던 이유, 운영 메모, 모델 분석과 재실행입니다."
         actions={
-          <Button size="small" onClick={() => setInsightOpen((current) => !current)}>
+          <Button
+            size="small"
+            ref={insightTrigger}
+            disabled={noteEditor.pending}
+            onClick={() =>
+              noteEditor.requestLeave(() => {
+                noteEditor.returnFocusRef.current = insightTrigger.current;
+                setInsightOpen((current) => !current);
+              })
+            }
+          >
             {insightOpen ? "접기" : "원인 설명 열기"}
           </Button>
         }

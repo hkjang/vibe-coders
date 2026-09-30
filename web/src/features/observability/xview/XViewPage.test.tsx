@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -438,7 +438,15 @@ describe("XViewPage", () => {
         },
         session: { session_id: "", stream: false },
       }),
-      "GET /admin/requests/req-1/note": () => ({ request_id: "req-1", tags: [], note: "" }),
+      "GET /admin/requests/req-1/note": () => ({
+        request_id: "req-1",
+        tags: [],
+        note: "",
+        created_by: "",
+        updated_at: "0001-01-01T00:00:00Z",
+        exists: false,
+        redacted_fields: [],
+      }),
     });
     const user = userEvent.setup();
     renderPage();
@@ -448,6 +456,20 @@ describe("XViewPage", () => {
 
     const sheet = await screen.findByRole("dialog", { name: "요청 원인 설명" });
     expect(await within(sheet).findByText("기본 provider")).toBeVisible();
+    const edit = within(sheet).getByRole("button", { name: "메모·태그 수정" });
+    await waitFor(() => expect(edit).toBeEnabled());
+    await user.click(edit);
+    const noteDialog = await screen.findByRole("dialog", { name: "요청 메모·태그 수정" });
+    await user.selectOptions(within(noteDialog).getByLabelText("태그 변경 방법"), "clear");
+    // This is a direct parent-handler boundary check, not a claim that an
+    // inert background button is reachable through a user's pointer.
+    fireEvent.click(within(sheet).getByRole("button", { name: "패널 닫기", hidden: true }));
+    await screen.findByRole("alertdialog");
+    await user.click(screen.getByRole("button", { name: "변경 버리기" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "요청 원인 설명" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "req-1 원인 설명 열기" })).toHaveFocus();
   });
 
   it("has no automated accessibility violations", async () => {

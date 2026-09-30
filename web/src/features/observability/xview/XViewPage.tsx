@@ -1,3 +1,5 @@
+import { RequestNoteBoundary } from "@/features/observability/request-insight/RequestNoteBoundary";
+import { useRequestNoteContext } from "@/features/observability/request-insight/request-note-context";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -69,6 +71,15 @@ function pick<T extends string>(value: string | null, allowed: readonly T[], fal
 }
 
 export function XViewPage(): React.JSX.Element {
+  return (
+    <RequestNoteBoundary>
+      <XViewPageContent />
+    </RequestNoteBoundary>
+  );
+}
+
+function XViewPageContent(): React.JSX.Element {
+  const noteEditor = useRequestNoteContext();
   const auth = useAuth();
   const [params, updateParams] = useSearchState();
   const [tab, setTab] = useTabParam<TabId>(tabIds);
@@ -114,6 +125,7 @@ export function XViewPage(): React.JSX.Element {
   const [selection, setSelection] = useState<ReadonlyArray<ScatterPoint>>([]);
   const [flowRequestId, setFlowRequestId] = useState("");
   const [insightRequestId, setInsightRequestId] = useState("");
+  const noteRequestId = noteEditor.target?.requestId ?? insightRequestId;
   const selectionFocusRef = useRef<HTMLElement | null>(null);
   const flowFocusRef = useRef<HTMLElement | null>(null);
   const insightFocusRef = useRef<HTMLElement | null>(null);
@@ -550,8 +562,11 @@ export function XViewPage(): React.JSX.Element {
                       <Button
                         size="small"
                         onClick={(event) => {
-                          insightFocusRef.current = event.currentTarget;
-                          setInsightRequestId(point.request_id);
+                          const trigger = event.currentTarget;
+                          noteEditor.requestLeave(() => {
+                            insightFocusRef.current = trigger;
+                            setInsightRequestId(point.request_id);
+                          });
                         }}
                         aria-label={`${point.request_id} 원인 설명 열기`}
                       >
@@ -633,19 +648,19 @@ export function XViewPage(): React.JSX.Element {
       </Sheet>
 
       <Sheet
-        open={insightRequestId !== ""}
+        open={noteRequestId !== ""}
         onOpenChange={(next) => {
-          if (!next) setInsightRequestId("");
+          if (!next) noteEditor.requestLeave(() => setInsightRequestId(""));
         }}
         returnFocusRef={insightFocusRef}
         size="wide"
         title="요청 원인 설명"
         description="라우팅·폴백·캐시·안전장치·비용을 나눠 설명하고, 메모·분석·재실행을 이어서 처리합니다."
       >
-        {insightRequestId ? (
+        {noteRequestId ? (
           <RequestInsightPanel
-            key={insightRequestId}
-            requestId={insightRequestId}
+            key={noteRequestId}
+            requestId={noteRequestId}
             canInspectRaw={canInspectRaw}
             canWriteNote={canWriteNote}
           />

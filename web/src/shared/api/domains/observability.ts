@@ -78,7 +78,7 @@ import type {
   PostAdminRequestsIdAnalyzeData,
   PostAdminRequestsIdReplayData,
   PostAdminSavedFiltersData,
-  PutAdminRequestsIdNoteData,
+  PatchAdminRequestsIdNoteData,
 } from "@/shared/api/generated";
 
 // The legacy admin surface is documented without request/response schemas, so the
@@ -110,11 +110,13 @@ export interface JourneyProbeBody {
   clients?: string[];
 }
 
-/** Body of `PUT /admin/requests/{id}/note` (see `handleRequestNote`). */
+/** Body of `PATCH /admin/requests/{id}/note` (see `handleRequestNote`). */
 export interface RequestNoteBody {
   /** Operator labels; the server strips `#` and commas and de-duplicates. */
-  tags: readonly string[];
-  note: string;
+  tags?: readonly string[];
+  note?: string;
+  /** Preserved fields must be absent above. Unpreserved omission still clears. */
+  preserve_fields: readonly ("note" | "tags")[];
 }
 
 const optionalString = z.string().optional();
@@ -375,9 +377,10 @@ export const observabilityEndpoints = {
       "/admin/requests/{id}/note",
       requestNoteSchema,
     ),
-    // POST and PUT share one upsert handler; PUT states the intent the screen has.
-    saveNote: operation<WithBody<PutAdminRequestsIdNoteData, RequestNoteBody>, unknown>()(
-      "PUT",
+    // PATCH requires explicit intent; older recipients reject it before writing.
+    // Never fall back to legacy PUT/POST, which ignore preserve_fields on old pods.
+    saveNote: operation<WithBody<PatchAdminRequestsIdNoteData, RequestNoteBody>, unknown>()(
+      "PATCH",
       "/admin/requests/{id}/note",
       requestNoteSchema,
     ),

@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -313,7 +313,15 @@ describe("LLMPage", () => {
         },
         session: { session_id: "", stream: false },
       }),
-      "GET /admin/requests/req-1/note": () => ({ request_id: "req-1", tags: [], note: "" }),
+      "GET /admin/requests/req-1/note": () => ({
+        request_id: "req-1",
+        tags: [],
+        note: "",
+        created_by: "",
+        updated_at: "0001-01-01T00:00:00Z",
+        exists: false,
+        redacted_fields: [],
+      }),
     });
     renderPage("/observability/llm?tab=evaluations");
 
@@ -325,6 +333,24 @@ describe("LLMPage", () => {
 
     expect(await screen.findByText("기본 provider")).toBeVisible();
     expect(api.calls.some((call) => call.key === "GET /admin/requests/req-1/explain")).toBe(true);
+    const edit = screen.getByRole("button", { name: "메모·태그 수정" });
+    await waitFor(() => expect(edit).toBeEnabled());
+    await user.click(edit);
+    const noteDialog = await screen.findByRole("dialog", { name: "요청 메모·태그 수정" });
+    await user.selectOptions(within(noteDialog).getByLabelText("메모 변경 방법"), "clear");
+    const collapse = screen.getByRole("button", { name: "접기", hidden: true });
+    // Exercise the parent handler directly: real background controls are inert
+    // while the nested modal is open; browser tests cover actual keyboard close.
+    fireEvent.click(collapse);
+    await screen.findByRole("alertdialog");
+    await user.click(screen.getByRole("button", { name: "계속 편집" }));
+    expect(within(noteDialog).getByLabelText("메모 변경 방법")).toHaveValue("clear");
+    fireEvent.click(collapse);
+    await user.click(screen.getByRole("button", { name: "변경 버리기" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "요청 메모·태그 수정" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "원인 설명 열기" })).toHaveFocus();
   });
 
   it("submits feedback with the operator's rating", async () => {

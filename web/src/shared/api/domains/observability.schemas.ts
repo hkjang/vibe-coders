@@ -883,18 +883,22 @@ export const requestExplainSchema = looseObject({
 });
 export type RequestExplain = z.output<typeof requestExplainSchema>;
 
-/** store.RequestNote — GET/POST/PUT /admin/requests/{id}/note. */
-export const requestNoteSchema = looseObject({
-  request_id: optionalText,
-  tags: orDefault(z.array(z.string()), []),
-  note: optionalText,
-  created_by: optionalText,
-  updated_at: optionalText,
+/** Confirmed app projection, available with X-Vibe-UI: app on backend v0.86.16+. */
+export const requestNoteSchema = z.object({
+  request_id: z.string().min(1),
+  tags: z.array(z.string()),
+  note: z.string(),
+  created_by: z.string(),
+  updated_at: z.iso.datetime({ offset: true }),
+  exists: z.boolean(),
+  redacted_fields: z
+    .array(z.enum(["note", "tags"]))
+    .refine((fields) => new Set(fields).size === fields.length),
 });
 export type RequestNote = z.output<typeof requestNoteSchema>;
 
 /** DELETE /admin/requests/{id}/note answers `{id, status:"deleted"}`. */
-export const requestNoteDeletedSchema = looseObject({ id: optionalText, status: optionalText });
+export const requestNoteDeletedSchema = z.object({ id: z.string().min(1), status: z.literal("deleted") });
 
 /** POST /admin/requests/{id}/analyze answers `{analysis}` written by a model. */
 export const requestAnalysisSchema = looseObject({ analysis: optionalText });

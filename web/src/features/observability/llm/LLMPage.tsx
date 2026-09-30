@@ -1,3 +1,5 @@
+import { RequestNoteBoundary } from "@/features/observability/request-insight/RequestNoteBoundary";
+import { useRequestNoteContext } from "@/features/observability/request-insight/request-note-context";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquarePlus, RefreshCw, Search } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -69,6 +71,15 @@ function severityTone(severity: string): "danger" | "info" | "warning" {
 }
 
 export function LLMPage(): React.JSX.Element {
+  return (
+    <RequestNoteBoundary>
+      <LLMPageContent />
+    </RequestNoteBoundary>
+  );
+}
+
+function LLMPageContent(): React.JSX.Element {
+  const noteEditor = useRequestNoteContext();
   const auth = useAuth();
   const queryClient = useQueryClient();
   const interval = useRefreshInterval();
@@ -98,6 +109,7 @@ export function LLMPage(): React.JSX.Element {
   }));
   const [filterError, setFilterError] = useState<string>();
   const [selectedRequestId, setSelectedRequestId] = useState("");
+  const noteRequestId = noteEditor.target?.requestId ?? selectedRequestId;
   const [feedbackTarget, setFeedbackTarget] = useState<{ requestId: string; traceId: string }>();
   const [comparePrompt, setComparePrompt] = useState<{ name: string; version: string }>();
   const detailFocusRef = useRef<HTMLElement | null>(null);
@@ -583,8 +595,11 @@ export function LLMPage(): React.JSX.Element {
                             <Button
                               size="small"
                               onClick={(event) => {
-                                detailFocusRef.current = event.currentTarget;
-                                setSelectedRequestId(item.request_id);
+                                const trigger = event.currentTarget;
+                                noteEditor.requestLeave(() => {
+                                  detailFocusRef.current = trigger;
+                                  setSelectedRequestId(item.request_id);
+                                });
                               }}
                               aria-label={`${item.request_id} 호출 상세 열기`}
                             >
@@ -673,8 +688,11 @@ export function LLMPage(): React.JSX.Element {
                             <Button
                               size="small"
                               onClick={(event) => {
-                                detailFocusRef.current = event.currentTarget;
-                                setSelectedRequestId(item.request_id);
+                                const trigger = event.currentTarget;
+                                noteEditor.requestLeave(() => {
+                                  detailFocusRef.current = trigger;
+                                  setSelectedRequestId(item.request_id);
+                                });
                               }}
                               aria-label={`${item.request_id} 호출 상세 열기`}
                             >
@@ -876,18 +894,18 @@ export function LLMPage(): React.JSX.Element {
       </TabPanel>
 
       <Sheet
-        open={selectedRequestId !== ""}
+        open={noteRequestId !== ""}
         onOpenChange={(next) => {
-          if (!next) setSelectedRequestId("");
+          if (!next) noteEditor.requestLeave(() => setSelectedRequestId(""));
         }}
         returnFocusRef={detailFocusRef}
         size="wide"
         title="LLM 호출 상세"
         description="평가, 피드백, 도구 호출과 코드 검증 결과를 확인합니다. 프롬프트 원문은 표시하지 않습니다."
       >
-        {selectedRequestId ? (
+        {noteRequestId ? (
           <LLMTraceDetail
-            requestId={selectedRequestId}
+            requestId={noteRequestId}
             canWriteFeedback={canWrite}
             writeDeniedReason={writeDeniedReason}
             onWriteFeedback={(requestId, traceId) => openFeedback(requestId, traceId)}
