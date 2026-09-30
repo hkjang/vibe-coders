@@ -5,8 +5,8 @@
 #   ./scripts/release.sh [-v VERSION] [-i IMAGE] [-p PLATFORM]
 #
 # 예:
-#   ./scripts/release.sh -v v0.86.8
-#   ./scripts/release.sh -v v0.86.8 -p linux/arm64
+#   ./scripts/release.sh -v v0.86.9
+#   ./scripts/release.sh -v v0.86.9 -p linux/arm64
 set -euo pipefail
 
 IMAGE="ai-coding-proxy-gateway"

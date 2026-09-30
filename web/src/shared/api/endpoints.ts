@@ -60,6 +60,7 @@ import { agentsEndpoints } from "@/shared/api/domains/agents";
 import { dataEndpoints } from "@/shared/api/domains/data";
 import { finopsEndpoints } from "@/shared/api/domains/finops";
 import { gatewayEndpoints } from "@/shared/api/domains/gateway";
+import { providerImpactEndpoint } from "@/shared/api/domains/provider-impact";
 import { governanceEndpoints } from "@/shared/api/domains/governance";
 import { governanceReportsEndpoints } from "@/shared/api/domains/governance-reports";
 import { mcpEndpoints } from "@/shared/api/domains/mcp";
@@ -187,6 +188,7 @@ export const endpoints = {
       appRequestsQuerySchema,
     ),
     providers: {
+      impact: providerImpactEndpoint,
       list: operation<GetAdminProvidersData, GetAdminProvidersResponse>()(
         "GET",
         "/admin/providers",

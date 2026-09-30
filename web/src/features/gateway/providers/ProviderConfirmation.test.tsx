@@ -1,18 +1,41 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProviderDeleteDialog } from "@/features/gateway/providers/ProviderDeleteDialog";
 import { ProviderEditDialog } from "@/features/gateway/providers/ProviderEditDialog";
+import { providerImpactAcknowledgement } from "@/features/gateway/providers/ProviderImpactPanel";
+import { providerImpactFixture } from "@/features/gateway/providers/provider-impact-test-fixtures";
 import { buildProviderRows, type ProviderCatalogRow } from "@/features/gateway/providers/provider-catalog";
 import type { ProviderWriteBody } from "@/shared/api/domains/gateway";
 import type { Provider } from "@/shared/api/schemas";
 import { publishLogout, tokenStore } from "@/shared/auth/token-store";
 import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
-import { apiFailure } from "@/test/api";
+import { apiFailure, mockApi } from "@/test/api";
+
+function render(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return renderComponent(ui, {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+}
+
+beforeEach(() => {
+  mockApi({
+    "GET /admin/provider-impact": ({ query }) =>
+      providerImpactFixture((query as { provider_ref: string }).provider_ref),
+  });
+});
+
+async function acknowledge(user: ReturnType<typeof userEvent.setup>) {
+  const checkbox = await screen.findByRole("checkbox", { name: new RegExp(providerImpactAcknowledgement) });
+  await waitFor(() => expect(checkbox).toBeEnabled());
+  if (!(checkbox as HTMLInputElement).checked) await user.click(checkbox);
+}
 
 const provider: Provider = {
   name: "public-provider",
@@ -85,6 +108,7 @@ async function open(user: ReturnType<typeof userEvent.setup>) {
 
 async function review(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "변경 내용 검토" }));
+  await acknowledge(user);
   return screen.findByRole("table", { name: "공급자 변경 전후 비교" });
 }
 
@@ -121,6 +145,7 @@ describe("공급자 삭제 재확인", () => {
     }
     await user.clear(input);
     await user.type(input, hidden.identity);
+    await acknowledge(user);
     await user.click(confirm);
     await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith(hidden.identity));
   });
@@ -151,6 +176,7 @@ describe("공급자 삭제 재확인", () => {
     await open(user);
     const input = screen.getByLabelText("삭제 대상 재입력");
     await user.type(input, provider.name);
+    await acknowledge(user);
     act(() => {
       fireEvent.submit(formOf(input));
       fireEvent.submit(formOf(input));
@@ -164,6 +190,7 @@ describe("공급자 삭제 재확인", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("req_test");
     expect(input).toBeEnabled();
     expect(input).toHaveValue(provider.name);
+    await acknowledge(user);
     await user.click(screen.getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(remove).toHaveBeenCalledTimes(2);
@@ -176,6 +203,7 @@ describe("공급자 삭제 재확인", () => {
     render(<Harness mode="delete" remove={remove} />);
     await open(user);
     await user.type(screen.getByLabelText("삭제 대상 재입력"), provider.name);
+    await acknowledge(user);
     await user.click(screen.getByRole("button", { name: "삭제" }));
     act(() => {
       tokenStore.clearAll();
@@ -302,6 +330,7 @@ describe("공급자 수정 검토", () => {
     await act(async () => pending.reject(apiFailure("synthetic failure")));
     expect(await screen.findByRole("alert")).toHaveTextContent("req_test");
     expect(screen.getByRole("table")).toHaveTextContent("public-*,pending");
+    await acknowledge(user);
     await user.click(screen.getByRole("button", { name: "검토한 내용 저장" }));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save.mock.calls[0]).toEqual(save.mock.calls[1]);

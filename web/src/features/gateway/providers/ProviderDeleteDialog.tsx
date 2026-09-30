@@ -2,6 +2,8 @@ import { useId, useState, type RefObject } from "react";
 import "@/features/gateway/providers/provider-review.css";
 
 import { ProviderDraftBoundary } from "@/features/gateway/providers/ProviderDraftBoundary";
+import { ProviderImpactPanel } from "@/features/gateway/providers/ProviderImpactPanel";
+import { useProviderImpact } from "@/features/gateway/providers/use-provider-impact";
 import type { ProviderCatalogRow } from "@/features/gateway/providers/provider-catalog";
 import { isAppError } from "@/shared/api/error";
 import { FormField } from "@/shared/components/form/FormField";
@@ -45,9 +47,10 @@ function ProviderDeleteConfirmation({
       onOpenChange(false);
     },
   });
+  const impact = useProviderImpact(row.identity, true, guard.pending);
   const confirm = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    if (confirmation !== target) return;
+    if (confirmation !== target || !impact.canSubmit()) return;
     setError(undefined);
     void guard.run(
       () => onDelete(target),
@@ -76,21 +79,18 @@ function ProviderDeleteConfirmation({
             variant="danger"
             type="submit"
             form={formId}
-            disabled={guard.pending || confirmation !== target}
+            disabled={guard.pending || confirmation !== target || !impact.canConfirm}
           >
             {guard.pending ? "삭제 중" : "삭제"}
           </Button>
         </>
       }
     >
-      <form id={formId} className="form-grid" onSubmit={confirm}>
+      <form id={formId} className="form-grid provider-review-form" onSubmit={confirm}>
         <p>
           삭제 대상: <code className="provider-delete-target">{target}</code>
         </p>
-        <p>
-          참조 영향은 조회하지 않았습니다. 라우팅 규칙·모델·팀의 사용 여부와 대체 경로의 성공은 확인되지
-          않았습니다.
-        </p>
+        <ProviderImpactPanel review={impact} pending={guard.pending} />
         <FormField
           label="삭제 대상 재입력"
           description={

@@ -24,3 +24,36 @@
 .provider-delete-target {
   overflow-wrap: anywhere;
 }
+
+.provider-impact-panel,
+.provider-impact-sections,
+.provider-impact-section {
+  min-width: 0;
+}
+
+.provider-impact-section {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  overflow-wrap: anywhere;
+}
+
+.provider-impact-sections {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.provider-impact-items {
+  padding-inline-start: var(--space-6);
+}
+
+.provider-impact-items code {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.provider-impact-pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
