@@ -122,6 +122,9 @@ export function ChatRunActionDialog({
           </>
         ) : null}
       </fieldset>
+      <p className="field-description" tabIndex={0}>
+        내용이 길면 이 안내에 초점을 둔 뒤 위·아래 방향키로 살펴볼 수 있습니다.
+      </p>
     </FormDialog>
   );
 }

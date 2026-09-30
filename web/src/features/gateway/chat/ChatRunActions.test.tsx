@@ -111,11 +111,17 @@ describe("비교 실행 후 작업의 고정 초안", () => {
       expect(within(dialog).getByRole("group", { name: "실행 작업 입력" })).toHaveClass(
         "chat-run-action-draft",
       );
+      const scrollHint = within(dialog).getByText(
+        "내용이 길면 이 안내에 초점을 둔 뒤 위·아래 방향키로 살펴볼 수 있습니다.",
+      );
+      expect(scrollHint).toHaveAttribute("tabindex", "0");
+      expect(scrollHint.closest(".chat-run-action-draft")).toBeNull();
       await current.user.type(within(dialog).getByRole("textbox", { name: scenario.field }), scenario.draft);
       current.update({ readOnly: true });
       expect(within(dialog).getByRole("textbox", { name: scenario.field })).toHaveValue(scenario.draft);
       expect(within(dialog).getByRole("textbox", { name: scenario.field })).toBeDisabled();
       expect(within(dialog).getByRole("button", { name: scenario.submit })).toBeDisabled();
+      expect(scrollHint).not.toBeDisabled();
       expect(current.api.calls).toHaveLength(0);
       current.update({ readOnly: false });
       expect(current.api.calls).toHaveLength(0);
