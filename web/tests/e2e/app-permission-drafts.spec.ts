@@ -353,6 +353,68 @@ test("알 수 없는 유형·누락·빈 ID를 사용자 회수로 바꾸지 않
   expect(gateway.writes).toEqual([]);
 });
 
+test("기존 ID의 FEFF·공백을 정규화해 다른 권한을 회수하지 않고 정확한 Unicode 대상만 전송한다", async ({
+  page,
+  gateway,
+}) => {
+  const canonical = "alice";
+  const blocked = [`\uFEFF${canonical}`, ` ${canonical} `];
+  const unicode = `${opaqueSubject}\uFEFF내부 문자`;
+  const subjects = [canonical, ...blocked, unicode];
+  gateway.replacePermissions(
+    subjects.map((subject, index) => permission(`opaque-existing-${index}`, "user", subject)),
+  );
+  await login(page);
+  const sheet = await openPermissions(page);
+  const rows = sheet.locator("tbody tr");
+  await expect(rows).toHaveCount(subjects.length);
+  for (const [index, subject] of subjects.entries()) {
+    // Raw textContent and exact CSS attribute values deliberately avoid
+    // accessible-name/text locators that normalize the whitespace under test.
+    await expect(rows.nth(index).locator("td").nth(1)).toHaveJSProperty("textContent", subject);
+  }
+  const exactTrigger = (subject: string) =>
+    sheet.locator(`button[aria-label=${JSON.stringify(`${subject} 권한 회수`)}]`);
+  for (const subject of blocked) {
+    const button = exactTrigger(subject);
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute("title", "대상 종류와 ID를 확인할 수 없어 회수할 수 없습니다.");
+    // Removing native disabled only tests the browser activation boundary;
+    // React may still suppress the callback. Unit/Go contracts are separate.
+    await button.evaluate((element) => {
+      const control = element as HTMLButtonElement;
+      control.disabled = false;
+      control.click();
+      control.disabled = true;
+    });
+    await expect(revokeForm(page)).toBeHidden();
+    expect(gateway.writes).toEqual([]);
+    await expect(exactTrigger(canonical)).toBeEnabled();
+  }
+  for (const subject of [canonical, unicode]) {
+    await exactTrigger(subject).click();
+    const form = revokeForm(page);
+    await expect(form).toBeVisible();
+    await confirmRevoke(form).click();
+    await expect(form).toBeHidden();
+    await expect(exactTrigger(subject)).toHaveCount(0);
+  }
+  expect(gateway.writes).toEqual(
+    [canonical, unicode].map((subject_id) => ({
+      method: "DELETE",
+      appId: alpha.id,
+      subject_type: "user",
+      subject_id,
+      userId: "app-grants-one",
+    })),
+  );
+  await expect(rows).toHaveCount(blocked.length);
+  for (const [index, subject] of blocked.entries()) {
+    await expect(rows.nth(index).locator("td").nth(1)).toHaveJSProperty("textContent", subject);
+    await expect(exactTrigger(subject)).toBeDisabled();
+  }
+});
+
 test("회수 실패는 대상과 요청 ID를 유지하며 재시도·중복 제출을 보호한다", async ({ page, gateway }) => {
   await login(page);
   const sheet = await openPermissions(page);
