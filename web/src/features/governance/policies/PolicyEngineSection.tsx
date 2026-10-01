@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, Plus, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { z } from "zod";
 
 import {
@@ -8,7 +8,10 @@ import {
   PanelFailure,
   type GovernanceColumn,
 } from "@/features/governance/policies/governance-parts";
-import { compactJson } from "@/features/governance/policies/governance-utils";
+import { PolicyEditorDialog } from "./PolicyEditorDialog";
+import { usePolicyEditorAccess } from "./policy-editor-access";
+import { editorJson, editorText, fingerprint } from "./policy-editor-security";
+import { policyProblem } from "./policy-editor-state";
 import {
   actionLabels,
   conditionLabels,
@@ -114,6 +117,20 @@ function actionsFrom(values: PolicyFormValues): Record<string, unknown> {
 }
 
 export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.JSX.Element {
+  const queryClient = useQueryClient();
+  const editorAccess = usePolicyEditorAccess(canWrite);
+  const [editing, setEditing] = useState<{ baseline: Policy; owner: string }>();
+  const editorSelection = useRef<typeof editing>(undefined);
+  const [editorOwner, setEditorOwner] = useState(editorAccess.sessionKey);
+  if (editorOwner !== editorAccess.sessionKey) {
+    setEditorOwner(editorAccess.sessionKey);
+    setEditing(undefined);
+  }
+  useLayoutEffect(() => {
+    if (editorSelection.current?.owner !== editorAccess.sessionKey) editorSelection.current = undefined;
+  }, [editorAccess.sessionKey]);
+  const editorTrigger = useRef<HTMLButtonElement | null>(null);
+  const editorTargetId = useRef<string | undefined>(undefined);
   const [policyFormOpen, setPolicyFormOpen] = useState(false);
   const [regressionFormOpen, setRegressionFormOpen] = useState(false);
   const [pendingToggle, setPendingToggle] = useState<Policy | undefined>();
@@ -253,9 +270,9 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
       header: "정책",
       cell: (row) => (
         <span>
-          <strong>{row.name || row.id}</strong>
+          <strong>{editorText(row.name || row.id, editorAccess.prefixes)}</strong>
           <br />
-          <span className="mono">{row.id}</span>
+          <span className="mono">{editorText(row.id, editorAccess.prefixes)}</span>
         </span>
       ),
     },
@@ -269,10 +286,11 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
           <ul>
             {(row.rules ?? []).slice(0, 3).map((rule, index) => (
               <li key={rule.id ?? index}>
-                <strong>{rule.name || rule.id || "규칙"}</strong>
+                <strong>{editorText(rule.name || rule.id || "규칙", editorAccess.prefixes)}</strong>
                 <br />
                 <span className="mono">
-                  조건 {compactJson(rule.conditions)} → {compactJson(rule.actions)}
+                  조건 {editorJson(rule.conditions, editorAccess.prefixes)} →{" "}
+                  {editorJson(rule.actions, editorAccess.prefixes)}
                 </span>
               </li>
             ))}
@@ -298,18 +316,66 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
       id: "actions",
       header: "동작",
       cell: (row) => (
-        <Button
-          size="small"
-          disabled={!canWrite}
-          title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-          aria-label={`${row.name || row.id} ${row.enabled ? "중지" : "사용"}`}
-          onClick={(event) => {
-            rowTriggerRef.current = event.currentTarget;
-            setPendingToggle(row);
-          }}
-        >
-          {row.enabled ? "중지" : "사용"}
-        </Button>
+        <>
+          <Button
+            size="small"
+            ref={(node) => {
+              if (node && editorTargetId.current === row.id) editorTrigger.current = node;
+            }}
+            disabled={
+              !editorAccess.write.allowed ||
+              !!policyProblem(row) ||
+              policies.isFetching ||
+              policies.isError ||
+              !policies.isSuccess
+            }
+            title={editorAccess.write.reason ?? policyProblem(row)}
+            aria-label={`${editorText(row.name || row.id, editorAccess.prefixes)} 초안 편집`}
+            onClick={(event) => {
+              try {
+                editorAccess.assertRead();
+                editorAccess.write.assertCurrent();
+                if (editorSelection.current) return;
+                const query = queryClient.getQueryState(["governance", "policies"]);
+                const data = queryClient.getQueryData<{ policies?: Policy[] | null }>([
+                  "governance",
+                  "policies",
+                ]);
+                const currentRows = data?.policies?.filter((item) => item.id === row.id);
+                if (
+                  query?.status !== "success" ||
+                  query.fetchStatus !== "idle" ||
+                  query.isInvalidated ||
+                  policyProblem(row) ||
+                  currentRows?.length !== 1 ||
+                  fingerprint(currentRows[0]) !== fingerprint(row)
+                )
+                  return;
+                editorTrigger.current = event.currentTarget;
+                editorTargetId.current = row.id;
+                const selected = { baseline: structuredClone(row), owner: editorAccess.sessionKey };
+                editorSelection.current = selected;
+                setEditing(selected);
+              } catch {
+                /* A captured old trigger cannot open another owner's editor. */
+              }
+            }}
+          >
+            초안 편집
+          </Button>
+          <Button
+            size="small"
+            disabled={!canWrite}
+            title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+            aria-label={`${editorText(row.name || row.id, editorAccess.prefixes)} ${row.enabled ? "중지" : "사용"}`}
+            onClick={(event) => {
+              rowTriggerRef.current = event.currentTarget;
+              setPendingToggle(row);
+            }}
+          >
+            {row.enabled ? "중지" : "사용"}
+          </Button>
+        </>
       ),
     },
   ];
@@ -348,6 +414,19 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
 
   return (
     <>
+      {editing?.owner === editorAccess.sessionKey ? (
+        <PolicyEditorDialog
+          key={editing.owner}
+          baseline={editing.baseline}
+          access={editorAccess}
+          close={() => {
+            if (editorSelection.current !== editing) return;
+            editorSelection.current = undefined;
+            setEditing(undefined);
+          }}
+          returnFocusRef={editorTrigger}
+        />
+      ) : null}
       <SectionCard
         title="AI 정책 엔진"
         description="조건이 맞는 요청을 차단하거나 승인 대상으로 만듭니다. 우선순위가 낮을수록 먼저 평가합니다."
