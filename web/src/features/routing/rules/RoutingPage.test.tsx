@@ -435,12 +435,18 @@ describe("RoutingPage", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "gpt-* → gpt-4.1-mini 규칙 삭제" }));
     const dialog = await screen.findByRole("dialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: "삭제" }));
+    await userEvent.type(await within(dialog).findByRole("textbox", { name: "삭제 확인 문구" }), "규칙 삭제");
+    await userEvent.click(
+      within(dialog).getByRole("checkbox", { name: "사용 중인 규칙의 라우팅 영향을 확인했습니다" }),
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "규칙 삭제" }));
 
     await waitFor(() =>
       expect(api.calls.some((call) => call.key === "DELETE /admin/routing-rules/route_1")).toBe(true),
     );
-    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("라우팅 규칙을 삭제했습니다."));
+    await waitFor(() =>
+      expect(toastSpy.success).toHaveBeenCalledWith("라우팅 규칙 삭제 요청을 확인했습니다."),
+    );
   });
 
   it("규칙 사용을 중지하면 enabled=false 를 보내고 결과를 알린다", async () => {

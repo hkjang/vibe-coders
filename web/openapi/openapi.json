@@ -4345,6 +4345,27 @@
         ],
         "type": "object"
       },
+      "RoutingRuleDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Exact decoded request-path ID, not evidence that a row existed or a revision token.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Acknowledges a successful SQL DELETE even when zero rows matched.",
+            "enum": [
+              "deleted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "type": "object"
+      },
       "RoutingRuleListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5424,7 +5445,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.39"
+    "version": "v0.86.40"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -15068,6 +15089,7 @@
     },
     "/admin/routing-rules/{id}": {
       "delete": {
+        "description": "Delete the requested rule ID with existing routing:write authorization; the separate collection GET requires routing:read. Legacy read-only credentials cannot DELETE. The SQL DELETE does not check an affected-row count: success also applies when the ID was already absent or a previous DELETE removed it. The acknowledgment echoes the decoded request-path ID and status deleted, not a deleted-row snapshot or proof of prior existence. No request body is required or interpreted. There is no revision/CAS, expected-state comparison or idempotency token. A preflight GET cannot lock the rule, and a rule concurrently recreated with the same ID can be deleted or appear after this response. Every successful DELETE, including repeated or absent-ID requests, invalidates this process's routing cache and attempts best-effort audit; configured post-change checks may run and record state. These effects are not atomic with the deletion; other processes retain the existing five-second cache TTL. Response loss may occur after deletion. A subsequent GET observes current configuration, not which request removed a row or whether replay is appropriate.",
         "operationId": "delete__admin_routing_rules_id",
         "parameters": [
           {
@@ -15081,7 +15103,54 @@
         ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleDeleteResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_rule_id: the decoded ID is empty or contains a slash."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: existing authentication or routing:write scope rejection, including legacy read-only credentials. Admin role names or admin:write alone do not grant routing:write."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_rule_delete_failed: the SQL DELETE returned an error. An absent row alone is not an error; no rule_not_found 404 is generated. A lost or unconfirmed response must not be treated as proof that no change occurred."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

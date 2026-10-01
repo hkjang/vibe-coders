@@ -1255,6 +1255,17 @@ export type RoutingHealthResponse = {
     until: string;
 };
 
+export type RoutingRuleDeleteResponse = {
+    /**
+     * Exact decoded request-path ID, not evidence that a row existed or a revision token.
+     */
+    id: string;
+    /**
+     * Acknowledges a successful SQL DELETE even when zero rows matched.
+     */
+    status: 'deleted';
+};
+
 export type RoutingRuleListResponse = {
     rules: Array<RoutingRuleView>;
 };
@@ -7719,12 +7730,35 @@ export type DeleteAdminRoutingRulesIdData = {
     url: '/admin/routing-rules/{id}';
 };
 
+export type DeleteAdminRoutingRulesIdErrors = {
+    /**
+     * invalid_rule_id: the decoded ID is empty or contains a slash.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: existing authentication or routing:write scope rejection, including legacy read-only credentials. Admin role names or admin:write alone do not grant routing:write.
+     */
+    401: AppError;
+    /**
+     * routing_rule_delete_failed: the SQL DELETE returned an error. An absent row alone is not an error; no rule_not_found 404 is generated. A lost or unconfirmed response must not be treated as proof that no change occurred.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminRoutingRulesIdError = DeleteAdminRoutingRulesIdErrors[keyof DeleteAdminRoutingRulesIdErrors];
+
 export type DeleteAdminRoutingRulesIdResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RoutingRuleDeleteResponse;
 };
+
+export type DeleteAdminRoutingRulesIdResponse = DeleteAdminRoutingRulesIdResponses[keyof DeleteAdminRoutingRulesIdResponses];
 
 export type PatchAdminRoutingRulesIdData = {
     body: RoutingRulePatchRequest;
