@@ -2,7 +2,7 @@ import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, ListTree, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef } from "react";
 import { Link, useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -11,6 +11,7 @@ import { TraceFilters } from "@/features/observability/traces/TraceFilters";
 import { TraceRequestDetails } from "@/features/observability/traces/TraceRequestDetails";
 import { TraceRequestTable } from "@/features/observability/traces/TraceRequestTable";
 import { TraceTimeline } from "@/features/observability/traces/TraceTimeline";
+import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "./trace-safe-flow-access";
 import {
   buildTraceQuery,
   formatTraceDate,
@@ -25,7 +26,7 @@ import { refreshIntervalMs } from "@/features/health/health-utils";
 import { uiLabels } from "@/config/ui-labels";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
+import { AppError, isAppError } from "@/shared/api/error";
 import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
 import type { AppRequestSummary } from "@/shared/api/schemas";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
@@ -37,7 +38,13 @@ import { usePreferences } from "@/shared/stores/preferences";
 import "@/features/observability/traces/trace-page.css";
 
 export function TracePage(): React.JSX.Element {
+  const flowAccess = useTraceSafeFlowAccess();
+  return <TracePageContent key={flowAccess.key} flowAccess={flowAccess} />;
+}
+
+function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): React.JSX.Element {
   const auth = useAuth();
+  const listLifetime = useId();
   const location = useLocation();
   const runtimeFeature = featureByPath(location.pathname, auth.features) ?? featureByPath(location.pathname);
   const legacyPath = runtimeFeature?.legacyPath;
@@ -63,15 +70,22 @@ export function TracePage(): React.JSX.Element {
   const previousSelectionKeyRef = useRef<string | undefined>(undefined);
 
   const result = useQuery({
-    queryKey: ["admin", "requests", "trace-explorer", query],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.requests, {
+    queryKey: ["admin", "requests", "trace-explorer", flowAccess.key, listLifetime, query],
+    enabled: flowAccess.readable,
+    queryFn: async ({ signal }) => {
+      flowAccess.assertRead();
+      const response = await apiClient.request(endpoints.admin.requests, {
         headers: appRequestsContractHeaders,
         query,
         signal,
         routeId: "observability.traces",
-      }),
-    placeholderData: keepPreviousData,
+      });
+      flowAccess.assertRead();
+      if (signal.aborted) throw new AppError("목록 조회가 취소되었습니다.", { kind: "aborted" });
+      return response;
+    },
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[3] === flowAccess.key ? keepPreviousData(previous) : undefined,
     staleTime: 10_000,
     refetchInterval: (traceQuery) =>
       traceQuery.state.status === "error" && traceQuery.state.data === undefined ? false : interval,
@@ -189,6 +203,15 @@ export function TracePage(): React.JSX.Element {
     result.isPlaceholderData,
   ]);
 
+  if (!flowAccess.readable) {
+    return (
+      <ErrorState
+        title="현재 화면의 요청 조회 권한을 확인할 수 없습니다."
+        message="요청 목록과 단계 기록을 보려면 현재 화면 접근과 admin:read 권한이 필요합니다."
+        showLegacy={false}
+      />
+    );
+  }
   if (result.error && !result.data) {
     return (
       <ErrorState
@@ -241,7 +264,7 @@ export function TracePage(): React.JSX.Element {
           <h1 ref={pageHeadingRef} tabIndex={-1}>
             추적 탐색기
           </h1>
-          <p>같은 추적 ID로 연결된 요청의 시작 시점과 처리 지연을 요청 단위로 확인합니다.</p>
+          <p>같은 추적 ID로 연결된 요청의 기록 시각과 기록된 지연을 요청 단위로 확인합니다.</p>
         </div>
         <div className="page-actions">
           <Badge tone="info">{uiLabels.readOnly}</Badge>
@@ -432,6 +455,14 @@ export function TracePage(): React.JSX.Element {
       )}
 
       <TraceRequestDetails
+        flowReady={
+          result.isSuccess &&
+          !result.isError &&
+          !result.isPlaceholderData &&
+          !result.isFetching &&
+          requestIdentityAvailable
+        }
+        listRevision={result.dataUpdatedAt}
         request={selectedRequest}
         detailRef={detailRef}
         selectionOrdinal={selectedRequestOrdinal}

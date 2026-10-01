@@ -36,7 +36,10 @@ export function TraceTimeline({
       <header className="trace-panel-header">
         <div>
           <h2 id="trace-timeline-title">요청 처리 흐름</h2>
-          <p>각 막대는 안전한 운영 메타데이터로 구성한 요청 시작 시점과 전체 지연을 나타냅니다.</p>
+          <p>
+            각 막대는 안전한 운영 메타데이터의 요청 기록 시각과 기록된 지연을 나타냅니다. 실제 실행 시작·종료
+            시각을 보장하지 않습니다.
+          </p>
         </div>
         <Badge tone="info">요청 단위</Badge>
       </header>
@@ -78,7 +81,7 @@ export function TraceTimeline({
                 </span>
                 <span className="trace-lane-facts">
                   <span>
-                    시작 +{formatTraceDuration(startOffsetMs)} · 처리{" "}
+                    기록 +{formatTraceDuration(startOffsetMs)} · 기록된 지연{" "}
                     {formatTraceDuration(request.latency_ms)}
                   </span>
                   <time dateTime={request.created_at}>

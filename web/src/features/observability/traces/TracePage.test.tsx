@@ -11,6 +11,7 @@ import { endpoints } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import type { AppRequestsResponse } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({
   credentialPrefixes: ["corp_"],
@@ -120,7 +121,11 @@ function renderPage(initialEntry = "/observability/traces") {
             path="/observability/traces"
             element={
               <>
-                <TracePage />
+                <FeatureAccessContext.Provider
+                  value={{ featureId: "observability.traces", permitted: true, readOnly: true }}
+                >
+                  <TracePage />
+                </FeatureAccessContext.Provider>
                 <LocationProbe />
               </>
             }
@@ -798,7 +803,7 @@ describe("TracePage", () => {
     expect(await screen.findByRole("heading", { name: "일치하는 추적 요청이 없습니다." })).toBeVisible();
     loading.unmount();
 
-    authRuntime.scopes = ["observability:read"];
+    authRuntime.legacyFallback = false;
     vi.spyOn(apiClient, "request").mockRejectedValueOnce(
       new AppError("서버 상세 오류", {
         kind: "http",
