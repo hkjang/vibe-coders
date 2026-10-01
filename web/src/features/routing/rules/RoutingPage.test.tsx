@@ -571,20 +571,41 @@ describe("RoutingPage", () => {
   });
 
   it("학습 추천을 규칙으로 적용하면 복잡도 구간을 채워 보낸다", async () => {
-    const api = mockAllEndpoints();
+    const api = mockAllEndpoints({
+      "POST /admin/routing-rules": (options) => ({
+        rule: {
+          ...(options.body as Record<string, unknown>),
+          id: "route_learning",
+          created_at: "0001-01-01T00:00:00Z",
+        },
+      }),
+    });
     render("/routing/rules/learning");
 
     await userEvent.click(await screen.findByRole("button", { name: /추천을 규칙으로 적용/u }));
     const dialog = await screen.findByRole("dialog");
+    expect(api.bodies("POST /admin/routing-rules")).toHaveLength(0);
+    await userEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "작업 유형과 관계없이 해당 복잡도 범위에 적용됨을 확인했습니다",
+      }),
+    );
     await userEvent.click(within(dialog).getByRole("button", { name: "규칙 만들기" }));
 
     await waitFor(() => expect(api.bodies("POST /admin/routing-rules")).toHaveLength(1));
-    expect(api.bodies("POST /admin/routing-rules")[0]).toMatchObject({
+    expect(api.bodies("POST /admin/routing-rules")[0]).toEqual({
       target_model: "gpt-4.1-mini",
       min_complexity: 0,
-      max_complexity: 34,
+      max_complexity: 33,
       match_pattern: "*",
+      target_provider: "",
+      priority: 100,
+      enabled: true,
+      note: "학습 추천 적용 (coding/low)",
     });
+    await waitFor(() =>
+      expect(toastSpy.success).toHaveBeenCalledWith("라우팅 규칙 생성 요청을 확인했습니다."),
+    );
   });
 
   it("검토 큐 승인은 승인 경로로 호출한다", async () => {
