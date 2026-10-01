@@ -7,7 +7,7 @@ import {
   type GovernanceColumn,
 } from "@/features/governance/policies/governance-parts";
 import { apiClient } from "@/shared/api/client";
-import type { Policy, PolicySuggestion } from "@/shared/api/domains/governance";
+import type { Policy } from "@/shared/api/domains/governance";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -17,7 +17,7 @@ import { Select } from "@/shared/components/ui/Select";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { formatNumber } from "@/shared/utils/format";
-import { PolicySimulationSection } from "./PolicySimulationSection";
+import { PolicyDraftSection } from "./PolicyDraftSection";
 import { simulationWindows, type SimulationWindow } from "./policy-simulation-state";
 
 const routeId = "governance.policies";
@@ -25,7 +25,6 @@ const canaryDayOptions = [7, 14, 30] as const;
 
 export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [params, updateSearch] = useSearchState();
-  const [pendingApply, setPendingApply] = useState<PolicySuggestion | undefined>();
   const [pendingBump, setPendingBump] = useState<{ policyId: string; next: number } | undefined>();
   const rowTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -58,21 +57,6 @@ export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX
     queryKey: ["governance", "policies"],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.governance.policies.list, { signal, routeId }),
-  });
-
-  const applyDraft = useMutationFeedback({
-    mutate: (suggestion: PolicySuggestion) =>
-      apiClient.request(endpoints.domains.governance.advisor.apply, {
-        body: {
-          title: suggestion.title ?? suggestion.id,
-          conditions: suggestion.conditions ?? {},
-          actions: suggestion.actions ?? {},
-        },
-        routeId,
-      }),
-    invalidates: [["governance", "policies"]],
-    successMessage: "비활성 draft 정책으로 생성했습니다. 정책 탭에서 검토 후 사용하세요.",
-    errorMessage: "draft 정책을 만들지 못했습니다.",
   });
 
   const bumpRollout = useMutationFeedback({
@@ -151,7 +135,7 @@ export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX
 
   return (
     <div className="page-stack">
-      <PolicySimulationSection
+      <PolicyDraftSection
         canWrite={canWrite}
         window={window}
         rows={suggestionRows}
@@ -161,10 +145,6 @@ export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX
         hasData={Boolean(suggestions.data)}
         refresh={() => void suggestions.refetch()}
         changeWindow={(next) => updateSearch({ advisor_window: next })}
-        applyDraft={(row, trigger) => {
-          rowTriggerRef.current = trigger;
-          setPendingApply(row);
-        }}
       />
 
       <SectionCard
@@ -203,20 +183,6 @@ export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX
           emptyMessage="단계 적용 중인 정책이 없습니다."
         />
       </SectionCard>
-
-      <ConfirmDialog
-        open={pendingApply !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setPendingApply(undefined);
-        }}
-        returnFocusRef={rowTriggerRef}
-        title="draft 정책을 생성할까요?"
-        description="추천 규칙으로 비활성(draft) 정책을 만듭니다. 정책 탭에서 검토한 뒤 사용으로 전환하세요."
-        confirmLabel="draft 생성"
-        onConfirm={async () => {
-          if (pendingApply) await applyDraft.mutateAsync(pendingApply);
-        }}
-      />
 
       <ConfirmDialog
         open={pendingBump !== undefined}
