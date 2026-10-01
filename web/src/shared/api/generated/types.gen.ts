@@ -1255,6 +1255,66 @@ export type RoutingHealthResponse = {
     until: string;
 };
 
+export type RoutingRuleListResponse = {
+    rules: Array<RoutingRuleView>;
+};
+
+/**
+ * Every known field is optional and nullable: omitted/null preserves the database column at UPDATE time. Non-null false, zero and empty strings are explicit inputs, subject to field normalization and merged validation. ID and created_at are not editable. No new string-length cap or strict JSON parser is introduced.
+ */
+export type RoutingRulePatchRequest = {
+    enabled?: boolean | null;
+    /**
+     * Surrounding Go whitespace is trimmed; an explicit empty value becomes * (all models).
+     */
+    match_pattern?: string | null;
+    /**
+     * Zero is explicit; merged bounds must satisfy 0 <= min <= max <= 100 at the write.
+     */
+    max_complexity?: number | null;
+    /**
+     * Zero is explicit; merged bounds must satisfy 0 <= min <= max <= 100 at the write.
+     */
+    min_complexity?: number | null;
+    /**
+     * Surrounding Go whitespace is trimmed; an explicit empty value clears the note.
+     */
+    note?: string | null;
+    /**
+     * Explicit values must be positive; unlike create, zero is rejected, not defaulted.
+     */
+    priority?: number | null;
+    /**
+     * Surrounding Go whitespace is trimmed; an explicit blank value is rejected.
+     */
+    target_model?: string | null;
+    /**
+     * Surrounding Go whitespace is trimmed; an explicit empty value clears the configured provider.
+     */
+    target_provider?: string | null;
+    [key: string]: unknown;
+} | null;
+
+export type RoutingRuleView = {
+    /**
+     * Original creation timestamp, not a modification revision. Invalid legacy stored times decode to the Go zero timestamp.
+     */
+    created_at: string;
+    enabled: boolean;
+    id: string;
+    match_pattern: string;
+    max_complexity: number;
+    min_complexity: number;
+    note: string;
+    priority: number;
+    target_model: string;
+    target_provider: string;
+};
+
+export type RoutingRuleWriteResponse = {
+    rule: RoutingRuleView;
+};
+
 export type SsoExchangeRequest = {
     code: string;
 };
@@ -7610,12 +7670,31 @@ export type GetAdminRoutingRulesData = {
     url: '/admin/routing-rules';
 };
 
+export type GetAdminRoutingRulesErrors = {
+    /**
+     * Existing authentication/scope rejection: invalid_api_key. GET requires routing:read; PATCH requires routing:write. Legacy read-only credentials cannot PATCH.
+     */
+    401: AppError;
+    /**
+     * routing_rules_failed: stored list could not be read.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRoutingRulesError = GetAdminRoutingRulesErrors[keyof GetAdminRoutingRulesErrors];
+
 export type GetAdminRoutingRulesResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RoutingRuleListResponse;
 };
+
+export type GetAdminRoutingRulesResponse = GetAdminRoutingRulesResponses[keyof GetAdminRoutingRulesResponses];
 
 export type PostAdminRoutingRulesData = {
     body?: never;
@@ -7648,7 +7727,7 @@ export type DeleteAdminRoutingRulesIdResponses = {
 };
 
 export type PatchAdminRoutingRulesIdData = {
-    body?: never;
+    body: RoutingRulePatchRequest;
     path: {
         id: string;
     };
@@ -7656,12 +7735,39 @@ export type PatchAdminRoutingRulesIdData = {
     url: '/admin/routing-rules/{id}';
 };
 
+export type PatchAdminRoutingRulesIdErrors = {
+    /**
+     * invalid_rule_id, invalid_body, invalid_priority, missing_target_model or invalid_range. After a no-row UPDATE, existence is diagnosed by a separate current read; concurrent changes can affect that diagnosis.
+     */
+    400: AppError;
+    /**
+     * Existing authentication/scope rejection: invalid_api_key. GET requires routing:read; PATCH requires routing:write. Legacy read-only credentials cannot PATCH.
+     */
+    401: AppError;
+    /**
+     * rule_not_found: rule absent at initial lookup or no-row UPDATE diagnosis; PATCH never recreates it.
+     */
+    404: AppError;
+    /**
+     * routing_rule_lookup_failed or routing_rule_save_failed: lookup, UPDATE or returned-row processing failed. A client must not infer non-application solely from a lost or unconfirmed response.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PatchAdminRoutingRulesIdError = PatchAdminRoutingRulesIdErrors[keyof PatchAdminRoutingRulesIdErrors];
+
 export type PatchAdminRoutingRulesIdResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RoutingRuleWriteResponse;
 };
+
+export type PatchAdminRoutingRulesIdResponse = PatchAdminRoutingRulesIdResponses[keyof PatchAdminRoutingRulesIdResponses];
 
 export type GetAdminRoutingBalancerData = {
     body?: never;

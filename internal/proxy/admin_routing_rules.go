@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -118,7 +119,7 @@ func (s *Server) handleRoutingRuleByID(w http.ResponseWriter, r *http.Request) {
 		// Every field the create form accepts is editable here. Deleting and
 		// recreating a rule was previously the only way to change a pattern or a
 		// target, and live traffic routes differently for as long as the rule is
-		// gone. Absent fields keep their stored value.
+		// gone. Absent/null fields keep their database value at the write.
 		var p struct {
 			Enabled        *bool   `json:"enabled"`
 			Priority       *int    `json:"priority"`
@@ -133,29 +134,18 @@ func (s *Server) handleRoutingRuleByID(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
-		next := *cur
-		if p.Enabled != nil {
-			next.Enabled = *p.Enabled
-		}
 		if p.Priority != nil {
 			if *p.Priority <= 0 {
 				writeOpenAIError(w, http.StatusBadRequest, "priority must be positive", "invalid_request_error", "invalid_priority")
 				return
 			}
-			next.Priority = *p.Priority
 		}
 		if p.MatchPattern != nil {
 			pattern := strings.TrimSpace(*p.MatchPattern)
 			if pattern == "" {
 				pattern = "*"
 			}
-			next.MatchPattern = pattern
-		}
-		if p.MinComplexity != nil {
-			next.MinComplexity = *p.MinComplexity
-		}
-		if p.MaxComplexity != nil {
-			next.MaxComplexity = *p.MaxComplexity
+			p.MatchPattern = &pattern
 		}
 		if p.TargetModel != nil {
 			target := strings.TrimSpace(*p.TargetModel)
@@ -163,28 +153,39 @@ func (s *Server) handleRoutingRuleByID(w http.ResponseWriter, r *http.Request) {
 				writeOpenAIError(w, http.StatusBadRequest, "target_model is required", "invalid_request_error", "missing_target_model")
 				return
 			}
-			next.TargetModel = target
+			p.TargetModel = &target
 		}
 		if p.TargetProvider != nil {
-			next.TargetProvider = strings.TrimSpace(*p.TargetProvider)
+			provider := strings.TrimSpace(*p.TargetProvider)
+			p.TargetProvider = &provider
 		}
 		if p.Note != nil {
-			next.Note = strings.TrimSpace(*p.Note)
+			note := strings.TrimSpace(*p.Note)
+			p.Note = &note
 		}
-		// Validate the merged rule, not the patch: changing only one bound must
-		// not be able to leave the stored rule with an impossible range.
-		if next.MinComplexity < 0 || next.MaxComplexity > 100 || next.MinComplexity > next.MaxComplexity {
+		// The store validates the merged range against the actual write-time
+		// values, not cur's stale snapshot. The initial lookup preserves the
+		// existing missing-target/decode ordering but is not a concurrency lock.
+		next, err := s.db.PatchRoutingRule(r.Context(), id, store.RoutingRulePatch{
+			Enabled: p.Enabled, Priority: p.Priority, MatchPattern: p.MatchPattern,
+			MinComplexity: p.MinComplexity, MaxComplexity: p.MaxComplexity,
+			TargetModel: p.TargetModel, TargetProvider: p.TargetProvider, Note: p.Note,
+		})
+		if errors.Is(err, store.ErrRoutingRuleNotFound) {
+			writeOpenAIError(w, http.StatusNotFound, "rule not found", "invalid_request_error", "rule_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrRoutingRuleInvalidRange) {
 			writeOpenAIError(w, http.StatusBadRequest, "complexity range must satisfy 0 <= min <= max <= 100", "invalid_request_error", "invalid_range")
 			return
 		}
-		cur = &next
-		if err := s.db.UpsertRoutingRule(r.Context(), *cur); err != nil {
+		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_rule_save_failed")
 			return
 		}
 		s.invalidateRoutingRulesCache()
-		s.auditAdmin(r, "routing_rule.update", "", auditJSON(cur))
-		writeJSON(w, http.StatusOK, map[string]any{"rule": cur})
+		s.auditAdmin(r, "routing_rule.update", "", auditJSON(next))
+		writeJSON(w, http.StatusOK, map[string]any{"rule": next})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}

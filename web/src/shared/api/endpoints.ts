@@ -68,6 +68,7 @@ import { observabilityEndpoints } from "@/shared/api/domains/observability";
 import { promptsEndpoints } from "@/shared/api/domains/prompts";
 import { redteamEndpoints } from "@/shared/api/domains/redteam";
 import { routingEndpoints } from "@/shared/api/domains/routing";
+import { routingEditEndpoints } from "@/shared/api/domains/routing-edit";
 import { securityEndpoints } from "@/shared/api/domains/security";
 import { systemEndpoints } from "@/shared/api/domains/system";
 import { text2sqlEndpoints } from "@/shared/api/domains/text2sql";
@@ -257,6 +258,7 @@ export const endpoints = {
     prompts: promptsEndpoints,
     redteam: redteamEndpoints,
     routing: routingEndpoints,
+    routingEdit: routingEditEndpoints,
     security: securityEndpoints,
     system: systemEndpoints,
     text2sql: text2sqlEndpoints,

@@ -411,18 +411,22 @@ describe("RoutingPage", () => {
     const target = within(dialog).getByLabelText(/대상 모델/u);
     await userEvent.clear(target);
     await userEvent.type(target, "balanced-v2");
+    await userEvent.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
+    expect(api.calls.some((call) => call.key.startsWith("PATCH /admin/routing-rules"))).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: "규칙 저장" }));
 
     await waitFor(() =>
       expect(api.calls.some((call) => call.key === "PATCH /admin/routing-rules/route_1")).toBe(true),
     );
-    expect(api.bodies("PATCH /admin/routing-rules/route_1").at(-1)).toMatchObject({
-      target_model: "balanced-v2",
-      match_pattern: "gpt-*",
-    });
+    expect(api.bodies("PATCH /admin/routing-rules/route_1")).toEqual([
+      {
+        target_model: "balanced-v2",
+      },
+    ]);
     // Editing in place must never remove the live rule first: traffic would route
     // differently for as long as it were gone.
     expect(api.calls.some((call) => call.key.startsWith("DELETE /admin/routing-rules"))).toBe(false);
+    expect(api.calls.some((call) => call.key.startsWith("POST /admin/routing-rules"))).toBe(false);
   });
 
   it("규칙 삭제를 확인하면 삭제 API를 호출하고 결과를 알린다", async () => {
