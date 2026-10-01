@@ -9,6 +9,7 @@ import {
   type GovernanceColumn,
 } from "@/features/governance/policies/governance-parts";
 import { PolicyEditorDialog } from "./PolicyEditorDialog";
+import { PolicyImportEntry } from "./PolicyImportEntry";
 import { usePolicyEditorAccess } from "./policy-editor-access";
 import { editorJson, editorText, fingerprint } from "./policy-editor-security";
 import { policyProblem } from "./policy-editor-state";
@@ -431,15 +432,18 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
         title="AI 정책 엔진"
         description="조건이 맞는 요청을 차단하거나 승인 대상으로 만듭니다. 우선순위가 낮을수록 먼저 평가합니다."
         actions={
-          <Button
-            ref={policyTriggerRef}
-            variant="primary"
-            disabled={!canWrite}
-            title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-            onClick={() => setPolicyFormOpen(true)}
-          >
-            <Plus aria-hidden="true" /> 정책 추가
-          </Button>
+          <div className="governance-actions">
+            <PolicyImportEntry canWrite={canWrite} />
+            <Button
+              ref={policyTriggerRef}
+              variant="primary"
+              disabled={!canWrite}
+              title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+              onClick={() => setPolicyFormOpen(true)}
+            >
+              <Plus aria-hidden="true" /> 정책 추가
+            </Button>
+          </div>
         }
       >
         {policies.isError ? (

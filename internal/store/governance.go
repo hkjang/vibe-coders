@@ -38,56 +38,21 @@ func (s *SQLStore) ListPolicies(ctx context.Context) ([]Policy, error) {
 
 func (s *SQLStore) UpsertPolicyWithRules(ctx context.Context, p Policy, rules []PolicyRule) error {
 	now := time.Now().UTC()
-	if p.CreatedAt.IsZero() {
-		p.CreatedAt = now
-	}
-	p.UpdatedAt = now
-	if p.Priority == 0 {
-		p.Priority = 100
-	}
-	if p.RolloutPercent <= 0 || p.RolloutPercent > 100 {
-		p.RolloutPercent = 100
-	}
+	p = normalizeStoredPolicy(p, now)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO policies (id, name, description, enabled, priority, rollout_percent, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			name = excluded.name,
-			description = excluded.description,
-			enabled = excluded.enabled,
-			priority = excluded.priority,
-			rollout_percent = excluded.rollout_percent,
-			updated_at = excluded.updated_at`),
-		p.ID, p.Name, p.Description, boolInt(p.Enabled), p.Priority, p.RolloutPercent, formatTime(p.CreatedAt), formatTime(p.UpdatedAt))
-	if err != nil {
+	if err := s.upsertPolicyTx(ctx, tx, p); err != nil {
 		return err
 	}
 	if rules != nil {
-		if _, err := tx.ExecContext(ctx, s.bind(`DELETE FROM policy_rules WHERE policy_id = ?`), p.ID); err != nil {
+		if err := s.deletePolicyRulesTx(ctx, tx, p.ID); err != nil {
 			return err
 		}
 		for _, rule := range rules {
-			if rule.CreatedAt.IsZero() {
-				rule.CreatedAt = now
-			}
-			rule.UpdatedAt = now
-			if rule.PolicyID == "" {
-				rule.PolicyID = p.ID
-			}
-			if rule.Priority == 0 {
-				rule.Priority = 100
-			}
-			conditions, _ := json.Marshal(nonNilMap(rule.Conditions))
-			actions, _ := json.Marshal(nonNilMap(rule.Actions))
-			if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO policy_rules
-				(id, policy_id, name, enabled, priority, conditions_json, actions_json, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-				rule.ID, rule.PolicyID, rule.Name, boolInt(rule.Enabled), rule.Priority, string(conditions), string(actions),
-				formatTime(rule.CreatedAt), formatTime(rule.UpdatedAt)); err != nil {
+			if err := s.insertPolicyRuleTx(ctx, tx, normalizeStoredPolicyRule(rule, p.ID, now)); err != nil {
 				return err
 			}
 		}

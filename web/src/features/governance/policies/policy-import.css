@@ -1,0 +1,62 @@
+.dialog-content:has(> .dialog-body > .policy-import) > .dialog-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.policy-import {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.policy-import p,
+.policy-import h4,
+.policy-import td,
+.policy-import th {
+  overflow-wrap: anywhere;
+}
+.policy-import fieldset,
+.policy-import section,
+.policy-import li {
+  min-width: 0;
+}
+.policy-import fieldset {
+  display: grid;
+  gap: var(--space-3);
+}
+.policy-import pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 0.875rem;
+}
+.policy-import table {
+  width: 100%;
+  table-layout: fixed;
+}
+.policy-import td,
+.policy-import th {
+  padding: var(--space-2);
+  vertical-align: top;
+  text-align: start;
+}
+.policy-import-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.policy-import-file {
+  display: grid;
+  gap: var(--space-2);
+}
+.policy-import-file input {
+  max-width: 100%;
+  min-width: 0;
+}
+.policy-import-reviews {
+  padding-inline-start: var(--space-6);
+}
+.policy-import-reviews > li {
+  margin-block: var(--space-4);
+}
