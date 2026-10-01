@@ -1,33 +1,27 @@
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, ListTree, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featureByPath } from "@/config/migration-registry";
 import { TraceFilters } from "@/features/observability/traces/TraceFilters";
 import { TraceRequestDetails } from "@/features/observability/traces/TraceRequestDetails";
-import { TraceRequestTable } from "@/features/observability/traces/TraceRequestTable";
-import { TraceTimeline } from "@/features/observability/traces/TraceTimeline";
 import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "./trace-safe-flow-access";
+import { useTraceListQuery } from "./trace-list-query";
+import { TraceListCriteria } from "./TraceListCriteria";
+import { TraceListResults } from "./TraceListResults";
 import {
   buildTraceQuery,
-  formatTraceDate,
-  formatTraceDuration,
   orderTraceRequests,
   requestExplorerPath,
   selectedRequestFromSearch,
   traceFilterFormKey,
-  traceCount,
 } from "@/features/observability/traces/trace-utils";
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { uiLabels } from "@/config/ui-labels";
-import { apiClient } from "@/shared/api/client";
-import { endpoints } from "@/shared/api/endpoints";
-import { AppError, isAppError } from "@/shared/api/error";
-import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
+import { isAppError } from "@/shared/api/error";
 import type { AppRequestSummary } from "@/shared/api/schemas";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -44,7 +38,6 @@ export function TracePage(): React.JSX.Element {
 
 function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): React.JSX.Element {
   const auth = useAuth();
-  const listLifetime = useId();
   const location = useLocation();
   const runtimeFeature = featureByPath(location.pathname, auth.features) ?? featureByPath(location.pathname);
   const legacyPath = runtimeFeature?.legacyPath;
@@ -56,7 +49,20 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
   const query = useMemo(() => buildTraceQuery(searchParams), [searchParams]);
   const selectedTimeZone = query.tz ?? "Asia/Seoul";
   const selectedRequestSelection = selectedRequestFromSearch(searchParams);
+  const selectionKey = selectedRequestSelection
+    ? `${selectedRequestSelection.kind}:${selectedRequestSelection.value}`
+    : undefined;
   const filterFormKey = traceFilterFormKey(searchParams);
+  const criteriaIdentity = JSON.stringify([filterFormKey, searchParams.getAll("cursor")]);
+  const list = useTraceListQuery(query, criteriaIdentity, selectionKey ?? "", flowAccess, interval);
+  const { result } = list;
+  const data = result.data?.response;
+  const displayedQuery = result.data?.criteria;
+  const displayedTimeZone = displayedQuery?.tz ?? selectedTimeZone;
+  const routeRef = useRef({ searchParams, setSearchParams });
+  useLayoutEffect(() => {
+    routeRef.current = { searchParams, setSearchParams };
+  });
   const detailRef = useRef<HTMLElement>(null);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -69,32 +75,10 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
   const errorResetButtonRef = useRef<HTMLButtonElement>(null);
   const previousSelectionKeyRef = useRef<string | undefined>(undefined);
 
-  const result = useQuery({
-    queryKey: ["admin", "requests", "trace-explorer", flowAccess.key, listLifetime, query],
-    enabled: flowAccess.readable,
-    queryFn: async ({ signal }) => {
-      flowAccess.assertRead();
-      const response = await apiClient.request(endpoints.admin.requests, {
-        headers: appRequestsContractHeaders,
-        query,
-        signal,
-        routeId: "observability.traces",
-      });
-      flowAccess.assertRead();
-      if (signal.aborted) throw new AppError("목록 조회가 취소되었습니다.", { kind: "aborted" });
-      return response;
-    },
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[3] === flowAccess.key ? keepPreviousData(previous) : undefined,
-    staleTime: 10_000,
-    refetchInterval: (traceQuery) =>
-      traceQuery.state.status === "error" && traceQuery.state.data === undefined ? false : interval,
-    refetchIntervalInBackground: false,
-  });
-  const requestIdentityAvailable = result.data?.request_contract_version === 2;
+  const requestIdentityAvailable = data?.request_contract_version === 2;
   const selectedRequest =
-    selectedRequestSelection && requestIdentityAvailable
-      ? result.data?.requests.find((request) =>
+    selectedRequestSelection && requestIdentityAvailable && list.belongsToCriteria
+      ? data?.requests.find((request) =>
           selectedRequestSelection.kind === "ref"
             ? request.request_ref === selectedRequestSelection.value
             : request.request_filterable && request.request_id === selectedRequestSelection.value,
@@ -102,36 +86,37 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
       : undefined;
   const selectedRequestRef = selectedRequest?.request_ref;
   const selectedRequestOrdinal = selectedRequest
-    ? orderTraceRequests(result.data?.requests ?? []).findIndex(
+    ? orderTraceRequests(data?.requests ?? []).findIndex(
         (request) => request.request_ref === selectedRequest.request_ref,
       ) + 1
     : undefined;
-  const selectionKey = selectedRequestSelection
-    ? `${selectedRequestSelection.kind}:${selectedRequestSelection.value}`
-    : undefined;
   const selectionPresence = selectedRequestSelection
-    ? result.data
-      ? requestIdentityAvailable
-        ? selectedRequest
-          ? "found"
-          : "missing"
-        : "unsupported"
-      : "loading"
+    ? !list.belongsToCriteria
+      ? "loading"
+      : data
+        ? requestIdentityAvailable
+          ? selectedRequest
+            ? "found"
+            : "missing"
+          : "unsupported"
+        : "loading"
     : "none";
 
   const updateSearch = useCallback(
     (updates: Readonly<Record<string, string | undefined>>, replace = false): void => {
-      const next = new URLSearchParams(searchParams);
+      const current = routeRef.current;
+      const next = new URLSearchParams(current.searchParams);
       for (const [key, value] of Object.entries(updates)) {
         if (value) next.set(key, value);
         else next.delete(key);
       }
-      setSearchParams(next, { replace });
+      current.setSearchParams(next, { replace });
     },
-    [searchParams, setSearchParams],
+    [],
   );
 
   const selectRequest = (request: AppRequestSummary, trigger: HTMLButtonElement): void => {
+    if (!list.canSelect(request)) return;
     const nextSelection = request.request_filterable
       ? { kind: "id" as const, value: request.request_id }
       : { kind: "ref" as const, value: request.request_ref };
@@ -141,6 +126,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
       detailRef.current?.focus();
       return;
     }
+    if (!list.retireSelection()) return;
     updateSearch(
       nextSelection.kind === "id"
         ? { selected_ref: undefined, selected_request: nextSelection.value }
@@ -149,9 +135,10 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
     );
   };
 
-  const clearSelectedRequest = useCallback((): void => {
+  const clearSelectedRequest = (): void => {
+    if (!list.retireSelection()) return;
     updateSearch({ selected_ref: undefined, selected_request: undefined }, true);
-  }, [updateSearch]);
+  };
 
   const forgetSelectionTrigger = useCallback((): void => {
     selectionTriggersByKeyRef.current.clear();
@@ -212,49 +199,66 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
       />
     );
   }
-  if (result.error && !result.data) {
+  const criteriaPanel = (
+    <TraceListCriteria
+      requested={query}
+      displayed={displayedQuery}
+      prefixes={auth.credentialPrefixes}
+      pending={result.isPending || result.isFetching}
+      failed={result.isError}
+    />
+  );
+  if (result.error && !data) {
     return (
-      <ErrorState
-        headingRef={errorHeadingRef}
-        title="추적 요청 흐름을 불러오지 못했습니다."
-        message={safeAppErrorMessage(result.error, "추적 요청 흐름을 확인할 수 없습니다.")}
-        requestId={isAppError(result.error) ? result.error.requestId : undefined}
-        diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
-        onRetry={() => {
-          pendingPageFocusRef.current = true;
-          pendingErrorActionFocusRef.current = "retry";
-          void result.refetch();
-        }}
-        onReset={() => {
-          pendingPageFocusRef.current = true;
-          pendingErrorActionFocusRef.current = "reset";
-          setSearchParams({}, { replace: false });
-        }}
-        retryButtonRef={errorRetryButtonRef}
-        resetButtonRef={errorResetButtonRef}
-        resetLabel="필터 초기화"
-        showLegacy={showLegacyAdmin}
-        legacyHref={legacyPath}
-      />
+      <div className="page-stack trace-page">
+        {criteriaPanel}
+        <ErrorState
+          headingRef={errorHeadingRef}
+          title="추적 요청 흐름을 불러오지 못했습니다."
+          message={safeAppErrorMessage(result.error, "추적 요청 흐름을 확인할 수 없습니다.")}
+          requestId={isAppError(result.error) ? result.error.requestId : undefined}
+          diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
+          onRetry={() => {
+            pendingPageFocusRef.current = true;
+            pendingErrorActionFocusRef.current = "retry";
+            void result.refetch();
+          }}
+          onReset={() => {
+            pendingPageFocusRef.current = true;
+            pendingErrorActionFocusRef.current = "reset";
+            setSearchParams({}, { replace: false });
+          }}
+          retryButtonRef={errorRetryButtonRef}
+          resetButtonRef={errorResetButtonRef}
+          resetLabel="필터 초기화"
+          showLegacy={showLegacyAdmin}
+          legacyHref={legacyPath}
+        />
+      </div>
     );
   }
-  if (result.isPending && !result.data) {
-    return <LoadingState label="추적 요청 흐름을 불러오는 중입니다." />;
+  if (result.isPending && !data) {
+    return (
+      <div className="page-stack trace-page">
+        {criteriaPanel}
+        <LoadingState label="추적 요청 흐름을 불러오는 중입니다." />
+      </div>
+    );
   }
 
-  const data = result.data;
   const requests = data?.requests ?? [];
   const requestedTraceId = query.trace_id;
-  const averageLatency = requests.length
-    ? requests.reduce((total, request) => total + request.latency_ms, 0) / requests.length
-    : 0;
-  const failedRequests = requests.filter(
-    (request) => request.status_code >= 400 && request.status_code < 600,
-  ).length;
   const explorerHref = requestExplorerPath(
-    query,
+    selectedRequest && displayedQuery ? displayedQuery : query,
     selectedRequest?.request_filterable ? selectedRequest.request_id : undefined,
   );
+  const selectionDisabledReason = list.ready
+    ? undefined
+    : result.isFetching || result.isPlaceholderData
+      ? "현재 목록을 조회 중입니다. 조회가 끝나면 요청 상세를 선택하세요."
+      : result.isError
+        ? "최신 목록 조회에 실패했습니다. 새로고침 후 요청 상세를 선택하세요."
+        : "현재 조회 기준의 목록을 다시 확인한 뒤 요청 상세를 선택하세요.";
 
   return (
     <div className="page-stack trace-page">
@@ -296,13 +300,17 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
         }}
       />
 
+      {criteriaPanel}
+
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {selectedRequestSelection
-          ? selectionPresence === "unsupported"
-            ? "서버 업그레이드 중에는 요청 상세 연결을 사용할 수 없습니다."
-            : selectedRequest
-              ? `${selectedRequestOrdinal}번째 요청 ${selectedRequest.request_id} 상세가 열렸습니다.`
-              : "선택한 요청이 현재 페이지에 없습니다."
+          ? selectionPresence === "loading"
+            ? "현재 조회 기준에서 선택한 요청을 확인하고 있습니다."
+            : selectionPresence === "unsupported"
+              ? "서버 업그레이드 중에는 요청 상세 연결을 사용할 수 없습니다."
+              : selectedRequest
+                ? `${selectedRequestOrdinal}번째 요청 ${selectedRequest.request_id} 상세가 열렸습니다.`
+                : "선택한 요청이 현재 페이지에 없습니다."
           : ""}
       </p>
 
@@ -352,96 +360,25 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
         추적 조회 결과
       </h2>
 
-      {requests.length ? (
-        <>
-          <section className="trace-summary" aria-label="추적 요청 요약">
-            <article>
-              <span>표시 요청</span>
-              <strong>{requests.length.toLocaleString("ko-KR")}건</strong>
-            </article>
-            <article>
-              <span>추적 ID</span>
-              <strong>{traceCount(requests).toLocaleString("ko-KR")}개</strong>
-            </article>
-            <article>
-              <span>평균 지연</span>
-              <strong>{formatTraceDuration(Math.round(averageLatency))}</strong>
-            </article>
-            <article>
-              <span>오류 요청</span>
-              <strong>{failedRequests.toLocaleString("ko-KR")}건</strong>
-            </article>
-          </section>
-
-          <TraceTimeline
-            requests={requests}
-            selectionEnabled={requestIdentityAvailable}
-            selectedRequestRef={selectedRequestRef}
-            timeZone={selectedTimeZone}
-            onSelect={selectRequest}
-          />
-
-          <TraceRequestTable
-            requests={requests}
-            selectionEnabled={requestIdentityAvailable}
-            selectedRequestRef={selectedRequestRef}
-            timeZone={selectedTimeZone}
-            onSelect={selectRequest}
-          />
-
-          <div className="trace-pagination">
-            <span>
-              마지막 갱신{" "}
-              {data ? (
-                <time data-testid="traces-generated-at" dateTime={data.generated_at}>
-                  {formatTraceDate(data.generated_at, selectedTimeZone, { timeStyle: "medium" })}
-                </time>
-              ) : (
-                "-"
-              )}
-            </span>
-            <div>
-              <Button
-                variant="secondary"
-                size="small"
-                disabled={!data?.previous_cursor || result.isFetching}
-                onClick={() => {
-                  pendingPageFocusRef.current = true;
-                  forgetSelectionTrigger();
-                  updateSearch(
-                    {
-                      cursor: data?.previous_cursor,
-                      selected_ref: undefined,
-                      selected_request: undefined,
-                    },
-                    false,
-                  );
-                }}
-              >
-                이전
-              </Button>
-              <Button
-                variant="secondary"
-                size="small"
-                disabled={!data?.next_cursor || result.isFetching}
-                onClick={() => {
-                  pendingPageFocusRef.current = true;
-                  forgetSelectionTrigger();
-                  updateSearch(
-                    {
-                      cursor: data?.next_cursor,
-                      selected_ref: undefined,
-                      selected_request: undefined,
-                    },
-                    false,
-                  );
-                }}
-              >
-                다음
-              </Button>
-            </div>
-          </div>
-        </>
+      {requests.length && data ? (
+        <TraceListResults
+          data={data}
+          ready={list.ready}
+          selectionDisabledReason={selectionDisabledReason}
+          selectedRequestRef={selectedRequestRef}
+          timeZone={displayedTimeZone}
+          onSelect={selectRequest}
+          onPage={(cursor) => {
+            try {
+              list.assertCurrent();
+            } catch {
+              return;
+            }
+            pendingPageFocusRef.current = true;
+            forgetSelectionTrigger();
+            updateSearch({ cursor, selected_ref: undefined, selected_request: undefined }, false);
+          }}
+        />
       ) : (
         <section className="trace-empty" role="status">
           <ListTree aria-hidden="true" />
@@ -455,20 +392,16 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
       )}
 
       <TraceRequestDetails
-        flowReady={
-          result.isSuccess &&
-          !result.isError &&
-          !result.isPlaceholderData &&
-          !result.isFetching &&
-          requestIdentityAvailable
-        }
-        listRevision={result.dataUpdatedAt}
+        flowReady={list.ready && requestIdentityAvailable}
+        listRevision={list.revision}
+        assertParent={selectedRequest ? () => list.assertSelected(selectedRequest) : undefined}
         request={selectedRequest}
         detailRef={detailRef}
         selectionOrdinal={selectedRequestOrdinal}
         selectionActive={selectedRequestSelection !== undefined}
         selectionUnavailable={selectionPresence === "unsupported"}
-        timeZone={selectedTimeZone}
+        selectionPending={selectionPresence === "loading"}
+        timeZone={displayedTimeZone}
         requestExplorerHref={explorerHref}
         onClear={clearSelectedRequest}
       />
