@@ -2,17 +2,9 @@ import type { RefObject } from "react";
 import { useEffect } from "react";
 import { z } from "zod";
 
-import { ProviderEditDialog } from "@/features/gateway/providers/ProviderEditDialog";
-import { ProviderFormFields } from "@/features/gateway/providers/ProviderFormFields";
+import { ProviderCreateDialog, ProviderEditDialog } from "@/features/gateway/providers/ProviderEditDialog";
 import type { ProviderCatalogRow } from "@/features/gateway/providers/provider-catalog";
-import {
-  numberText,
-  providerFormSchema,
-  providerFormValues,
-  providerWriteBody,
-  type ProviderFormInput,
-  type ProviderFormOutput,
-} from "@/features/gateway/providers/provider-form";
+import { numberText } from "@/features/gateway/providers/provider-form";
 import type { ProviderSLOWriteBody, ProviderWriteBody } from "@/shared/api/domains/gateway";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { Input } from "@/shared/components/ui/Input";
@@ -39,35 +31,6 @@ export function ProviderFormDialog(props: ProviderFormDialogProps): React.JSX.El
     <ProviderEditDialog key={props.row.identity} {...props} row={props.row} />
   ) : (
     <ProviderCreateDialog {...props} />
-  );
-}
-
-function ProviderCreateDialog({
-  onOpenChange,
-  onSubmit,
-  returnFocusRef,
-}: ProviderFormDialogProps): React.JSX.Element {
-  const access = useProviderWriteAccess();
-  const form = useZodForm<ProviderFormInput, ProviderFormOutput>(providerFormSchema, providerFormValues());
-  return (
-    <FormDialog
-      open
-      onOpenChange={onOpenChange}
-      returnFocusRef={returnFocusRef}
-      form={form}
-      title="공급자 추가"
-      description="이름과 기본 URL은 필수입니다. API 키는 입력할 때만 교체되고 화면에 다시 표시되지 않습니다."
-      submitDisabled={!access.allowed}
-      onSubmit={(values) => {
-        access.assertCurrent();
-        return onSubmit(providerWriteBody(values));
-      }}
-    >
-      {!access.allowed ? <InlineNotice tone="warning">{access.reason}</InlineNotice> : null}
-      <fieldset className="form-grid form-dialog-fields" disabled={!access.allowed}>
-        <ProviderFormFields form={form} />
-      </fieldset>
-    </FormDialog>
   );
 }
 

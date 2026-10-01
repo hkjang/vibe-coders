@@ -739,6 +739,46 @@ export type ProtectedResourceMetadata = {
     scopes_supported: Array<string>;
 };
 
+export type ProviderConnectionTestRequest = unknown & {
+    /**
+     * HTTP(S) base URL, at most 8192 UTF-8 bytes, without credentials. Input uses existing save normalization: surrounding whitespace and trailing slashes of the full string are removed. Existing fixed base-path/query semantics apply; /v1/models is appended without smart path de-duplication. Stored mode rejects normalization that would change the actual stored destination.
+     */
+    base_url: string;
+    /**
+     * draft requires api_key; stored requires provider_ref and forbids api_key; none forbids api_key and is rejected when the existing provider has a stored key. none omits the Authorization header.
+     */
+    credential_mode: 'draft' | 'stored' | 'none';
+    /**
+     * New provider name, subject to existing creation validation. An existing name returns 409 without using its key.
+     */
+    name?: string;
+    provider_ref?: string;
+    /**
+     * 0 or omitted uses the configured upstream timeout. Effective probe timeout is clamped to 1–10000 ms and includes queue/DB/network time; the entire ingress/probe is also bounded by a 10-second parent context. Audit has a separate at-most-1-second budget.
+     */
+    timeout_ms?: number;
+};
+
+/**
+ * Fresh fixed GET /v1/models only: success requires 2xx and one lowercase data array whose object entries each contain one nonblank string id. Empty arrays are valid. This does not prove inference support, model access, billing or a later save. No raw provider/model/error/header/credential data is returned. The bounded model catalogue is never cached by this operation. All upstream failures, including 401/403, use HTTP 200 with an outcome; HTTP 401 is reserved for gateway authentication.
+ */
+export type ProviderConnectionTestResponse = {
+    /**
+     * Observed queue/validation/network elapsed time, excluding the action audit.
+     */
+    duration_ms: number;
+    /**
+     * Returned catalogue entry count only on catalog_available (including zero); null for every failure. Not an inference-validated or distinct-model count.
+     */
+    model_count: number | null;
+    outcome: 'catalog_available' | 'authentication_rejected' | 'redirect_blocked' | 'upstream_rejected' | 'invalid_response' | 'response_too_large' | 'model_limit_exceeded' | 'timeout' | 'connection_failed' | 'cancelled';
+    timeout_ms: number;
+    /**
+     * Null when no valid upstream HTTP status was received. No upstream headers or body are reflected.
+     */
+    upstream_status: number | null;
+};
+
 export type ProviderHealthAlert = {
     code: string;
     message: string;
@@ -1334,6 +1374,30 @@ export type MattermostConfigRequestWritable = {
      * Input-only webhook URL. Omit or null to keep; empty string clears it.
      */
     webhook_url?: string | null;
+};
+
+export type ProviderConnectionTestRequestWritable = unknown & {
+    /**
+     * Draft-only credential, at most 8192 UTF-8 bytes; not returned, audited or stored. Internal whitespace/control characters are rejected.
+     */
+    api_key?: string;
+    /**
+     * HTTP(S) base URL, at most 8192 UTF-8 bytes, without credentials. Input uses existing save normalization: surrounding whitespace and trailing slashes of the full string are removed. Existing fixed base-path/query semantics apply; /v1/models is appended without smart path de-duplication. Stored mode rejects normalization that would change the actual stored destination.
+     */
+    base_url: string;
+    /**
+     * draft requires api_key; stored requires provider_ref and forbids api_key; none forbids api_key and is rejected when the existing provider has a stored key. none omits the Authorization header.
+     */
+    credential_mode: 'draft' | 'stored' | 'none';
+    /**
+     * New provider name, subject to existing creation validation. An existing name returns 409 without using its key.
+     */
+    name?: string;
+    provider_ref?: string;
+    /**
+     * 0 or omitted uses the configured upstream timeout. Effective probe timeout is clamped to 1–10000 ms and includes queue/DB/network time; the entire ingress/probe is also bounded by a 10-second parent context. Audit has a separate at-most-1-second budget.
+     */
+    timeout_ms?: number;
 };
 
 export type GetWellKnownOauthProtectedResourceData = {
@@ -5802,6 +5866,59 @@ export type PostAdminPromptsPromotionsResponses = {
      */
     200: unknown;
 };
+
+export type PostAdminProviderConnectionTestData = {
+    body: ProviderConnectionTestRequestWritable;
+    path?: never;
+    query?: never;
+    url: '/admin/provider-connection-test';
+};
+
+export type PostAdminProviderConnectionTestErrors = {
+    /**
+     * Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values.
+     */
+    400: AppError;
+    /**
+     * Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values.
+     */
+    401: AppError;
+    /**
+     * Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values.
+     */
+    403: AppError;
+    /**
+     * Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values.
+     */
+    404: AppError;
+    /**
+     * Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values.
+     */
+    405: AppError;
+    /**
+     * Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values.
+     */
+    409: AppError;
+    /**
+     * Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminProviderConnectionTestError = PostAdminProviderConnectionTestErrors[keyof PostAdminProviderConnectionTestErrors];
+
+export type PostAdminProviderConnectionTestResponses = {
+    /**
+     * OK
+     */
+    200: ProviderConnectionTestResponse;
+};
+
+export type PostAdminProviderConnectionTestResponse = PostAdminProviderConnectionTestResponses[keyof PostAdminProviderConnectionTestResponses];
 
 export type GetAdminProviderImpactData = {
     body?: never;

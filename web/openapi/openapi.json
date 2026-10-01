@@ -2657,6 +2657,130 @@
         ],
         "type": "object"
       },
+      "ProviderConnectionTestRequest": {
+        "additionalProperties": false,
+        "description": "Exactly one of name (new target) or provider_ref (existing target) is required. Unknown, duplicate, case-variant, null and trailing fields are rejected; body limit 32768 bytes. New names are checked for an existing provider but this is not a later-save precondition or CAS. Stored credentials are read at request time and only sent to the current validated stored URL when the submitted URL matches. Unsafe or masked legacy URLs cannot use stored credentials. No provider configuration or model cache is changed; a bounded result-only action audit is recorded.",
+        "oneOf": [
+          {
+            "not": {
+              "required": [
+                "provider_ref"
+              ]
+            },
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "not": {
+              "required": [
+                "name"
+              ]
+            },
+            "required": [
+              "provider_ref"
+            ]
+          }
+        ],
+        "properties": {
+          "api_key": {
+            "description": "Draft-only credential, at most 8192 UTF-8 bytes; not returned, audited or stored. Internal whitespace/control characters are rejected.",
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          },
+          "base_url": {
+            "description": "HTTP(S) base URL, at most 8192 UTF-8 bytes, without credentials. Input uses existing save normalization: surrounding whitespace and trailing slashes of the full string are removed. Existing fixed base-path/query semantics apply; /v1/models is appended without smart path de-duplication. Stored mode rejects normalization that would change the actual stored destination.",
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          },
+          "credential_mode": {
+            "description": "draft requires api_key; stored requires provider_ref and forbids api_key; none forbids api_key and is rejected when the existing provider has a stored key. none omits the Authorization header.",
+            "enum": [
+              "draft",
+              "stored",
+              "none"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "New provider name, subject to existing creation validation. An existing name returns 409 without using its key.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider_ref": {
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "timeout_ms": {
+            "description": "0 or omitted uses the configured upstream timeout. Effective probe timeout is clamped to 1–10000 ms and includes queue/DB/network time; the entire ingress/probe is also bounded by a 10-second parent context. Audit has a separate at-most-1-second budget.",
+            "maximum": 600000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "base_url",
+          "credential_mode"
+        ],
+        "type": "object"
+      },
+      "ProviderConnectionTestResponse": {
+        "additionalProperties": false,
+        "description": "Fresh fixed GET /v1/models only: success requires 2xx and one lowercase data array whose object entries each contain one nonblank string id. Empty arrays are valid. This does not prove inference support, model access, billing or a later save. No raw provider/model/error/header/credential data is returned. The bounded model catalogue is never cached by this operation. All upstream failures, including 401/403, use HTTP 200 with an outcome; HTTP 401 is reserved for gateway authentication.",
+        "properties": {
+          "duration_ms": {
+            "description": "Observed queue/validation/network elapsed time, excluding the action audit.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_count": {
+            "description": "Returned catalogue entry count only on catalog_available (including zero); null for every failure. Not an inference-validated or distinct-model count.",
+            "maximum": 10000,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "catalog_available",
+              "authentication_rejected",
+              "redirect_blocked",
+              "upstream_rejected",
+              "invalid_response",
+              "response_too_large",
+              "model_limit_exceeded",
+              "timeout",
+              "connection_failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "timeout_ms": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "upstream_status": {
+            "description": "Null when no valid upstream HTTP status was received. No upstream headers or body are reflected.",
+            "maximum": 599,
+            "minimum": 100,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "outcome",
+          "upstream_status",
+          "duration_ms",
+          "timeout_ms",
+          "model_count"
+        ],
+        "type": "object"
+      },
       "ProviderHealthAlert": {
         "additionalProperties": false,
         "properties": {
@@ -4650,7 +4774,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.28"
+    "version": "v0.86.29"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -11404,6 +11528,123 @@
         "summary": "Prompt version promotions",
         "tags": [
           "governance"
+        ]
+      }
+    },
+    "/admin/provider-connection-test": {
+      "post": {
+        "description": "Requires existing admin:write authorization plus current shared-DB app/feature access (not a client header): gateway.providers must be available, writable and preview/stable/deprecated/retired. Performs a non-redirecting GET /v1/models without application-level retries; the existing shared transport may replay idempotent requests after stale-connection failures. Shares the global catalogue concurrency cap, bounds decoded body to 8 MiB and entries to 10000. Fresh explicit credentials only; no saved-provider mutation, inference request or model-cache change. Private/on-premise destinations remain supported under existing administrator/egress controls; this is not a general SSRF isolation boundary. Audit contains only the fixed result DTO and existing hashed administrator identity.",
+        "operationId": "post__admin_provider_connection_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConnectionTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConnectionTestResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Test a new or edited provider draft against its model catalogue without saving",
+        "tags": [
+          "admin"
         ]
       }
     },

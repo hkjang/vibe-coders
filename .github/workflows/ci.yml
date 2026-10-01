@@ -100,7 +100,7 @@ jobs:
           retention-days: 7
 
   auth-browser:
-    name: real Go · OIDC · browser authentication and API keys
+    name: real Go · OIDC · browser authentication and provider checks
     runs-on: ubuntu-latest
     needs: frontend
     timeout-minutes: 15
@@ -129,7 +129,9 @@ jobs:
         env:
           VIBE_AUTH_BROWSER_ARTIFACT_TEST: "1"
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
-        run: node --test scripts/auth-report-sanitization.test.mjs
+        run: |
+          node --test scripts/auth-report-sanitization.test.mjs
+          VIBE_PROVIDER_BROWSER_ARTIFACT_TEST=1 node --test scripts/provider-connection-report-sanitization.test.mjs
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: appui-dist
@@ -142,6 +144,14 @@ jobs:
         # synthetic accounts and a local model responder. No deployment
         # credentials or synthetic admin/auth responses are used.
         run: go test ./internal/proxy -run '^TestAuthBrowserIntegration$' -count=1 -timeout=6m
+      - name: Verify pre-save provider checks against an isolated Go server
+        env:
+          VIBE_PROVIDER_CONNECTION_BROWSER_TEST: "1"
+          CGO_ENABLED: "0"
+        # The browser reaches the real login/provider APIs and a local catalogue
+        # responder. Its private numeric-only summary is checked by the harness;
+        # no draft keys, raw output, browser traces or snapshots are retained.
+        run: go test ./internal/proxy -run '^TestProviderConnectionBrowserIntegration$' -count=1 -timeout=2m
       - name: Upload sanitized authentication summary only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -280,7 +290,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.28
+      SOURCE_SBOM_VERSION: v0.86.29
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0
