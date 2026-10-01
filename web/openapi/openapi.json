@@ -4345,6 +4345,136 @@
         ],
         "type": "object"
       },
+      "RoutingRuleListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RoutingRuleView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "type": "object"
+      },
+      "RoutingRulePatchRequest": {
+        "additionalProperties": true,
+        "description": "Every known field is optional and nullable: omitted/null preserves the database column at UPDATE time. Non-null false, zero and empty strings are explicit inputs, subject to field normalization and merged validation. ID and created_at are not editable. No new string-length cap or strict JSON parser is introduced.",
+        "nullable": true,
+        "properties": {
+          "enabled": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "match_pattern": {
+            "description": "Surrounding Go whitespace is trimmed; an explicit empty value becomes * (all models).",
+            "nullable": true,
+            "type": "string"
+          },
+          "max_complexity": {
+            "description": "Zero is explicit; merged bounds must satisfy 0 <= min <= max <= 100 at the write.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "min_complexity": {
+            "description": "Zero is explicit; merged bounds must satisfy 0 <= min <= max <= 100 at the write.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "note": {
+            "description": "Surrounding Go whitespace is trimmed; an explicit empty value clears the note.",
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "description": "Explicit values must be positive; unlike create, zero is rejected, not defaulted.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "target_model": {
+            "description": "Surrounding Go whitespace is trimmed; an explicit blank value is rejected.",
+            "nullable": true,
+            "type": "string"
+          },
+          "target_provider": {
+            "description": "Surrounding Go whitespace is trimmed; an explicit empty value clears the configured provider.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RoutingRuleView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "description": "Original creation timestamp, not a modification revision. Invalid legacy stored times decode to the Go zero timestamp.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "match_pattern": {
+            "type": "string"
+          },
+          "max_complexity": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "min_complexity": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_model": {
+            "type": "string"
+          },
+          "target_provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "enabled",
+          "priority",
+          "match_pattern",
+          "min_complexity",
+          "max_complexity",
+          "target_model",
+          "target_provider",
+          "note",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "RoutingRuleWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "rule": {
+            "$ref": "#/components/schemas/RoutingRuleView"
+          }
+        },
+        "required": [
+          "rule"
+        ],
+        "type": "object"
+      },
       "SSOExchangeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5294,7 +5424,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.38"
+    "version": "v0.86.39"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -14864,10 +14994,48 @@
     },
     "/admin/routing-rules": {
       "get": {
+        "description": "Read stored routing rules with existing routing:read authorization. The unpaginated list includes all ten raw configuration fields for every row and uses [] when empty. This is configuration, not a masked projection, a revision token, or proof that the rule currently selects live traffic.",
         "operationId": "get__admin_routing_rules",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleListResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing authentication/scope rejection: invalid_api_key. GET requires routing:read; PATCH requires routing:write. Legacy read-only credentials cannot PATCH."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_rules_failed: stored list could not be read."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -14927,6 +15095,7 @@
         ]
       },
       "patch": {
+        "description": "Partially update an existing rule with routing:write authorization. Omitted or null fields retain their database values at the actual UPDATE, not an earlier handler snapshot. The rule is never inserted by PATCH. Complexity bounds are validated together against the values at that write. Success returns the row from UPDATE RETURNING, not a later reread. Explicit concurrent writes to the same field remain last-writer-wins; there is no revision/CAS or idempotency token. Local routing cache invalidation and best-effort audit follow a successful update; other processes retain the existing five-second cache TTL. Configured post-change checks may run and record state. Response loss may occur after the write, so an unconfirmed response is not evidence that it is safe to reapply. Empty object or null body is a no-op update of an existing valid rule. Unknown fields, case-insensitive field aliases and the existing Go JSON decoder behavior are preserved.",
         "operationId": "patch__admin_routing_rules_id",
         "parameters": [
           {
@@ -14938,9 +15107,76 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingRulePatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleWriteResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_rule_id, invalid_body, invalid_priority, missing_target_model or invalid_range. After a no-row UPDATE, existence is diagnosed by a separate current read; concurrent changes can affect that diagnosis."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing authentication/scope rejection: invalid_api_key. GET requires routing:read; PATCH requires routing:write. Legacy read-only credentials cannot PATCH."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "rule_not_found: rule absent at initial lookup or no-row UPDATE diagnosis; PATCH never recreates it."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_rule_lookup_failed or routing_rule_save_failed: lookup, UPDATE or returned-row processing failed. A client must not infer non-application solely from a lost or unconfirmed response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

@@ -298,11 +298,11 @@ describe("원본 경로와 새 확인창 표시 경계", () => {
     expect(current.api.bodies(patchPath)).toHaveLength(0);
   });
   for (const id of ["", ".", "..", "opaque/segment"]) {
-    it(`표현 불가 원본 ID ${JSON.stringify(id)}는 사용 전환만 차단`, async () => {
+    it(`표현 불가 원본 ID ${JSON.stringify(id)}는 사용 전환과 수정 차단`, async () => {
       const current = await setupToggle(true, true, { id });
       const button = screen.getByRole("button", { name: "gpt-* → public-model-a 규칙 중지" });
       expect(button).toBeDisabled();
-      expect(screen.getByRole("button", { name: "gpt-* → public-model-a 규칙 수정" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "gpt-* → public-model-a 규칙 수정" })).toBeDisabled();
       expect(current.api.calls.filter((call) => call.key.startsWith("PATCH"))).toHaveLength(0);
     });
   }
@@ -324,13 +324,15 @@ describe("원본 경로와 새 확인창 표시 경계", () => {
       note: value,
     });
     current.prefixes(["public_rt_"]);
-    const opened = await openToggle(current);
-    expect(opened.dialog.outerHTML).not.toContain(value);
-    expect(within(opened.dialog).getAllByText("민감정보가 포함될 수 있어 표시하지 않습니다.")).toHaveLength(
-      5,
-    );
-    await current.user.click(within(opened.dialog).getByRole("button", { name: "중지" }));
-    await waitFor(() => expect(opened.dialog).not.toBeInTheDocument());
+    const masked = "민감정보가 포함될 수 있어 표시하지 않습니다.";
+    await current.user.click(screen.getByRole("button", { name: `${masked} → ${masked} 규칙 중지` }));
+    const dialog = screen.getByRole("dialog", { name: "라우팅 규칙 중지" });
+    expect(within(dialog).getByRole("button", { name: "중지" })).toBeEnabled();
+    expect(document.body.outerHTML).not.toContain(value);
+    expect(dialog.outerHTML).not.toContain(value);
+    expect(within(dialog).getAllByText("민감정보가 포함될 수 있어 표시하지 않습니다.")).toHaveLength(5);
+    await current.user.click(within(dialog).getByRole("button", { name: "중지" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(current.api.bodies(current.patchPath)).toEqual([{ enabled: false }]);
     expect(current.records.get(value)?.target_provider).toBe(value);
   });

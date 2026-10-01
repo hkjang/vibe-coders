@@ -638,6 +638,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichAppRequestFlowOpenAPI(op, responses)
 	case "get /admin/policies/export", "post /admin/policies/import":
 		enrichPolicyImportOpenAPI(route, op, responses)
+	case "get /admin/routing-rules", "patch /admin/routing-rules/{id}":
+		enrichRoutingEditOpenAPI(strings.ToLower(method), op, responses)
 	case "get /ready":
 		responses["200"] = successResponse("ReadyResponse")
 		responses["503"] = map[string]any{"description": "Database is not ready", "content": jsonContent(schemaRef("ReadinessFailureResponse"))}
@@ -1029,6 +1031,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range policyImportOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range routingEditOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas

@@ -1,15 +1,12 @@
 import { Plus } from "lucide-react";
-import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useLayoutEffect, useRef, useState } from "react";
 import { z } from "zod";
 
 import { routingRulesQueryKey, writeScopeMessage } from "@/features/routing/rules/routing-shared";
 import { QueryFailureNotice, ScopeNotice } from "@/features/routing/rules/routing-ui";
 import { apiClient } from "@/shared/api/client";
-import {
-  type RoutingRule,
-  type RoutingRuleInput,
-  type RoutingRuleToggleInput,
-} from "@/shared/api/domains/routing";
+import { type RoutingRule, type RoutingRuleInput } from "@/shared/api/domains/routing";
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
@@ -29,6 +26,10 @@ import { useRoutingToggleData } from "./routing-toggle-data";
 import { useRoutingToggleSelection } from "./routing-toggle-selection";
 import { useRuleColumns } from "./routing-rule-columns";
 import { useRoutingToggleFocus } from "./routing-toggle-focus";
+import { useRoutingEditAccess } from "./routing-rule-edit-access";
+import { editIdentityReason } from "./routing-rule-edit-state";
+import { sameRoutingRule } from "./routing-toggle-state";
+import { RoutingRuleEditDialog } from "./RoutingRuleEditDialog";
 
 const pageSize = 10;
 
@@ -48,11 +49,29 @@ type RuleFormValues = z.output<typeof ruleFormSchema>;
 export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
   const [createOpen, setCreateOpen] = useState(false);
-  const [editing, setEditing] = useState<RoutingRule>();
   const [pendingDelete, setPendingDelete] = useState<RoutingRule>();
   const createTrigger = useRef<HTMLButtonElement>(null);
   const [deleteTrigger, setDeleteTrigger] = useState<HTMLElement | null>(null);
-  const [editTrigger, setEditTrigger] = useState<HTMLElement | null>(null);
+  const client = useQueryClient();
+  const editAccess = useRoutingEditAccess(canWrite);
+  const serial = useRef(0);
+  const editActive = useRef<number | undefined>(undefined);
+  const [editSelection, setEditSelection] = useState<{
+    lifetime: object;
+    target?: { rule: RoutingRule; serial: number };
+  }>({ lifetime: editAccess.lifetime });
+  if (editSelection.lifetime !== editAccess.lifetime) {
+    setEditSelection({ lifetime: editAccess.lifetime });
+  }
+  const editing = editSelection.lifetime === editAccess.lifetime ? editSelection.target : undefined;
+  const {
+    panel: editPanelRef,
+    register: registerEdit,
+    returnFocusRef: editReturnFocusRef,
+  } = useRoutingToggleFocus(editing?.rule.id);
+  useLayoutEffect(() => {
+    editActive.current = undefined;
+  }, [editAccess.lifetime]);
 
   const toggleAccess = useRoutingToggleAccess(canWrite);
   const toggleData = useRoutingToggleData(toggleAccess);
@@ -63,6 +82,10 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
     returnFocusRef: toggleReturnFocusRef,
   } = useRoutingToggleFocus(toggleSelection.target?.rule.id);
   const rules = toggleData.query;
+  const parentKey = [...routingRulesQueryKey, toggleAccess.epoch, toggleAccess.owner] as const;
+  const renderedQuery = client.getQueryCache().find({ queryKey: parentKey, exact: true });
+  const renderedCount = renderedQuery?.state.dataUpdateCount;
+  const renderedData = renderedQuery?.state.data;
 
   const form = useZodForm<RuleFormInput, RuleFormValues>(ruleFormSchema, {
     match_pattern: "*",
@@ -88,14 +111,6 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
     errorMessage: "라우팅 규칙을 삭제하지 못했습니다.",
   });
 
-  const updateRule = useMutationFeedback<{ id: string; body: RoutingRuleToggleInput }, unknown>({
-    mutate: ({ body, id }) =>
-      apiClient.request(withPathParams(endpoints.domains.routing.rules.update, { id }), { body }),
-    invalidates: [routingRulesQueryKey],
-    successMessage: "라우팅 규칙을 수정했습니다.",
-    errorMessage: "라우팅 규칙을 수정하지 못했습니다.",
-  });
-
   const rows = [...(rules.data?.rules ?? [])].sort(
     (left, right) => left.priority - right.priority || left.target_model.localeCompare(right.target_model),
   );
@@ -104,7 +119,14 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
   const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <div className="routing-panel-stack" ref={togglePanelRef} tabIndex={-1}>
+    <div
+      className="routing-panel-stack"
+      ref={(node) => {
+        togglePanelRef.current = node;
+        editPanelRef.current = node;
+      }}
+      tabIndex={-1}
+    >
       {canWrite ? null : <ScopeNotice>{writeScopeMessage}</ScopeNotice>}
       {rules.isError ? (
         <QueryFailureNotice
@@ -142,18 +164,31 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
                 setPendingDelete(rule);
               },
               onEdit: (rule, trigger) => {
-                setEditTrigger(trigger);
-                form.reset({
-                  match_pattern: rule.match_pattern,
-                  target_model: rule.target_model,
-                  target_provider: rule.target_provider,
-                  min_complexity: rule.min_complexity,
-                  max_complexity: rule.max_complexity,
-                  priority: rule.priority,
-                  note: rule.note,
-                });
-                setEditing(rule);
+                try {
+                  editAccess.assertApproval(editAccess.approval);
+                  const query = client.getQueryCache().find({ queryKey: parentKey, exact: true });
+                  if (
+                    editActive.current !== undefined ||
+                    !query ||
+                    query !== renderedQuery ||
+                    query.state.dataUpdateCount !== renderedCount ||
+                    query.state.data !== renderedData
+                  )
+                    return;
+                  const current = toggleData.assertConfirmed().find((candidate) => candidate.id === rule.id);
+                  if (!sameRoutingRule(current, rule) || editIdentityReason(rule)) return;
+                  const sequence = ++serial.current;
+                  editActive.current = sequence;
+                  registerEdit(rule.id, trigger);
+                  setEditSelection({
+                    lifetime: editAccess.lifetime,
+                    target: { rule: { ...rule }, serial: sequence },
+                  });
+                } catch {
+                  /* No new edit from a retired callback or unconfirmed list. */
+                }
               },
+              onEditRef: registerEdit,
               onToggle: toggleSelection.open,
               onToggleRef: registerToggle,
             },
@@ -162,6 +197,13 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
               reason:
                 toggleAccess.write.reason ??
                 (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
+            },
+            {
+              allowed: editAccess.write.allowed && toggleData.confirmed,
+              reason:
+                editAccess.write.reason ??
+                (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
+              prefixes: editAccess.prefixes,
             },
           )}
           data={pageRows}
@@ -183,13 +225,6 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
         description="복잡도 범위와 모델 패턴이 맞는 요청을 지정한 모델로 라우팅합니다."
         form={form}
         onOpenChange={(open) => {
-          if (editing) {
-            if (!open) {
-              setEditing(undefined);
-              form.reset();
-            }
-            return;
-          }
           setCreateOpen(open);
           if (!open) form.reset();
         }}
@@ -206,20 +241,12 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
             priority: values.priority,
             note: values.note,
           };
-          if (editing) {
-            // Editing in place keeps the rule live. Deleting and recreating it
-            // would route traffic differently for as long as it is gone.
-            await updateRule.mutateAsync({ id: editing.id, body });
-            setEditing(undefined);
-            form.reset();
-            return;
-          }
           await createRule.mutateAsync({ ...body, enabled: true });
         }}
-        open={createOpen || editing !== undefined}
-        returnFocusRef={editing ? { current: editTrigger } : createTrigger}
-        submitLabel={editing ? "규칙 저장" : "규칙 만들기"}
-        title={editing ? "라우팅 규칙 수정" : "라우팅 규칙 추가"}
+        open={createOpen}
+        returnFocusRef={createTrigger}
+        submitLabel="규칙 만들기"
+        title="라우팅 규칙 추가"
       >
         <FormField
           label="모델 패턴"
@@ -260,6 +287,20 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
           {(control) => <Textarea {...control} rows={2} {...form.register("note")} />}
         </FormField>
       </FormDialog>
+
+      {editing ? (
+        <RoutingRuleEditDialog
+          key={`${editAccess.key}:${editing.serial}`}
+          rule={editing.rule}
+          access={editAccess}
+          returnFocusRef={editReturnFocusRef}
+          onClose={() => {
+            if (editActive.current !== editing.serial) return;
+            editActive.current = undefined;
+            setEditSelection({ lifetime: editAccess.lifetime });
+          }}
+        />
+      ) : null}
 
       {toggleSelection.target ? (
         <RoutingToggleDialog

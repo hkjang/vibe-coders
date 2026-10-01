@@ -1,0 +1,50 @@
+.dialog-content:has(> .dialog-body > .routing-rule-edit) > .dialog-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.routing-rule-edit,
+.routing-rule-edit-fields {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.routing-rule-edit-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.routing-rule-edit p,
+.routing-rule-edit dd,
+.routing-rule-edit th,
+.routing-rule-edit td {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.routing-rule-edit input,
+.routing-rule-edit textarea,
+.routing-rule-edit section {
+  min-width: 0;
+  max-width: 100%;
+}
+.routing-rule-edit table {
+  width: 100%;
+  table-layout: fixed;
+}
+.routing-rule-edit td,
+.routing-rule-edit th {
+  text-align: start;
+  vertical-align: top;
+  padding: var(--space-2);
+}
+.routing-rule-edit-identity {
+  margin: 0;
+}
+.routing-rule-edit-identity dd {
+  margin-inline-start: 0;
+}
+.routing-rule-edit [data-review-heading] {
+  scroll-margin-top: var(--space-4);
+}

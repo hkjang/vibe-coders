@@ -428,9 +428,20 @@ test("선택창의 런타임 접두사 마스킹은 표시만 바꾸고 원본 I
   gateway.setPrefixes([prefix]);
   gateway.setRows([original, rule(ruleB)]);
   await login(page);
-  const { dialog } = await open(page, original);
-  // Only the new selected review is in scope. The existing table/raw GET is not
-  // claimed to be projected or secret-free by this display-boundary regression.
+  // Table and review display are masked; the transport and stored values remain unchanged.
+  expect(
+    await page
+      .getByRole("table", { name: "복잡도 기반 라우팅 규칙 목록", exact: true })
+      .evaluate((node, value) => node.outerHTML.includes(value), marker),
+  ).toBe(false);
+  const masked = "민감정보가 포함될 수 있어 표시하지 않습니다.";
+  await page.getByRole("button", { name: `${masked} → ${masked} 규칙 중지`, exact: true }).click();
+  const dialog = dialogFor(page, original.enabled);
+  await expect(dialog).toBeVisible();
+  await expect(detail(dialog, "변경 후 상태")).toHaveText("중지됨");
+  expect(await page.locator("body").evaluate((node, value) => node.outerHTML.includes(value), marker)).toBe(
+    false,
+  );
   expect(await dialog.evaluate((node, value) => node.outerHTML.includes(value), marker)).toBe(false);
   await expect(dialog.getByText("민감정보가 포함될 수 있어 표시하지 않습니다.", { exact: true })).toHaveCount(
     4,
