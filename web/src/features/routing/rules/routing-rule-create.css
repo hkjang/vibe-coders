@@ -1,0 +1,33 @@
+.dialog-content:has(> .dialog-body > .routing-rule-create) > .dialog-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.routing-rule-create,
+.routing-rule-create-fields,
+.routing-rule-create-review {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.routing-rule-create p,
+.routing-rule-create dd,
+.routing-rule-create label {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.routing-rule-create input,
+.routing-rule-create textarea,
+.routing-rule-create section {
+  min-width: 0;
+  max-width: 100%;
+}
+.routing-rule-create-review,
+.routing-rule-create-review dd {
+  margin: 0;
+}
+.routing-rule-create [data-create-heading] {
+  scroll-margin-top: var(--space-4);
+}

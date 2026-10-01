@@ -1,22 +1,13 @@
 import { Plus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useLayoutEffect, useRef, useState } from "react";
-import { z } from "zod";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { routingRulesQueryKey, writeScopeMessage } from "@/features/routing/rules/routing-shared";
 import { QueryFailureNotice, ScopeNotice } from "@/features/routing/rules/routing-ui";
-import { apiClient } from "@/shared/api/client";
-import { type RoutingRule, type RoutingRuleInput } from "@/shared/api/domains/routing";
-import { endpoints } from "@/shared/api/endpoints";
-import { FormDialog } from "@/shared/components/form/FormDialog";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
+import { type RoutingRule } from "@/shared/api/domains/routing";
 import { Button } from "@/shared/components/ui/Button";
-import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Textarea } from "@/shared/components/ui/Textarea";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSearchState, pageFromParam } from "@/shared/hooks/use-search-state";
 import { RoutingToggleDialog } from "./RoutingToggleDialog";
 import { useRoutingToggleAccess } from "./routing-toggle-access";
@@ -31,26 +22,36 @@ import { RoutingRuleEditDialog } from "./RoutingRuleEditDialog";
 import { RoutingRuleDeleteDialog } from "./RoutingRuleDeleteDialog";
 import { useRoutingDeleteAccess } from "./routing-rule-delete-access";
 import { deleteIdentityReason } from "./routing-rule-delete-state";
+import { RoutingRuleCreateDialog } from "./RoutingRuleCreateDialog";
+import { useRoutingCreateAccess } from "./routing-rule-create-access";
 
 const pageSize = 10;
 
-const ruleFormSchema = z.object({
-  match_pattern: z.string().trim().max(200),
-  target_model: z.string().trim().min(1, "대상 모델을 입력하세요."),
-  target_provider: z.string().trim().max(120),
-  min_complexity: z.coerce.number().int().min(0).max(100),
-  max_complexity: z.coerce.number().int().min(0).max(100),
-  priority: z.coerce.number().int().min(1).max(10_000),
-  note: z.string().trim().max(500),
-});
-
-type RuleFormInput = z.input<typeof ruleFormSchema>;
-type RuleFormValues = z.output<typeof ruleFormSchema>;
-
 export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
-  const [createOpen, setCreateOpen] = useState(false);
   const createTrigger = useRef<HTMLButtonElement>(null);
+  const createPanel = useRef<HTMLDivElement>(null);
+  const createAccess = useRoutingCreateAccess(canWrite);
+  const createSerial = useRef(0);
+  const createActive = useRef<number | undefined>(undefined);
+  const [createSelection, setCreateSelection] = useState<{ lifetime: object; serial?: number }>({
+    lifetime: createAccess.lifetime,
+  });
+  if (createSelection.lifetime !== createAccess.lifetime)
+    setCreateSelection({ lifetime: createAccess.lifetime });
+  const creating = createSelection.lifetime === createAccess.lifetime ? createSelection.serial : undefined;
+  useLayoutEffect(() => {
+    createActive.current = undefined;
+  }, [createAccess.lifetime]);
+  const createReturnFocus = useMemo(
+    () => ({
+      get current() {
+        const button = createTrigger.current;
+        return button?.isConnected && !button.disabled ? button : createPanel.current;
+      },
+    }),
+    [],
+  );
   const client = useQueryClient();
   const editAccess = useRoutingEditAccess(canWrite);
   const serial = useRef(0);
@@ -106,23 +107,6 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
   const renderedCount = renderedQuery?.state.dataUpdateCount;
   const renderedData = renderedQuery?.state.data;
 
-  const form = useZodForm<RuleFormInput, RuleFormValues>(ruleFormSchema, {
-    match_pattern: "*",
-    target_model: "",
-    target_provider: "",
-    min_complexity: 0,
-    max_complexity: 100,
-    priority: 100,
-    note: "",
-  });
-
-  const createRule = useMutationFeedback<RoutingRuleInput, unknown>({
-    mutate: (body) => apiClient.request(endpoints.domains.routing.rules.create, { body }),
-    invalidates: [routingRulesQueryKey],
-    successMessage: "라우팅 규칙을 만들었습니다.",
-    errorMessage: "라우팅 규칙을 만들지 못했습니다.",
-  });
-
   const rows = [...(rules.data?.rules ?? [])].sort(
     (left, right) => left.priority - right.priority || left.target_model.localeCompare(right.target_model),
   );
@@ -134,6 +118,7 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
     <div
       className="routing-panel-stack"
       ref={(node) => {
+        createPanel.current = node;
         togglePanelRef.current = node;
         editPanelRef.current = node;
         deletePanelRef.current = node;
@@ -158,9 +143,19 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
             <Button
               ref={createTrigger}
               variant="primary"
-              disabled={!canWrite}
-              title={canWrite ? undefined : writeScopeMessage}
-              onClick={() => setCreateOpen(true)}
+              disabled={!createAccess.write.allowed}
+              title={createAccess.write.reason}
+              onClick={() => {
+                try {
+                  createAccess.assertApproval(createAccess.approval);
+                  if (createActive.current !== undefined) return;
+                  const sequence = ++createSerial.current;
+                  createActive.current = sequence;
+                  setCreateSelection({ lifetime: createAccess.lifetime, serial: sequence });
+                } catch {
+                  /* Retired create trigger. */
+                }
+              }}
             >
               <Plus aria-hidden="true" /> 규칙 추가
             </Button>
@@ -262,72 +257,18 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
         </p>
       </SectionCard>
 
-      <FormDialog
-        description="복잡도 범위와 모델 패턴이 맞는 요청을 지정한 모델로 라우팅합니다."
-        form={form}
-        onOpenChange={(open) => {
-          setCreateOpen(open);
-          if (!open) form.reset();
-        }}
-        onSubmit={async (values) => {
-          if (values.min_complexity > values.max_complexity) {
-            throw new Error("복잡도 범위는 최소값이 최대값보다 클 수 없습니다.");
-          }
-          const body = {
-            match_pattern: values.match_pattern || "*",
-            target_model: values.target_model,
-            target_provider: values.target_provider,
-            min_complexity: values.min_complexity,
-            max_complexity: values.max_complexity,
-            priority: values.priority,
-            note: values.note,
-          };
-          await createRule.mutateAsync({ ...body, enabled: true });
-        }}
-        open={createOpen}
-        returnFocusRef={createTrigger}
-        submitLabel="규칙 만들기"
-        title="라우팅 규칙 추가"
-      >
-        <FormField
-          label="모델 패턴"
-          description="들어온 모델 이름과 비교할 glob 패턴입니다. 비우면 * (전체)."
-          error={form.formState.errors.match_pattern?.message}
-        >
-          {(control) => <Input {...control} {...form.register("match_pattern")} placeholder="gpt-*" />}
-        </FormField>
-        <FormField label="대상 모델" required error={form.formState.errors.target_model?.message}>
-          {(control) => <Input {...control} {...form.register("target_model")} placeholder="gpt-4.1-mini" />}
-        </FormField>
-        <FormField
-          label="대상 공급자"
-          description="비우면 라우팅이 공급자를 자동으로 고릅니다."
-          error={form.formState.errors.target_provider?.message}
-        >
-          {(control) => <Input {...control} {...form.register("target_provider")} />}
-        </FormField>
-        <FormField label="최소 복잡도" required error={form.formState.errors.min_complexity?.message}>
-          {(control) => (
-            <Input {...control} type="number" min={0} max={100} {...form.register("min_complexity")} />
-          )}
-        </FormField>
-        <FormField label="최대 복잡도" required error={form.formState.errors.max_complexity?.message}>
-          {(control) => (
-            <Input {...control} type="number" min={0} max={100} {...form.register("max_complexity")} />
-          )}
-        </FormField>
-        <FormField
-          label="우선순위"
-          description="숫자가 작을수록 먼저 평가합니다."
-          required
-          error={form.formState.errors.priority?.message}
-        >
-          {(control) => <Input {...control} type="number" min={1} {...form.register("priority")} />}
-        </FormField>
-        <FormField label="메모" error={form.formState.errors.note?.message}>
-          {(control) => <Textarea {...control} rows={2} {...form.register("note")} />}
-        </FormField>
-      </FormDialog>
+      {creating !== undefined ? (
+        <RoutingRuleCreateDialog
+          key={`${createAccess.key}:${creating}`}
+          access={createAccess}
+          returnFocusRef={createReturnFocus}
+          onClose={() => {
+            if (createActive.current !== creating) return;
+            createActive.current = undefined;
+            setCreateSelection({ lifetime: createAccess.lifetime });
+          }}
+        />
+      ) : null}
 
       {editing ? (
         <RoutingRuleEditDialog

@@ -31,7 +31,7 @@ func routingEditOpenAPISchemas() map[string]any {
 		"priority": map[string]any{"type": "integer", "format": "int64"}, "match_pattern": map[string]any{"type": "string"},
 		"min_complexity": map[string]any{"type": "integer", "format": "int64"}, "max_complexity": map[string]any{"type": "integer", "format": "int64"},
 		"target_model": map[string]any{"type": "string"}, "target_provider": map[string]any{"type": "string"}, "note": map[string]any{"type": "string"},
-		"created_at": map[string]any{"type": "string", "format": "date-time", "description": "Original creation timestamp, not a modification revision. Invalid legacy stored times decode to the Go zero timestamp."},
+		"created_at": map[string]any{"type": "string", "format": "date-time", "description": "Original creation timestamp on GET/PATCH, not a modification revision. Invalid legacy stored times decode to the Go zero timestamp. POST returns its handler value copy with 0001-01-01T00:00:00Z; the store fills time separately, so a later GET differs."},
 	}
 	return map[string]any{
 		"RoutingRuleView": map[string]any{
