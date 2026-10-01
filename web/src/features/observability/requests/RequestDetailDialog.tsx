@@ -8,6 +8,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
 import { formatRequestDate } from "@/features/observability/requests/request-date";
 import { RequestComparePanel } from "@/features/observability/requests/RequestComparePanel";
+import { RequestSafeFlowPanel } from "./RequestSafeFlowPanel";
 
 interface RequestDetailDialogProps {
   legacyHref?: `/admin${string}`;
@@ -18,6 +19,10 @@ interface RequestDetailDialogProps {
   returnFocusRef: RefObject<HTMLElement | null>;
   timeZone: string;
   traceHandoffEnabled: boolean;
+  flowReady: boolean;
+  flowGeneration: number;
+  flowSelection: number;
+  assertFlowSelection: () => void;
 }
 
 export function RequestDetailDialog({
@@ -29,6 +34,10 @@ export function RequestDetailDialog({
   returnFocusRef,
   timeZone,
   traceHandoffEnabled,
+  flowReady,
+  flowGeneration,
+  flowSelection,
+  assertFlowSelection,
 }: RequestDetailDialogProps): React.JSX.Element {
   let traceSearch: string | undefined;
   if (traceHandoffEnabled && request?.trace_filterable === true && request.trace_id) {
@@ -159,6 +168,17 @@ export function RequestDetailDialog({
             <dd>{request.finish_reason || "없음"}</dd>
           </div>
         </dl>
+      ) : null}
+      {request && open ? (
+        <RequestSafeFlowPanel
+          key={JSON.stringify([request.request_ref, request.created_at, flowGeneration, flowSelection])}
+          request={request}
+          contractV2={traceHandoffEnabled}
+          ready={flowReady}
+          generation={flowGeneration}
+          assertSelected={assertFlowSelection}
+          timeZone={timeZone}
+        />
       ) : null}
       {request?.request_filterable === true && request.request_id ? (
         <RequestComparePanel requestId={request.request_id} />

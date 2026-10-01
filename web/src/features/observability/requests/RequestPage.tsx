@@ -1,6 +1,5 @@
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Filter, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
@@ -11,11 +10,10 @@ import { RequestDetailDialog } from "@/features/observability/requests/RequestDe
 import { formatRequestDate } from "@/features/observability/requests/request-date";
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { FilterSuggestions } from "@/features/observability/requests/FilterSuggestions";
-import { apiClient } from "@/shared/api/client";
-import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
-import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
-import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
+import type { AppRequestsQuery } from "@/shared/api/schemas";
+import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "../traces/trace-safe-flow-access";
+import { requestSelectionIdentity, useRequestSafeFlowSelection } from "./request-safe-flow-selection";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -46,13 +44,6 @@ const defaultLimit = 50;
 const defaultTimeZone = "Asia/Seoul";
 const exactHTTPStatusPattern = /^[1-5][0-9]{2}$/u;
 const standardPageLimits = [25, 50, 100, 200] as const;
-
-interface SelectedRequestDetail {
-  contractVersion: 1 | 2;
-  dataUpdatedAt: number;
-  ordinal: number;
-  request: AppRequestSummary;
-}
 
 function queryFromSearch(search: URLSearchParams): AppRequestsQuery {
   const requestedLimit = Number(search.get("limit"));
@@ -105,6 +96,11 @@ function RequestIPFilter({ initialValue }: { initialValue: string }): React.JSX.
 }
 
 export function RequestPage(): React.JSX.Element {
+  const access = useTraceSafeFlowAccess("observability.requests");
+  return <RequestPageContent key={access.key} access={access} />;
+}
+
+function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.JSX.Element {
   const auth = useAuth();
   const location = useLocation();
   const runtimeFeature = featureByPath(location.pathname, auth.features) ?? featureByPath(location.pathname);
@@ -123,25 +119,8 @@ export function RequestPage(): React.JSX.Element {
   const customLimit = standardPageLimits.includes(selectedLimit as (typeof standardPageLimits)[number])
     ? undefined
     : selectedLimit;
-  const [selected, setSelected] = useState<SelectedRequestDetail>();
-  const result = useQuery({
-    queryKey: ["admin", "requests", query],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.requests, {
-        headers: appRequestsContractHeaders,
-        query,
-        signal,
-        routeId: "observability.requests",
-      }),
-    placeholderData: keepPreviousData,
-    staleTime: 10_000,
-    refetchInterval: (requestQuery) =>
-      (selected !== undefined && selected.dataUpdatedAt === requestQuery.state.dataUpdatedAt) ||
-      (requestQuery.state.status === "error" && requestQuery.state.data === undefined)
-        ? false
-        : interval,
-    refetchIntervalInBackground: false,
-  });
+  const selection = useRequestSafeFlowSelection(query, access, interval);
+  const { result, selected: activeSelected } = selection;
   const [filterRevision, setFilterRevision] = useState(0);
   // Filter autocomplete is fetched when its own field is first focused, so opening the
   // screen — or touching one filter — costs no request for the others.
@@ -149,8 +128,18 @@ export function RequestPage(): React.JSX.Element {
   const enableSuggest = (field: string) => (): void =>
     setSuggestFields((current) => (current[field] ? current : { ...current, [field]: true }));
   const [filterError, setFilterError] = useState<string>();
-  const returnFocusRef = useRef<HTMLElement | null>(null);
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const lastTarget = useRef<string | undefined>(undefined);
+  const returnFocusRef = useMemo(
+    () => ({
+      get current() {
+        const trigger = lastTarget.current ? rowRefs.current.get(lastTarget.current) : undefined;
+        return trigger?.isConnected && !trigger.disabled ? trigger : resultsHeadingRef.current;
+      },
+    }),
+    [],
+  );
   const errorHeadingRef = useRef<HTMLHeadingElement>(null);
   const pendingPageFocusRef = useRef(false);
   const pageErrorFocusedRef = useRef(false);
@@ -250,16 +239,8 @@ export function RequestPage(): React.JSX.Element {
     setSearchParams(next, { replace: false });
   };
 
-  const openRequest = (request: AppRequestSummary, ordinal: number, trigger: HTMLElement): void => {
-    returnFocusRef.current = trigger;
-    setSelected({
-      contractVersion: result.data?.request_contract_version ?? 1,
-      dataUpdatedAt: result.dataUpdatedAt,
-      ordinal,
-      request,
-    });
-  };
-
+  if (!access.readable)
+    return <ErrorState message="현재 화면의 요청 조회 권한을 확인할 수 없습니다." showLegacy={false} />;
   if (result.error && !result.data) {
     return (
       <ErrorState
@@ -287,12 +268,7 @@ export function RequestPage(): React.JSX.Element {
   }
   if (result.isPending && !result.data) return <LoadingState label="최근 요청을 불러오는 중입니다." />;
 
-  const data = result.data;
-  const activeSelected =
-    selected?.contractVersion === data?.request_contract_version &&
-    selected.dataUpdatedAt === result.dataUpdatedAt
-      ? selected
-      : undefined;
+  const data = result.data?.response;
   return (
     <section className="page-stack request-page">
       <header className="page-header">
@@ -509,7 +485,7 @@ export function RequestPage(): React.JSX.Element {
             <tbody>
               {data?.requests.length ? (
                 data.requests.map((request, index) => (
-                  <tr key={request.request_ref}>
+                  <tr key={requestSelectionIdentity(request)}>
                     <td>
                       <time
                         data-testid={`request-created-at-${request.request_id}`}
@@ -538,8 +514,17 @@ export function RequestPage(): React.JSX.Element {
                       <Button
                         size="small"
                         variant="ghost"
+                        ref={(node) => {
+                          const identity = requestSelectionIdentity(request);
+                          if (node) rowRefs.current.set(identity, node);
+                          else rowRefs.current.delete(identity);
+                        }}
+                        aria-disabled={!selection.ready}
                         aria-label={`${index + 1}번째 요청 ${request.request_id} 상세 보기`}
-                        onClick={(event) => openRequest(request, index + 1, event.currentTarget)}
+                        onClick={() => {
+                          if (selection.open(request, index + 1))
+                            lastTarget.current = requestSelectionIdentity(request);
+                        }}
                       >
                         상세
                       </Button>
@@ -596,8 +581,12 @@ export function RequestPage(): React.JSX.Element {
         request={activeSelected?.request}
         requestOrdinal={activeSelected?.ordinal}
         traceHandoffEnabled={data?.request_contract_version === 2}
+        flowReady={selection.ready}
+        flowGeneration={activeSelected?.generation ?? 0}
+        flowSelection={activeSelected?.serial ?? 0}
+        assertFlowSelection={selection.assertSelected}
         onOpenChange={(open) => {
-          if (!open) setSelected(undefined);
+          if (!open) selection.close();
         }}
         returnFocusRef={returnFocusRef}
         legacyHref={showLegacyAdmin ? legacyPath : undefined}

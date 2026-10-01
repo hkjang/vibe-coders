@@ -2,7 +2,7 @@
 
 AI 코딩 프록시 게이트웨이의 빌드·태깅·GitHub 릴리즈·오프라인 배포 패키지 산출 절차를 한 문서에 정리했습니다.
 
-현재 명령 예시는 `v0.86.33` 후보와 직전 릴리즈 `v0.86.32`를 기준으로 합니다. 아래 명령의
+현재 명령 예시는 `v0.86.34` 후보와 직전 릴리즈 `v0.86.33`을 기준으로 합니다. 아래 명령의
 버전 갱신은 게시 완료를 뜻하지 않으며 최종 소스·버전·자산의 검증 후에만 릴리즈합니다.
 
 ---
@@ -39,7 +39,25 @@ AI 코딩 프록시 게이트웨이의 빌드·태깅·GitHub 릴리즈·오프�
 - [ ] Docker `proxy-gateway-data` volume과 0600 `gateway.env` 백업 및 `.sha256` 검증 완료
 - [ ] GitHub 원격 저장소 접근 권한 확인 (`gh auth status`)
 
-### v0.86.33 후보의 별도 확인 범위
+### v0.86.34 후보의 별도 확인 범위
+
+이번 변경은 **요청 탐색기의 상세창에서 명시적으로 처리 단계 조회**만 확장한다. 기존 안전 GET과
+엄격한 응답·표·타임라인을 재사용하며 서버·OpenAPI·업무 로직·비교 계약·공통 인증은 유지한다.
+
+- [x] v2 원래 참조/나노초 시각, 클릭 전 GET 0, v1·부적합한 시각에서 임의 보정/원문 우회 0 확인
+- [x] 요청/추적 기대 소유자와 실제 기능 승인 일치, 세 인증 모드·읽기 전용·현재 범위/팀/세션 확인
+- [x] 목록 질의·성공 응답 세대로 선택 폐기. 동일 시각/응답·필터/권한/팀 왕복에서 옛 선택 부활 0
+- [x] 부모 갱신 중 DOM/초점 유지와 새 조회 잠금, 실패/LKG 비승인, 성공 뒤 닫힘과 현재 행/제목 초점
+- [x] 기존 요청·추적·비교 회귀, 명시 재조회·늦은 응답·390px 다크·키보드·axe 확인
+- [x] 새 성공 DTO의 무원문 범위와 기존 비교/오류 캐시를 구분. API fixture 브라우저와 실제 Go 검사를 구분
+- [x] 최종 후보 소스·버전·SBOM·내장 에셋, 전체 로컬 회귀·실제 격리 인증·사전 컨테이너 확인
+- [ ] 정확한 main CI·태그·최종 릴리즈 이미지·공개 7개 자산 재다운로드 확인
+
+현재 단위 2,786개/200파일·독립 관련 180개·전용 브라우저 18개와 실제 격리 인증 11개·로컬
+공급자·보고서 보호를 통과했다. 전체 브라우저 739개/31파일(재시도 0), Go normal/race·기존
+관리자·사전 컨테이너도 통과했다. 이전 v0.86.33 출고나 부분 통과를 원격 검증으로 재사용하지 않는다.
+
+### v0.86.33 출고 당시 확인 범위 (기록 보존)
 
 이번 변경은 추적 탐색기의 **선택 요청 메타데이터·직접 하위 단계 조회**만 대상으로 한다.
 기존 `/admin`·인증·업무 API·인덱스와 Preview 상태를 유지한다.
@@ -56,13 +74,17 @@ AI 코딩 프록시 게이트웨이의 빌드·태깅·GitHub 릴리즈·오프�
   조회 원문을 URL/영속 저장소에 추가하지 않음. 기록 시각·음수 상대 위치·미기록 지연을 구분
 - [x] 딥 링크·390px 다크·실제 키보드 가로 읽기·부모 갱신 중 초점 유지·axe 검증.
   합성 API 브라우저를 실제 UI→Go 동일 실행이나 운영 Preview 검증으로 합산하지 않음
-- [ ] 최종 v0.86.33 소스·생성 계약·버전·SBOM·내장 애셋 일치와 전체 회귀·실제 인증·컨테이너·
+- [x] 최종 v0.86.33 소스·생성 계약·버전·SBOM·내장 애셋 일치와 전체 회귀·실제 인증·컨테이너·
   원격 CI·태그·7개 배포 파일 확인. 후보 검증만으로 출시·Stable·Phase 완료를 선언하지 않음
 
 로컬 최종 소스는 Vitest 2,745개/199파일·브라우저 721개(재시도 0), 전체 Go normal/race,
 실제 인증 11개·로컬 공급자·비밀 없는 실패 보고서 검사를 통과했다. 최초 실패와 수정 근거는
 분리해 보존했다. 최신 구성요소 검사와 SBOM 일치가 최종 이미지·원격 CI 검사를 대신하지 않으며,
 Go 비도달 모듈 취약점 4건과 라이선스 `NOASSERTION` 47개도 그대로 추적한다.
+
+최종 메인 `4668c416`의 CI 10개·문서 배포 3개와 인증 안전 요약 11개를 확인한 뒤
+2026-10-01에 v0.86.33을 게시했다. 태그 소스와 공개된 7개 파일의 체크섬·SBOM·라이선스·
+운영 도구를 재다운로드 검증했다. 이 근거는 v0.86.34의 새 구현·CI 검증이 아니다.
 
 ### v0.86.32 통합 당시 확인 범위 (기록 보존)
 
@@ -151,7 +173,7 @@ frontend를 frozen lockfile로 빌드하고 산출물을 overlay해야 합니다
 ```bash
 corepack enable
 pnpm --dir web install --frozen-lockfile
-VITE_UI_VERSION=v0.86.33 pnpm --dir web build
+VITE_UI_VERSION=v0.86.34 pnpm --dir web build
 find internal/appui/dist -mindepth 1 ! -name '.gitkeep' -delete
 cp -R web/dist/. internal/appui/dist/
 test -s internal/appui/dist/index.html
@@ -174,7 +196,7 @@ $env:UPSTREAM_API_KEY = "sk-..."
 $env:GATEWAY_SECRET   = "dev-only-secret"
 $env:ADMIN_TOKEN      = "dev-admin"
 $env:UI_APP_ENABLED   = "true"
-go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=v0.86.33" ./cmd/gateway
+go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=v0.86.34" ./cmd/gateway
 ```
 
 ### Linux / macOS
@@ -184,7 +206,7 @@ UPSTREAM_API_KEY=sk-... \
 GATEWAY_SECRET=dev-only-secret \
 ADMIN_TOKEN=dev-admin \
 UI_APP_ENABLED=true \
-go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=v0.86.33" ./cmd/gateway
+go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=v0.86.34" ./cmd/gateway
 ```
 
 기동 후 헬스체크:
@@ -251,7 +273,7 @@ git push -u origin master
 ### 4.4 릴리즈 태그 생성 & 푸시
 
 ```powershell
-$VERSION = "v0.86.33"
+$VERSION = "v0.86.34"
 git tag -a $VERSION -m "Release $VERSION"
 git push origin $VERSION
 ```
@@ -272,13 +294,13 @@ cross-platform 이미지는 릴리스 스크립트가 패키징하지 않습니�
 ### Windows / PowerShell
 
 ```powershell
-pwsh -File scripts/release.ps1 -Version v0.86.33
+pwsh -File scripts/release.ps1 -Version v0.86.34
 ```
 
 ### Linux / macOS
 
 ```bash
-./scripts/release.sh -v v0.86.33 -p linux/amd64
+./scripts/release.sh -v v0.86.34 -p linux/amd64
 ```
 
 ### 스크립트 처리 단계
@@ -308,26 +330,26 @@ container smoke는 이미지의 OCI `org.opencontainers.image.version`과
 
 ```
 release/
-  ai-coding-proxy-gateway-v0.86.33.tar.gz        ← Docker 이미지 패키지
-  ai-coding-proxy-gateway-v0.86.33.tar.gz.sha256 ← SHA256 체크섬
-  README-offline-v0.86.33.md                      ← 오프라인 배포 가이드
-  SBOM-v0.86.33.spdx.json                         ← Go+npm 통합 SPDX SBOM
-  THIRD_PARTY_LICENSES-v0.86.33.md                ← Go·Frontend 라이선스 목록
-  init-deployment-env-v0.86.33.sh                 ← 운영 env 원자 생성·검증
-  backup-volume-v0.86.33.sh                       ← named volume·env 백업·복구
+  ai-coding-proxy-gateway-v0.86.34.tar.gz        ← Docker 이미지 패키지
+  ai-coding-proxy-gateway-v0.86.34.tar.gz.sha256 ← SHA256 체크섬
+  README-offline-v0.86.34.md                      ← 오프라인 배포 가이드
+  SBOM-v0.86.34.spdx.json                         ← Go+npm 통합 SPDX SBOM
+  THIRD_PARTY_LICENSES-v0.86.34.md                ← Go·Frontend 라이선스 목록
+  init-deployment-env-v0.86.34.sh                 ← 운영 env 원자 생성·검증
+  backup-volume-v0.86.34.sh                       ← named volume·env 백업·복구
 ```
 
 ### 파라미터 옵션
 
 ```powershell
 # 버전 지정
-pwsh -File scripts/release.ps1 -Version v0.86.33
+pwsh -File scripts/release.ps1 -Version v0.86.34
 
 # 이미지 이름 변경
-pwsh -File scripts/release.ps1 -Version v0.86.33 -Image my-gateway
+pwsh -File scripts/release.ps1 -Version v0.86.34 -Image my-gateway
 
 # ARM64 빌드 (애플 실리콘 / ARM 서버)
-pwsh -File scripts/release.ps1 -Version v0.86.33 -Platform linux/arm64
+pwsh -File scripts/release.ps1 -Version v0.86.34 -Platform linux/arm64
 ```
 
 ---
@@ -346,7 +368,7 @@ gh auth status
 
 ```powershell
 # 스크립트를 사용하여 릴리즈 업로드
-pwsh -File scripts/gh_release.ps1 -Version v0.86.33 -PrevVersion v0.86.32
+pwsh -File scripts/gh_release.ps1 -Version v0.86.34 -PrevVersion v0.86.33
 ```
 
 raw `gh release create`로 직접 게시하지 않습니다. 위 스크립트는 clean tree, annotated tag,
@@ -357,7 +379,7 @@ SBOM·라이선스·운영 helper를 게시 전에 검증합니다. 직접 명�
 ### 6.3 릴리즈 확인
 
 ```powershell
-gh release view v0.86.33 --repo hkjang/vibe-coders
+gh release view v0.86.34 --repo hkjang/vibe-coders
 ```
 
 또는 브라우저에서 직접 확인:
@@ -375,44 +397,44 @@ https://github.com/hkjang/vibe-coders/releases
 `release/` 폴더 전체를 USB 또는 망연계 시스템으로 폐쇄망 서버에 복사합니다.
 
 ```
-ai-coding-proxy-gateway-v0.86.33.tar.gz
-ai-coding-proxy-gateway-v0.86.33.tar.gz.sha256
-README-offline-v0.86.33.md
-SBOM-v0.86.33.spdx.json
-THIRD_PARTY_LICENSES-v0.86.33.md
-init-deployment-env-v0.86.33.sh
-backup-volume-v0.86.33.sh
+ai-coding-proxy-gateway-v0.86.34.tar.gz
+ai-coding-proxy-gateway-v0.86.34.tar.gz.sha256
+README-offline-v0.86.34.md
+SBOM-v0.86.34.spdx.json
+THIRD_PARTY_LICENSES-v0.86.34.md
+init-deployment-env-v0.86.34.sh
+backup-volume-v0.86.34.sh
 ```
 
 ### 7.2 무결성 확인
 
 ```bash
-sha256sum -c ai-coding-proxy-gateway-v0.86.33.tar.gz.sha256
-# 정상: ai-coding-proxy-gateway-v0.86.33.tar.gz: OK
+sha256sum -c ai-coding-proxy-gateway-v0.86.34.tar.gz.sha256
+# 정상: ai-coding-proxy-gateway-v0.86.34.tar.gz: OK
 ```
 
 ### 7.3 이미지 적재
 
 ```bash
-gunzip -c ai-coding-proxy-gateway-v0.86.33.tar.gz | docker load
-# 정상: Loaded image: ai-coding-proxy-gateway:v0.86.33
+gunzip -c ai-coding-proxy-gateway-v0.86.34.tar.gz | docker load
+# 정상: Loaded image: ai-coding-proxy-gateway:v0.86.34
 ```
 
 ### 7.4 단일 컨테이너 실행
 
 ```bash
-chmod 0700 init-deployment-env-v0.86.33.sh backup-volume-v0.86.33.sh
-sudo env GATEWAY_VERSION=v0.86.33 \
-  ./init-deployment-env-v0.86.33.sh /opt/proxy-gateway/gateway.env
+chmod 0700 init-deployment-env-v0.86.34.sh backup-volume-v0.86.34.sh
+sudo env GATEWAY_VERSION=v0.86.34 \
+  ./init-deployment-env-v0.86.34.sh /opt/proxy-gateway/gateway.env
 docker volume create proxy-gateway-data >/dev/null
 # 기존 볼륨·바인드 마운트를 재사용할 때 소유권을 nonroot(65532)로 복구합니다. 새 볼륨은 변경 없이 끝납니다.
 docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
-  ai-coding-proxy-gateway:v0.86.33 repair-data-dir
+  ai-coding-proxy-gateway:v0.86.34 repair-data-dir
 docker run -d --name proxy-gateway --restart=always \
   -p 8080:8080 \
   --mount source=proxy-gateway-data,target=/data \
   --env-file /opt/proxy-gateway/gateway.env \
-  ai-coding-proxy-gateway:v0.86.33
+  ai-coding-proxy-gateway:v0.86.34
 ```
 
 초기화 helper가 upstream key를 숨김 입력받습니다. `ADMIN_TOKEN`과 `GATEWAY_SECRET`은
@@ -422,8 +444,8 @@ docker run -d --name proxy-gateway --restart=always \
 ### 7.5 docker compose 실행
 
 ```bash
-sudo env GATEWAY_VERSION=v0.86.33 \
-  ./init-deployment-env-v0.86.33.sh /opt/proxy-gateway/gateway.env
+sudo env GATEWAY_VERSION=v0.86.34 \
+  ./init-deployment-env-v0.86.34.sh /opt/proxy-gateway/gateway.env
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 docker compose --env-file /opt/proxy-gateway/gateway.env logs -f gateway
 ```
@@ -465,7 +487,7 @@ Next Console Preview:  http://<HOST>:8080/app/
 패키징을 수행한 호스트에서는 전체 이미지 계약을 한 번에 재검증할 수 있습니다.
 
 ```bash
-bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.86.33 v0.86.33
+bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.86.34 v0.86.34
 ```
 
 이 검증은 `/admin` 안정 화면, `/app` 308, deep link, 존재하지 않는 asset 404,
@@ -529,7 +551,7 @@ carrier로 만들어 `docker cp`만 사용합니다.
 docker compose --env-file /opt/proxy-gateway/gateway.env down
 
 scripts/backup-volume.sh restore \
-  --image ai-coding-proxy-gateway:v0.86.33 \
+  --image ai-coding-proxy-gateway:v0.86.34 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups \

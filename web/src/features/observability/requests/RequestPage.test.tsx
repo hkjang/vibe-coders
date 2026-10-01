@@ -10,6 +10,7 @@ import { apiClient } from "@/shared/api/client";
 import { AppError } from "@/shared/api/error";
 import type { AppRequestsResponse } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({
   credentialPrefixes: ["corp_"],
@@ -102,7 +103,11 @@ function renderPage(initialEntry = "/observability/requests") {
             path="/observability/requests"
             element={
               <>
-                <RequestPage />
+                <FeatureAccessContext.Provider
+                  value={{ featureId: "observability.requests", permitted: true, readOnly: true }}
+                >
+                  <RequestPage />
+                </FeatureAccessContext.Provider>
                 <LocationProbe />
               </>
             }
@@ -648,7 +653,9 @@ describe("RequestPage", () => {
     page.unmount();
 
     authRuntime.legacyFallback = true;
-    authRuntime.scopes = ["requests:read"];
+    // A server-error control needs actual list read permission; fallback is denied separately.
+    authRuntime.featureFallback = false;
+    authRuntime.scopes = ["admin:read"];
     request.mockRejectedValueOnce(
       new AppError("목록 실패", { kind: "http", requestId: "gateway-request-no-legacy" }),
     );

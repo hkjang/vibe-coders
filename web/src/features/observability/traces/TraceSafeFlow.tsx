@@ -2,7 +2,11 @@ import { useId } from "react";
 import { isAppError } from "@/shared/api/error";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "./trace-safe-flow-access";
+import {
+  useTraceSafeFlowAccess,
+  type TraceSafeFlowAccess,
+  type TraceSafeFlowOwner,
+} from "./trace-safe-flow-access";
 import { useTraceSafeFlowQuery, type TraceFlowSelection } from "./trace-safe-flow-query";
 import { TraceSafeFlowResult } from "./TraceSafeFlowResult";
 import { flowDisplay } from "./trace-safe-flow-display";
@@ -63,8 +67,10 @@ function FlowBody({
   );
 }
 
-export function TraceSafeFlow(selection: TraceFlowSelection & { timeZone: string }) {
-  const access = useTraceSafeFlowAccess();
+export function TraceSafeFlow(
+  selection: TraceFlowSelection & { timeZone: string; expectedOwner?: TraceSafeFlowOwner },
+) {
+  const access = useTraceSafeFlowAccess(selection.expectedOwner);
   const titleId = useId();
   return (
     <section className="trace-safe-flow" aria-labelledby={titleId}>

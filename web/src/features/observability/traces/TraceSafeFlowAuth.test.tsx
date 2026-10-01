@@ -1,10 +1,37 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { deferred, flow, renderTrace, runtime } from "./trace-safe-flow-test-harness";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
+import { useTraceSafeFlowAccess } from "./trace-safe-flow-access";
 
 const table = () => screen.findByRole("table", { name: "기록된 요청 단계와 시간" });
 
 describe("Trace의 확인된 bootstrap 인증 모드", () => {
+  it.each([
+    ["observability.traces", "observability.traces", true],
+    ["observability.requests", "observability.requests", true],
+    ["observability.traces", "observability.requests", false],
+    ["observability.requests", "observability.traces", false],
+  ] as const)("기능 소유자 %s는 호출자가 요구한 %s와 정확히 일치해야 한다", (owner, expected, allowed) => {
+    Object.assign(runtime, {
+      mode: "authenticated",
+      userPresent: true,
+      id: "reader-a",
+      role: "admin",
+      scopes: ["admin:read"],
+    });
+    const view = renderHook(() => useTraceSafeFlowAccess(expected), {
+      wrapper: ({ children }) => (
+        <FeatureAccessContext.Provider value={{ featureId: owner, permitted: true, readOnly: true }}>
+          {children}
+        </FeatureAccessContext.Provider>
+      ),
+    });
+    expect(view.result.current.readable).toBe(allowed);
+    expect(view.result.current.routeId).toBe(expected);
+    if (allowed) expect(() => view.result.current.assertRead()).not.toThrow();
+    else expect(() => view.result.current.assertRead()).toThrow();
+  });
   // appUIBootstrapIdentity returns a real user/scopes for these modes. The mode
   // alone is not evidence of permission, and this transport mock enforces none.
   it.each(["legacy", "open"] as const)("%s의 확인된 읽기 사용자는 목록과 단계를 조회한다", async (mode) => {
