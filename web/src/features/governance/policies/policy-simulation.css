@@ -1,0 +1,19 @@
+.policy-simulation-card .section-card-header {
+  flex-wrap: wrap;
+}
+.policy-simulation-card .inline-notice,
+.policy-simulation-result {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.policy-simulation-result code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.policy-simulation-result .kv-list dd {
+  min-width: 0;
+}
+.policy-simulation-notes {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
