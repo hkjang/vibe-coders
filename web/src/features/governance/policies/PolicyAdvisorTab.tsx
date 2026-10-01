@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { FlaskConical, Wand2 } from "lucide-react";
 import { useRef, useState } from "react";
 
 import {
@@ -7,37 +6,33 @@ import {
   PanelFailure,
   type GovernanceColumn,
 } from "@/features/governance/policies/governance-parts";
-import { compactJson, severityLabel, severityTone } from "@/features/governance/policies/governance-utils";
 import { apiClient } from "@/shared/api/client";
-import type { Policy, PolicySimulation, PolicySuggestion } from "@/shared/api/domains/governance";
+import type { Policy, PolicySuggestion } from "@/shared/api/domains/governance";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
-import { EmptyState } from "@/shared/components/ui/EmptyState";
-import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
-import { Sheet } from "@/shared/components/ui/Sheet";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSearchState } from "@/shared/hooks/use-search-state";
-import { formatKRW, formatNumber, formatPercent } from "@/shared/utils/format";
+import { formatNumber } from "@/shared/utils/format";
+import { PolicySimulationSection } from "./PolicySimulationSection";
+import { simulationWindows, type SimulationWindow } from "./policy-simulation-state";
 
 const routeId = "governance.policies";
-const advisorWindows = ["24h", "7d", "30d"] as const;
 const canaryDayOptions = [7, 14, 30] as const;
 
 export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [params, updateSearch] = useSearchState();
-  const [simulation, setSimulation] = useState<
-    { suggestion: PolicySuggestion; result: PolicySimulation } | undefined
-  >();
   const [pendingApply, setPendingApply] = useState<PolicySuggestion | undefined>();
   const [pendingBump, setPendingBump] = useState<{ policyId: string; next: number } | undefined>();
   const rowTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const requestedWindow = params.get("advisor_window") ?? "";
-  const window = (advisorWindows as readonly string[]).includes(requestedWindow) ? requestedWindow : "7d";
+  const window = Object.hasOwn(simulationWindows, requestedWindow)
+    ? (requestedWindow as SimulationWindow)
+    : "7d";
   const requestedDays = Number(params.get("canary_days"));
   const canaryDays = (canaryDayOptions as readonly number[]).includes(requestedDays) ? requestedDays : 7;
 
@@ -63,25 +58,6 @@ export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX
     queryKey: ["governance", "policies"],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.governance.policies.list, { signal, routeId }),
-  });
-
-  const simulate = useMutationFeedback({
-    mutate: (suggestion: PolicySuggestion) =>
-      apiClient.request(endpoints.domains.governance.policies.simulate, {
-        body: {
-          rules: [
-            {
-              name: suggestion.title ?? suggestion.id,
-              conditions: suggestion.conditions ?? {},
-              actions: suggestion.actions ?? {},
-            },
-          ],
-          window,
-        },
-        routeId,
-      }),
-    errorMessage: "섀도우 영향을 계산하지 못했습니다.",
-    onSuccess: (result, suggestion) => setSimulation({ suggestion, result }),
   });
 
   const applyDraft = useMutationFeedback({
@@ -131,67 +107,6 @@ export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX
   const suggestionRows = suggestions.data?.suggestions ?? [];
   const canaryRows = canary.data?.policies ?? [];
 
-  const suggestionColumns: ReadonlyArray<GovernanceColumn<PolicySuggestion>> = [
-    {
-      id: "severity",
-      header: "심각도",
-      cell: (row) => <Badge tone={severityTone(row.severity)}>{severityLabel(row.severity)}</Badge>,
-    },
-    {
-      id: "title",
-      header: "추천",
-      cell: (row) => (
-        <span>
-          <strong>{row.title || row.id}</strong>
-          <br />
-          {row.rationale}
-        </span>
-      ),
-    },
-    {
-      id: "rule",
-      header: "규칙",
-      cell: (row) => (
-        <span className="mono">
-          if {compactJson(row.conditions)} → {compactJson(row.actions)}
-        </span>
-      ),
-    },
-    {
-      id: "actions",
-      header: "동작",
-      cell: (row) => (
-        <span className="governance-actions">
-          <Button
-            size="small"
-            disabled={!canWrite || simulate.isPending}
-            title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-            aria-label={`${row.title ?? row.id} 섀도우 영향 확인`}
-            onClick={(event) => {
-              rowTriggerRef.current = event.currentTarget;
-              simulate.mutate(row);
-            }}
-          >
-            <FlaskConical aria-hidden="true" /> 섀도우 영향
-          </Button>
-          <Button
-            size="small"
-            variant="primary"
-            disabled={!canWrite}
-            title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-            aria-label={`${row.title ?? row.id} draft 정책 생성`}
-            onClick={(event) => {
-              rowTriggerRef.current = event.currentTarget;
-              setPendingApply(row);
-            }}
-          >
-            <Wand2 aria-hidden="true" /> draft 생성
-          </Button>
-        </span>
-      ),
-    },
-  ];
-
   const canaryColumns: ReadonlyArray<GovernanceColumn<(typeof canaryRows)[number]>> = [
     { id: "name", header: "정책", cell: (row) => row.name || row.policy_id },
     {
@@ -236,50 +151,21 @@ export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX
 
   return (
     <div className="page-stack">
-      <SectionCard
-        title="정책 어드바이저"
-        description="최근 신호를 근거로 추천한 정책 규칙입니다. 적용하면 비활성 draft 정책으로 생성됩니다."
-        actions={
-          <label className="toolbar">
-            <span>분석 기간</span>
-            <Select
-              aria-label="정책 어드바이저 분석 기간"
-              value={window}
-              onChange={(event) => updateSearch({ advisor_window: event.target.value })}
-            >
-              {advisorWindows.map((value) => (
-                <option key={value} value={value}>
-                  최근 {value}
-                </option>
-              ))}
-            </Select>
-          </label>
-        }
-      >
-        {suggestions.isError ? (
-          <PanelFailure
-            error={suggestions.error}
-            hasData={Boolean(suggestions.data)}
-            label="정책 추천"
-            onRetry={() => void suggestions.refetch()}
-          />
-        ) : null}
-        {!suggestions.isPending && !suggestions.isError && suggestionRows.length === 0 ? (
-          <EmptyState
-            title="지금 추천할 정책이 없습니다."
-            description="비용 급증, 비밀정보 탐지, MCP 도구 오류가 감지되면 근거와 함께 정책을 추천합니다."
-          />
-        ) : (
-          <GovernanceTable
-            caption="정책 추천 목록"
-            columns={suggestionColumns}
-            rows={suggestionRows}
-            loading={suggestions.isPending}
-            error={suggestions.isError && !suggestions.data ? "추천을 불러오지 못했습니다." : undefined}
-            onRetry={() => void suggestions.refetch()}
-          />
-        )}
-      </SectionCard>
+      <PolicySimulationSection
+        canWrite={canWrite}
+        window={window}
+        rows={suggestionRows}
+        pending={suggestions.isPending}
+        failed={suggestions.isError}
+        error={suggestions.error}
+        hasData={Boolean(suggestions.data)}
+        refresh={() => void suggestions.refetch()}
+        changeWindow={(next) => updateSearch({ advisor_window: next })}
+        applyDraft={(row, trigger) => {
+          rowTriggerRef.current = trigger;
+          setPendingApply(row);
+        }}
+      />
 
       <SectionCard
         title="Canary 롤아웃 현황"
@@ -317,46 +203,6 @@ export function PolicyAdvisorTab({ canWrite }: { canWrite: boolean }): React.JSX
           emptyMessage="단계 적용 중인 정책이 없습니다."
         />
       </SectionCard>
-
-      <Sheet
-        open={simulation !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setSimulation(undefined);
-        }}
-        returnFocusRef={rowTriggerRef}
-        title="섀도우 영향 분석"
-        description="과거 요청에 이 규칙을 재생해 차단 규모와 오탐 후보를 추정합니다."
-        size="wide"
-      >
-        {simulation ? (
-          <KeyValueList
-            items={[
-              { label: "추천", value: simulation.suggestion.title ?? simulation.suggestion.id },
-              { label: "평가한 요청", value: formatNumber(simulation.result.evaluated) },
-              { label: "차단 예상", value: formatNumber(simulation.result.blocked) },
-              { label: "승인 요구 예상", value: formatNumber(simulation.result.require_approval) },
-              { label: "차단률", value: formatPercent(simulation.result.block_rate) },
-              {
-                label: "영향 API 키",
-                value: formatNumber(simulation.result.shadow?.affected_keys),
-              },
-              { label: "영향 팀", value: formatNumber(simulation.result.shadow?.affected_teams) },
-              {
-                label: "오탐 후보",
-                value: formatNumber(simulation.result.shadow?.false_positive_candidates),
-              },
-              {
-                label: "오탐률",
-                value: formatPercent(simulation.result.shadow?.false_positive_rate),
-              },
-              {
-                label: "차단될 요청의 과거 비용",
-                value: formatKRW(simulation.result.shadow?.blocked_cost_krw),
-              },
-            ]}
-          />
-        ) : null}
-      </Sheet>
 
       <ConfirmDialog
         open={pendingApply !== undefined}
