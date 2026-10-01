@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionPage } from "@/features/observability/sessions/SessionPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
 
@@ -95,7 +96,14 @@ const flightRecorderResponse = {
 };
 
 function renderPage(route = "/observability/sessions"): ReturnType<typeof renderScreen> {
-  return renderScreen(<SessionPage />, { path: "/observability/sessions", route });
+  return renderScreen(
+    <FeatureAccessContext.Provider
+      value={{ featureId: "observability.sessions", permitted: true, readOnly: false }}
+    >
+      <SessionPage />
+    </FeatureAccessContext.Provider>,
+    { path: "/observability/sessions", route },
+  );
 }
 
 describe("SessionPage", () => {
