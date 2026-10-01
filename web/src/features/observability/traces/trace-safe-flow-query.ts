@@ -12,21 +12,23 @@ import type { TraceSafeFlowAccess } from "./trace-safe-flow-access";
 export interface TraceFlowSelection extends TraceSafeFlowQuery {
   ready: boolean;
   revision: number;
+  /** Request Explorer additionally fences the actual parent QueryCache at admission/settlement. */
+  assertParent?: () => void;
 }
 
 export function useTraceSafeFlowQuery(selection: TraceFlowSelection, access: TraceSafeFlowAccess) {
   const client = useQueryClient();
   const { assertRead } = access;
   const lifetime = useId();
-  const { request_ref, created_at, ready, revision } = selection;
+  const { request_ref, created_at, ready, revision, assertParent } = selection;
   const key = useMemo(
     () => ["admin", "app-request-flow", access.key, request_ref, created_at, lifetime],
     [access.key, request_ref, created_at, lifetime],
   );
-  const latest = useRef({ ready, revision });
+  const latest = useRef({ ready, revision, assertParent });
   const active = useRef(false);
   useLayoutEffect(() => {
-    latest.current = { ready, revision };
+    latest.current = { ready, revision, assertParent };
   });
   useLayoutEffect(() => {
     active.current = true;
@@ -37,6 +39,7 @@ export function useTraceSafeFlowQuery(selection: TraceFlowSelection, access: Tra
   const assertCurrent = useCallback(
     (expected: number) => {
       assertRead();
+      latest.current.assertParent?.();
       if (!active.current || !latest.current.ready || latest.current.revision !== expected)
         throw new AppError("현재 목록에서 요청을 다시 확인하세요.", { kind: "aborted" });
     },
@@ -54,7 +57,7 @@ export function useTraceSafeFlowQuery(selection: TraceFlowSelection, access: Tra
       const response = await apiClient.request(endpoints.domains.observability.requestFlow, {
         query: target,
         signal,
-        routeId: "observability.traces",
+        routeId: access.routeId,
       });
       assertCurrent(expected);
       if (signal.aborted) throw new AppError("단계 조회가 취소되었습니다.", { kind: "aborted" });

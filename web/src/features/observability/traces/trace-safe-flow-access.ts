@@ -4,7 +4,9 @@ import { AppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 
-export function useTraceSafeFlowAccess() {
+export type TraceSafeFlowOwner = "observability.traces" | "observability.requests";
+
+export function useTraceSafeFlowAccess(expectedOwner: TraceSafeFlowOwner = "observability.traces") {
   const auth = useAuth();
   const feature = useContext(FeatureAccessContext);
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
@@ -18,14 +20,14 @@ export function useTraceSafeFlowAccess() {
   ]);
   const readable =
     (auth.mode === "authenticated" || auth.mode === "legacy" || auth.mode === "open") &&
-    owner === "observability.traces" &&
+    owner === expectedOwner &&
     feature?.permitted === true &&
     typeof feature.readOnly === "boolean" &&
     auth.user?.scopes.includes("admin:read") === true;
-  const latest = useRef({ principal, owner, readable });
+  const latest = useRef({ principal, owner, readable, expectedOwner });
   const mounted = useRef(false);
   useLayoutEffect(() => {
-    latest.current = { principal, owner, readable };
+    latest.current = { principal, owner, readable, expectedOwner };
   });
   useLayoutEffect(() => {
     mounted.current = true;
@@ -39,15 +41,17 @@ export function useTraceSafeFlowAccess() {
       epoch !== tokenStore.getSessionEpoch() ||
       !latest.current.readable ||
       latest.current.owner !== owner ||
+      latest.current.expectedOwner !== expectedOwner ||
       latest.current.principal !== principal
     )
       throw new AppError("현재 요청 조회 권한을 확인하세요.", { kind: "aborted" });
-  }, [epoch, owner, principal]);
+  }, [epoch, owner, principal, expectedOwner]);
   return {
     readable,
     assertRead,
     prefixes: auth.credentialPrefixes,
-    key: JSON.stringify([epoch, owner, principal, readable]),
+    routeId: expectedOwner,
+    key: JSON.stringify([epoch, expectedOwner, owner, principal, readable]),
   };
 }
 export type TraceSafeFlowAccess = ReturnType<typeof useTraceSafeFlowAccess>;
