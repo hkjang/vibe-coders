@@ -1,0 +1,16 @@
+.policy-draft-review .kv-list > div,
+.policy-draft-review .kv-list dd {
+  min-width: 0;
+}
+.policy-draft-review pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.policy-draft-review {
+  overflow-wrap: anywhere;
+}
+.policy-draft-note {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}

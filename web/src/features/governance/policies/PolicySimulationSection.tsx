@@ -27,6 +27,9 @@ interface SimulationSectionProps {
   refresh: () => void;
   changeWindow: (window: string) => void;
   applyDraft: (row: PolicySuggestion, trigger: HTMLButtonElement) => void;
+  draftDisabled?: boolean;
+  draftReason?: string;
+  draftTriggerRef?: (id: string, node: HTMLButtonElement | null) => void;
 }
 export function PolicySimulationSection(props: SimulationSectionProps) {
   const access = usePolicySimulationAccess(props.canWrite);
@@ -100,12 +103,13 @@ function SimulationSession({
           <Button
             size="small"
             variant="primary"
-            disabled={!props.canWrite}
-            title={props.canWrite ? undefined : "admin:write 권한이 필요합니다."}
-            aria-label={`${text(row.title ?? row.id)} draft 정책 생성`}
+            disabled={props.draftDisabled ?? !props.canWrite}
+            title={props.draftReason}
+            ref={(node) => props.draftTriggerRef?.(row.id, node)}
+            aria-label={`${text(row.title ?? row.id)} 초안 생성`}
             onClick={(event) => props.applyDraft(row, event.currentTarget)}
           >
-            <Wand2 aria-hidden="true" /> draft 생성
+            <Wand2 aria-hidden="true" /> 초안 생성
           </Button>
         </span>
       ),
