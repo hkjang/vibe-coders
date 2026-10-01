@@ -4345,6 +4345,56 @@
         ],
         "type": "object"
       },
+      "RoutingRuleCreateRequest": {
+        "additionalProperties": true,
+        "description": "Eight known optional/nullable fields describe the existing Go decoder input; after decoding, target_model must be nonblank. Canonical required keys are not imposed because existing case-insensitive aliases remain accepted. Absent fields or fields supplied only as null begin with Go zero values, except enabled defaults to true; these are create defaults, not preservation of an existing row. ID and created_at are server-assigned and unknown input fields are ignored. No new string-length limit, provider/model existence check or strict JSON parser is introduced.",
+        "properties": {
+          "enabled": {
+            "description": "Omitted/null defaults to true; explicit false creates a disabled rule.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "match_pattern": {
+            "description": "Surrounding Go whitespace is trimmed; omitted/null/blank becomes * (all models).",
+            "nullable": true,
+            "type": "string"
+          },
+          "max_complexity": {
+            "description": "Omitted/null defaults to zero; decoded bounds must satisfy 0 <= min <= max <= 100 together.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "min_complexity": {
+            "description": "Omitted/null defaults to zero; decoded bounds must satisfy 0 <= min <= max <= 100 together.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "note": {
+            "description": "Surrounding Go whitespace is trimmed; omitted/null/blank becomes an empty note.",
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "description": "Omitted/null/zero/negative values become 100; positive integers are preserved. This differs from PATCH.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "target_model": {
+            "description": "Surrounding Go whitespace is trimmed; omitted/null/blank fails with missing_target_model.",
+            "nullable": true,
+            "type": "string"
+          },
+          "target_provider": {
+            "description": "Surrounding Go whitespace is trimmed; omitted/null/blank becomes an empty configured provider.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "RoutingRuleDeleteResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4435,7 +4485,7 @@
         "additionalProperties": false,
         "properties": {
           "created_at": {
-            "description": "Original creation timestamp, not a modification revision. Invalid legacy stored times decode to the Go zero timestamp.",
+            "description": "Original creation timestamp on GET/PATCH, not a modification revision. Invalid legacy stored times decode to the Go zero timestamp. POST returns its handler value copy with 0001-01-01T00:00:00Z; the store fills time separately, so a later GET differs.",
             "format": "date-time",
             "type": "string"
           },
@@ -5445,7 +5495,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.40"
+    "version": "v0.86.41"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -15070,10 +15120,68 @@
         ]
       },
       "post": {
+        "description": "Create a routing rule with existing routing:write authorization; reading the collection separately requires routing:read. HTTP 201 returns the normalized handler copy with all ten fields, including created_at=0001-01-01T00:00:00Z. The store fills creation time in its own value copy, so a later GET returns the stored time instead; the POST timestamp is not a revision or proof of a stored-row snapshot. Normally repeated requests generate different IDs and can create duplicate configurations; there is no revision/CAS or idempotency token. Existing ID generation and upsert behavior do not guarantee collision-free insertion. Local routing cache invalidation and best-effort audit follow persistence; other processes retain the existing five-second cache TTL. Configured post-change checks may run and record state. Audit/post-change work is not an atomic transaction with the rule. Response loss may occur after persistence and is not evidence that retransmission is safe. Unknown fields, case-insensitive aliases and the existing single Go JSON decode behavior are preserved. This raw configuration response is not a masked projection, provider/model validation, or proof of the effect on live traffic.",
         "operationId": "post__admin_routing_rules",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingRuleCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleWriteResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body for JSON/type/integer decoding failures; missing_target_model when the decoded target is blank after Go whitespace trimming; invalid_range unless 0 <= min <= max <= 100. A null body decodes but fails target validation."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing authentication/scope rejection: invalid_api_key. POST requires routing:write; legacy read-only credentials cannot create. GET separately requires routing:read."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_rule_save_failed: persistence failed. Lost or otherwise unconfirmed responses are not proof that a rule was not applied."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

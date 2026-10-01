@@ -480,23 +480,43 @@ describe("RoutingPage", () => {
   });
 
   it("규칙을 추가하면 입력한 값을 그대로 보낸다", async () => {
-    const api = mockAllEndpoints();
+    const api = mockAllEndpoints({
+      "POST /admin/routing-rules": (options) => ({
+        rule: {
+          ...(options.body as Record<string, unknown>),
+          id: "route_created",
+          created_at: "0001-01-01T00:00:00Z",
+        },
+      }),
+    });
     render();
 
     await userEvent.click(await screen.findByRole("button", { name: /규칙 추가/u }));
     const dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByLabelText(/대상 모델/u), "gpt-4.1-nano");
+    await userEvent.click(within(dialog).getByRole("button", { name: "생성 내용 검토" }));
+    expect(api.bodies("POST /admin/routing-rules")).toHaveLength(0);
+    await userEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "사용 중으로 생성되는 규칙의 라우팅 영향을 확인했습니다",
+      }),
+    );
     await userEvent.click(within(dialog).getByRole("button", { name: "규칙 만들기" }));
 
     await waitFor(() => expect(api.bodies("POST /admin/routing-rules")).toHaveLength(1));
-    expect(api.bodies("POST /admin/routing-rules")[0]).toMatchObject({
+    expect(api.bodies("POST /admin/routing-rules")[0]).toEqual({
       match_pattern: "*",
       target_model: "gpt-4.1-nano",
+      target_provider: "",
       min_complexity: 0,
       max_complexity: 100,
       priority: 100,
+      note: "",
       enabled: true,
     });
+    await waitFor(() =>
+      expect(toastSpy.success).toHaveBeenCalledWith("라우팅 규칙 생성 요청을 확인했습니다."),
+    );
   });
 
   it("URL 하위 경로와 쿼리에서 탭과 필터를 복원해 서버에 전달한다", async () => {

@@ -1255,6 +1255,45 @@ export type RoutingHealthResponse = {
     until: string;
 };
 
+/**
+ * Eight known optional/nullable fields describe the existing Go decoder input; after decoding, target_model must be nonblank. Canonical required keys are not imposed because existing case-insensitive aliases remain accepted. Absent fields or fields supplied only as null begin with Go zero values, except enabled defaults to true; these are create defaults, not preservation of an existing row. ID and created_at are server-assigned and unknown input fields are ignored. No new string-length limit, provider/model existence check or strict JSON parser is introduced.
+ */
+export type RoutingRuleCreateRequest = {
+    /**
+     * Omitted/null defaults to true; explicit false creates a disabled rule.
+     */
+    enabled?: boolean | null;
+    /**
+     * Surrounding Go whitespace is trimmed; omitted/null/blank becomes * (all models).
+     */
+    match_pattern?: string | null;
+    /**
+     * Omitted/null defaults to zero; decoded bounds must satisfy 0 <= min <= max <= 100 together.
+     */
+    max_complexity?: number | null;
+    /**
+     * Omitted/null defaults to zero; decoded bounds must satisfy 0 <= min <= max <= 100 together.
+     */
+    min_complexity?: number | null;
+    /**
+     * Surrounding Go whitespace is trimmed; omitted/null/blank becomes an empty note.
+     */
+    note?: string | null;
+    /**
+     * Omitted/null/zero/negative values become 100; positive integers are preserved. This differs from PATCH.
+     */
+    priority?: number | null;
+    /**
+     * Surrounding Go whitespace is trimmed; omitted/null/blank fails with missing_target_model.
+     */
+    target_model?: string | null;
+    /**
+     * Surrounding Go whitespace is trimmed; omitted/null/blank becomes an empty configured provider.
+     */
+    target_provider?: string | null;
+    [key: string]: unknown;
+};
+
 export type RoutingRuleDeleteResponse = {
     /**
      * Exact decoded request-path ID, not evidence that a row existed or a revision token.
@@ -1308,7 +1347,7 @@ export type RoutingRulePatchRequest = {
 
 export type RoutingRuleView = {
     /**
-     * Original creation timestamp, not a modification revision. Invalid legacy stored times decode to the Go zero timestamp.
+     * Original creation timestamp on GET/PATCH, not a modification revision. Invalid legacy stored times decode to the Go zero timestamp. POST returns its handler value copy with 0001-01-01T00:00:00Z; the store fills time separately, so a later GET differs.
      */
     created_at: string;
     enabled: boolean;
@@ -7708,18 +7747,41 @@ export type GetAdminRoutingRulesResponses = {
 export type GetAdminRoutingRulesResponse = GetAdminRoutingRulesResponses[keyof GetAdminRoutingRulesResponses];
 
 export type PostAdminRoutingRulesData = {
-    body?: never;
+    body: RoutingRuleCreateRequest;
     path?: never;
     query?: never;
     url: '/admin/routing-rules';
 };
 
+export type PostAdminRoutingRulesErrors = {
+    /**
+     * invalid_body for JSON/type/integer decoding failures; missing_target_model when the decoded target is blank after Go whitespace trimming; invalid_range unless 0 <= min <= max <= 100. A null body decodes but fails target validation.
+     */
+    400: AppError;
+    /**
+     * Existing authentication/scope rejection: invalid_api_key. POST requires routing:write; legacy read-only credentials cannot create. GET separately requires routing:read.
+     */
+    401: AppError;
+    /**
+     * routing_rule_save_failed: persistence failed. Lost or otherwise unconfirmed responses are not proof that a rule was not applied.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRoutingRulesError = PostAdminRoutingRulesErrors[keyof PostAdminRoutingRulesErrors];
+
 export type PostAdminRoutingRulesResponses = {
     /**
      * OK
      */
-    200: unknown;
+    201: RoutingRuleWriteResponse;
 };
+
+export type PostAdminRoutingRulesResponse = PostAdminRoutingRulesResponses[keyof PostAdminRoutingRulesResponses];
 
 export type DeleteAdminRoutingRulesIdData = {
     body?: never;

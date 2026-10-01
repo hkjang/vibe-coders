@@ -266,6 +266,8 @@ jobs:
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestRoutingPatch' -count=1 -timeout=5m
       - name: Verify PostgreSQL existing routing rule deletion and permission contracts
         run: go test -race ./internal/proxy -run '^TestRoutingDelete' -count=1 -timeout=5m
+      - name: Verify PostgreSQL existing routing rule creation and acknowledgment contracts
+        run: go test -race ./internal/proxy -run '^TestRoutingCreate' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
@@ -296,7 +298,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.40
+      SOURCE_SBOM_VERSION: v0.86.41
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0
