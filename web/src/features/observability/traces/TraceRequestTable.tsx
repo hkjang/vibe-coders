@@ -5,6 +5,7 @@ import {
   traceStatusTone,
 } from "@/features/observability/traces/trace-utils";
 import type { AppRequestSummary } from "@/shared/api/schemas";
+import { useId } from "react";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 
@@ -12,6 +13,7 @@ interface TraceRequestTableProps {
   onSelect: (request: AppRequestSummary, trigger: HTMLButtonElement) => void;
   requests: readonly AppRequestSummary[];
   selectionEnabled: boolean;
+  selectionDisabledReason?: string;
   selectedRequestRef?: string;
   timeZone: string;
 }
@@ -20,10 +22,12 @@ export function TraceRequestTable({
   onSelect,
   requests,
   selectionEnabled,
+  selectionDisabledReason,
   selectedRequestRef,
   timeZone,
 }: TraceRequestTableProps): React.JSX.Element {
   const orderedRequests = orderTraceRequests(requests);
+  const reasonId = useId();
 
   return (
     <section className="trace-request-list" aria-labelledby="trace-request-list-title">
@@ -34,6 +38,7 @@ export function TraceRequestTable({
         </div>
         <span>{orderedRequests.length.toLocaleString("ko-KR")}건</span>
       </header>
+      {selectionDisabledReason ? <p id={reasonId}>{selectionDisabledReason}</p> : null}
       <div className="data-table-shell">
         <div className="data-table-scroll">
           <table className="data-table trace-request-table">
@@ -96,8 +101,17 @@ export function TraceRequestTable({
                         aria-label={`${index + 1}번째 요청 ${request.request_id} 상세 보기`}
                         aria-pressed={selected}
                         disabled={!selectionEnabled}
-                        title={selectionEnabled ? undefined : "서버 배포 완료 후 요청 상세를 열 수 있습니다."}
-                        onClick={(event) => onSelect(request, event.currentTarget)}
+                        aria-disabled={selectionDisabledReason ? true : undefined}
+                        aria-describedby={selectionDisabledReason ? reasonId : undefined}
+                        title={
+                          selectionEnabled
+                            ? selectionDisabledReason
+                            : "서버 배포 완료 후 요청 상세를 열 수 있습니다."
+                        }
+                        onClick={(event) => {
+                          if (selectionEnabled && !selectionDisabledReason)
+                            onSelect(request, event.currentTarget);
+                        }}
                       >
                         {selected ? "선택됨" : "상세"}
                       </Button>

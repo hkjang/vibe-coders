@@ -421,7 +421,9 @@ describe("TracePage", () => {
   });
 
   it("페이지 이동이 최종 실패하면 오류 제목으로 포커스를 옮긴다", async () => {
-    vi.spyOn(apiClient, "request")
+    const request = vi
+      .spyOn(apiClient, "request")
+      .mockResolvedValue(response as never)
       .mockResolvedValueOnce(response as never)
       .mockRejectedValueOnce(
         new AppError("페이지 이동 실패", {
@@ -444,6 +446,13 @@ describe("TracePage", () => {
     await user.click(screen.getByRole("button", { name: "테스트 기록 뒤로" }));
     expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
     await waitFor(() => expect(screen.getByRole("heading", { name: "추적 조회 결과" })).toHaveFocus());
+    // Returning to a criteria lifetime revalidates it instead of reviving an old Query.
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      endpoints.admin.requests,
+      expect.objectContaining({ query: { limit: 50, tz: "Asia/Seoul" } }),
+    );
   });
 
   it("상세가 열린 페이지 이동 중에는 제목을 건너뛰고 완료된 결과로 포커스를 옮긴다", async () => {

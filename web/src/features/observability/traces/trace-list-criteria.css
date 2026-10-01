@@ -1,0 +1,58 @@
+.trace-list-criteria {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card);
+}
+
+.trace-list-criteria h2,
+.trace-list-criteria h3,
+.trace-list-criteria p,
+.trace-list-criteria dl,
+.trace-list-criteria dd {
+  margin: 0;
+}
+
+.trace-list-criteria h2,
+.trace-list-criteria h3 {
+  font-size: inherit;
+}
+
+.trace-list-criteria p,
+.trace-list-criteria dt {
+  color: var(--color-muted);
+}
+
+.trace-list-criteria-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.trace-list-criteria-columns section,
+.trace-list-criteria dl {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: var(--space-2);
+}
+
+.trace-list-criteria dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-2);
+}
+
+.trace-list-criteria :is(dt, dd, p) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 48rem) {
+  .trace-list-criteria-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

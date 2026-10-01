@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties } from "react";
 
 import {
   buildTraceTimeline,
@@ -13,6 +13,7 @@ interface TraceTimelineProps {
   onSelect: (request: AppRequestSummary, trigger: HTMLButtonElement) => void;
   requests: readonly AppRequestSummary[];
   selectionEnabled: boolean;
+  selectionDisabledReason?: string;
   selectedRequestRef?: string;
   timeZone: string;
 }
@@ -26,10 +27,12 @@ export function TraceTimeline({
   onSelect,
   requests,
   selectionEnabled,
+  selectionDisabledReason,
   selectedRequestRef,
   timeZone,
 }: TraceTimelineProps): React.JSX.Element {
   const timeline = buildTraceTimeline(requests);
+  const reasonId = useId();
 
   return (
     <section className="trace-panel" aria-labelledby="trace-timeline-title">
@@ -43,6 +46,7 @@ export function TraceTimeline({
         </div>
         <Badge tone="info">요청 단위</Badge>
       </header>
+      {selectionDisabledReason ? <p id={reasonId}>{selectionDisabledReason}</p> : null}
 
       <div className="trace-scale" aria-hidden="true">
         <span>0ms</span>
@@ -66,8 +70,14 @@ export function TraceTimeline({
                 aria-label={`${index + 1}번째 요청 ${request.request_id} 흐름 선택`}
                 aria-pressed={selected}
                 disabled={!selectionEnabled}
-                title={selectionEnabled ? undefined : "서버 배포 완료 후 요청 상세를 열 수 있습니다."}
-                onClick={(event) => onSelect(request, event.currentTarget)}
+                aria-disabled={selectionDisabledReason ? true : undefined}
+                aria-describedby={selectionDisabledReason ? reasonId : undefined}
+                title={
+                  selectionEnabled ? selectionDisabledReason : "서버 배포 완료 후 요청 상세를 열 수 있습니다."
+                }
+                onClick={(event) => {
+                  if (selectionEnabled && !selectionDisabledReason) onSelect(request, event.currentTarget);
+                }}
               >
                 <span className="trace-lane-heading">
                   <span>

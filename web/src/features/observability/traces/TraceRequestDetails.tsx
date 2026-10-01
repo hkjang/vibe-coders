@@ -15,9 +15,11 @@ interface TraceRequestDetailsProps {
   selectionActive: boolean;
   selectionOrdinal?: number;
   selectionUnavailable: boolean;
+  selectionPending?: boolean;
   timeZone: string;
   flowReady: boolean;
   listRevision: number;
+  assertParent?: () => void;
 }
 
 export function TraceRequestDetails({
@@ -28,9 +30,11 @@ export function TraceRequestDetails({
   selectionActive,
   selectionOrdinal,
   selectionUnavailable,
+  selectionPending = false,
   timeZone,
   flowReady,
   listRevision,
+  assertParent,
 }: TraceRequestDetailsProps): React.JSX.Element | null {
   if (!selectionActive) return null;
 
@@ -45,14 +49,18 @@ export function TraceRequestDetails({
       >
         <div>
           <strong>
-            {selectionUnavailable
-              ? "서버 업그레이드 중에는 요청 상세를 열 수 없습니다."
-              : "선택한 요청이 현재 페이지에 없습니다."}
+            {selectionPending
+              ? "현재 조회 기준에서 선택한 요청을 확인하고 있습니다."
+              : selectionUnavailable
+                ? "서버 업그레이드 중에는 요청 상세를 열 수 없습니다."
+                : "선택한 요청이 현재 페이지에 없습니다."}
           </strong>
           <p>
-            {selectionUnavailable
-              ? "모든 서버가 v0.83.0 이상이 되면 현재 목록에서 요청 상세를 다시 선택할 수 있습니다."
-              : "필터나 페이지 위치가 변경되었을 수 있습니다. 선택을 해제한 뒤 다시 찾아보세요."}
+            {selectionPending
+              ? "이전 조회 결과로 새 상세를 열지 않습니다. 목록 조회가 끝날 때까지 기다려 주세요."
+              : selectionUnavailable
+                ? "모든 서버가 v0.83.0 이상이 되면 현재 목록에서 요청 상세를 다시 선택할 수 있습니다."
+                : "필터나 페이지 위치가 변경되었을 수 있습니다. 선택을 해제한 뒤 다시 찾아보세요."}
           </p>
         </div>
         <Button size="small" variant="secondary" onClick={onClear}>
@@ -173,6 +181,7 @@ export function TraceRequestDetails({
         created_at={request.created_at}
         ready={flowReady}
         revision={listRevision}
+        assertParent={assertParent}
       />
 
       <div className="trace-detail-actions">
