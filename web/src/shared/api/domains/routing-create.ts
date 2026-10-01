@@ -22,8 +22,8 @@ export const routingCreateWriteSchema = z.object({
   rule: routingCreateRuleSchema,
 }) satisfies z.ZodType<RoutingRuleWriteResponse>;
 
-// The existing compatibility adapter remains unchanged for learning and other
-// callers. This form alone uses the generated POST contract and strict ACK.
+// The compatibility adapter remains available to other callers. Reviewed
+// manual and learning-based creation share this generated POST contract.
 export const routingCreateEndpoints = {
   list: routingEditEndpoints.list,
   create: operation<PostAdminRoutingRulesData, PostAdminRoutingRulesResponse>()(

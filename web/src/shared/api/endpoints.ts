@@ -71,6 +71,7 @@ import { routingEndpoints } from "@/shared/api/domains/routing";
 import { routingEditEndpoints } from "@/shared/api/domains/routing-edit";
 import { routingDeleteEndpoints } from "@/shared/api/domains/routing-delete";
 import { routingCreateEndpoints } from "@/shared/api/domains/routing-create";
+import { routingLearningEndpoints } from "@/shared/api/domains/routing-learning";
 import { securityEndpoints } from "@/shared/api/domains/security";
 import { systemEndpoints } from "@/shared/api/domains/system";
 import { text2sqlEndpoints } from "@/shared/api/domains/text2sql";
@@ -263,6 +264,7 @@ export const endpoints = {
     routingEdit: routingEditEndpoints,
     routingDelete: routingDeleteEndpoints,
     routingCreate: routingCreateEndpoints,
+    routingLearning: routingLearningEndpoints,
     security: securityEndpoints,
     system: systemEndpoints,
     text2sql: text2sqlEndpoints,

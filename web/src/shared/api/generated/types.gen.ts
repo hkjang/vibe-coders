@@ -1255,6 +1255,119 @@ export type RoutingHealthResponse = {
     until: string;
 };
 
+export type RoutingLearningCell = {
+    /**
+     * Average joined estimated_cost, treating missing values as zero. Historical estimate, not a future bill or currency conversion proof.
+     */
+    avg_cost_krw: number;
+    /**
+     * Average recorded latency in milliseconds.
+     */
+    avg_latency_ms: number;
+    /**
+     * Current SQL buckets: low (<34), medium (34 through 66), high (>=67); usual valid score ranges 0-33/34-66/67-100. No enum: future labels remain representable.
+     */
+    bucket: string;
+    /**
+     * SUM of recorded failover values divided by requests.
+     */
+    fallback_rate: number;
+    /**
+     * Recorded model spelling is preserved; empty or null groups as (unknown). No frontend whitespace normalization is implied.
+     */
+    model: string;
+    /**
+     * COUNT of joined aggregate rows; not a deduplicated global traffic total.
+     */
+    requests: number;
+    /**
+     * successes divided by requests.
+     */
+    success_rate: number;
+    /**
+     * Rows with 2xx status, no recorded error and no failover.
+     */
+    successes: number;
+    /**
+     * Recorded task type; empty or null storage values group as other.
+     */
+    task_type: string;
+    /**
+     * Count of joined requests whose net feedback sum is negative; not individual negative feedback events.
+     */
+    thumbs_down: number;
+    /**
+     * Count of joined requests whose net feedback sum is positive; not individual positive feedback events.
+     */
+    thumbs_up: number;
+};
+
+export type RoutingLearningRecommendation = {
+    /**
+     * Chosen model's historical average estimated cost.
+     */
+    avg_cost_krw: number;
+    /**
+     * Current SQL buckets: low (<34), medium (34 through 66), high (>=67); usual valid score ranges 0-33/34-66/67-100. No enum: future labels remain representable.
+     */
+    bucket: string;
+    /**
+     * Every observed model in the group meets min_samples; not a probability or approval of live traffic safety.
+     */
+    confident: boolean;
+    /**
+     * recommended_model != top_model; does not inspect stored routing rules.
+     */
+    differs: boolean;
+    /**
+     * Generated explanatory text containing raw model names; not a masked projection.
+     */
+    rationale: string;
+    /**
+     * Eligible observed model chosen by success-rate comparison with existing 0.005 tolerance, then lower cost, then more samples. Raw spelling retained.
+     */
+    recommended_model: string;
+    /**
+     * Chosen model's observed request count, not all models' combined samples.
+     */
+    samples: number;
+    /**
+     * Chosen model's observed success rate.
+     */
+    success_rate: number;
+    /**
+     * Evidence task type, not a condition in the separate routing-rule API.
+     */
+    task_type: string;
+    /**
+     * Most-used observed model in this task/bucket, not the currently configured routing target.
+     */
+    top_model: string;
+    /**
+     * Most-used observed model's success rate.
+     */
+    top_success_rate: number;
+};
+
+export type RoutingLearningReport = {
+    /**
+     * Every observed task/bucket/model aggregate, including below-floor models. Empty is [], not null.
+     */
+    cells: Array<RoutingLearningCell>;
+    /**
+     * Effective positive sample floor after query normalization.
+     */
+    min_samples: number;
+    /**
+     * One recommendation per task/bucket having an eligible model. Empty is [], not null. Not a list of stored rules.
+     */
+    recommendations: Array<RoutingLearningRecommendation>;
+    /**
+     * UTC RFC3339 seconds-only lower-bound display. Original filter precision is higher; not an exact replay watermark, upper bound, snapshot or revision.
+     */
+    since: string;
+};
+
 /**
  * Eight known optional/nullable fields describe the existing Go decoder input; after decoding, target_model must be nonblank. Canonical required keys are not imposed because existing case-insensitive aliases remain accepted. Absent fields or fields supplied only as null begin with Go zero values, except enabled defaults to true; these are create defaults, not preservation of an existing row. ID and created_at are server-assigned and unknown input fields are ignored. No new string-length limit, provider/model existence check or strict JSON parser is introduced.
  */
@@ -8046,16 +8159,48 @@ export type GetAdminRoutingHealthResponse = GetAdminRoutingHealthResponses[keyof
 export type GetAdminRoutingLearningData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * 24h, 7d, 30d and 90d are recognized; other positive time.ParseDuration values such as 2h are accepted. Omitted, invalid or nonpositive values select seven days. No closed enum or new range restriction.
+         */
+        window?: string;
+        /**
+         * Query text parsed with strconv.Atoi; a positive platform-sized integer is used, otherwise 20. This is a recommendation eligibility threshold, not a limit on returned cells or rows. No new upper cap is imposed.
+         */
+        min_samples?: string;
+    };
     url: '/admin/routing/learning';
 };
+
+export type GetAdminRoutingLearningErrors = {
+    /**
+     * invalid_api_key: existing authentication or routing:read scope rejection. Legacy read-only credentials permit this GET, but not a later routing-rule POST.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: the existing handler requires GET after authorization.
+     */
+    405: AppError;
+    /**
+     * routing_learning_failed: the historical aggregate could not be read. No fallback estimate or automatic rule creation is implied.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRoutingLearningError = GetAdminRoutingLearningErrors[keyof GetAdminRoutingLearningErrors];
 
 export type GetAdminRoutingLearningResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RoutingLearningReport;
 };
+
+export type GetAdminRoutingLearningResponse = GetAdminRoutingLearningResponses[keyof GetAdminRoutingLearningResponses];
 
 export type GetAdminRoutingLearningAutoData = {
     body?: never;

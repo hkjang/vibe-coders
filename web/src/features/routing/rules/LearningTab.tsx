@@ -1,20 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import {
-  routingDomainQueryKey,
-  routingLearningQueryKey,
-  routingRulesQueryKey,
-  writeScopeMessage,
-} from "@/features/routing/rules/routing-shared";
+import { routingDomainQueryKey, writeScopeMessage } from "@/features/routing/rules/routing-shared";
 import { QueryFailureNotice, ScopeNotice } from "@/features/routing/rules/routing-ui";
 import { apiClient } from "@/shared/api/client";
-import {
-  domainReviewActionEndpoint,
-  type RoutingDomainReviewItem,
-  type RoutingLearningReport,
-  type RoutingRuleInput,
-} from "@/shared/api/domains/routing";
+import { domainReviewActionEndpoint, type RoutingDomainReviewItem } from "@/shared/api/domains/routing";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -29,23 +19,18 @@ import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSearchState } from "@/shared/hooks/use-search-state";
-import { formatDateTime, formatKRW, formatNumber, formatPercent, shortId } from "@/shared/utils/format";
+import { formatDateTime, formatNumber, formatPercent, shortId } from "@/shared/utils/format";
+import { LearningRecommendationSection } from "./LearningRecommendationSection";
+import { learningWindows, learningWindowLabels, type LearningWindow } from "./learning-recommendation-state";
 
-const windows = ["24h", "7d", "30d", "90d"] as const;
 const defaultWindow = "7d";
 const reviewStatuses = ["pending", "approved", "rejected"] as const;
 const defaultStatus = "pending";
 
-type Recommendation = RoutingLearningReport["recommendations"][number];
-
-const bucketRanges: Record<string, { min: number; max: number }> = {
-  low: { min: 0, max: 34 },
-  medium: { min: 35, max: 69 },
-  high: { min: 70, max: 100 },
-};
-
-function windowFrom(value: string | null): string {
-  return (windows as readonly string[]).includes(value ?? "") ? (value as string) : defaultWindow;
+function windowFrom(value: string | null): LearningWindow {
+  return (learningWindows as readonly string[]).includes(value ?? "")
+    ? (value as LearningWindow)
+    : defaultWindow;
 }
 
 function statusFrom(value: string | null): string {
@@ -56,73 +41,6 @@ function permissionMessage(error: unknown): string | undefined {
   return isAppError(error) && (error.kind === "permission" || error.status === 403)
     ? "도메인 라우팅 학습 데이터는 프롬프트 원문 조회 권한이 있는 계정만 볼 수 있습니다."
     : undefined;
-}
-
-function recommendationColumns(
-  canWrite: boolean,
-  onApply: (recommendation: Recommendation, trigger: HTMLButtonElement) => void,
-): ReadonlyArray<DataTableColumn<Recommendation>> {
-  const column = createDataTableColumnHelper<Recommendation>();
-  return column.columns([
-    column.accessor((row) => row.task_type, { id: "task_type", header: "작업 유형" }),
-    column.accessor((row) => row.bucket, {
-      id: "bucket",
-      header: "복잡도 구간",
-      cell: ({ getValue }) => <Badge tone="info">{getValue()}</Badge>,
-    }),
-    column.accessor((row) => row.top_model, {
-      id: "top_model",
-      header: "현재 주력 모델",
-      cell: ({ row, getValue }) => (
-        <span className="mono">
-          {getValue() || "—"} ({formatPercent(row.original.top_success_rate)})
-        </span>
-      ),
-    }),
-    column.accessor((row) => row.recommended_model, {
-      id: "recommended_model",
-      header: "추천 모델",
-      cell: ({ row, getValue }) => (
-        <span className="mono">
-          {getValue() || "—"} ({formatPercent(row.original.success_rate)})
-        </span>
-      ),
-    }),
-    column.accessor((row) => row.avg_cost_krw, {
-      id: "cost",
-      header: "평균 비용",
-      cell: ({ getValue }) => <span className="cell-number">{formatKRW(getValue())}</span>,
-    }),
-    column.accessor((row) => row.samples, {
-      id: "samples",
-      header: "표본",
-      cell: ({ row, getValue }) => (
-        <span className="cell-number">
-          {formatNumber(getValue())}
-          {row.original.confident ? "" : " (부족)"}
-        </span>
-      ),
-    }),
-    column.display({
-      id: "actions",
-      header: "작업",
-      cell: ({ row }) =>
-        row.original.differs ? (
-          <Button
-            size="small"
-            variant="ghost"
-            aria-label={`${row.original.recommended_model} 추천을 규칙으로 적용`}
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeScopeMessage}
-            onClick={(event) => onApply(row.original, event.currentTarget)}
-          >
-            규칙 적용
-          </Button>
-        ) : (
-          <span className="routing-meta">이미 사용 중</span>
-        ),
-    }),
-  ]);
 }
 
 function reviewColumns(
@@ -193,23 +111,12 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
   const window = windowFrom(searchParams.get("window"));
   const status = statusFrom(searchParams.get("status"));
   const route = searchParams.get("route") ?? "";
-  const [pendingApply, setPendingApply] = useState<Recommendation>();
   const [pendingReview, setPendingReview] = useState<{
     item: RoutingDomainReviewItem;
     action: "approve" | "reject";
   }>();
-  const [applyTrigger, setApplyTrigger] = useState<HTMLElement | null>(null);
   const [reviewTrigger, setReviewTrigger] = useState<HTMLElement | null>(null);
 
-  const learning = useQuery({
-    queryKey: [...routingLearningQueryKey, window],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.routing.learning, {
-        query: { window },
-        signal,
-        routeId: "routing.rules",
-      }),
-  });
   const domainDecisions = useQuery({
     queryKey: [...routingDomainQueryKey, "decisions", window, route],
     queryFn: ({ signal }) =>
@@ -241,12 +148,6 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
     retry: false,
   });
 
-  const applyRecommendation = useMutationFeedback<RoutingRuleInput, unknown>({
-    mutate: (body) => apiClient.request(endpoints.domains.routing.rules.create, { body }),
-    invalidates: [routingRulesQueryKey],
-    successMessage: "추천을 라우팅 규칙으로 만들었습니다.",
-    errorMessage: "추천을 규칙으로 만들지 못했습니다.",
-  });
   const decideReview = useMutationFeedback<{ id: string; action: "approve" | "reject" }, unknown>({
     mutate: ({ id, action }) => apiClient.request(domainReviewActionEndpoint(id, action)),
     invalidates: [routingDomainQueryKey],
@@ -254,7 +155,6 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
     errorMessage: "검토 결과를 저장하지 못했습니다.",
   });
 
-  const recommendations = learning.data?.recommendations ?? [];
   const decisions = domainDecisions.data?.decisions ?? [];
   const reviewItems = reviewQueue.data?.items ?? [];
   const averageConfidence =
@@ -277,9 +177,9 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
             value={window}
             onChange={(event) => updateSearch({ window: event.target.value })}
           >
-            {windows.map((item) => (
+            {learningWindows.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {learningWindowLabels[item]}
               </option>
             ))}
           </select>
@@ -309,44 +209,11 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
         </label>
       </Toolbar>
 
-      {learning.isError ? (
-        <QueryFailureNotice
-          error={learning.error}
-          hasData={Boolean(learning.data)}
-          label="라우팅 학습 리포트"
-          onRetry={() => void learning.refetch()}
-        />
-      ) : null}
-
-      <StatGrid label="학습 요약">
-        <StatCard label="학습 셀" value={formatNumber(learning.data?.cells.length)} />
-        <StatCard label="추천" value={formatNumber(recommendations.length)} />
-        <StatCard label="최소 표본" value={formatNumber(learning.data?.min_samples)} />
-        <StatCard
-          label="검토 대기"
-          tone={reviewItems.length > 0 ? "warning" : "default"}
-          value={domainPermission ? "—" : formatNumber(reviewItems.length)}
-        />
-      </StatGrid>
-
-      <SectionCard
-        title="모델 추천 학습"
-        description="성공률과 비용 기록에서 (작업 유형 × 복잡도 구간)별로 더 나은 모델을 찾아 제안합니다."
-      >
-        <DataTable
-          caption="학습된 모델 추천"
-          columns={recommendationColumns(canWrite, (recommendation, trigger) => {
-            setApplyTrigger(trigger);
-            setPendingApply(recommendation);
-          })}
-          data={recommendations}
-          emptyMessage="표본이 충분한 추천이 아직 없습니다. 요청이 쌓이면 추천이 나타납니다."
-          error={learning.isError && !learning.data ? "학습 리포트를 불러오지 못했습니다." : undefined}
-          getRowId={(row, index) => `${row.task_type}-${row.bucket}-${index}`}
-          loading={learning.isPending}
-          onRetry={() => void learning.refetch()}
-        />
-      </SectionCard>
+      <LearningRecommendationSection
+        canWrite={canWrite}
+        window={window}
+        pendingReviews={domainPermission ? undefined : reviewItems.length}
+      />
 
       {domainPermission ? (
         <InlineNotice tone="info" title="도메인 학습 데이터를 볼 수 없습니다.">
@@ -449,39 +316,6 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
           </ul>
         )}
       </SectionCard>
-
-      <ConfirmDialog
-        confirmLabel="규칙 만들기"
-        description={
-          pendingApply
-            ? `${pendingApply.task_type} / ${pendingApply.bucket} 요청을 ${pendingApply.recommended_model} 로 라우팅하는 규칙을 만듭니다.`
-            : "추천을 규칙으로 만듭니다."
-        }
-        onConfirm={async () => {
-          if (!pendingApply) return;
-          const range = bucketRanges[pendingApply.bucket] ?? { min: 0, max: 100 };
-          await applyRecommendation.mutateAsync({
-            match_pattern: "*",
-            target_model: pendingApply.recommended_model,
-            target_provider: "",
-            min_complexity: range.min,
-            max_complexity: range.max,
-            priority: 100,
-            enabled: true,
-            note: `학습 추천 적용 (${pendingApply.task_type}/${pendingApply.bucket})`,
-          });
-        }}
-        onOpenChange={(open) => {
-          if (!open) setPendingApply(undefined);
-        }}
-        open={pendingApply !== undefined}
-        returnFocusRef={{ current: applyTrigger }}
-        title="추천을 규칙으로 적용"
-      >
-        <p>
-          만들어진 규칙은 모든 모델 패턴(*)에 적용됩니다. 필요하면 규칙 탭에서 패턴과 우선순위를 조정하세요.
-        </p>
-      </ConfirmDialog>
 
       <ConfirmDialog
         confirmLabel={pendingReview?.action === "reject" ? "거절" : "승인"}

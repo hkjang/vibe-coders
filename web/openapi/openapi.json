@@ -4345,6 +4345,181 @@
         ],
         "type": "object"
       },
+      "RoutingLearningCell": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_cost_krw": {
+            "description": "Average joined estimated_cost, treating missing values as zero. Historical estimate, not a future bill or currency conversion proof.",
+            "format": "double",
+            "type": "number"
+          },
+          "avg_latency_ms": {
+            "description": "Average recorded latency in milliseconds.",
+            "format": "double",
+            "type": "number"
+          },
+          "bucket": {
+            "description": "Current SQL buckets: low (<34), medium (34 through 66), high (>=67); usual valid score ranges 0-33/34-66/67-100. No enum: future labels remain representable.",
+            "type": "string"
+          },
+          "fallback_rate": {
+            "description": "SUM of recorded failover values divided by requests.",
+            "format": "double",
+            "type": "number"
+          },
+          "model": {
+            "description": "Recorded model spelling is preserved; empty or null groups as (unknown). No frontend whitespace normalization is implied.",
+            "type": "string"
+          },
+          "requests": {
+            "description": "COUNT of joined aggregate rows; not a deduplicated global traffic total.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "success_rate": {
+            "description": "successes divided by requests.",
+            "format": "double",
+            "type": "number"
+          },
+          "successes": {
+            "description": "Rows with 2xx status, no recorded error and no failover.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_type": {
+            "description": "Recorded task type; empty or null storage values group as other.",
+            "type": "string"
+          },
+          "thumbs_down": {
+            "description": "Count of joined requests whose net feedback sum is negative; not individual negative feedback events.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "thumbs_up": {
+            "description": "Count of joined requests whose net feedback sum is positive; not individual positive feedback events.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_type",
+          "bucket",
+          "model",
+          "requests",
+          "successes",
+          "success_rate",
+          "fallback_rate",
+          "avg_cost_krw",
+          "avg_latency_ms",
+          "thumbs_up",
+          "thumbs_down"
+        ],
+        "type": "object"
+      },
+      "RoutingLearningRecommendation": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_cost_krw": {
+            "description": "Chosen model's historical average estimated cost.",
+            "format": "double",
+            "type": "number"
+          },
+          "bucket": {
+            "description": "Current SQL buckets: low (<34), medium (34 through 66), high (>=67); usual valid score ranges 0-33/34-66/67-100. No enum: future labels remain representable.",
+            "type": "string"
+          },
+          "confident": {
+            "description": "Every observed model in the group meets min_samples; not a probability or approval of live traffic safety.",
+            "type": "boolean"
+          },
+          "differs": {
+            "description": "recommended_model != top_model; does not inspect stored routing rules.",
+            "type": "boolean"
+          },
+          "rationale": {
+            "description": "Generated explanatory text containing raw model names; not a masked projection.",
+            "type": "string"
+          },
+          "recommended_model": {
+            "description": "Eligible observed model chosen by success-rate comparison with existing 0.005 tolerance, then lower cost, then more samples. Raw spelling retained.",
+            "type": "string"
+          },
+          "samples": {
+            "description": "Chosen model's observed request count, not all models' combined samples.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "success_rate": {
+            "description": "Chosen model's observed success rate.",
+            "format": "double",
+            "type": "number"
+          },
+          "task_type": {
+            "description": "Evidence task type, not a condition in the separate routing-rule API.",
+            "type": "string"
+          },
+          "top_model": {
+            "description": "Most-used observed model in this task/bucket, not the currently configured routing target.",
+            "type": "string"
+          },
+          "top_success_rate": {
+            "description": "Most-used observed model's success rate.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "task_type",
+          "bucket",
+          "recommended_model",
+          "success_rate",
+          "avg_cost_krw",
+          "samples",
+          "top_model",
+          "top_success_rate",
+          "differs",
+          "confident",
+          "rationale"
+        ],
+        "type": "object"
+      },
+      "RoutingLearningReport": {
+        "additionalProperties": false,
+        "properties": {
+          "cells": {
+            "description": "Every observed task/bucket/model aggregate, including below-floor models. Empty is [], not null.",
+            "items": {
+              "$ref": "#/components/schemas/RoutingLearningCell"
+            },
+            "type": "array"
+          },
+          "min_samples": {
+            "description": "Effective positive sample floor after query normalization.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "recommendations": {
+            "description": "One recommendation per task/bucket having an eligible model. Empty is [], not null. Not a list of stored rules.",
+            "items": {
+              "$ref": "#/components/schemas/RoutingLearningRecommendation"
+            },
+            "type": "array"
+          },
+          "since": {
+            "description": "UTC RFC3339 seconds-only lower-bound display. Original filter precision is higher; not an exact replay watermark, upper bound, snapshot or revision.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "min_samples",
+          "cells",
+          "recommendations"
+        ],
+        "type": "object"
+      },
       "RoutingRuleCreateRequest": {
         "additionalProperties": true,
         "description": "Eight known optional/nullable fields describe the existing Go decoder input; after decoding, target_model must be nonblank. Canonical required keys are not imposed because existing case-insensitive aliases remain accepted. Absent fields or fields supplied only as null begin with Go zero values, except enabled defaults to true; these are create defaults, not preservation of an existing row. ID and created_at are server-assigned and unknown input fields are ignored. No new string-length limit, provider/model existence check or strict JSON parser is introduced.",
@@ -5495,7 +5670,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.41"
+    "version": "v0.86.42"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -15637,10 +15812,80 @@
     },
     "/admin/routing/learning": {
       "get": {
+        "description": "Read historical learning aggregates with existing routing:read authorization; creating a separate routing rule requires routing:write. Rows are grouped by task_type, complexity bucket and recorded model for endpoints matching %chat/completions% since the query lower bound. Current score buckets are low 0-33, medium 34-66, high 67-100 within the usual 0-100 score domain; the SQL classifies any recorded value below 34 as low and any value at least 67 as high. These labels are extensible strings. window accepts named periods or any positive Go duration, with default 7d for omitted/invalid/nonpositive input. min_samples accepts a positive Go integer, with default 20 otherwise. The floor filters eligible recommendations, not observed cells. differs compares the recommendation to the most-used observed model and is not a saved-rule existence/effectiveness check. confident means every observed model in that task/bucket meets the sample floor, not an operational safety approval. since is a seconds-precision UTC rendering of the lower bound, not a snapshot or revision token; the actual SQL filter uses its original higher-precision value. This unpaginated aggregate has no team filter or upper-bound query parameter, and it neither creates rules nor enables automatic learning. Model/task/rationale text is unmasked metadata, not a PII-free projection. A separately created model/complexity rule does not gain a task_type condition merely from its note.",
         "operationId": "get__admin_routing_learning",
+        "parameters": [
+          {
+            "description": "24h, 7d, 30d and 90d are recognized; other positive time.ParseDuration values such as 2h are accepted. Omitted, invalid or nonpositive values select seven days. No closed enum or new range restriction.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "7d",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Query text parsed with strconv.Atoi; a positive platform-sized integer is used, otherwise 20. This is a recommendation eligibility threshold, not a limit on returned cells or rows. No new upper cap is imposed.",
+            "in": "query",
+            "name": "min_samples",
+            "required": false,
+            "schema": {
+              "default": "20",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingLearningReport"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: existing authentication or routing:read scope rejection. Legacy read-only credentials permit this GET, but not a later routing-rule POST."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: the existing handler requires GET after authorization."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_learning_failed: the historical aggregate could not be read. No fallback estimate or automatic rule creation is implied."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

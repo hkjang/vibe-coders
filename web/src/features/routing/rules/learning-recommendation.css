@@ -1,0 +1,36 @@
+.dialog-content:has(> .dialog-body > .learning-recommendation-dialog) > .dialog-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.learning-recommendation-dialog,
+.learning-recommendation-section,
+.learning-recommendation-values {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.learning-recommendation-dialog p,
+.learning-recommendation-dialog dd,
+.learning-recommendation-dialog label,
+.learning-recommendation-section td,
+.learning-recommendation-section .badge {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+.learning-recommendation-values,
+.learning-recommendation-values dd {
+  margin: 0;
+}
+.learning-recommendation-dialog h3 {
+  scroll-margin-top: var(--space-4);
+}
+.learning-recommendation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
