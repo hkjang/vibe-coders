@@ -227,9 +227,11 @@ jobs:
         env:
           TEST_POSTGRES_DSN: ""
           TEST_SQLITE_PLANNER: "1"
-        run: go test ./internal/store -run '^TestAppRecentRequestsSQLiteNaturalPlannerAtScale$' -count=1 -timeout=5m
+        run: go test ./internal/store -run '^(TestAppRecentRequestsSQLiteNaturalPlannerAtScale|TestAppRequestFlowNaturalPlannerAtScale)$' -count=1 -timeout=5m
       - name: Verify PostgreSQL 200k-row plans and oversized legacy upgrade
         run: go test ./internal/store -run '^(TestAppRecentRequestsPostgresNaturalPlannerAtScale|TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys)$' -count=1 -timeout=5m
+      - name: Verify PostgreSQL safe trace flow privacy, scope and natural query plans
+        run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestAppRequestFlow' -count=1 -timeout=7m
       - name: Verify PostgreSQL UI telemetry concurrency and retention
         run: go test -race ./internal/store -run '^TestAppUITelemetry' -count=1 -timeout=5m
       - name: Verify PostgreSQL startup lock waiters and concurrent migrations
@@ -290,7 +292,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.32
+      SOURCE_SBOM_VERSION: v0.86.33
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

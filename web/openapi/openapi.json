@@ -589,6 +589,188 @@
         ],
         "type": "object"
       },
+      "AppRequestFlowResponse": {
+        "additionalProperties": false,
+        "description": "Exactly one first root span (kind=request, parent_ref=null); all later children refer to that root, with unique opaque refs. Maximum 201 spans. No raw identifiers or payload fields.",
+        "properties": {
+          "coverage": {
+            "additionalProperties": false,
+            "properties": {
+              "text2sql": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "enum": [
+                      100
+                    ],
+                    "type": "integer"
+                  },
+                  "omitted": {
+                    "description": "Excluded candidates within the bounded first 100, not a count of all hidden records.",
+                    "maximum": 100,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "limit",
+                  "truncated",
+                  "omitted"
+                ],
+                "type": "object"
+              },
+              "tools": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "enum": [
+                      100
+                    ],
+                    "type": "integer"
+                  },
+                  "omitted": {
+                    "description": "Excluded candidates within the bounded first 100, not a count of all hidden records.",
+                    "maximum": 100,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "limit",
+                  "truncated",
+                  "omitted"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "tools",
+              "text2sql"
+            ],
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "maxLength": 30,
+            "minLength": 30,
+            "nullable": false,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{9}Z$",
+            "type": "string"
+          },
+          "flow_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "maxLength": 30,
+            "minLength": 30,
+            "nullable": false,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{9}Z$",
+            "type": "string"
+          },
+          "request_ref": {
+            "pattern": "^req_[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{21}$",
+            "type": "string"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/AppRequestFlowSpan"
+            },
+            "maxItems": 201,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "flow_version",
+          "request_ref",
+          "created_at",
+          "generated_at",
+          "spans",
+          "coverage"
+        ],
+        "type": "object"
+      },
+      "AppRequestFlowSpan": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_ms": {
+            "description": "Stored nonnegative safe-integer latency, not measured provenance; tools always null.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "request",
+              "text2sql",
+              "tool",
+              "mcp_tool"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Safe display text, additionally capped at 256 UTF-8 bytes.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "offset_ms": {
+            "description": "Signed recorded-time difference from the root record, truncated to milliseconds; not execution start.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "parent_ref": {
+            "nullable": true,
+            "pattern": "^span_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "maxLength": 30,
+            "minLength": 30,
+            "nullable": true,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{9}Z$",
+            "type": "string"
+          },
+          "span_ref": {
+            "pattern": "^span_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error",
+              "skipped",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "span_ref",
+          "parent_ref",
+          "kind",
+          "name",
+          "status",
+          "recorded_at",
+          "offset_ms",
+          "duration_ms"
+        ],
+        "type": "object"
+      },
       "AppRequestSummary": {
         "additionalProperties": false,
         "properties": {
@@ -4774,7 +4956,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.32"
+    "version": "v0.86.33"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -5335,6 +5517,108 @@
         "summary": "Create a work app from a template",
         "tags": [
           "data-products"
+        ]
+      }
+    },
+    "/admin/app/request-flow": {
+      "get": {
+        "description": "Read-only safe metadata for one v2 request_ref and its original canonical UTC nanosecond created_at. Exactly these two query parameters, once each; raw identifiers are never accepted. admin:read is required; existing gateway authentication returns 401 for missing credentials or insufficient scope. Current team checks and existing JWT/team-cache semantics apply, not atomic/global revocation. Candidate overflow, missing records, ref mismatch and team denial share one 404. Responses always use no-store and never include raw IDs, prompts, errors, headers, SQL or arguments, including for raw-prompt administrators. Bounded child candidates are filtered/sorted only after their limit; neither earliest/all children nor a complete distributed trace is promised. Recorded times/latencies do not establish execution start or measured tool duration. Authentication denial can still write existing auth audit events.",
+        "operationId": "get__admin_app_request_flow",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "request_ref",
+            "required": true,
+            "schema": {
+              "pattern": "^req_[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{21}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Pass the original list string unchanged; JavaScript Date roundtrips lose nanoseconds.",
+            "in": "query",
+            "name": "created_at",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "maxLength": 30,
+              "minLength": 30,
+              "nullable": false,
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{9}Z$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppRequestFlowResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid, missing, duplicate or additional query parameters"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing gateway authentication or admin:read scope check failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "app_request_flow_unavailable: unavailable without distinguishing missing, scoped or bounded-resolution cases"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Safe database/read failure, not an empty successful flow"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bounded safe processing records resolved by opaque request reference",
+        "tags": [
+          "admin"
         ]
       }
     },

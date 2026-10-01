@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { formatTraceDate, formatTraceDuration } from "@/features/observability/traces/trace-utils";
 import type { AppRequestSummary } from "@/shared/api/schemas";
 import { Button } from "@/shared/components/ui/Button";
+import { TraceSafeFlow } from "./TraceSafeFlow";
 
 interface TraceRequestDetailsProps {
   detailRef: RefObject<HTMLElement | null>;
@@ -15,6 +16,8 @@ interface TraceRequestDetailsProps {
   selectionOrdinal?: number;
   selectionUnavailable: boolean;
   timeZone: string;
+  flowReady: boolean;
+  listRevision: number;
 }
 
 export function TraceRequestDetails({
@@ -26,6 +29,8 @@ export function TraceRequestDetails({
   selectionOrdinal,
   selectionUnavailable,
   timeZone,
+  flowReady,
+  listRevision,
 }: TraceRequestDetailsProps): React.JSX.Element | null {
   if (!selectionActive) return null;
 
@@ -161,6 +166,14 @@ export function TraceRequestDetails({
           </dd>
         </div>
       </dl>
+
+      <TraceSafeFlow
+        timeZone={timeZone}
+        request_ref={request.request_ref}
+        created_at={request.created_at}
+        ready={flowReady}
+        revision={listRevision}
+      />
 
       <div className="trace-detail-actions">
         <Link className="button button-secondary button-default" to={requestExplorerHref}>

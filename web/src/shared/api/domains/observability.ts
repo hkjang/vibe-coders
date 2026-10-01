@@ -2,6 +2,7 @@
 // here with `operation()` from "@/shared/api/endpoint-factory" and a zod schema
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
+import { traceSafeFlowQuerySchema, traceSafeFlowSchema } from "./trace-safe-flow.schema";
 
 import {
   capabilitiesResponseSchema,
@@ -42,6 +43,8 @@ import {
 } from "@/shared/api/domains/observability.schemas";
 import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
+  GetAdminAppRequestFlowData,
+  GetAdminAppRequestFlowResponse,
   DeleteAdminRequestsIdNoteData,
   DeleteAdminSavedFiltersIdData,
   GetAdminCapabilitiesData,
@@ -207,6 +210,12 @@ const podsQuerySchema = z.object({ stale_s: optionalNumber });
 export type PodsQuery = z.infer<typeof podsQuerySchema>;
 
 export const observabilityEndpoints = {
+  requestFlow: operation<GetAdminAppRequestFlowData, GetAdminAppRequestFlowResponse>()(
+    "GET",
+    "/admin/app/request-flow",
+    traceSafeFlowSchema,
+    traceSafeFlowQuerySchema,
+  ),
   sessions: {
     list: operation<WithQuery<GetAdminSessionsData, SessionListQuery>, unknown>()(
       "GET",

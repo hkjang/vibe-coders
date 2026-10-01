@@ -227,6 +227,15 @@ async function mockTraceGateway(
       return json(bootstrap);
     }
     if (url.pathname === "/health") return json({ status: "ok" });
+    if (url.pathname === "/admin/app/request-flow" && request.method() === "GET") {
+      // This fixture intentionally remains an older v0.83 backend. The new
+      // optional safe detail must not break its existing list/selection flows.
+      return route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "not_found", message: "not found" } }),
+      });
+    }
     if (url.pathname === "/admin/requests") {
       calls.push({ headers: request.headers(), url });
       if (request.method() !== "GET") {

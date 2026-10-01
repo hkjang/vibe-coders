@@ -142,6 +142,55 @@ export type AppError = {
     };
 };
 
+/**
+ * Exactly one first root span (kind=request, parent_ref=null); all later children refer to that root, with unique opaque refs. Maximum 201 spans. No raw identifiers or payload fields.
+ */
+export type AppRequestFlowResponse = {
+    coverage: {
+        text2sql: {
+            limit: 100;
+            /**
+             * Excluded candidates within the bounded first 100, not a count of all hidden records.
+             */
+            omitted: number;
+            truncated: boolean;
+        };
+        tools: {
+            limit: 100;
+            /**
+             * Excluded candidates within the bounded first 100, not a count of all hidden records.
+             */
+            omitted: number;
+            truncated: boolean;
+        };
+    };
+    created_at: string;
+    flow_version: 1;
+    generated_at: string;
+    request_ref: string;
+    spans: Array<AppRequestFlowSpan>;
+};
+
+export type AppRequestFlowSpan = {
+    /**
+     * Stored nonnegative safe-integer latency, not measured provenance; tools always null.
+     */
+    duration_ms: number | null;
+    kind: 'request' | 'text2sql' | 'tool' | 'mcp_tool';
+    /**
+     * Safe display text, additionally capped at 256 UTF-8 bytes.
+     */
+    name: string;
+    /**
+     * Signed recorded-time difference from the root record, truncated to milliseconds; not execution start.
+     */
+    offset_ms: number | null;
+    parent_ref: string | null;
+    recorded_at: string | null;
+    span_ref: string;
+    status: 'ok' | 'error' | 'skipped' | 'unknown';
+};
+
 export type AppRequestSummary = {
     api_key_id: string;
     cached_tokens: number;
@@ -1775,6 +1824,53 @@ export type PostAdminAppTemplatesInstantiateResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminAppRequestFlowData = {
+    body?: never;
+    path?: never;
+    query: {
+        request_ref: string;
+        /**
+         * Pass the original list string unchanged; JavaScript Date roundtrips lose nanoseconds.
+         */
+        created_at: string;
+    };
+    url: '/admin/app/request-flow';
+};
+
+export type GetAdminAppRequestFlowErrors = {
+    /**
+     * Invalid, missing, duplicate or additional query parameters
+     */
+    400: AppError;
+    /**
+     * Existing gateway authentication or admin:read scope check failed
+     */
+    401: AppError;
+    /**
+     * app_request_flow_unavailable: unavailable without distinguishing missing, scoped or bounded-resolution cases
+     */
+    404: AppError;
+    /**
+     * Safe database/read failure, not an empty successful flow
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminAppRequestFlowError = GetAdminAppRequestFlowErrors[keyof GetAdminAppRequestFlowErrors];
+
+export type GetAdminAppRequestFlowResponses = {
+    /**
+     * OK
+     */
+    200: AppRequestFlowResponse;
+};
+
+export type GetAdminAppRequestFlowResponse = GetAdminAppRequestFlowResponses[keyof GetAdminAppRequestFlowResponses];
 
 export type GetAdminApprovalsData = {
     body?: never;

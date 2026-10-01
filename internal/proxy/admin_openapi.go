@@ -83,6 +83,7 @@ var apiEndpoints = []apiEndpoint{
 	// ---- admin: core analytics ----
 	{"/admin/stats", []string{"get"}, "admin", "Summary stats", false},
 	{"/admin/requests", []string{"get"}, "admin", "List recent requests", false},
+	{"/admin/app/request-flow", []string{"get"}, "admin", "Bounded safe processing records resolved by opaque request reference", false},
 	{"/admin/requests/{id}", []string{"get"}, "admin", "Request detail with readable OpenAI-compatible model/params/header/routing projection", false},
 	{"/admin/requests/{id}/headers", []string{"get"}, "admin", "Masked and grouped request/gateway/upstream headers", false},
 	{"/admin/requests/{id}/routing", []string{"get"}, "admin", "Routing, provider, fallback, policy and model resolution summary", false},
@@ -633,6 +634,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	switch key {
 	case "get /health":
 		responses["200"] = successResponse("HealthResponse")
+	case "get /admin/app/request-flow":
+		enrichAppRequestFlowOpenAPI(op, responses)
 	case "get /ready":
 		responses["200"] = successResponse("ReadyResponse")
 		responses["503"] = map[string]any{"description": "Database is not ready", "content": jsonContent(schemaRef("ReadinessFailureResponse"))}
@@ -1018,6 +1021,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range providerConnectionOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range appRequestFlowOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas

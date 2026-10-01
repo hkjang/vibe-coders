@@ -1,0 +1,85 @@
+.trace-safe-flow {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.trace-safe-flow p,
+.trace-safe-flow dd,
+.trace-safe-flow th,
+.trace-safe-flow td {
+  overflow-wrap: anywhere;
+}
+.trace-safe-flow p {
+  font-size: 0.875rem;
+}
+.trace-safe-flow-table {
+  overflow-x: auto;
+  max-width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+}
+.trace-safe-flow-table:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.trace-safe-flow table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.trace-safe-flow th,
+.trace-safe-flow td {
+  padding: var(--space-2);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border);
+}
+.trace-safe-flow th {
+  font-weight: 600;
+}
+.trace-safe-flow thead th,
+.trace-safe-flow td {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.trace-safe-flow tbody th {
+  min-width: 12rem;
+  width: 16rem;
+}
+.trace-safe-flow small {
+  display: block;
+  font-weight: normal;
+}
+.trace-safe-flow-coverage {
+  display: grid;
+  gap: var(--space-2);
+}
+.trace-safe-flow-coverage dd {
+  margin: 0;
+}
+.trace-safe-flow-track {
+  display: block;
+  position: relative;
+  width: 9rem;
+  height: var(--space-4);
+  background: var(--color-muted-soft);
+}
+.trace-safe-flow-bar,
+.trace-safe-flow-point {
+  position: absolute;
+  display: block;
+  top: var(--space-1);
+  height: var(--space-2);
+  background: var(--color-primary);
+}
+.trace-safe-flow-point {
+  min-width: var(--space-1);
+  transform: translateX(-50%);
+  border-radius: 50%;
+}
+@media (max-width: 600px) {
+  .trace-safe-flow table {
+    min-width: 38rem;
+  }
+}
