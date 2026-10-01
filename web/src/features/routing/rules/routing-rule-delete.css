@@ -1,0 +1,35 @@
+.dialog-content:has(> .dialog-body > .routing-rule-delete) > .dialog-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.routing-rule-delete,
+.routing-rule-delete-confirmation {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.routing-rule-delete p,
+.routing-rule-delete dd {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.routing-rule-delete dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+.routing-rule-delete dl > div,
+.routing-rule-delete section,
+.routing-rule-delete .checkbox-copy {
+  min-width: 0;
+}
+.routing-rule-delete dd {
+  margin: 0;
+}
+.routing-rule-delete input {
+  max-width: 100%;
+}

@@ -7,13 +7,11 @@ import { routingRulesQueryKey, writeScopeMessage } from "@/features/routing/rule
 import { QueryFailureNotice, ScopeNotice } from "@/features/routing/rules/routing-ui";
 import { apiClient } from "@/shared/api/client";
 import { type RoutingRule, type RoutingRuleInput } from "@/shared/api/domains/routing";
-import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { Button } from "@/shared/components/ui/Button";
-import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Textarea } from "@/shared/components/ui/Textarea";
@@ -30,6 +28,9 @@ import { useRoutingEditAccess } from "./routing-rule-edit-access";
 import { editIdentityReason } from "./routing-rule-edit-state";
 import { sameRoutingRule } from "./routing-toggle-state";
 import { RoutingRuleEditDialog } from "./RoutingRuleEditDialog";
+import { RoutingRuleDeleteDialog } from "./RoutingRuleDeleteDialog";
+import { useRoutingDeleteAccess } from "./routing-rule-delete-access";
+import { deleteIdentityReason } from "./routing-rule-delete-state";
 
 const pageSize = 10;
 
@@ -49,9 +50,7 @@ type RuleFormValues = z.output<typeof ruleFormSchema>;
 export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
   const [createOpen, setCreateOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<RoutingRule>();
   const createTrigger = useRef<HTMLButtonElement>(null);
-  const [deleteTrigger, setDeleteTrigger] = useState<HTMLElement | null>(null);
   const client = useQueryClient();
   const editAccess = useRoutingEditAccess(canWrite);
   const serial = useRef(0);
@@ -72,6 +71,26 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
   useLayoutEffect(() => {
     editActive.current = undefined;
   }, [editAccess.lifetime]);
+
+  const deleteAccess = useRoutingDeleteAccess(canWrite);
+  const deleteSerial = useRef(0);
+  const deleteActive = useRef<number | undefined>(undefined);
+  const [deleteSelection, setDeleteSelection] = useState<{
+    lifetime: object;
+    target?: { rule: RoutingRule; serial: number };
+  }>({ lifetime: deleteAccess.lifetime });
+  if (deleteSelection.lifetime !== deleteAccess.lifetime) {
+    setDeleteSelection({ lifetime: deleteAccess.lifetime });
+  }
+  const deleting = deleteSelection.lifetime === deleteAccess.lifetime ? deleteSelection.target : undefined;
+  const {
+    panel: deletePanelRef,
+    register: registerDelete,
+    returnFocusRef: deleteReturnFocusRef,
+  } = useRoutingToggleFocus(deleting?.rule.id);
+  useLayoutEffect(() => {
+    deleteActive.current = undefined;
+  }, [deleteAccess.lifetime]);
 
   const toggleAccess = useRoutingToggleAccess(canWrite);
   const toggleData = useRoutingToggleData(toggleAccess);
@@ -104,13 +123,6 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
     errorMessage: "라우팅 규칙을 만들지 못했습니다.",
   });
 
-  const deleteRule = useMutationFeedback<string, unknown>({
-    mutate: (id) => apiClient.request(withPathParams(endpoints.domains.routing.rules.remove, { id })),
-    invalidates: [routingRulesQueryKey],
-    successMessage: "라우팅 규칙을 삭제했습니다.",
-    errorMessage: "라우팅 규칙을 삭제하지 못했습니다.",
-  });
-
   const rows = [...(rules.data?.rules ?? [])].sort(
     (left, right) => left.priority - right.priority || left.target_model.localeCompare(right.target_model),
   );
@@ -124,6 +136,7 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
       ref={(node) => {
         togglePanelRef.current = node;
         editPanelRef.current = node;
+        deletePanelRef.current = node;
       }}
       tabIndex={-1}
     >
@@ -160,9 +173,31 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
             canWrite,
             {
               onDelete: (rule, trigger) => {
-                setDeleteTrigger(trigger);
-                setPendingDelete(rule);
+                try {
+                  deleteAccess.assertApproval(deleteAccess.approval);
+                  const query = client.getQueryCache().find({ queryKey: parentKey, exact: true });
+                  if (
+                    deleteActive.current !== undefined ||
+                    !query ||
+                    query !== renderedQuery ||
+                    query.state.dataUpdateCount !== renderedCount ||
+                    query.state.data !== renderedData
+                  )
+                    return;
+                  const current = toggleData.assertConfirmed().find((candidate) => candidate.id === rule.id);
+                  if (!sameRoutingRule(current, rule) || deleteIdentityReason(rule)) return;
+                  const sequence = ++deleteSerial.current;
+                  deleteActive.current = sequence;
+                  registerDelete(rule.id, trigger);
+                  setDeleteSelection({
+                    lifetime: deleteAccess.lifetime,
+                    target: { rule: Object.freeze({ ...rule }), serial: sequence },
+                  });
+                } catch {
+                  /* Retired callbacks and unconfirmed lists cannot open a deletion. */
+                }
               },
+              onDeleteRef: registerDelete,
               onEdit: (rule, trigger) => {
                 try {
                   editAccess.assertApproval(editAccess.approval);
@@ -204,6 +239,12 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
                 editAccess.write.reason ??
                 (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
               prefixes: editAccess.prefixes,
+            },
+            {
+              allowed: deleteAccess.write.allowed && toggleData.confirmed,
+              reason:
+                deleteAccess.write.reason ??
+                (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
             },
           )}
           data={pageRows}
@@ -316,26 +357,19 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
         />
       ) : null}
 
-      <ConfirmDialog
-        confirmLabel="삭제"
-        description={
-          pendingDelete
-            ? `${pendingDelete.match_pattern || "*"} → ${pendingDelete.target_model} 규칙을 삭제합니다.`
-            : "라우팅 규칙을 삭제합니다."
-        }
-        onConfirm={async () => {
-          if (pendingDelete) await deleteRule.mutateAsync(pendingDelete.id);
-        }}
-        onOpenChange={(open) => {
-          if (!open) setPendingDelete(undefined);
-        }}
-        open={pendingDelete !== undefined}
-        returnFocusRef={{ current: deleteTrigger }}
-        title="라우팅 규칙 삭제"
-        tone="danger"
-      >
-        <p>삭제하면 이 규칙에 걸리던 요청은 다음 우선순위 규칙 또는 기본 라우팅을 따릅니다.</p>
-      </ConfirmDialog>
+      {deleting ? (
+        <RoutingRuleDeleteDialog
+          key={`${deleteAccess.key}:${deleting.serial}`}
+          rule={deleting.rule}
+          access={deleteAccess}
+          returnFocusRef={deleteReturnFocusRef}
+          onClose={() => {
+            if (deleteActive.current !== deleting.serial) return;
+            deleteActive.current = undefined;
+            setDeleteSelection({ lifetime: deleteAccess.lifetime });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { formatDateTime } from "@/shared/utils/format";
 import { writeScopeMessage } from "./routing-shared";
 import { toggleIdentityReason } from "./routing-toggle-state";
 import { editIdentityReason, ruleText } from "./routing-rule-edit-state";
+import { deleteIdentityReason } from "./routing-rule-delete-state";
 
 /** How a rule is named in confirmations and accessible action labels. */
 function ruleLabel(rule: RoutingRule, prefixes: readonly string[]): string {
@@ -15,6 +16,7 @@ function ruleLabel(rule: RoutingRule, prefixes: readonly string[]): string {
 
 interface RuleRowActions {
   onDelete: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
+  onDeleteRef?: (id: string, button: HTMLButtonElement | null) => void;
   onEdit: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
   onEditRef?: (id: string, button: HTMLButtonElement | null) => void;
   onToggle: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
@@ -26,6 +28,7 @@ export function useRuleColumns(
   actions: RuleRowActions,
   toggle: { allowed: boolean; reason?: string },
   edit?: { allowed: boolean; reason?: string; prefixes: readonly string[] },
+  deletion?: { allowed: boolean; reason?: string },
 ): ReadonlyArray<DataTableColumn<RoutingRule>> {
   return useMemo(() => {
     const column = createDataTableColumnHelper<RoutingRule>();
@@ -106,11 +109,16 @@ export function useRuleColumns(
               수정
             </Button>
             <Button
+              ref={(button) => actions.onDeleteRef?.(row.original.id, button)}
               size="small"
               variant="ghost"
               aria-label={`${ruleLabel(row.original, prefixes)} 규칙 삭제`}
-              disabled={!canWrite}
-              title={canWrite ? undefined : writeScopeMessage}
+              disabled={!(deletion?.allowed ?? canWrite) || !!deleteIdentityReason(row.original)}
+              title={
+                deleteIdentityReason(row.original) ??
+                deletion?.reason ??
+                (canWrite ? undefined : writeScopeMessage)
+              }
               onClick={(event) => actions.onDelete(row.original, event.currentTarget)}
             >
               삭제
@@ -119,5 +127,5 @@ export function useRuleColumns(
         ),
       }),
     ]);
-  }, [canWrite, actions, toggle, edit]);
+  }, [canWrite, actions, toggle, edit, deletion]);
 }

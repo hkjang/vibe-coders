@@ -2,8 +2,8 @@
 
 AI 코딩 프록시 게이트웨이의 기동·종료·관측·백업·장애 대응 절차를 한 문서에 정리했습니다.
 
-현재 배포 명령 예시는 게시가 완료된 `v0.86.38` 태그의 소스·자산 기준입니다. 개발 중인
-`v0.86.39`는 아직 커밋·PR·릴리즈 전 후보입니다. 후보 소스를 이전 버전으로 표시해 빌드하거나
+현재 배포 명령 예시는 게시가 완료된 `v0.86.39` 태그의 소스·자산 기준입니다. 개발 중인
+`v0.86.40`은 아직 커밋·PR·릴리즈 전 후보입니다. 후보 소스를 이전 버전으로 표시해 빌드하거나
 후보 문서만으로 운영 업그레이드·`/app`의 Stable 승격을 진행하지 마세요.
 
 ---
@@ -59,7 +59,7 @@ React `/app`까지 포함하는 직접 빌드는 frontend 산출물을 embed 경
 ```bash
 corepack enable
 pnpm --dir web install --frozen-lockfile
-VITE_UI_VERSION=v0.86.38 pnpm --dir web build
+VITE_UI_VERSION=v0.86.39 pnpm --dir web build
 find internal/appui/dist -mindepth 1 ! -name '.gitkeep' -delete
 cp -R web/dist/. internal/appui/dist/
 test -s internal/appui/dist/index.html
@@ -67,7 +67,7 @@ test -n "$(find internal/appui/dist/assets -type f -print -quit)"
 
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath \
-  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.86.38" \
+  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.86.39" \
   -o gateway ./cmd/gateway
 UI_APP_ENABLED=true ./gateway
 ```
@@ -78,20 +78,20 @@ UI_APP_ENABLED=true ./gateway
 ### 2.3 Docker
 
 ```bash
-docker build --build-arg VERSION=v0.86.38 -t ai-coding-proxy-gateway:v0.86.38 .
+docker build --build-arg VERSION=v0.86.39 -t ai-coding-proxy-gateway:v0.86.39 .
 
-export GATEWAY_VERSION=v0.86.38
+export GATEWAY_VERSION=v0.86.39
 export UPSTREAM_API_KEY='<실제 upstream key>'
 scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
 docker volume create proxy-gateway-data >/dev/null
 # 기존 볼륨·바인드 마운트를 재사용할 때 소유권을 nonroot(65532)로 복구합니다. 새 볼륨은 변경 없이 끝납니다.
 docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
-  ai-coding-proxy-gateway:v0.86.38 repair-data-dir
+  ai-coding-proxy-gateway:v0.86.39 repair-data-dir
 docker run -d --name proxy-gateway --restart=always \
   -p 8080:8080 \
   --mount source=proxy-gateway-data,target=/data \
   --env-file /opt/proxy-gateway/gateway.env \
-  ai-coding-proxy-gateway:v0.86.38
+  ai-coding-proxy-gateway:v0.86.39
 ```
 
 Dockerfile은 Node 24+pnpm frozen frontend builder → Go 1.26.8 embed builder → distroless
@@ -106,7 +106,7 @@ nonroot의 3-stage 구조입니다. React 정적 에셋은 Go 바이너리에 �
 `/opt/proxy-gateway/gateway.env`에 고정합니다.
 
 ```bash
-export GATEWAY_VERSION=v0.86.38
+export GATEWAY_VERSION=v0.86.39
 export UPSTREAM_API_KEY='<실제 upstream key>'
 scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
@@ -129,17 +129,17 @@ jq는 Docker builder 외부에 설치할 필요가 없습니다. 패키징 전�
 
 ```bash
 # 인터넷이 되는 환경에서 산출
-./scripts/release.sh -v v0.86.38 -p linux/amd64
-# 기존 이미지·sha256·README + SBOM-v0.86.38.spdx.json +
-# THIRD_PARTY_LICENSES-v0.86.38.md 생성
+./scripts/release.sh -v v0.86.39 -p linux/amd64
+# 기존 이미지·sha256·README + SBOM-v0.86.39.spdx.json +
+# THIRD_PARTY_LICENSES-v0.86.39.md 생성
 ```
 
 폐쇄망 서버에서:
 
 ```bash
-sha256sum -c ai-coding-proxy-gateway-v0.86.38.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.38.tar.gz | docker load
-docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.86.38
+sha256sum -c ai-coding-proxy-gateway-v0.86.39.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.39.tar.gz | docker load
+docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.86.39
 ```
 
 ---
@@ -554,11 +554,11 @@ v38 출고 전 동결 소스의 전체 UI 단위 2,998개/211파일·Node 45개 
 정확한 범위는 [인수 검증표](APP_UI_ACCEPTANCE.md)의 v38 절을 참고하세요. 미커밋 후보 검사는
 운영 배포 승인이 아니며 `/app` 기본 OFF·Preview와 기존 관리자를 유지합니다.
 
-### 5.14 기존 라우팅 규칙 수정 (`v0.86.39` 개발 후보)
+### 5.14 기존 라우팅 규칙 수정 (`v0.86.39` 출고)
 
-이 절은 미커밋·미PR·미릴리즈 후보의 사용 흐름입니다. v38 배포본에 이미 들어 있는 기능으로
-해석하지 마세요. 로컬 검사를 마쳤으며 원격/출고 게이트는 진행 중입니다. 아래 서버 부분 UPDATE 보장은 v39 서버
-구현 기준입니다. 구버전 서버에서는 사전 GET만으로 같은 동시성 보장을 만들 수 없습니다.
+v39는 PR #66·메인 CI 확인 후 메인 `c1530695`에서 게시되었고 공개 파일 7종을 실제
+다운로드해 검증했습니다. 아래 서버 부분 UPDATE 보장은 v39 서버 구현 기준입니다.
+구버전 서버에서는 사전 GET만으로 같은 동시성 보장을 만들 수 없습니다.
 
 1. `/app/routing/rules`에서 현재 목록을 조회한 뒤 해당 규칙의 `수정`을 엽니다. 현재
    `routing:read`·`routing:write`와 기능 쓰기 허용이 모두 필요합니다. 읽기 전용에서는 저장하지 않습니다.
@@ -587,7 +587,31 @@ PATCH가 없는 행을 새로 만들지는 않지만 다른 작성자가 같은 
 best-effort이고 설정된 후속 모의 검사·기록이 발생할 수 있어 원자적 감사·자동 롤백·즉시 전체 반영을 보장하지 않습니다.
 기존 생성·삭제·사용 전환과 `/admin`은 유지합니다. 전체 UI 단위 3,075개/214파일·합성 브라우저
 816개/36파일과 실제 로컬 인증·보고서 보호·후보 컨테이너 검사는 통과했습니다. 양 DB PATCH,
-Go 일반·레이스/vet와 남은 원격/출고 게이트·운영 인수는 [인수 검증표](APP_UI_ACCEPTANCE.md)의 v39 절에서 구분합니다.
+Go 일반·레이스/vet와 완료된 원격/출고 검증·잔여 운영 인수는 [인수 검증표](APP_UI_ACCEPTANCE.md)의 v39 절에서 구분합니다.
+
+### 5.15 라우팅 규칙 삭제 확인 (`v0.86.40` 개발 후보)
+
+아래는 아직 출고 전인 후보 흐름이며 v39 배포본의 동작 설명이 아닙니다.
+
+1. 최신 목록에서 `삭제`를 열고 원본 ID·대상·사용 상태·조건·우선순위를 확인합니다.
+   보호된 원문은 화면에 표시하지 않습니다. 최초 원본 조회가 끝나야 확인 문구를 입력할 수 있습니다.
+2. `삭제 확인 문구`에 정확히 `규칙 삭제`를 입력합니다. 사용 중이면
+   `사용 중인 규칙의 라우팅 영향을 확인했습니다`도 선택합니다. 실제 전체 영향 분석 결과는 아닙니다.
+3. `규칙 삭제` 직전 현재 원본을 다시 조회합니다. 권한·목록 기준·원본이 바뀌면 작업을 멈추고
+   최신 목록에서 다시 검토합니다. 서버도 기존 `routing:write` 권한을 검사합니다.
+4. `라우팅 규칙 삭제 요청을 확인했습니다.`는 응답의 ID와 상태를 확인했다는 뜻입니다.
+   서버는 없는 ID에도 같은 성공 응답을 하므로 직전 존재나 실제 한 행 삭제를 증명하지 않습니다.
+5. `삭제 여부를 확인하지 못했습니다.`이면 현재 목록·감사를 확인하세요. `목록 다시 조회`는
+   조회만 하며 같은 창의 삭제 잠금을 풀지 않습니다. 확인된 요청 뒤 조회만 실패한 경우도
+   별도로 안내합니다. 새 창에서의 재시도 역시 이전 요청의 늦은 완료를 막지 못합니다.
+
+사전 조회와 삭제는 원자적이지 않습니다. 같은 ID의 외부 재생성·동시 변경과 서버가 처리한
+요청의 취소를 보장하지 않습니다. 기존 인증 갱신 재전송·캐시 TTL·best-effort 감사와
+설정된 후속 모의 검사를 유지하며 자동 복구·전체 영향 검증·Stable 승격은 별도입니다.
+
+동결 후보의 전체 UI 단위 3,122개·합성 브라우저 830개와 별도 양 DB/Go·실제 인증·후보
+컨테이너 검사는 통과했습니다. 합성 삭제 화면 검사를 실제 Go 삭제 업무 E2E로 합치지 않으며,
+원격/출고 게이트와 운영 인수는 [인수 검증표](APP_UI_ACCEPTANCE.md)의 v40 절에서 구분합니다.
 
 ## 6. 백업 / 복구
 
@@ -605,7 +629,7 @@ SQLite 일관성을 위해 먼저 gateway를 중지합니다. stopped gateway co
 ```bash
 docker compose --env-file /opt/proxy-gateway/gateway.env stop gateway
 scripts/backup-volume.sh backup \
-  --image ai-coding-proxy-gateway:v0.86.38 \
+  --image ai-coding-proxy-gateway:v0.86.39 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups
@@ -635,7 +659,7 @@ SQLite header/가능한 경우 `PRAGMA quick_check`, 내부 파일 checksum, vol
 docker compose --env-file /opt/proxy-gateway/gateway.env down
 
 scripts/backup-volume.sh restore \
-  --image ai-coding-proxy-gateway:v0.86.38 \
+  --image ai-coding-proxy-gateway:v0.86.39 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups \
@@ -763,7 +787,7 @@ root로 실행한 다른 프로세스가 볼륨을 채운 경우, Kubernetes PVC
 
    ```bash
    docker run --rm --mount source=proxy-gateway-data,target=/data \
-     ai-coding-proxy-gateway:v0.86.38 check-data-dir
+     ai-coding-proxy-gateway:v0.86.39 check-data-dir
    ```
 
    사용 불가한 경로마다 소유자·권한과 원인을 출력하고 종료 코드 1을 반환합니다.
@@ -772,7 +796,7 @@ root로 실행한 다른 프로세스가 볼륨을 채운 경우, Kubernetes PVC
 
    ```bash
    docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
-     ai-coding-proxy-gateway:v0.86.38 repair-data-dir
+     ai-coding-proxy-gateway:v0.86.39 repair-data-dir
    ```
 
    변경한 항목을 모두 출력하며, 다시 실행해도 변경이 없습니다. 심볼릭 링크는 재소유만 하고 따라가지 않습니다.
@@ -782,7 +806,7 @@ root로 실행한 다른 프로세스가 볼륨을 채운 경우, Kubernetes PVC
 
    ```bash
    docker run --rm --mount source=proxy-gateway-data,target=/data \
-     ai-coding-proxy-gateway:v0.86.38 check-data-dir
+     ai-coding-proxy-gateway:v0.86.39 check-data-dir
    docker restart proxy-gateway
    curl -fsS http://<HOST>:8080/ready
    ```
@@ -812,7 +836,7 @@ v0.84.0부터의 동작: 명시적 매핑은 상향·하향 모두 그대로 적
    ```bash
    docker run --rm --mount source=proxy-gateway-data,target=/data \
      --env-file /opt/proxy-gateway/gateway.env \
-     ai-coding-proxy-gateway:v0.86.38 set-user-role --email admin@example.com --role super_admin
+     ai-coding-proxy-gateway:v0.86.39 set-user-role --email admin@example.com --role super_admin
    ```
 
    PostgreSQL이면 같은 env 파일의 `DB_DSN`으로 접속하므로 볼륨 마운트 없이 실행합니다. 변경은 감사 이력에
