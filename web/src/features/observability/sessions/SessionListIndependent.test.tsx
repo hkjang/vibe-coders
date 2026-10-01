@@ -122,10 +122,11 @@ describe("세션 목록 독립 인수 경계", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
     await act(async () => view.history(1));
     const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(view.details()).toHaveLength(2));
     // Controlled list refetch, not a physical activation behind the modal or a real timer tick.
     await act(async () => view.refresh());
     expect(view.lists()).toHaveLength(2);
-    expect(view.details()).toHaveLength(1);
+    expect(view.details()).toHaveLength(2);
     expect(screen.getByRole("dialog")).toBe(dialog);
     expect(days).toHaveValue(90);
     expect(keyword).toHaveValue("Bearer abcdefghijklmnop");

@@ -205,12 +205,14 @@ test("session_id만 여닫거나 이력을 이동하면 미제출 입력과 검�
   await expect(validation).toBeVisible();
   await select(page).click();
   await expect(dialog(page)).toBeVisible();
+  await expect.poll(() => gateway.detailCalls.length).toBe(1);
   await page.keyboard.press("Escape");
   await expect(period(page)).toHaveValue("90");
   await expect(keyword(page)).toHaveValue(draft);
   await expect(validation).toBeVisible();
   await page.goBack();
   await expect(dialog(page)).toBeVisible();
+  await expect.poll(() => gateway.detailCalls.length).toBe(2);
   await page.goForward();
   await expect(dialog(page)).toBeHidden();
   await refresh(page).click();
@@ -218,7 +220,7 @@ test("session_id만 여닫거나 이력을 이동하면 미제출 입력과 검�
   await expect(period(page)).toHaveValue("90");
   await expect(keyword(page)).toHaveValue(draft);
   await expect(validation).toBeVisible();
-  expect(gateway.detailCalls).toHaveLength(1);
+  expect(gateway.detailCalls).toHaveLength(2);
   await submit(page, "7");
   await expect(validation).toBeHidden();
   await expect(period(page)).toHaveValue("7");

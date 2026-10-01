@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AppError } from "@/shared/api/error";
@@ -85,6 +85,7 @@ describe("세션 목록 조회 기준", () => {
     await userEvent.type(screen.getByLabelText("조회 기간(일)"), "90");
     await userEvent.type(screen.getByLabelText("세션 ID · 메시지 검색"), "미제출");
     await act(async () => view.navigate("?session_id=sess-alpha"));
+    await screen.findByRole("region", { name: "수신 기록 집계" });
     expect(screen.getByLabelText("조회 기간(일)")).toHaveValue(90);
     expect(screen.getByLabelText("세션 ID · 메시지 검색")).toHaveValue("미제출");
     await act(async () => view.navigate("?days=30&q=alpha"));
@@ -207,9 +208,11 @@ describe("세션 목록 조회 기준", () => {
     renderSessions();
     await userEvent.click(await ready());
     const dialog = await screen.findByRole("dialog");
-    expect(
-      within(dialog).getByText("목록 기간과 별개인 세션의 제한된 최근 요청을 보여줍니다."),
-    ).toBeVisible();
+    const descriptionId = dialog.getAttribute("aria-describedby");
+    if (!descriptionId) throw new Error("Expected Sheet description binding");
+    const description = document.getElementById(descriptionId);
+    expect(description).toBeVisible();
+    expect(description).toHaveTextContent("목록 기간과 별개인 세션의 제한된 최근 요청을 보여줍니다.");
     expect(dialog).not.toHaveTextContent("프롬프트 원문은 포함되지 않습니다");
   });
   it.each(["scope", "owner", "permission", "epoch"] as const)(
