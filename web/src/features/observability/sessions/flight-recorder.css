@@ -1,0 +1,25 @@
+.flight-recorder-panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.flight-recorder-panel > *,
+.flight-recorder-panel .obs-timeline-body {
+  min-width: 0;
+}
+
+.flight-recorder-panel .obs-timeline-item {
+  grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr);
+}
+
+.flight-recorder-panel .obs-timeline-badges .badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 40rem) {
+  .flight-recorder-panel .obs-timeline-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

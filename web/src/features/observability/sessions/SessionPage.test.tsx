@@ -163,7 +163,7 @@ describe("SessionPage", () => {
     expect(await screen.findByText("판정: 위험")).toBeVisible();
     expect(screen.getByText("1개 요청에서 시크릿이 탐지/마스킹됨")).toBeVisible();
     expect(screen.getByText("정책 차단 1")).toBeVisible();
-    expect(screen.getByText("코드 위험 high")).toBeVisible();
+    expect(screen.getByText("코드 위험 높음")).toBeVisible();
   });
 
   it("keeps a credential-shaped search out of the URL", async () => {
