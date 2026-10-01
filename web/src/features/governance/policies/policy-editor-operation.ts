@@ -30,12 +30,14 @@ export function usePolicyEditorOperation({
 }) {
   const client = useQueryClient();
   const [saved, setSaved] = useState(false);
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [error, setError] = useState<{ cause: unknown; sent: boolean }>();
   const [phase, setPhase] = useState<"idle" | "checking" | "saving" | "refreshing">("idle");
   const flight = useRef<AbortController | undefined>(undefined);
   const mounted = useRef(false);
   const completed = useRef(false);
+  const needsReconciliation = useRef(false);
   const guard = useDraftGuard({ dirty: dirty && !saved, onDiscard: close });
   useLayoutEffect(() => {
     mounted.current = true;
@@ -80,7 +82,14 @@ export function usePolicyEditorOperation({
       );
   };
   const save = (review: PolicyReview) => {
-    if (!mounted.current || flight.current || completed.current || !isReview(review)) return;
+    if (
+      !mounted.current ||
+      flight.current ||
+      completed.current ||
+      needsReconciliation.current ||
+      !isReview(review)
+    )
+      return;
     try {
       access.assertRead();
       access.write.assertCurrent();
@@ -125,6 +134,8 @@ export function usePolicyEditorOperation({
           // No await between current admission and the existing central API call.
           setPhase("saving");
           sent = true;
+          needsReconciliation.current = true;
+          setUnconfirmed(true);
           const result = await apiClient.request(endpoints.domains.governance.policies.save, {
             body: review.body,
             signal: controller.signal,
@@ -134,6 +145,8 @@ export function usePolicyEditorOperation({
           if (!acknowledged(result.policy, review.body))
             throw new AppError("저장 응답을 확인할 수 없습니다.", { kind: "contract" });
           completed.current = true;
+          needsReconciliation.current = false;
+          setUnconfirmed(false);
           setSaved(true);
           setPhase("refreshing");
           await client.invalidateQueries({ queryKey: editorQueryKey, refetchType: "none" });
@@ -183,6 +196,11 @@ export function usePolicyEditorOperation({
           const fresh = await get(controller);
           current(controller);
           client.setQueryData(editorQueryKey, fresh);
+          if (needsReconciliation.current) {
+            assertBaseline(fresh.policies);
+            needsReconciliation.current = false;
+            setUnconfirmed(false);
+          }
           setRefreshFailed(false);
         },
         (cause) => {
@@ -204,6 +222,7 @@ export function usePolicyEditorOperation({
   };
   return {
     saved,
+    unconfirmed,
     error,
     refreshFailed,
     phase,

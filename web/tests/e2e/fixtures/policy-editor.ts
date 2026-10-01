@@ -251,6 +251,9 @@ async function installGateway(context: BrowserContext, origin: string) {
     writable: (allowed: boolean) => {
       user = { ...user, scopes: account.scopes.filter((scope) => allowed || scope !== "admin:write") };
     },
+    readable: (allowed: boolean) => {
+      user = { ...user, scopes: account.scopes.filter((scope) => allowed || scope !== "security:read") };
+    },
     readonly: (mode: "flag" | "status" | false) => {
       readOnly = mode === "flag";
       status = mode === "status" ? "preview_read_only" : "preview";

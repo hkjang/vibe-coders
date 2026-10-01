@@ -207,6 +207,85 @@ test("내용이 빠진 성공 응답은 저장 완료나 자동 재전송으로 
   await expect(panel(page).getByText("저장 여부를 확인할 수 없습니다.", { exact: true })).toBeVisible();
   await expect(panel(page).getByText(success, { exact: true })).toBeHidden();
   expect(gateway.saves).toEqual([renamedBody]);
+  await expect(save(page)).toBeDisabled();
+  await panel(page).getByRole("button", { name: "목록 다시 조회", exact: true }).click();
+  await expect(save(page)).toBeDisabled();
+  await save(page).evaluate((node) => (node as HTMLButtonElement).click());
+  expect(gateway.saves).toEqual([renamedBody]);
+});
+
+test("미확정 저장은 명시적인 원본 재조회 전 재클릭·다시 검토를 잠근다", async ({ page, gateway }) => {
+  gateway.reply(1, { status: 201, body: {}, commit: false });
+  await login(page);
+  await rename(page);
+  await save(page).click();
+  await expect(panel(page).getByText("저장 여부를 확인할 수 없습니다.", { exact: true })).toBeVisible();
+  await expect(save(page)).toBeDisabled();
+  const before = gateway.reads();
+  await save(page).evaluate((node) => (node as HTMLButtonElement).click());
+  await panel(page).getByRole("button", { name: "다시 편집", exact: true }).click();
+  await review(page).click();
+  await expect(save(page)).toBeDisabled();
+  await save(page).evaluate((node) => (node as HTMLButtonElement).click());
+  expect(gateway.reads()).toBe(before);
+  expect(gateway.saves).toEqual([renamedBody]);
+  await panel(page).getByRole("button", { name: "목록 다시 조회", exact: true }).click();
+  await expect(save(page)).toBeEnabled();
+  expect(gateway.saves).toEqual([renamedBody]);
+  await save(page).click();
+  await expect(panel(page).getByText(success, { exact: true })).toBeVisible();
+  expect(gateway.saves).toEqual([renamedBody, renamedBody]);
+});
+
+test("미확정 저장 뒤 재조회 실패는 잠금을 풀지 않고 성공한 동일 원본 조회만 재시도를 허용한다", async ({
+  page,
+  gateway,
+}) => {
+  gateway.reply(1, { status: 503, body: { error: { message: "public save unavailable" } }, commit: false });
+  await login(page);
+  await rename(page);
+  await save(page).click();
+  await expect(panel(page).getByText("저장 여부를 확인할 수 없습니다.", { exact: true })).toBeVisible();
+  await expect(save(page)).toBeDisabled();
+  gateway.failFollowupReads(true);
+  await panel(page).getByRole("button", { name: "목록 다시 조회", exact: true }).click();
+  await expect(panel(page).getByRole("button", { name: "취소", exact: true })).toBeEnabled();
+  await expect(save(page)).toBeDisabled();
+  await save(page).evaluate((node) => (node as HTMLButtonElement).click());
+  expect(gateway.saves).toEqual([renamedBody]);
+  gateway.failFollowupReads(false);
+  await panel(page).getByRole("button", { name: "목록 다시 조회", exact: true }).click();
+  await expect(save(page)).toBeEnabled();
+  expect(gateway.saves).toEqual([renamedBody]);
+});
+
+test("같은 계정의 조회 권한 회수 중 미확정 응답도 복구 후 잠금·안내를 유지한다", async ({
+  page,
+  gateway,
+}) => {
+  gateway.holdSave(1);
+  gateway.reply(1, { status: 201, body: {}, commit: false });
+  await login(page);
+  await rename(page);
+  await save(page).click();
+  await expect.poll(() => gateway.saves.length).toBe(1);
+  gateway.readable(false);
+  await runtime(page);
+  await expect(panel(page).getByText("현재 정책을 저장할 수 없습니다.", { exact: true })).toBeVisible();
+  gateway.releaseSave(1);
+  await expect.poll(() => gateway.finished).toEqual([1]);
+  await expect(panel(page).getByRole("button", { name: "취소", exact: true })).toBeEnabled();
+  gateway.readable(true);
+  await runtime(page);
+  await expect(panel(page).getByText("저장 여부를 확인할 수 없습니다.", { exact: true })).toBeVisible();
+  await panel(page).getByRole("button", { name: "다시 편집", exact: true }).click();
+  await review(page).click();
+  await expect(save(page)).toBeDisabled();
+  await save(page).evaluate((node) => (node as HTMLButtonElement).click());
+  expect(gateway.saves).toEqual([renamedBody]);
+  await panel(page).getByRole("button", { name: "목록 다시 조회", exact: true }).click();
+  await expect(save(page)).toBeEnabled();
+  expect(gateway.saves).toEqual([renamedBody]);
 });
 
 test("확정 저장 뒤 목록 실패는 저장 실패로 바꾸거나 다시 저장하지 않는다", async ({ page, gateway }) => {

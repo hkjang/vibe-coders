@@ -18,6 +18,7 @@ const runtime = vi.hoisted(() => ({
   principal: "public_a",
   scopes: ["security:read", "admin:read", "admin:write"],
   prefixes: ["vc_sk_", "vc_sa_"],
+  serverAvailable: false,
 }));
 const captured = vi.hoisted(() => ({
   save: undefined as ButtonModule.ButtonProps["onClick"],
@@ -35,6 +36,7 @@ vi.mock("@/app/auth/AuthProvider", async () => {
           feature.featureId === "governance.policies"
             ? {
                 ...feature,
+                ...(runtime.serverAvailable ? { serverAvailable: true } : {}),
                 readOnly: runtime.mode === "read_only",
                 status: runtime.mode === "preview_read_only" ? "preview_read_only" : "preview",
               }
@@ -103,6 +105,7 @@ beforeEach(() => {
     principal: "public_a",
     scopes: ["security:read", "admin:read", "admin:write"],
     prefixes: ["vc_sk_", "vc_sa_"],
+    serverAvailable: false,
   });
   captured.save = undefined;
   captured.open = undefined;

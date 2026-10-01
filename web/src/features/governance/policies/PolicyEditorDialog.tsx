@@ -117,7 +117,9 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
             review ? (
               <Button
                 variant="primary"
-                aria-disabled={operation.pending || !access.write.allowed || !validReview}
+                aria-disabled={
+                  operation.pending || operation.unconfirmed || !access.write.allowed || !validReview
+                }
                 aria-busy={operation.pending}
                 onClick={() => operation.save(review)}
               >
@@ -160,23 +162,27 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
             실행 권한 또는 표시 보호 기준이 바뀌었습니다. 다시 편집으로 돌아가 검토하세요.
           </InlineNotice>
         ) : null}
+        {operation.unconfirmed && operation.phase !== "saving" ? (
+          <InlineNotice tone="warning" title="저장 여부를 확인할 수 없습니다.">
+            저장되었을 수 있어 다시 저장을 잠갔습니다. 목록 다시 조회로 원본이 그대로인지 확인한 뒤에만 다시
+            저장할 수 있습니다. 원본이 바뀌었다면 닫은 뒤 최신 목록에서 다시 편집하세요. 일반 오류에 자동
+            재시도를 추가하지 않으며, 기존 인증 갱신 동작은 유지합니다.
+          </InlineNotice>
+        ) : null}
         {operation.error ? (
           <InlineNotice
             tone="warning"
             title={
               operation.saved
                 ? "저장은 완료했지만 목록을 갱신하지 못했습니다."
-                : operation.error.sent
-                  ? "저장 여부를 확인할 수 없습니다."
+                : operation.unconfirmed
+                  ? undefined
                   : "저장 전 원본을 확인하지 못했습니다."
             }
           >
             {conflict
               ? "원본이 바뀌었거나 현재 목록이 확정되지 않았습니다. 최신 목록을 확인하고 닫은 뒤 다시 편집하세요."
               : safeAppErrorMessage(cause, "잠시 후 수동으로 다시 확인하세요.")}
-            {operation.error.sent
-              ? " 저장되었을 수 있습니다. 목록을 확인하기 전 다시 저장하지 마세요. 일반 오류에 자동 재시도를 추가하지 않으며, 기존 인증 갱신 동작은 유지합니다."
-              : null}
             {requestId ? <p>요청 ID: {editorText(requestId, access.prefixes)}</p> : null}
           </InlineNotice>
         ) : null}
