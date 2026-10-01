@@ -37,6 +37,7 @@ export function ProviderFormFields({
       </FormField>
       <FormField
         label="API 키"
+        error={form.formState.errors.api_key?.message}
         description={
           row?.provider.api_key_configured
             ? "저장된 키가 있습니다. 비워 두면 그대로 유지합니다."

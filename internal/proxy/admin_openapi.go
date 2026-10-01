@@ -164,6 +164,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/keys/health", []string{"get"}, "admin", "API key hygiene alerts (expiring/idle)", false},
 	{"/admin/providers", []string{"get", "post"}, "admin", "List / upsert providers", false},
 	{"/admin/provider-impact", []string{"get"}, "admin", "Inspect bounded provider configuration references without upstream calls", false},
+	{"/admin/provider-connection-test", []string{"post"}, "admin", "Test a new or edited provider draft against its model catalogue without saving", false},
 	{"/admin/providers/{name}", []string{"delete"}, "admin", "Delete a provider", false},
 	{"/admin/providers/slo", []string{"get", "post", "delete"}, "admin", "List, upsert, or delete provider SLOs", false},
 	{"/admin/models", []string{"get"}, "models", "Normalized admin model inventory with provider freshness and partial failures", false},
@@ -771,6 +772,13 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		for _, status := range []string{"400", "401", "404", "503"} {
 			responses[status] = map[string]any{"description": "Invalid reference, denied authentication, missing provider or unavailable bounded provider lookup", "content": jsonContent(schemaRef("AppError"))}
 		}
+	case "post /admin/provider-connection-test":
+		op["description"] = "Requires existing admin:write authorization plus current shared-DB app/feature access (not a client header): gateway.providers must be available, writable and preview/stable/deprecated/retired. Performs a non-redirecting GET /v1/models without application-level retries; the existing shared transport may replay idempotent requests after stale-connection failures. Shares the global catalogue concurrency cap, bounds decoded body to 8 MiB and entries to 10000. Fresh explicit credentials only; no saved-provider mutation, inference request or model-cache change. Private/on-premise destinations remain supported under existing administrator/egress controls; this is not a general SSRF isolation boundary. Audit contains only the fixed result DTO and existing hashed administrator identity."
+		op["requestBody"] = requestBody("ProviderConnectionTestRequest")
+		responses["200"] = successResponse("ProviderConnectionTestResponse")
+		for _, status := range []string{"400", "401", "403", "404", "405", "409", "503"} {
+			responses[status] = map[string]any{"description": "Fixed safe AppError: invalid input, gateway authentication, denied feature, missing provider, unsupported method, changed destination/credential or existing new name, unavailable configuration lookup. No raw submitted or upstream values.", "content": jsonContent(schemaRef("AppError"))}
+		}
 	case "get /admin/models":
 		op["parameters"] = []any{
 			map[string]any{
@@ -1007,6 +1015,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range providerImpactOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range providerConnectionOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas

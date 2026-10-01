@@ -26,5 +26,5 @@
     "types": ["vite/client", "vitest/globals"]
   },
   "include": ["src", "tests"],
-  "exclude": ["tests/auth-live"]
+  "exclude": ["tests/auth-live", "tests/provider-connection-live"]
 }

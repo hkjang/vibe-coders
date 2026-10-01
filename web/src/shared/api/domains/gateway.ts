@@ -52,12 +52,15 @@ import type {
   PostAdminPromptLabTestCasesData,
   PostAdminPromptLabTestCasesIdRunData,
   PostAdminProvidersData,
+  PostAdminProviderConnectionTestData,
+  PostAdminProviderConnectionTestResponse,
   PostAdminProvidersSloData,
   PostAdminRoutingBalancerData,
   PostAdminRoutingBreakerResetData,
   PostAdminRoutingPreviewData,
 } from "@/shared/api/generated";
 import { operation, route, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
+import { providerConnectionSchema, type ProviderConnectionBody } from "./provider-connection.schemas";
 import {
   balancerReleaseSchema,
   balancerSchema,
@@ -330,6 +333,10 @@ export const gatewayEndpoints = {
     >()("GET", "/admin/chat-test/multi-run/leaderboard", multiRunLeaderboardSchema, leaderboardQuerySchema),
   },
   providers: {
+    connectionTest: operation<
+      WithBody<PostAdminProviderConnectionTestData, ProviderConnectionBody>,
+      PostAdminProviderConnectionTestResponse
+    >()("POST", "/admin/provider-connection-test", providerConnectionSchema),
     save: operation<WithBody<PostAdminProvidersData, ProviderWriteBody>, unknown>()(
       "POST",
       "/admin/providers",

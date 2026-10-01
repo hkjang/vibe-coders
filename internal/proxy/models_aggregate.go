@@ -277,12 +277,21 @@ func (s *Server) acquireModelsCatalogSlot(ctx context.Context) (func(), error) {
 }
 
 func decodeProviderModels(raw []byte) ([]map[string]any, error) {
+	return decodeProviderModelsWithPolicy(raw, false)
+}
+
+// Existing catalogue callers retain their permissive compatibility contract.
+// A fresh connection probe requires one explicit lowercase data array.
+func decodeProviderModelsWithPolicy(raw []byte, strict bool) ([]map[string]any, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	first, err := decoder.Token()
 	if err != nil {
 		return nil, err
 	}
 	if first == nil {
+		if strict {
+			return nil, errors.New("provider model catalogue must be a JSON object")
+		}
 		if err := requireJSONEOF(decoder); err != nil {
 			return nil, err
 		}
@@ -292,6 +301,7 @@ func decodeProviderModels(raw []byte) ([]map[string]any, error) {
 		return nil, errors.New("provider model catalogue must be a JSON object")
 	}
 	models := make([]map[string]any, 0, 256)
+	seenData := false
 	for decoder.More() {
 		keyToken, err := decoder.Token()
 		if err != nil {
@@ -301,18 +311,25 @@ func decodeProviderModels(raw []byte) ([]map[string]any, error) {
 		if !ok {
 			return nil, errors.New("provider model catalogue contains a non-string object key")
 		}
-		if !strings.EqualFold(key, "data") {
+		if (!strict && !strings.EqualFold(key, "data")) || (strict && key != "data") {
 			var ignored json.RawMessage
 			if err := decoder.Decode(&ignored); err != nil {
 				return nil, err
 			}
 			continue
 		}
+		if strict && seenData {
+			return nil, errors.New("provider model catalogue has duplicate data")
+		}
+		seenData = true
 		value, err := decoder.Token()
 		if err != nil {
 			return nil, err
 		}
 		if value == nil {
+			if strict {
+				return nil, errors.New("provider model catalogue data must be an array")
+			}
 			models = models[:0]
 			continue
 		}
@@ -326,7 +343,12 @@ func decodeProviderModels(raw []byte) ([]map[string]any, error) {
 				return nil, &providerModelsLimitError{kind: "model count", limit: maxModelsPerProvider}
 			}
 			var model map[string]any
-			if err := decoder.Decode(&model); err != nil {
+			if strict {
+				model, err = decodeStrictProviderModel(decoder)
+			} else {
+				err = decoder.Decode(&model)
+			}
+			if err != nil {
 				return nil, err
 			}
 			models = append(models, model)
@@ -341,13 +363,66 @@ func decodeProviderModels(raw []byte) ([]map[string]any, error) {
 	if err := requireJSONEOF(decoder); err != nil {
 		return nil, err
 	}
+	if strict && !seenData {
+		return nil, errors.New("provider model catalogue data is required")
+	}
 	return models, nil
+}
+
+func decodeStrictProviderModel(decoder *json.Decoder) (map[string]any, error) {
+	invalid := errors.New("provider model catalogue entry requires one nonblank string id")
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, invalid
+	}
+	id, seen := "", false
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, invalid
+		}
+		if key == "id" {
+			if seen {
+				return nil, invalid
+			}
+			seen = true
+			value, err := decoder.Token()
+			id, ok = value.(string)
+			if err != nil || !ok || strings.TrimSpace(id) == "" {
+				return nil, invalid
+			}
+		} else {
+			var ignored json.RawMessage
+			if err := decoder.Decode(&ignored); err != nil {
+				return nil, invalid
+			}
+		}
+	}
+	if token, err := decoder.Token(); err != nil || token != json.Delim('}') || !seen {
+		return nil, invalid
+	}
+	// The probe returns only a count. Do not retain arbitrary model metadata.
+	return map[string]any{"id": id}, nil
 }
 
 // readBoundedModelsFallbackBody validates a classic unpinned fallback response before
 // any upstream headers or bytes are committed downstream. The cap applies after gzip
 // decompression, preventing a small compressed catalogue from expanding without bound.
 func readBoundedModelsFallbackBody(resp *http.Response) ([]byte, error) {
+	raw, err := readBoundedModelsResponseBody(resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, errors.New("provider model catalogue returned an unsuccessful status")
+	}
+	if _, err := decodeProviderModels(raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func readBoundedModelsResponseBody(resp *http.Response) ([]byte, error) {
 	var reader io.Reader = resp.Body
 	encoding := strings.TrimSpace(strings.ToLower(resp.Header.Get("Content-Encoding")))
 	if encoding != "" && encoding != "identity" {
@@ -367,12 +442,6 @@ func readBoundedModelsFallbackBody(resp *http.Response) ([]byte, error) {
 	}
 	if len(raw) > maxModelsResponseBytes {
 		return nil, &providerModelsLimitError{kind: "byte size", limit: maxModelsResponseBytes}
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, errors.New("provider model catalogue returned an unsuccessful status")
-	}
-	if _, err := decodeProviderModels(raw); err != nil {
-		return nil, err
 	}
 	return raw, nil
 }
@@ -396,26 +465,16 @@ func requireJSONEOF(decoder *json.Decoder) error {
 // parameters are deliberately absent: aggregate/admin discovery must never fan credentials
 // or vendor-specific options out to multiple providers.
 func (s *Server) fetchProviderModels(ctx context.Context, name, baseURL, apiKey string, timeout time.Duration) ([]map[string]any, error) {
-	requestURL, err := modelsCatalogRequestURL(baseURL, "/v1/models")
-	if err != nil {
-		return nil, err
-	}
-	target, err := s.upstreamURL(baseURL, requestURL)
-	if err != nil {
-		return nil, err
-	}
 	callCtx := ctx
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		callCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	req, err := http.NewRequestWithContext(callCtx, http.MethodGet, target, nil)
+	req, err := s.providerModelsHTTPRequest(callCtx, baseURL, apiKey)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Accept", "application/json")
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -432,6 +491,24 @@ func (s *Server) fetchProviderModels(ctx context.Context, name, baseURL, apiKey 
 		return nil, fmt.Errorf("provider %q returned status %d", name, resp.StatusCode)
 	}
 	return decodeProviderModels(raw)
+}
+
+func (s *Server) providerModelsHTTPRequest(ctx context.Context, baseURL, apiKey string) (*http.Request, error) {
+	requestURL, err := modelsCatalogRequestURL(baseURL, "/v1/models")
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.upstreamURL(baseURL, requestURL)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+	return req, nil
 }
 
 // modelsCatalogRequestURL keeps only a provider's validated fixed query. Caller query

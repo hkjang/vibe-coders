@@ -17,7 +17,9 @@
     "vitest.config.ts",
     "playwright.config.ts",
     "playwright.auth.config.ts",
+    "playwright.provider-connection.config.ts",
     "tests/auth-live",
+    "tests/provider-connection-live",
     "eslint.config.js"
   ]
 }

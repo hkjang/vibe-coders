@@ -57,3 +57,13 @@
   align-items: center;
   gap: var(--space-3);
 }
+.provider-connection-panel,
+.provider-connection-panel dl {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.provider-connection-panel p,
+.provider-connection-scroll-hint {
+  font-size: 0.875rem;
+}
