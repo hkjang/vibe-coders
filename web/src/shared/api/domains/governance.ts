@@ -4,6 +4,7 @@
 import { z } from "zod";
 
 import { costGuardSchema } from "./cost-guard";
+import { policyImportEndpoints } from "./policy-import";
 import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
   DeleteAdminAlertsIdData,
@@ -506,6 +507,7 @@ export interface RemediationApplyBody {
 }
 
 export const governanceEndpoints = {
+  policyImport: policyImportEndpoints,
   killSwitch: {
     get: operation<GetAdminKillSwitchData, unknown>()("GET", "/admin/kill-switch", killSwitchSchema),
     set: operation<WithBody<PostAdminKillSwitchData, KillSwitchBody>, unknown>()(

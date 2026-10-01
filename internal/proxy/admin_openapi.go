@@ -636,6 +636,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("HealthResponse")
 	case "get /admin/app/request-flow":
 		enrichAppRequestFlowOpenAPI(op, responses)
+	case "get /admin/policies/export", "post /admin/policies/import":
+		enrichPolicyImportOpenAPI(route, op, responses)
 	case "get /ready":
 		responses["200"] = successResponse("ReadyResponse")
 		responses["503"] = map[string]any{"description": "Database is not ready", "content": jsonContent(schemaRef("ReadinessFailureResponse"))}
@@ -1024,6 +1026,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range appRequestFlowOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range policyImportOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas

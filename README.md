@@ -56,11 +56,11 @@ go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=dev" ./cmd/gateway
 `bash tests/smoke.sh`를 실행하십시오.
 
 Docker로 독립 실행할 때는 현재 소스에서 이미지를 먼저 빌드합니다. 아래 버전 예시는
-`v0.86.32` 후보 소스를 기준으로 하며, 명령 예시의 갱신이 릴리즈 게시나 Stable 승격을 뜻하지는 않습니다.
+`v0.86.37` 후보 소스를 기준으로 하며, 명령 예시의 갱신이 릴리즈 게시나 Stable 승격을 뜻하지는 않습니다.
 
 ```bash
-docker build --build-arg VERSION=v0.86.32 -t ai-coding-proxy-gateway:v0.86.32 .
-UI_APP_ENABLED=true GATEWAY_VERSION=v0.86.32 ./scripts/init-deployment-env.sh .env
+docker build --build-arg VERSION=v0.86.37 -t ai-coding-proxy-gateway:v0.86.37 .
+UI_APP_ENABLED=true GATEWAY_VERSION=v0.86.37 ./scripts/init-deployment-env.sh .env
 docker compose --env-file .env up -d
 docker compose --env-file .env ps
 curl http://localhost:8080/health
@@ -104,6 +104,7 @@ named volume `proxy-gateway-data`에 유지됩니다. `down -v`는 사용하지 
 - `/app/governance/policies?tab=advisor` 정책 시뮬레이션: 실행한 추천·규칙·분석 기간을 고정해 한글 결과로 보여 주고, 실행 권한(`admin:write`·`security:read`)을 확인할 수 없거나 사용자·역할·팀·기능 소유자·기간·세션/탭 수명이 바뀐 뒤의 늦은 결과와 중복 실행을 제한한다. 원문 표본을 새 결과 상태에 보관하지 않으며 0과 누락, 복원하지 못한 조건, 표본 상한과 과거 비용의 한계를 구분한다. 정책 저장·적용·캐너리 변경과는 별도이며 전체 트래픽 재현이나 안전성 보증은 아니다.
 - 같은 어드바이저의 `초안 생성`: 열린 추천·규칙·분석 기간을 고정해 검토하고 현재 쓰기 권한·읽기 전용·세션을 다시 확인한 뒤 **비활성 정책**을 만든다. 시뮬레이션 성공은 생성 요건이 아니며 활성화는 별도다. 생성 응답이 불명확하면 정책 목록을 먼저 확인하고, 수동 재생성도 중복 초안을 만들 수 있음을 안내한다. 확인된 생성 성공과 후속 목록 조회 실패를 구분한다. 현재 접두사 기반 표시는 원문 규칙의 서버 저장·감사 제거를 뜻하지 않으며, 서버 설정에 따라 후속 모의 검사와 기록이 발생할 수 있다.
 - 정책 목록의 `초안 편집`: 비활성 정책의 이름·설명·우선순위와 복수 규칙을 수정하고, 규칙 추가·명시적 삭제와 한글 전후 비교를 거쳐 저장한다. 보존 가능한 기존 규칙 ID와 미편집 JSON·알 수 없는 중첩 필드는 유지하고, 보호된 값은 화면에 원문을 내보내지 않은 채 유지하거나 빈 입력에서 명시적으로 전체 교체한다. 변경 폐기 확인과 저장 직전 원본 재조회를 제공하지만 동시에 발생한 다른 변경까지 막지는 못한다. 불명확한 저장 응답과 확인된 저장 후 조회 실패를 구분한다. 정책은 비활성으로 유지하며 기존 생성·사용 전환·캐너리·시뮬레이션 동작은 변경하지 않는다. 통합 전 UI 82개·관련 262개·전체 단위 2,677개(195파일), 전용 합성 브라우저 22개·전체 695개 통과 근거와 최종 v0.86.32 검증 대기는 [로드맵](docs/APP_UI_ROADMAP.md)의 해당 후보 절에서 구분한다.
+- 정책 목록의 `정책 가져오기` (`v0.86.37` 후보): 파일 형식 확인 → 현재 정책과 서버 계획의 한글 전후 비교 → 확인 문구와 사용 상태·규칙 제거·보호된 원문 전송 확인 → 명시적 적용을 제공한다. 기존 API에서 전체 입력·규칙 소유권 검증 후 정책과 규칙을 한 DB 트랜잭션으로 반영하며, 규칙 생략/null의 유지와 `[]`의 전체 제거를 구분한다. 동의 후 현재 정책 원문 백업을 내려받을 수 있지만 민감값이 포함될 수 있고, 재적용은 파일에 포함된 정책 ID만 대상으로 한다. 저장 직전 재조회는 동시 변경을 차단하지 않으며 감사는 별도 best-effort 기록이다. 미확정 응답과 확인된 적용 후 조회 실패를 구분한다. 중간 cp3 근거와 cp4/v37 최종 로컬 검사·원격/출고 대기는 [인수 검증표](docs/APP_UI_ACCEPTANCE.md)의 v37 절에 분리하며, 전체 DB 복구·정확히 한 번 실행·Stable 승격을 뜻하지 않는다.
 - Datadog LLM Observability 대응 기능: Trace/Span Explorer, Session Explorer, Prompt Tracking, Patterns, Insights, trend timeseries, human feedback(label/prompt/alignment summary), managed evaluation, external evaluation submit API
 - 사용자 상세 화면에 API 키별 LLM 요청/eval failure/feedback/alignment trend drill-down 제공
 - prompt name/version 비교 API와 UI 모달로 버전별 지연·비용·오류율·평가 실패율 비교 제공
@@ -145,7 +146,7 @@ named volume `proxy-gateway-data`에 유지됩니다. `down -v`는 사용하지 
 - **질문 자산화 + 위험 단계화** (`v0.4.4`): 반복 질문 원클릭 승격(`/admin/text2sql/promote` — report/golden/glossary; 저장 리포트 `/admin/text2sql/reports`). 누적 위험 단계화(감지 < `TEXT2SQL_DAILY_RISK_WARN` ≤ 경고 < `TEXT2SQL_DAILY_RISK_LIMIT` ≤ 차단) — 경고 구간은 주의 문구만 첨부하고 정상 처리
 - **응답 품질 강화** (`v0.4.5`): 검증 통과 응답에 감사 근거 푸터(스키마·버전·권한/용어 지문·EXPLAIN 위험·마스킹 컬럼), 검증 거부 시 수정 방법 안내, 실행 결과 0행 시 복구 제안 자동 첨부
 - **ClickHouse Text2SQL fact 적재** (`v0.4.6`): 일별 rollup에 더해 질의 단위 fact 테이블 적재(`CLICKHOUSE_TEXT2SQL_FACT_TABLE`) — 질문/SQL 원문 제외(마스킹), watermark 증분 + 자동/수동(`/admin/dw/text2sql-fact`)
-- **정책 GitOps** (`v0.4.7`): 거버넌스 정책+룰 portable JSON 내보내기(`GET /admin/policies/export`)·가져오기(`POST /admin/policies/import`, `?dry_run=1`이면 생성/수정 플랜만) — repo 커밋·PR 리뷰·diff·롤백
+- **정책 GitOps** (`v0.4.7`): 거버넌스 정책+룰 portable JSON 내보내기(`GET /admin/policies/export`)·가져오기(`POST /admin/policies/import`, `?dry_run=1`이면 생성/수정 플랜만) — repo 커밋·PR 리뷰·diff·이전 파일 재적용. 파일에 없는 정책 삭제나 전체 DB·감사 복구는 아니며, v0.86.37 후보의 검증·원자적 적용과 복원 한계는 [운영 가이드](docs/OPERATIONS.md#512-정책-파일-검토가져오기와-원문-백업-v08637-후보)를 참고
 - **저장 리포트 스케줄 실행** (`v0.4.8`): 승격된 리포트에 스케줄(`POST /admin/text2sql/reports {id,interval,enabled,deliver_mattermost}`) — 백그라운드 스케줄러가 도래분을 read-only 실행하고 Mattermost로 결과 요약 전달(실행 DB 설정 시)
 - **Text2SQL 관측 메트릭** (`v0.4.9`): `/metrics`에 `proxy_text2sql_requests_total`·`_cache_hits_total`·`_risk_blocked_total`·`_challenge_veto_total`·`_shadow_evals_total` 추가
 - **어드민 UI 통합** (`v0.5.0`): Text2SQL 탭에 저장 리포트(스케줄)·인사이트 마이너(원클릭 리포트 승격)·행동 이상 탐지 섹션 노출 — API 전용 기능을 운영자 화면으로
@@ -1109,24 +1110,24 @@ React 산출물은 Go 바이너리에 embed되므로 운영 컨테이너에 Node
 주입됩니다.
 
 ```powershell
-pwsh -File scripts/release.ps1 -Version v0.86.32
+pwsh -File scripts/release.ps1 -Version v0.86.37
 ```
 
 ```bash
-./scripts/release.sh -v v0.86.32 -p linux/amd64
+./scripts/release.sh -v v0.86.37 -p linux/amd64
 ```
 
 산출물 예시:
 
 ```
 release/
-  ai-coding-proxy-gateway-v0.86.32.tar.gz
-  ai-coding-proxy-gateway-v0.86.32.tar.gz.sha256
-  README-offline-v0.86.32.md
-  SBOM-v0.86.32.spdx.json
-  THIRD_PARTY_LICENSES-v0.86.32.md
-  init-deployment-env-v0.86.32.sh
-  backup-volume-v0.86.32.sh
+  ai-coding-proxy-gateway-v0.86.37.tar.gz
+  ai-coding-proxy-gateway-v0.86.37.tar.gz.sha256
+  README-offline-v0.86.37.md
+  SBOM-v0.86.37.spdx.json
+  THIRD_PARTY_LICENSES-v0.86.37.md
+  init-deployment-env-v0.86.37.sh
+  backup-volume-v0.86.37.sh
 ```
 
 ### 폐쇄망 적재
@@ -1135,30 +1136,30 @@ release/
 2. 체크섬 확인
 
    ```bash
-   sha256sum -c ai-coding-proxy-gateway-v0.86.32.tar.gz.sha256
+   sha256sum -c ai-coding-proxy-gateway-v0.86.37.tar.gz.sha256
    ```
 
 3. 이미지 적재
 
    ```bash
-   gunzip -c ai-coding-proxy-gateway-v0.86.32.tar.gz | docker load
+   gunzip -c ai-coding-proxy-gateway-v0.86.37.tar.gz | docker load
    ```
 
 4. 최초 1회 비밀값 파일과 데이터 볼륨을 만든 뒤 실행
 
    ```bash
-   chmod 0700 init-deployment-env-v0.86.32.sh backup-volume-v0.86.32.sh
-   sudo env GATEWAY_VERSION=v0.86.32 \
-     ./init-deployment-env-v0.86.32.sh /opt/proxy-gateway/gateway.env
+   chmod 0700 init-deployment-env-v0.86.37.sh backup-volume-v0.86.37.sh
+   sudo env GATEWAY_VERSION=v0.86.37 \
+     ./init-deployment-env-v0.86.37.sh /opt/proxy-gateway/gateway.env
    docker volume create proxy-gateway-data >/dev/null
    # 기존 볼륨·바인드 마운트를 재사용할 때 소유권을 nonroot(65532)로 복구합니다. 새 볼륨은 변경 없이 끝납니다.
    docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
-       ai-coding-proxy-gateway:v0.86.32 repair-data-dir
+       ai-coding-proxy-gateway:v0.86.37 repair-data-dir
    docker run -d --name proxy-gateway --restart=always \
        -p 8080:8080 \
        --mount source=proxy-gateway-data,target=/data \
        --env-file /opt/proxy-gateway/gateway.env \
-       ai-coding-proxy-gateway:v0.86.32
+       ai-coding-proxy-gateway:v0.86.37
    ```
 
    초기화 스크립트는 `openssl`과 생성 결과를 검증한 뒤 임시 파일을 원자적으로 설치하며 API Key를 숨김 입력받습니다.
@@ -1168,7 +1169,7 @@ release/
 5. 또는 저장소에서 별도로 검토·전달한 `docker-compose.yml` 과 함께 운영
 
    ```bash
-   GATEWAY_VERSION=v0.86.32 ./init-deployment-env-v0.86.32.sh .env
+   GATEWAY_VERSION=v0.86.37 ./init-deployment-env-v0.86.37.sh .env
    docker compose up -d
    ```
 
@@ -1180,8 +1181,8 @@ release/
 셸이 없으므로 같은 이미지로 한 번만 소유권을 복구합니다. 새 볼륨에서는 아무것도 바꾸지 않으므로 항상 실행해도 됩니다.
 
 ```bash
-docker run --rm --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:v0.86.32 check-data-dir
-docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:v0.86.32 repair-data-dir
+docker run --rm --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:v0.86.37 check-data-dir
+docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:v0.86.37 repair-data-dir
 docker restart proxy-gateway
 ```
 
@@ -1192,5 +1193,5 @@ docker restart proxy-gateway
 같이 다시 검증할 수 있습니다.
 
 ```bash
-bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.86.32 v0.86.32
+bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.86.37 v0.86.37
 ```

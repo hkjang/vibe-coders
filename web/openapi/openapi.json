@@ -2740,6 +2740,344 @@
         ],
         "type": "object"
       },
+      "PolicyExportPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rollout_percent": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rules": {
+            "description": "Always present, including [] so reimport can clear rules added after this export.",
+            "items": {
+              "$ref": "#/components/schemas/PolicyExportRule"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "enabled",
+          "priority",
+          "rollout_percent",
+          "created_at",
+          "updated_at",
+          "rules"
+        ],
+        "type": "object"
+      },
+      "PolicyExportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "policies": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyExportPolicy"
+            },
+            "type": "array"
+          },
+          "version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "count",
+          "policies"
+        ],
+        "type": "object"
+      },
+      "PolicyExportRule": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "conditions": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "policy_id": {
+            "type": "string"
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "policy_id",
+          "name",
+          "enabled",
+          "priority",
+          "conditions",
+          "actions",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "PolicyImportPlanItem": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rules": {
+            "description": "Submitted explicit rule count, not the preserved rule count. Missing/null rules yields 0 in this plan while retaining existing rules.",
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "action",
+          "rules"
+        ],
+        "type": "object"
+      },
+      "PolicyImportPolicy": {
+        "additionalProperties": true,
+        "properties": {
+          "created_at": {
+            "description": "Omitted/null/zero uses server time for a new policy; an existing policy retains its original creation time.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "description": "Omitted/null replaces the description with an empty string.",
+            "nullable": true,
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Omitted/null means false. Import may enable a policy when true; this is not a disabled-draft-only endpoint.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Required nonblank ID. Surrounding whitespace is checked for emptiness but retained; duplicate policy IDs are rejected.",
+            "nullable": false,
+            "type": "string"
+          },
+          "name": {
+            "description": "Required nonblank name; checked for emptiness without trimming the stored value.",
+            "nullable": false,
+            "type": "string"
+          },
+          "priority": {
+            "description": "Omitted/null/0 becomes 100; negative integers are retained. Fractional numbers and numeric strings are rejected by typed decoding.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "rollout_percent": {
+            "description": "Omitted/null, zero, negative or values above 100 become 100. This is normalization, not an input-range rejection.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "rules": {
+            "description": "Omitted/null preserves this policy's rules; [] explicitly removes all its rules. The total number of explicit rules across all policies may not exceed 10000.",
+            "items": {
+              "$ref": "#/components/schemas/PolicyImportRule"
+            },
+            "maxItems": 10000,
+            "nullable": true,
+            "type": "array"
+          },
+          "updated_at": {
+            "description": "Accepted for typed compatibility but replaced by server time.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "PolicyImportRequest": {
+        "additionalProperties": true,
+        "description": "One UTF-8 JSON document, at most 4194304 bytes and 64 nested object/array levels; exact duplicate decoded object keys and trailing content are rejected. policies has 1–1000 items and explicit rules total at most 10000. Canonical lowercase known fields are described here; the existing typed decoder also accepts case-insensitive aliases and ignores unknown fields, including export envelope version/count. No additional string-length cap or CAS field is introduced. This is the typed import contract, not the looser single-policy POST decoder.",
+        "properties": {
+          "policies": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyImportPolicy"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "policies"
+        ],
+        "type": "object",
+        "x-body-max-bytes": 4194304,
+        "x-json-max-depth": 64,
+        "x-total-rules-limit": 10000
+      },
+      "PolicyImportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "plan": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyImportPlanItem"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          },
+          "updated": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dry_run",
+          "created",
+          "updated",
+          "plan"
+        ],
+        "type": "object"
+      },
+      "PolicyImportRule": {
+        "additionalProperties": true,
+        "properties": {
+          "actions": {
+            "additionalProperties": true,
+            "description": "Opaque JSON object; omitted/null becomes {}. Unknown keys and nested values are preserved without the single-policy decoder's key normalization. Finite JSON number tokens are retained locally; numbers outside float64 range are rejected. Ordinary policy/runtime readers and JavaScript clients do not gain arbitrary-precision guarantees.",
+            "nullable": true,
+            "type": "object"
+          },
+          "conditions": {
+            "additionalProperties": true,
+            "description": "Opaque JSON object; omitted/null becomes {}. Unknown keys and nested values are preserved without the single-policy decoder's key normalization. Finite JSON number tokens are retained locally; numbers outside float64 range are rejected. Ordinary policy/runtime readers and JavaScript clients do not gain arbitrary-precision guarantees.",
+            "nullable": true,
+            "type": "object"
+          },
+          "created_at": {
+            "description": "Omitted/null/zero uses server time; an explicit valid timestamp is retained when replacing the rule.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Omitted/null means false.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Required nonblank rule ID, unique across this batch and compatible with final rule ownership. Never auto-generated by typed import.",
+            "nullable": false,
+            "type": "string"
+          },
+          "name": {
+            "description": "Omitted/null becomes empty. Nonempty strings retain their original whitespace.",
+            "nullable": true,
+            "type": "string"
+          },
+          "policy_id": {
+            "description": "Omitted/null/empty is filled with the enclosing policy ID. Any other value must exactly match that ID.",
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "description": "Omitted/null/0 becomes 100; negative integers are retained.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "rollout_percent": {
+            "description": "Legacy typed field accepted but not persisted on rules. Runtime enforcement reads the parent policy's rollout value.",
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "updated_at": {
+            "description": "Accepted but replaced by server time.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
       "PricingResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4956,7 +5294,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.36"
+    "version": "v0.86.37"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -11013,10 +11351,48 @@
     },
     "/admin/policies/export": {
       "get": {
+        "description": "Export raw policy configuration with existing security:read authorization. One LEFT JOIN statement snapshot reads policies and their rules together; every policy includes rules, including an empty array. Local JSON-number decoding preserves stored finite number tokens without JavaScript conversion, but this is not byte-exact file backup or whole-database recovery. Raw names, conditions and actions are not a masked UI projection. Later import has no server CAS or concurrency reservation; reapplying this document does not remove policies absent from the file.",
         "operationId": "get__admin_policies_export",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyExportResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing authentication/scope rejection: invalid_api_key. Legacy readonly credentials allow export GET but not import POST, including dry-run."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Export/query or stored JSON decoding failed: policies_failed. No raw SQL/JSON error is echoed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -11032,10 +11408,100 @@
     },
     "/admin/policies/import": {
       "post": {
+        "description": "Import typed policy configuration with existing admin:write authorization, including dry-run. Validate/normalize the whole batch before any policy write; apply all policy/rule changes in one database transaction and invalidate this store's policy cache once after commit. Caches in other processes retain the existing TTL. This is no server CAS, idempotency token or whole-database restore. Missing or nil/null rules preserve existing rules; explicit [] clears them. Existing rule IDs may move between policies explicitly replacing their rules in this batch, not from a policy preserving its rules. Audit is count-only best-effort after commit and configured follow-up dry-run checks may record additional state; neither is atomic with policy changes. Unknown typed fields are ignored, case-insensitive known-field aliases retain Go decoder compatibility, and duplicate decoded JSON object keys are rejected. Only the exact dry_run=1 value avoids writes.",
         "operationId": "post__admin_policies_import",
+        "parameters": [
+          {
+            "description": "Only exactly \"1\" requests validation/plan without policy writes. Omitted, \"true\", \"0\" and other values apply the batch. Dry-run still requires admin:write.",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "example": "1",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyImportResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Fixed validation codes: invalid_body (UTF-8, JSON, exact duplicate keys, depth, trailing document or typed field error), empty_payload, policy_import_limit, invalid_policy, invalid_policy_rule, duplicate_policy_id, duplicate_rule_id, policy_rule_conflict. No policy writes occur for these validation failures."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing authentication/scope rejection: invalid_api_key. Legacy readonly credentials allow export GET but not import POST, including dry-run."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Import requires POST: method_not_allowed."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "JSON body exceeds 4194304 UTF-8 bytes: policy_import_too_large."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Database import failed: policy_import_failed. Policy/rule writes roll back together on transaction failure; response loss after commit can still leave the client unsure whether application succeeded."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
