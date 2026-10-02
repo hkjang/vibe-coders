@@ -831,7 +831,24 @@ const adminHTML = `<!doctype html>
       refresh: sessionStorage.getItem('authRefresh') || '',
       user: JSON.parse(sessionStorage.getItem('authUser') || 'null'),
     };
+    // A login/logout retires the old session immediately. Refresh only advances
+    // credentials inside that session, even if two access JWT strings are equal.
+    let authEpoch = 0;
+    let authRevision = 0;
+    let authChanging = false;
+    let authRefreshFlight = null;
+    function retireAuth(changing = false) {
+      authEpoch++;
+      authChanging = changing;
+      authRefreshFlight = null;
+      return authEpoch;
+    }
+    function authCurrent(epoch) { return epoch === authEpoch && !authChanging; }
+    function assertAuthCurrent(epoch) {
+      if (!authCurrent(epoch)) throw new Error('인증 세션이 변경되었습니다.');
+    }
     function saveAuth(tokens) {
+      authRevision++;
       authState.access = tokens.access_token || '';
       authState.refresh = tokens.refresh_token || '';
       if (tokens.user) authState.user = tokens.user;
@@ -840,6 +857,7 @@ const adminHTML = `<!doctype html>
       if (authState.user) sessionStorage.setItem('authUser', JSON.stringify(authState.user));
     }
     function clearAuth() {
+      retireAuth();
       authState.access = ''; authState.refresh = ''; authState.user = null;
       sessionStorage.removeItem('authAccess');
       sessionStorage.removeItem('authRefresh');
@@ -887,19 +905,28 @@ const adminHTML = `<!doctype html>
       }
     }
     function showLogin(message) {
+      const epoch = authEpoch;
       renderAuthHeader();
+      const submit = document.getElementById('login-submit');
+      submit.disabled = false; submit.textContent = '로그인';
       const err = document.getElementById('login-error');
       if (message) { err.textContent = message; err.style.display = 'block'; }
       else { err.style.display = 'none'; }
       document.getElementById('login-backdrop').classList.add('open');
-      setTimeout(() => document.getElementById('login-email').focus(), 50);
+      setTimeout(() => {
+        if (authCurrent(epoch) && document.getElementById('login-backdrop').classList.contains('open')) {
+          document.getElementById('login-email').focus();
+        }
+      }, 50);
       maybeShowSSOButton();
     }
     // maybeShowSSOButton adds an "SSO 로그인" button to the login card when Keycloak is on.
     async function maybeShowSSOButton() {
+      const epoch = authEpoch;
       if (document.getElementById('sso-login-btn')) return;
       let st;
       try { st = await (await fetch('/auth/sso/status')).json(); } catch { return; }
+      if (!authCurrent(epoch)) return;
       if (!st || !st.keycloak_enabled) return;
       const form = document.getElementById('login-form');
       if (!form) return;
@@ -919,21 +946,33 @@ const adminHTML = `<!doctype html>
     function hideLogin() {
       document.getElementById('login-backdrop').classList.remove('open');
     }
-    async function tryRefresh() {
-      if (!authState.refresh) return false;
-      try {
-        const res = await fetch('/auth/refresh', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: authState.refresh }),
-        });
-        if (!res.ok) return false;
-        saveAuth(await res.json()); // rotation: 새 access + 새 refresh 저장
-        return true;
-      } catch { return false; }
+    async function tryRefresh(epoch = authEpoch) {
+      if (!authCurrent(epoch) || !authState.refresh) return false;
+      if (authRefreshFlight && authRefreshFlight.epoch === epoch) return authRefreshFlight.promise;
+      const refreshToken = authState.refresh;
+      const flight = { epoch, promise: null };
+      flight.promise = (async () => {
+        try {
+          const res = await fetch('/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+          if (!authCurrent(epoch) || !res.ok) return false;
+          const tokens = await res.json();
+          if (!authCurrent(epoch)) return false;
+          saveAuth(tokens); // rotation: 새 access + 새 refresh 저장
+          return true;
+        } catch { return false; }
+      })().finally(() => {
+        if (authRefreshFlight === flight) authRefreshFlight = null;
+      });
+      authRefreshFlight = flight;
+      return flight.promise;
     }
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const epoch = retireAuth(true);
       const btn = document.getElementById('login-submit');
       const err = document.getElementById('login-error');
       btn.disabled = true; btn.textContent = '로그인 중…'; err.style.display = 'none';
@@ -946,31 +985,43 @@ const adminHTML = `<!doctype html>
             password: document.getElementById('login-password').value,
           }),
         });
+        if (epoch !== authEpoch) return;
         if (!res.ok) {
           err.textContent = res.status === 401 ? '이메일 또는 비밀번호가 올바르지 않습니다.' : '로그인 실패 (' + res.status + ')';
           err.style.display = 'block';
           return;
         }
-        saveAuth(await res.json());
+        const tokens = await res.json();
+        if (epoch !== authEpoch) return;
+        saveAuth(tokens);
+        authChanging = false;
         document.getElementById('login-password').value = '';
         hideLogin();
         location.hash = ''; // let bootAfterAuth route to the role's default home
-        await bootAfterAuth(null);
+        await bootAfterAuth(null, epoch);
       } catch (ex) {
+        if (epoch !== authEpoch) return;
         err.textContent = '로그인 실패: ' + ex.message;
         err.style.display = 'block';
       } finally {
-        btn.disabled = false; btn.textContent = '로그인';
+        if (epoch === authEpoch) {
+          authChanging = false;
+          btn.disabled = false; btn.textContent = '로그인';
+        }
       }
     });
     document.getElementById('auth-logout').addEventListener('click', async () => {
+      const access = authState.access;
+      const refresh = authState.refresh;
+      const epoch = retireAuth(true);
       try {
         await fetch('/auth/logout', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authState.access },
-          body: JSON.stringify({ refresh_token: authState.refresh }),
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + access },
+          body: JSON.stringify({ refresh_token: refresh }),
         });
       } catch {}
+      if (epoch !== authEpoch) return;
       clearAuth();
       renderAuthHeader();
       showLogin();
@@ -979,13 +1030,18 @@ const adminHTML = `<!doctype html>
     // loadNavigation fetches the server-computed accessible menu set and stores it. The
     // SPA renders only these menus and guards routes against allowed_tabs — the same
     // policy the server applies — so a hidden menu can never be reached by URL.
-    async function loadNavigation() {
+    async function loadNavigation(epoch = authEpoch) {
+      if (!authCurrent(epoch)) return false;
       try {
-        authState.nav = await api('/me/navigation');
+        const nav = await api('/me/navigation');
+        if (!authCurrent(epoch)) return false;
+        authState.nav = nav;
       } catch {
+        if (!authCurrent(epoch)) return false;
         authState.nav = null; // fall back to showing everything (legacy/no policy)
       }
       applyNavPermissions();
+      return true;
     }
 
     // applyNavPermissions hides nav anchors whose tab is not in the caller's allowed_tabs.
@@ -1012,10 +1068,11 @@ const adminHTML = `<!doctype html>
     }
 
     // bootAfterAuth wires navigation + default-home routing once the session is known.
-    async function bootAfterAuth(me) {
+    async function bootAfterAuth(me, epoch = authEpoch) {
+      if (!authCurrent(epoch)) return;
       renderAuthHeader();
       if (me) updateMenuMeta(me);
-      await loadNavigation();
+      if (!await loadNavigation(epoch) || !authCurrent(epoch)) return;
       // Default home: send the user to their role-appropriate landing if they arrived at
       // the app root (no explicit deep link).
       const atRoot = !location.hash || location.hash === '#' || location.hash === '#/';
@@ -1030,25 +1087,36 @@ const adminHTML = `<!doctype html>
     // captureSSOFragment consumes the short, browser-bound one-time code left by the
     // Keycloak callback. Access/refresh tokens are returned only in this POST response
     // and never appear in a URL, redirect header, or browser history.
-    async function captureSSOFragment() {
+    async function captureSSOFragment(epoch = authEpoch) {
+      if (!authCurrent(epoch)) return {};
       const hash = location.hash || '';
       const codeM = hash.match(/[#&]kc_code=([^&]+)/);
       const errM = hash.match(/[#&]kc_error=([^&]+)/);
       if (codeM) {
-        const code = decodeURIComponent(codeM[1]);
-        history.replaceState(null, '', location.pathname + location.search);
+        epoch = retireAuth(true);
         try {
+          const code = decodeURIComponent(codeM[1]);
+          history.replaceState(null, '', location.pathname + location.search);
           const res = await fetch('/auth/sso/exchange', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ code })
           });
-          if (!res.ok) return { error: 'SSO 일회용 코드가 만료되었거나 다른 브라우저에서 시작되었습니다.' };
-          saveAuth(await res.json());
+          if (epoch !== authEpoch) return {};
+          if (!res.ok) {
+            authChanging = false;
+            return { epoch, error: 'SSO 일회용 코드가 만료되었거나 다른 브라우저에서 시작되었습니다.' };
+          }
+          const tokens = await res.json();
+          if (epoch !== authEpoch) return {};
+          saveAuth(tokens);
           authState.enabled = true;
-          return { ok: true };
+          authChanging = false;
+          return { epoch, ok: true };
         } catch (_) {
-          return { error: 'SSO 세션 교환에 실패했습니다.' };
+          if (epoch !== authEpoch) return {};
+          authChanging = false;
+          return { epoch, error: 'SSO 세션 교환에 실패했습니다.' };
         }
       }
       if (errM) {
@@ -1059,30 +1127,37 @@ const adminHTML = `<!doctype html>
     }
 
     async function initAuth() {
-      const sso = await captureSSOFragment();
+      let epoch = authEpoch;
+      const sso = await captureSSOFragment(epoch);
+      if (sso.epoch !== undefined) epoch = sso.epoch;
+      if (!authCurrent(epoch)) return;
       if (sso.error) { authState.enabled = true; renderAuthHeader(); showLogin('SSO 로그인 실패: ' + sso.error); return; }
       try {
         const h = authState.access ? { Authorization: 'Bearer ' + authState.access } : {};
         const res = await fetch('/auth/me', { headers: h });
+        if (!authCurrent(epoch)) return;
         if (res.ok) {
           const me = await res.json();
+          if (!authCurrent(epoch)) return;
           authState.enabled = !!me.auth_enabled;
           if (me.user) { authState.user = me.user; sessionStorage.setItem('authUser', JSON.stringify(me.user)); }
-          await bootAfterAuth(me);
+          await bootAfterAuth(me, epoch);
           return;
         }
         if (res.status === 401) { // 인증 모드인데 access 만료/없음 → 조용히 refresh 시도
           authState.enabled = true;
-          if (await tryRefresh()) { await bootAfterAuth(null); return; }
+          const refreshed = await tryRefresh(epoch);
+          if (!authCurrent(epoch)) return;
+          if (refreshed) { await bootAfterAuth(null, epoch); return; }
           clearAuth();
           showLogin();
           return;
         }
       } catch {}
+      if (!authCurrent(epoch)) return;
       // /auth/me 자체가 실패해도 화면은 띄움 (레거시 모드 가정)
       renderAuthHeader();
-      await loadNavigation();
-      route();
+      if (await loadNavigation(epoch) && authCurrent(epoch)) route();
     }
 
     // ---------- modal ----------
@@ -1387,18 +1462,26 @@ const adminHTML = `<!doctype html>
     // pattern conflicts, chat test) and would otherwise announce a save that never
     // happened.
     async function api(path, options = {}) {
+      const epoch = authEpoch;
+      const revision = authRevision;
+      assertAuthCurrent(epoch);
       const successMessage = options.success;
       const doFetch = () => {
+        assertAuthCurrent(epoch);
         const requestHeaders = headers();
         if (options.body) requestHeaders['Content-Type'] = 'application/json';
         const { success, ...init } = options;
         return fetch(path, { ...init, headers: requestHeaders });
       };
       let res = await doFetch();
+      assertAuthCurrent(epoch);
       // JWT 모드: access 만료 시 refresh 회전 후 1회 재시도, 실패하면 재로그인 유도
       if (res.status === 401 && authState.enabled) {
-        if (await tryRefresh()) {
+        const refreshed = (authRevision !== revision && !!authState.access) || await tryRefresh(epoch);
+        assertAuthCurrent(epoch);
+        if (refreshed) {
           res = await doFetch();
+          assertAuthCurrent(epoch);
         } else {
           clearAuth();
           showLogin('세션이 만료되었습니다. 다시 로그인해주세요.');
@@ -1407,11 +1490,13 @@ const adminHTML = `<!doctype html>
       }
       if (!res.ok) {
         const text = await res.text();
+        assertAuthCurrent(epoch);
         throw new Error(text || res.statusText);
       }
+      const data = res.status === 204 ? null : await res.json();
+      assertAuthCurrent(epoch);
       if (successMessage) toast(successMessage, 'ok');
-      if (res.status === 204) return null;
-      return res.json();
+      return data;
     }
 
     // ---------- formatting ----------

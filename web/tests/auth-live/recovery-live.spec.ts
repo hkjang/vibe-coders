@@ -1,5 +1,6 @@
-import { expect, type Page, type Route } from "@playwright/test";
+import { expect, type Page, type Request, type Response, type Route } from "@playwright/test";
 
+import { waitForAccessRejection } from "./expiry-sync";
 import { admin, login, providerPath, required, test } from "./live-fixture";
 
 const chunkPath = required("VIBE_AUTH_PROVIDER_CHUNK");
@@ -160,6 +161,20 @@ test("AUTH-LIVE-011 실제 청크 실패의 키보드 복구와 기존 관리자
   // A separate fresh document has its own empty sessionStorage and module map.
   // The Legacy console does not consume React's credential storage keys.
   const legacy = await context.newPage();
+  let refreshAttempts = 0;
+  let successfulRefreshes = 0;
+  let unauthorizedSettingsReads = 0;
+  const collectRequest = (request: Request): void => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/auth/refresh")
+      refreshAttempts += 1;
+  };
+  const collectResponse = (response: Response): void => {
+    const path = new URL(response.url()).pathname;
+    if (response.request().method() === "POST" && path === "/auth/refresh" && response.status() === 200)
+      successfulRefreshes += 1;
+    if (response.request().method() === "GET" && path.startsWith("/admin/") && response.status() === 401)
+      unauthorizedSettingsReads += 1;
+  };
   try {
     const removeLegacyFailure = await enterChunkFailure(legacy);
     expect(await legacy.evaluate(() => !sessionStorage.getItem("authAccess"))).toBe(true);
@@ -179,6 +194,74 @@ test("AUTH-LIVE-011 실제 청크 실패의 키보드 복구와 기존 관리자
     expect((await loginResponse.finished()) === null).toBe(true);
     await expect(legacy.locator("#login-backdrop")).toBeHidden();
     await expect(legacy.locator("#auth-user")).toBeVisible();
+    // Confirm real expiry before the Legacy settings request burst. Keep both
+    // credentials in browser memory and leave the current login state unchanged.
+    const expirySnapshot = await legacy.evaluateHandle(() => ({
+      access: sessionStorage.getItem("authAccess") ?? "",
+      refresh: sessionStorage.getItem("authRefresh") ?? "",
+    }));
+    try {
+      const ttl = Number(required("VIBE_AUTH_ACCESS_TTL_SECONDS"));
+      expect(ttl).toBe(8);
+      await waitForAccessRejection(
+        (remainingMs) =>
+          legacy.evaluate(
+            async ({ snapshot, lifetime, timeout }) => {
+              let expiry = 0;
+              let validClaims = false;
+              try {
+                const segment = snapshot.access.split(".")[1] ?? "";
+                const claims: unknown = JSON.parse(atob(segment.replaceAll("-", "+").replaceAll("_", "/")));
+                if (typeof claims === "object" && claims !== null && "exp" in claims && "iat" in claims) {
+                  const exp = claims.exp;
+                  const iat = claims.iat;
+                  validClaims =
+                    typeof exp === "number" &&
+                    typeof iat === "number" &&
+                    Number.isSafeInteger(exp) &&
+                    Number.isSafeInteger(iat) &&
+                    iat > 0 &&
+                    exp - iat === lifetime &&
+                    snapshot.refresh.length > 0 &&
+                    snapshot.access === sessionStorage.getItem("authAccess") &&
+                    snapshot.refresh === sessionStorage.getItem("authRefresh");
+                  if (validClaims) expiry = exp as number;
+                }
+              } catch {
+                // No token, claims, exception or response text crosses this boundary.
+              }
+              if (!validClaims)
+                return { status: 0, validClaims: false, validServerDate: false, expiredAtServer: false };
+              const response = await fetch("/auth/me", {
+                headers: { Authorization: `Bearer ${snapshot.access}` },
+                cache: "no-store",
+                signal: AbortSignal.timeout(timeout),
+              });
+              const serverTime = Date.parse(response.headers.get("date") ?? "");
+              return {
+                status: response.status,
+                validClaims: true,
+                validServerDate: Number.isFinite(serverTime),
+                expiredAtServer: Number.isFinite(serverTime) && serverTime >= expiry * 1_000,
+              };
+            },
+            { snapshot: expirySnapshot, lifetime: ttl, timeout: remainingMs },
+          ),
+        { ttlSeconds: ttl },
+      );
+      expect(
+        await legacy.evaluate(
+          (snapshot) =>
+            snapshot.access === sessionStorage.getItem("authAccess") &&
+            snapshot.refresh === sessionStorage.getItem("authRefresh"),
+          expirySnapshot,
+        ),
+      ).toBe(true);
+    } finally {
+      await expirySnapshot.dispose();
+    }
+    legacy.on("request", collectRequest);
+    legacy.on("response", collectResponse);
     const providersRead = legacy.waitForResponse(
       (response) =>
         response.request().method() === "GET" &&
@@ -193,8 +276,38 @@ test("AUTH-LIVE-011 실제 청크 실패의 키보드 복구와 기존 관리자
     const list = legacy.locator("#settings-providers");
     await expect(list).toBeVisible();
     await expect(list.getByRole("cell", { name: "test", exact: true })).toBeVisible();
+    // These are multiple rejected reads from one settings request burst, not a
+    // claim that response events are simultaneous or that the server retried.
+    expect(unauthorizedSettingsReads).toBeGreaterThanOrEqual(2);
+    expect(refreshAttempts).toBe(1);
+    expect(successfulRefreshes).toBe(1);
+    const remainsAdmin = await legacy.evaluate(async () => {
+      const access = sessionStorage.getItem("authAccess") ?? "";
+      const refresh = sessionStorage.getItem("authRefresh") ?? "";
+      if (!access || !refresh) return false;
+      try {
+        const response = await fetch("/auth/me", {
+          headers: { Authorization: `Bearer ${access}` },
+          cache: "no-store",
+        });
+        const body: { auth_enabled?: boolean; user?: { role?: string } } = await response.json();
+        return (
+          response.status === 200 &&
+          body.auth_enabled === true &&
+          body.user?.role === "admin" &&
+          access === sessionStorage.getItem("authAccess") &&
+          refresh === sessionStorage.getItem("authRefresh")
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(remainsAdmin).toBe(true);
+    await expect(legacy.locator("#login-backdrop")).toBeHidden();
     await removeLegacyFailure();
   } finally {
+    legacy.off("request", collectRequest);
+    legacy.off("response", collectResponse);
     await legacy.close();
   }
 });
