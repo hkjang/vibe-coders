@@ -54,6 +54,7 @@ const runner = `
     reporter.onStdOut?.(Buffer.from(input.sensitive), row.test, row.result);
     reporter.onStdErr?.(Buffer.from(input.sensitive), row.test, row.result);
     for (const step of row.steps) {
+      if (step.nonFiniteLine) step.location.line = Number(step.nonFiniteLine);
       reporter.onStepBegin?.(row.test, row.result, step);
       reporter.onStepEnd?.(row.test, row.result, step);
     }
@@ -365,6 +366,97 @@ test("auth reporter rejects malformed title and stack values and clears lines be
   });
 });
 
+function failedStep(file, line) {
+  return {
+    title: sensitive,
+    location: { file, line, column: 1 },
+    error: { message: sensitive, stack: sensitive, value: sensitive },
+    attachments: [{ name: sensitive, body: sensitive }],
+  };
+}
+
+test("auth reporter preserves the first failed source line when finally cleanup replaces the last step", async () => {
+  const fixture = row("AUTH-LIVE-011", "timedOut", [
+    failedStep(`/private/${sensitive}/helpers.ts`, 99),
+    failedStep(`/private/${sensitive}/recovery-live.spec.ts`, 189),
+    failedStep(`/private/${sensitive}/recovery-live.spec.ts`, 198),
+  ]);
+  assert.deepEqual(await report([fixture]), {
+    status: "failed",
+    tests: [
+      {
+        scenario: "AUTH-LIVE-011",
+        status: "timedOut",
+        durationMs: 123,
+        lastSourceLine: 198,
+        failureSourceLine: 189,
+      },
+    ],
+  });
+});
+
+test("auth reporter prefers the final valid stack location to the failed-step fallback", async () => {
+  const fixture = row("AUTH-LIVE-011", "failed", [failedStep("recovery-live.spec.ts", 189)]);
+  fixture.result.error.stack = `Error: ${sensitive}\n    at test (/private/${sensitive}/recovery-live.spec.ts:192:7)`;
+  const summary = await report([fixture]);
+  assert.equal(summary.tests[0].lastSourceLine, 189);
+  assert.equal(summary.tests[0].failureSourceLine, 192);
+});
+
+test("auth reporter rejects invalid failed-step source paths and numbers before accepting a safe location", async () => {
+  const fixtures = [
+    ...[
+      "not-recovery-live.spec.ts",
+      "recovery-live.spec.ts.bak",
+      "recovery-live.spec.ts/",
+      "recovery-live.spec.ts\\",
+      `recovery-live.spec.ts?credential=${markers[0]}`,
+      "helpers.ts",
+      null,
+      { secret: sensitive },
+    ].map((file) => failedStep(file, 73)),
+    ...[0, -1, 1.5, "73", null, true, { secret: sensitive }, Number.MAX_SAFE_INTEGER + 1].map((line) =>
+      failedStep("recovery-live.spec.ts", line),
+    ),
+    ...["NaN", "Infinity", "-Infinity"].map((nonFiniteLine) => ({
+      ...failedStep("recovery-live.spec.ts", 1),
+      nonFiniteLine,
+    })),
+  ].map((step) => row("AUTH-LIVE-011", "timedOut", [step]));
+  for (const fixture of fixtures) {
+    fixture.steps.push(failedStep("C:\\private\\recovery-live.spec.ts", 74));
+  }
+  const summary = await report(fixtures);
+  for (const result of summary.tests) {
+    assert.equal(result.lastSourceLine, 74);
+    assert.equal(result.failureSourceLine, 74);
+  }
+});
+
+test("auth reporter clears failed-step lines for repeated test IDs and ignores successful or absent errors", async () => {
+  const first = row("AUTH-LIVE-011", "failed", [failedStep("recovery-live.spec.ts", 189)]);
+  const repeated = row("AUTH-LIVE-011", "timedOut");
+  const caught = row("AUTH-LIVE-011", "passed", [failedStep("recovery-live.spec.ts", 190)]);
+  const absent = row("AUTH-LIVE-011", "failed", [
+    { location: { file: "recovery-live.spec.ts", line: 191, column: 1 } },
+  ]);
+  assert.deepEqual(await report([first, repeated, caught, absent]), {
+    status: "failed",
+    tests: [
+      {
+        scenario: "AUTH-LIVE-011",
+        status: "failed",
+        durationMs: 123,
+        lastSourceLine: 189,
+        failureSourceLine: 189,
+      },
+      { scenario: "AUTH-LIVE-011", status: "timedOut", durationMs: 123 },
+      { scenario: "AUTH-LIVE-011", status: "passed", durationMs: 123, lastSourceLine: 190 },
+      { scenario: "AUTH-LIVE-011", status: "failed", durationMs: 123, lastSourceLine: 191 },
+    ],
+  });
+});
+
 async function artifactFiles(directory) {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -379,12 +471,13 @@ async function artifactFiles(directory) {
   return files;
 }
 
-for (const [filename, scenario] of [
+for (const [filename, scenario, timedOut = false] of [
   ["access-live.spec.ts", "AUTH-LIVE-006"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011"],
+  ["recovery-live.spec.ts", "AUTH-LIVE-011", true],
 ])
   test(
-    `live auth browser failure (${scenario}) keeps DOM canaries out of retained reports and private failure artifacts`,
+    `live auth browser ${timedOut ? "timeout with finally cleanup" : "failure"} (${scenario}) keeps DOM canaries out of retained reports and private failure artifacts`,
     {
       skip:
         process.env.VIBE_AUTH_BROWSER_ARTIFACT_TEST !== "1"
@@ -450,7 +543,15 @@ for (const [filename, scenario] of [
 
         const configPath = join(fixtureDirectory, "playwright.artifact.config.ts");
         const testPath = join(fixtureDirectory, filename);
+        const failureBody = timedOut
+          ? `  try {
+    await page.getByRole("button", { name: "MISSING_DIAGNOSTIC_BUTTON", exact: true }).click();
+  } finally {
+    await page.close();
+  }`
+          : '  expect(false, "intentional synthetic artifact boundary failure").toBe(true);';
         const source = `import { test as base, expect } from ${JSON.stringify(import.meta.resolve("@playwright/test"))};
+${timedOut ? "base.setTimeout(5_000); // Synthetic canary only; the actual auth suite remains at 45s." : ""}
 
 base("${scenario} synthetic failure artifact boundary", async ({ page }) => {
   const canary = process.env.VIBE_AUTH_ARTIFACT_CANARY ?? "";
@@ -460,10 +561,14 @@ base("${scenario} synthetic failure artifact boundary", async ({ page }) => {
     document.querySelector("code")?.textContent === value &&
       document.querySelector("input")?.value === value, canary);
   expect(installed).toBe(true);
-  expect(false, "intentional synthetic artifact boundary failure").toBe(true);
+${failureBody}
 });
 `;
-        const failureLine = source.split("\n").findIndex((line) => line.includes("expect(false,")) + 1;
+        const failureLine =
+          source
+            .split("\n")
+            .findIndex((line) => line.includes(timedOut ? "MISSING_DIAGNOSTIC_BUTTON" : "expect(false,")) + 1;
+        const cleanupLine = source.split("\n").findIndex((line) => line.includes("await page.close();")) + 1;
         await writeFile(join(fixtureDirectory, "package.json"), '{"type":"module"}\n', { mode: 0o600 });
         await writeFile(testPath, source, { mode: 0o600 });
         // Keep all production artifact, browser and isolation settings. Retention
@@ -513,13 +618,23 @@ export default {
         const summary = JSON.parse(raw);
         assert.equal(summary.status === "failed" && summary.tests?.length === 1, true);
         const result = summary.tests[0];
-        assert.equal(result.scenario === scenario && result.status === "failed", true);
+        assert.equal(
+          result.scenario === scenario && result.status === (timedOut ? "timedOut" : "failed"),
+          true,
+        );
         // A browser launch/configuration failure must not satisfy this regression.
         assert.equal(
           result.failureSourceLine === failureLine,
           true,
           "The deliberate browser assertion must run",
         );
+        if (timedOut) {
+          assert.equal(
+            result.lastSourceLine === cleanupLine && cleanupLine > failureLine,
+            true,
+            "Finally cleanup must not replace the first failed step's numeric location",
+          );
+        }
         // Playwright adds a terminal reporter when every configured reporter has
         // printsToStdio=false. The Go harness discards those streams; this test
         // captures them without forwarding or retaining any raw runner output.

@@ -51,10 +51,22 @@ export default class SafeAuthReporter implements Reporter {
     failureSourceLine?: number;
   }[] = [];
   private sourceLines = new Map<string, number>();
+  private failedStepLines = new Map<string, number>();
+
+  onTestBegin(test: TestCase): void {
+    this.sourceLines.delete(test.id);
+    this.failedStepLines.delete(test.id);
+  }
 
   onStepBegin(test: TestCase, _result: TestResult, step: TestStep): void {
     const line = sourceLine(step.location?.file, step.location?.line);
     if (line !== undefined) this.sourceLines.set(test.id, line);
+  }
+
+  onStepEnd(test: TestCase, _result: TestResult, step: TestStep): void {
+    if (!step.error || this.failedStepLines.has(test.id)) return;
+    const line = sourceLine(step.location?.file, step.location?.line);
+    if (line !== undefined) this.failedStepLines.set(test.id, line);
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
@@ -72,9 +84,17 @@ export default class SafeAuthReporter implements Reporter {
           ? duration
           : 0,
       lastSourceLine: this.sourceLines.get(test.id),
-      failureSourceLine: failureSourceLine(result.error?.stack),
+      // Cleanup may replace lastSourceLine after a timeout without a spec stack.
+      // Retain only the first observed failed step's numeric location, not its
+      // error or title. A caught step failure in a passed test is not a failure.
+      failureSourceLine:
+        failureSourceLine(result.error?.stack) ??
+        (["failed", "timedOut", "interrupted"].includes(result.status)
+          ? this.failedStepLines.get(test.id)
+          : undefined),
     });
     this.sourceLines.delete(test.id);
+    this.failedStepLines.delete(test.id);
   }
 
   async onEnd(result: FullResult): Promise<void> {
