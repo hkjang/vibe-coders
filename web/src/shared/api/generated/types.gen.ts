@@ -1243,6 +1243,63 @@ export type RoutingBreakerSummary = {
     threshold: number;
 };
 
+export type RoutingDomainReviewAck = {
+    /**
+     * Exact decoded request-path ID; does not prove a matching row existed.
+     */
+    id: string;
+    /**
+     * Status requested by the successful action; no row snapshot or timestamp is returned.
+     */
+    status: 'approved' | 'rejected';
+};
+
+export type RoutingDomainReviewItem = {
+    /**
+     * Stored creation timestamp string; returned without date parsing or normalization.
+     */
+    created_at: string;
+    /**
+     * Recorded model value from the MCP discovery policy at enqueue time (policy.Model), despite the legacy current_route field name; not a live current route or a before/after comparison with suggested_route. Absent storage value is an empty string.
+     */
+    current_route: string;
+    /**
+     * Stored decision ID; no implicit detail fetch or existence check.
+     */
+    decision_id: string;
+    /**
+     * Stored review ID; exact spelling is preserved.
+     */
+    id: string;
+    /**
+     * Stored unmasked query text. The current producer collapses whitespace and limits it to 2000 bytes, so it is not a full-fidelity original prompt. Raw-prompt permission is required for this entire report.
+     */
+    query_text: string;
+    /**
+     * Stored unmasked reason; absent storage value is an empty string.
+     */
+    reason: string;
+    /**
+     * Stored review timestamp string, or empty string when unreviewed; never null. Not a revision token.
+     */
+    reviewed_at: string;
+    /**
+     * Stored status, commonly pending/approved/rejected. Extensible string, not a closed enum.
+     */
+    status: string;
+    /**
+     * Stored proposed domain route, not an applied routing rule.
+     */
+    suggested_route: string;
+};
+
+export type RoutingDomainReviewReport = {
+    /**
+     * Recent matching rows; empty is [], not null. No total, cursor or revision is included.
+     */
+    items: Array<RoutingDomainReviewItem>;
+};
+
 export type RoutingHealthResponse = {
     alerts: Array<ProviderHealthAlert>;
     breakers: RoutingBreakerSummary;
@@ -8081,16 +8138,56 @@ export type GetAdminRoutingDomainExamplesResponses = {
 export type GetAdminRoutingDomainReviewData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Trimmed literal status filter; omitted/blank selects pending. Unknown strings are accepted and normally return an empty list.
+         */
+        status?: string;
+        /**
+         * Omitted/blank has no lower bound. 24h/7d/30d/90d or any positive Go duration is accepted; other nonblank input defaults to seven days. No closed enum or request validation range.
+         */
+        window?: string;
+        /**
+         * Trimmed query text parsed by strconv.Atoi. Missing, invalid, overflow or nonpositive values use 50; positive parsed values above 200 are capped at 200. These are normalization rules, not rejection bounds.
+         */
+        limit?: string;
+    };
     url: '/admin/routing/domain-review';
 };
+
+export type GetAdminRoutingDomainReviewErrors = {
+    /**
+     * invalid_api_key: existing authentication or routing:read scope rejection.
+     */
+    401: AppError;
+    /**
+     * raw_prompt_access_required: authenticated routing reader lacks raw-prompt permission; no queue payload is returned.
+     */
+    403: AppError;
+    /**
+     * method_not_allowed: the queue handler requires GET after authorization.
+     */
+    405: AppError;
+    /**
+     * domain_review_failed: queue storage read failed.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRoutingDomainReviewError = GetAdminRoutingDomainReviewErrors[keyof GetAdminRoutingDomainReviewErrors];
 
 export type GetAdminRoutingDomainReviewResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RoutingDomainReviewReport;
 };
+
+export type GetAdminRoutingDomainReviewResponse = GetAdminRoutingDomainReviewResponses[keyof GetAdminRoutingDomainReviewResponses];
 
 export type PostAdminRoutingDomainReviewIdData = {
     body?: never;
@@ -8101,12 +8198,39 @@ export type PostAdminRoutingDomainReviewIdData = {
     url: '/admin/routing/domain-review/{id}';
 };
 
+export type PostAdminRoutingDomainReviewIdErrors = {
+    /**
+     * invalid_review_path: no ID/action separator or whitespace-only decoded ID; invalid_review_action: the decoded action is not exactly approve or reject.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: existing authentication or routing:write scope rejection, including legacy read-only credentials. A raw-prompt role or admin:write alone does not grant routing:write.
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: the action handler requires POST after authorization.
+     */
+    405: AppError;
+    /**
+     * domain_review_update_failed: SQL UPDATE failed. A nonexistent ID alone does not produce a 404; an unconfirmed response does not prove no update occurred.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRoutingDomainReviewIdError = PostAdminRoutingDomainReviewIdErrors[keyof PostAdminRoutingDomainReviewIdErrors];
+
 export type PostAdminRoutingDomainReviewIdResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RoutingDomainReviewAck;
 };
+
+export type PostAdminRoutingDomainReviewIdResponse = PostAdminRoutingDomainReviewIdResponses[keyof PostAdminRoutingDomainReviewIdResponses];
 
 export type PostAdminRoutingFailoverDrillData = {
     body?: never;

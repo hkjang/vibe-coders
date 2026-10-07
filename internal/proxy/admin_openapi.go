@@ -646,6 +646,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichRoutingDeleteOpenAPI(op, responses)
 	case "get /admin/routing/learning":
 		enrichRoutingLearningOpenAPI(op, responses)
+	case "get /admin/routing/domain-review", "post /admin/routing/domain-review/{id}":
+		enrichRoutingDomainReviewOpenAPI(strings.ToLower(method), op, responses)
 	case "get /ready":
 		responses["200"] = successResponse("ReadyResponse")
 		responses["503"] = map[string]any{"description": "Database is not ready", "content": jsonContent(schemaRef("ReadinessFailureResponse"))}
@@ -1049,6 +1051,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range routingLearningOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range routingDomainReviewOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas
