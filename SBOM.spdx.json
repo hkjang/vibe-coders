@@ -5,7 +5,7 @@
   "name": "vibe-coders-v0.86.43-integrated-source-sbom",
   "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.43",
   "creationInfo": {
-    "created": "2026-10-07T23:31:16Z",
+    "created": "2026-10-07T23:43:09Z",
     "creators": [
       "Tool: Syft-1.51.0",
       "Tool: scripts/merge-source-sbom.mjs",
@@ -223,8 +223,8 @@
     },
     {
       "name": "golang.org/x/sync",
-      "SPDXID": "SPDXRef-Package-go-golang.org-x-sync-c5d601f0909d6852",
-      "versionInfo": "v0.21.0",
+      "SPDXID": "SPDXRef-Package-go-golang.org-x-sync-d826c8cb91198762",
+      "versionInfo": "v0.22.0",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
@@ -234,7 +234,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/golang.org/x/sync@v0.21.0"
+          "referenceLocator": "pkg:golang/golang.org/x/sync@v0.22.0"
         }
       ]
     },
@@ -257,8 +257,8 @@
     },
     {
       "name": "golang.org/x/text",
-      "SPDXID": "SPDXRef-Package-go-golang.org-x-text-7b50d7ea0b9938bf",
-      "versionInfo": "v0.39.0",
+      "SPDXID": "SPDXRef-Package-go-golang.org-x-text-9c6da1dcdedd6849",
+      "versionInfo": "v0.41.0",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
@@ -268,7 +268,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/golang.org/x/text@v0.39.0"
+          "referenceLocator": "pkg:golang/golang.org/x/text@v0.41.0"
         }
       ]
     },
@@ -6950,7 +6950,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-go-golang.org-x-sync-c5d601f0909d6852"
+      "relatedSpdxElement": "SPDXRef-Package-go-golang.org-x-sync-d826c8cb91198762"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
@@ -6960,7 +6960,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-go-golang.org-x-text-7b50d7ea0b9938bf"
+      "relatedSpdxElement": "SPDXRef-Package-go-golang.org-x-text-9c6da1dcdedd6849"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",

@@ -18,9 +18,9 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `github.com/remyoudompheng/bigfft` | v0.0.0-20230129092748-24d4a6f8daec | BSD-3-Clause |
 | `github.com/sijms/go-ora/v2` | v2.9.0 | MIT |
 | `golang.org/x/crypto` | v0.52.0 | BSD-3-Clause |
-| `golang.org/x/sync` | v0.21.0 | BSD-3-Clause |
+| `golang.org/x/sync` | v0.22.0 | BSD-3-Clause |
 | `golang.org/x/sys` | v0.45.0 | BSD-3-Clause |
-| `golang.org/x/text` | v0.39.0 | BSD-3-Clause |
+| `golang.org/x/text` | v0.41.0 | BSD-3-Clause |
 | `modernc.org/libc` | v1.55.3 | BSD-3-Clause |
 | `modernc.org/mathutil` | v1.6.0 | BSD-3-Clause |
 | `modernc.org/memory` | v1.8.0 | BSD-3-Clause |
