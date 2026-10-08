@@ -9,6 +9,7 @@ import { validateRequestTimeFilters } from "@/shared/utils/request-time-filters"
 import { isOpaqueAppRequestCursor, isValidRequestQueryField } from "@/shared/utils/request-query-filters";
 import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
+import { domainDecisionRequestIDError } from "@/shared/utils/domain-decision-filters";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   // Screens declare their own query keys next to their route registration; this
@@ -81,6 +82,17 @@ export function sanitizeAppRouteSearch(
   const rejectedValues = new Map<string, boolean>();
   const route = routerPath(pathname);
   const invalidOperationalKeys = new Set<string>();
+  if (route === "/routing/rules" || route.startsWith("/routing/rules/")) {
+    const requestIDs = parameters.getAll("request_id");
+    if (
+      requestIDs.length > 0 &&
+      (route !== "/routing/rules/learning" ||
+        requestIDs.length !== 1 ||
+        domainDecisionRequestIDError(requestIDs[0] ?? "") !== undefined)
+    ) {
+      invalidOperationalKeys.add("request_id");
+    }
+  }
   if (route === "/observability/requests" || route === "/observability/traces") {
     const requestFields =
       route === "/observability/requests"
