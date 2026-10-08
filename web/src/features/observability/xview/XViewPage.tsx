@@ -2,7 +2,7 @@ import { RequestNoteBoundary } from "@/features/observability/request-insight/Re
 import { useRequestNoteContext } from "@/features/observability/request-insight/request-note-context";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   canInspectRawRequest,
@@ -23,14 +23,20 @@ import {
   type ScatterViewMode,
 } from "@/features/observability/xview/scatter-model";
 import { WaterfallPanel } from "@/features/observability/xview/WaterfallPanel";
-import { useXViewLive, type XViewFilters } from "@/features/observability/xview/use-xview-live";
+import {
+  useXViewLive,
+  xviewDeniedMessage,
+  type XViewFilters,
+} from "@/features/observability/xview/use-xview-live";
+import { useXViewReadOwner, type XViewReadOwner } from "./xview-live-access";
+import { summarizeXView } from "./xview-live-state";
+import { XViewLiveStatus } from "./XViewLiveStatus";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { apiClient } from "@/shared/api/client";
 import type { ScatterPoint } from "@/shared/api/domains/observability.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { PageHeader } from "@/shared/components/page/PageHeader";
-import { ErrorState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
@@ -48,8 +54,9 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
-import { formatDateTime, formatKRW, formatNumber, formatRelative } from "@/shared/utils/format";
+import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
 import "@/features/observability/observability.css";
+import "./xview-live.css";
 
 const tabIds = ["scatter", "models", "waterfall"] as const;
 type TabId = (typeof tabIds)[number];
@@ -71,14 +78,36 @@ function pick<T extends string>(value: string | null, allowed: readonly T[], fal
 }
 
 export function XViewPage(): React.JSX.Element {
+  const principal = useXViewReadOwner();
+  const suspended = useRef<XViewReadOwner | undefined>(undefined);
+  const readOwner = useMemo(
+    () => ({
+      ...principal,
+      onDenied: () => {
+        suspended.current = principal;
+      },
+      resumeDraft: () => {
+        if (principal.isCurrent()) suspended.current = undefined;
+      },
+    }),
+    [principal],
+  );
+  const retainDraft = useMemo(
+    () => ({
+      owner: readOwner,
+      isCurrent: readOwner.isCurrent,
+      isSuspended: () => suspended.current === principal,
+    }),
+    [principal, readOwner],
+  );
   return (
-    <RequestNoteBoundary>
-      <XViewPageContent />
+    <RequestNoteBoundary retainDraft={retainDraft}>
+      <XViewPageContent readOwner={readOwner} />
     </RequestNoteBoundary>
   );
 }
 
-function XViewPageContent(): React.JSX.Element {
+function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.JSX.Element {
   const noteEditor = useRequestNoteContext();
   const auth = useAuth();
   const [params, updateParams] = useSearchState();
@@ -122,20 +151,37 @@ function XViewPageContent(): React.JSX.Element {
 
   const [draft, setDraft] = useState({ from, to, models, endpoint });
   const [filterError, setFilterError] = useState<string>();
-  const [selection, setSelection] = useState<ReadonlyArray<ScatterPoint>>([]);
-  const [flowRequestId, setFlowRequestId] = useState("");
-  const [insightRequestId, setInsightRequestId] = useState("");
-  const noteRequestId = noteEditor.target?.requestId ?? insightRequestId;
+  const live_ = useXViewLive(filters, live && tab === "scatter", readOwner);
+  const displayOwner = useMemo(
+    () => ({ readOwner, retirement: live_.denialBoundary }),
+    [readOwner, live_.denialBoundary],
+  );
+  const [selected, setSelected] = useState<{ owner: object; points: ReadonlyArray<ScatterPoint> }>();
+  const [flow, setFlow] = useState<{ owner: object; id: string }>();
+  const [insight, setInsight] = useState<{ owner: object; id: string }>();
+  const selection = selected?.owner === displayOwner ? selected.points : [];
+  const flowRequestId = flow?.owner === displayOwner ? flow.id : "";
+  const insightRequestId = insight?.owner === displayOwner ? insight.id : "";
+  const noteRequestId =
+    insight?.owner === displayOwner ? (noteEditor.target?.requestId ?? insightRequestId) : "";
+  const setSelection = (points: ReadonlyArray<ScatterPoint>) => setSelected({ owner: displayOwner, points });
+  const setFlowRequestId = (id: string) => setFlow({ owner: displayOwner, id });
+  const setInsightRequestId = (id: string) => setInsight({ owner: displayOwner, id });
   const selectionFocusRef = useRef<HTMLElement | null>(null);
   const flowFocusRef = useRef<HTMLElement | null>(null);
   const insightFocusRef = useRef<HTMLElement | null>(null);
+  const refreshFocusRef = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    if ((selected && selected.owner !== displayOwner) || live_.points.length === 0)
+      selectionFocusRef.current = refreshFocusRef.current;
+    if (flow && flow.owner !== displayOwner) flowFocusRef.current = refreshFocusRef.current;
+    if (insight && insight.owner !== displayOwner) insightFocusRef.current = refreshFocusRef.current;
+  }, [displayOwner, flow, insight, live_.points.length, selected]);
   const canInspectRaw = canInspectRawRequest(auth);
   const canWriteNote = canWriteRequestNote(auth);
 
-  const live_ = useXViewLive(filters, live && tab === "scatter");
-
   const flowMap = useQuery({
-    queryKey: ["observability", "xview", "flow-map", flowRequestId],
+    queryKey: ["observability", "xview", "flow-map", flowRequestId, live_.lifetime.id],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.observability.xview.flowMap, {
         query: { request_id: flowRequestId },
@@ -143,26 +189,23 @@ function XViewPageContent(): React.JSX.Element {
         routeId: "observability.xview.flow-map",
       }),
     enabled: flowRequestId !== "",
+    gcTime: 0,
     staleTime: 30_000,
   });
 
-  const signals = useMemo(() => {
-    let errors = 0;
-    let fallbacks = 0;
-    let governance = 0;
-    const latencies: number[] = [];
-    for (const point of live_.points) {
-      if (point.status_code >= 400) errors += 1;
-      if (point.failover) fallbacks += 1;
-      if (point.policy_decision_count > 0) governance += 1;
-      latencies.push(point.latency_ms);
-    }
-    latencies.sort((left, right) => left - right);
-    const p95 = latencies.length
-      ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))]
-      : 0;
-    return { errors, fallbacks, governance, p95, total: live_.points.length };
-  }, [live_.points]);
+  const signals = useMemo(() => summarizeXView(live_.points), [live_.points]);
+  const scatterPlot = useMemo(
+    () => (
+      <ScatterPlot
+        points={live_.points}
+        metric={metric}
+        scale={scale}
+        viewMode={viewMode}
+        onSelect={(points) => setSelected({ owner: displayOwner, points })}
+      />
+    ),
+    [displayOwner, live_.points, metric, scale, viewMode],
+  );
 
   const currentSavedParams = useMemo(() => {
     const search = new URLSearchParams();
@@ -230,23 +273,8 @@ function XViewPageContent(): React.JSX.Element {
     });
   };
 
-  if (live_.initialError && live_.points.length === 0) {
-    return (
-      <div className="page-stack">
-        <PageHeader title="XView 실시간" legacyHref="/admin#/xview" />
-        <ErrorState
-          message={safeAppErrorMessage(live_.initialError, "요청 분포를 불러오지 못했습니다.")}
-          requestId={isAppError(live_.initialError) ? live_.initialError.requestId : undefined}
-          onRetry={live_.refresh}
-          onReset={resetFilters}
-          legacyHref="/admin#/xview"
-        />
-      </div>
-    );
-  }
-
   return (
-    <div className="page-stack">
+    <div className="page-stack xview-live-page">
       <PageHeader
         title="XView 실시간"
         description="최근 요청의 분포와 이상치를 실시간 산점도로 관찰하고, 원인 세션까지 따라갑니다."
@@ -258,12 +286,14 @@ function XViewPageContent(): React.JSX.Element {
               label="실시간"
               onCheckedChange={(next) => updateParams({ live: next ? undefined : "off" })}
             />
-            <Button onClick={live_.refresh}>
+            <Button ref={refreshFocusRef} onClick={live_.refresh}>
               <RefreshCw aria-hidden="true" /> 지금 새로고침
             </Button>
           </>
         }
       />
+
+      <XViewLiveStatus state={live_} live={live} scatter={tab === "scatter"} fixedEnd={Boolean(to)} />
 
       <SavedViewBar
         canWrite={canWrite}
@@ -396,6 +426,17 @@ function XViewPageContent(): React.JSX.Element {
         </p>
       ) : null}
 
+      {live_.initialError ? (
+        <InlineNotice tone="danger" title="요청 분포를 불러오지 못했습니다.">
+          {live_.denied
+            ? xviewDeniedMessage
+            : safeAppErrorMessage(live_.initialError, "요청 분포를 불러오지 못했습니다.")}
+          {isAppError(live_.initialError) && live_.initialError.requestId ? (
+            <span className="request-id"> 요청 ID: {live_.initialError.requestId}</span>
+          ) : null}
+        </InlineNotice>
+      ) : null}
+
       <StatGrid label="지금 확인할 신호">
         <StatCard label="분석 요청" value={formatNumber(signals.total)} />
         <StatCard
@@ -412,13 +453,10 @@ function XViewPageContent(): React.JSX.Element {
         <StatCard label="지연 P95" value={`${formatNumber(signals.p95)}ms`} />
       </StatGrid>
 
-      <div className="obs-meta" role="status">
-        <span>
-          {live ? (live_.paused ? "탭이 가려져 실시간 갱신을 멈췄습니다." : "1.5초마다 갱신") : "실시간 꺼짐"}
-        </span>
-        {live_.lastUpdatedAt > 0 ? <span>마지막 갱신 {formatRelative(live_.lastUpdatedAt)}</span> : null}
-      </div>
-
+      <p className="obs-meta">
+        요약은 현재 표시한 요청 점 기준입니다. 조회와 주기적 보완은 전체 요청의 누락 없는 수집을 보장하지
+        않습니다.
+      </p>
       {live_.truncated ? (
         <InlineNotice tone="warning" title="표본이 상한에 걸렸습니다.">
           조회 구간의 요청이 6,000건 상한을 넘어 최근 구간만 표시합니다. 구간을 좁혀 다시 확인하세요.
@@ -453,6 +491,7 @@ function XViewPageContent(): React.JSX.Element {
       <TabPanel id={tab} panelIdPrefix="xview">
         {tab === "scatter" ? (
           <SectionCard
+            className="xview-distribution-card"
             title="요청 분포"
             description="가로축은 시간, 세로축은 선택한 지표입니다. 그래프를 드래그하면 그 구간의 요청이 선택됩니다."
             actions={
@@ -475,17 +514,11 @@ function XViewPageContent(): React.JSX.Element {
             ) : live_.points.length === 0 ? (
               <EmptyState
                 title="표시할 요청이 없습니다."
-                description="선택한 구간에 게이트웨이 요청이 없습니다. 조회 구간을 넓히거나 모델·엔드포인트 필터를 비워 보세요."
+                description="현재 받은 자료에 표시할 요청 점이 없습니다. 조회 상태를 확인하거나 구간·모델·엔드포인트 필터를 조정해 보세요."
                 actions={<Button onClick={resetFilters}>필터 초기화</Button>}
               />
             ) : (
-              <ScatterPlot
-                points={live_.points}
-                metric={metric}
-                scale={scale}
-                viewMode={viewMode}
-                onSelect={(selected) => setSelection(selected)}
-              />
+              scatterPlot
             )}
           </SectionCard>
         ) : null}
@@ -563,6 +596,21 @@ function XViewPageContent(): React.JSX.Element {
                         size="small"
                         onClick={(event) => {
                           const trigger = event.currentTarget;
+                          if (
+                            noteEditor.retainedDraft?.target.requestId === point.request_id &&
+                            noteEditor.target?.retention?.owner === readOwner &&
+                            readOwner.isCurrent() &&
+                            !live_.denied &&
+                            !live_.initialError &&
+                            !live_.snapshotFetching &&
+                            !live_.snapshotInvalidated &&
+                            live_.points.some((current) => current.request_id === point.request_id)
+                          ) {
+                            // Only an explicit same-request action can restore the retired sheet.
+                            readOwner.resumeDraft?.();
+                            insightFocusRef.current = trigger;
+                            setInsightRequestId(point.request_id);
+                          }
                           noteEditor.requestLeave(() => {
                             insightFocusRef.current = trigger;
                             setInsightRequestId(point.request_id);
@@ -610,7 +658,7 @@ function XViewPageContent(): React.JSX.Element {
               items={[
                 { label: "요청 ID", value: flowMap.data.request_id, mono: true },
                 { label: "모델", value: flowMap.data.summary.model },
-                { label: "Provider", value: flowMap.data.summary.provider },
+                { label: "공급자", value: flowMap.data.summary.provider },
                 { label: "상태", value: `HTTP ${formatNumber(flowMap.data.summary.status_code)}` },
                 { label: "지연", value: `${formatNumber(flowMap.data.summary.latency_ms)}ms` },
                 { label: "발생 시각", value: formatDateTime(flowMap.data.summary.created_at) },
@@ -648,7 +696,7 @@ function XViewPageContent(): React.JSX.Element {
       </Sheet>
 
       <Sheet
-        open={noteRequestId !== ""}
+        open={noteRequestId !== "" && !(noteEditor.retainedDraft && noteEditor.awaitingParentDecision)}
         onOpenChange={(next) => {
           if (!next) noteEditor.requestLeave(() => setInsightRequestId(""));
         }}
