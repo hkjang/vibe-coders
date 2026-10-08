@@ -10,6 +10,7 @@ import { isOpaqueAppRequestCursor, isValidRequestQueryField } from "@/shared/uti
 import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
 import { domainDecisionRequestIDError } from "@/shared/utils/domain-decision-filters";
+import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   // Screens declare their own query keys next to their route registration; this
@@ -17,7 +18,18 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   // compatibility redirects that forward to the gateway catalog screens.
   "/login": new Set(["return_to"]),
   "/providers": new Set(["page", "provider", "q", "range", "status"]),
-  "/models": new Set(["model", "model_provider", "page", "provider", "q", "range", "source", "status"]),
+  "/models": new Set([
+    "model",
+    "model_provider",
+    "page",
+    "provider",
+    "q",
+    "range",
+    "source",
+    "status",
+    "sort",
+    "page_size",
+  ]),
 };
 
 export const sensitiveQueryRejectionStateKey = "appSensitiveQueryKeys";
@@ -82,6 +94,16 @@ export function sanitizeAppRouteSearch(
   const rejectedValues = new Map<string, boolean>();
   const route = routerPath(pathname);
   const invalidOperationalKeys = new Set<string>();
+  if (route === "/models" || route === "/gateway/models" || route.startsWith("/gateway/models/")) {
+    const exactCatalogueRoute = route === "/models" || route === "/gateway/models";
+    if (parameters.has("sort") && (!exactCatalogueRoute || !readModelCatalogSort(parameters.getAll("sort"))))
+      invalidOperationalKeys.add("sort");
+    if (
+      parameters.has("page_size") &&
+      (!exactCatalogueRoute || !readModelCatalogPageSize(parameters.getAll("page_size")))
+    )
+      invalidOperationalKeys.add("page_size");
+  }
   if (route === "/routing/rules" || route.startsWith("/routing/rules/")) {
     const requestIDs = parameters.getAll("request_id");
     if (

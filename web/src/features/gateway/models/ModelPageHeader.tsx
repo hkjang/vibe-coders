@@ -59,7 +59,7 @@ export function ModelPageHeader({
 
       <section className="model-summary" aria-busy={loading || undefined} aria-label="모델 요약">
         <article>
-          <span>전체 모델</span>
+          <span>수신 모델</span>
           <strong>{value(totalCount)}</strong>
         </article>
         <article>
