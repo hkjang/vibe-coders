@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PoliciesPage } from "@/features/governance/policies/PoliciesPage";
 import { apiFailure, mockApi } from "@/test/api";
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { renderScreen } from "@/test/render";
 
 const authRuntime = vi.hoisted(() => ({
@@ -314,7 +315,12 @@ afterEach(() => {
 });
 
 function render(route = "/governance/policies") {
-  return renderScreen(<PoliciesPage />, { route, path: "/governance/policies" });
+  return renderScreen(
+    <FeatureAccessHarness featureId="governance.policies">
+      <PoliciesPage />
+    </FeatureAccessHarness>,
+    { route, path: "/governance/policies" },
+  );
 }
 
 describe("PoliciesPage", () => {
