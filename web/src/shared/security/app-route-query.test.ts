@@ -21,6 +21,39 @@ describe("app route query security", () => {
 
   afterEach(() => window.history.replaceState(null, "", initialURL));
 
+  it("도메인 결정의 요청 ID를 학습 화면에서만 안전하게 복원한다", () => {
+    const id = "\ufeff한글 / %2f ?#";
+    const search = `?request_id=${encodeURIComponent(id)}&window=7d&route=chat`;
+    const result = sanitizeAppRouteSearch("/app/routing/rules/learning", search);
+    expect(result.rejectedKeys).toEqual([]);
+    expect(new URLSearchParams(result.search).get("request_id")).toBe(id);
+    expect(sanitizeAppRouteSearch("/app/routing/rules/decisions", search).rejectedKeys).toEqual([
+      "request_id",
+    ]);
+    expect(sanitizeAppRouteSearch("/app/routing/rules", search).rejectedKeys).toEqual(["request_id"]);
+  });
+
+  it.each([
+    "request_id=one&request_id=two",
+    "request_id=%20untrimmed",
+    "request_id=invalid%00id",
+    `request_id=${"a".repeat(513)}`,
+  ])("도메인 결정의 모호하거나 잘못된 요청 ID를 주소에서 제외한다: %s", (parameters) => {
+    const result = sanitizeAppRouteSearch("/app/routing/rules/learning", `?${parameters}&window=7d`);
+    expect(result.rejectedKeys).toEqual(["request_id"]);
+    expect(result.search).toBe("?window=7d");
+  });
+
+  it("도메인 결정 URL에서도 사용자 정의 자격증명 접두어를 거부한다", () => {
+    const result = sanitizeAppRouteSearch(
+      "/app/routing/rules/learning",
+      `?request_id=synthetic_private_${"a".repeat(43)}&window=7d`,
+      ["synthetic_private_"],
+    );
+    expect(result.sensitiveKeys).toEqual(["request_id"]);
+    expect(result.search).toBe("?window=7d");
+  });
+
   it("keeps only the exact safe allowlist for provider and model routes", () => {
     expect(
       sanitizeAppRouteSearch(

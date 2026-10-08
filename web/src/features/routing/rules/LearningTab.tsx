@@ -10,10 +10,10 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { useSearchState } from "@/shared/hooks/use-search-state";
-import { formatDateTime, formatNumber, formatPercent, shortId } from "@/shared/utils/format";
+import { formatDateTime, formatPercent } from "@/shared/utils/format";
+import { DomainDecisionsSection } from "./DomainDecisionsSection";
 import { LearningRecommendationSection } from "./LearningRecommendationSection";
 import { DomainReviewSection } from "./DomainReviewSection";
 import { domainReviewStatuses, domainReviewStatusLabels } from "./domain-review-state";
@@ -46,16 +46,6 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
   const status = statusFrom(searchParams.get("status"));
   const route = searchParams.get("route") ?? "";
 
-  const domainDecisions = useQuery({
-    queryKey: [...routingDomainQueryKey, "decisions", window, route],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.routing.domain.decisions, {
-        query: { window, ...(route === "" ? {} : { route }) },
-        signal,
-        routeId: "routing.rules",
-      }),
-    retry: false,
-  });
   const examples = useQuery({
     queryKey: [...routingDomainQueryKey, "examples", route],
     queryFn: ({ signal }) =>
@@ -67,14 +57,7 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
     retry: false,
   });
 
-  const decisions = domainDecisions.data?.decisions ?? [];
-  const averageConfidence =
-    decisions.length > 0 ? decisions.reduce((sum, item) => sum + item.confidence, 0) / decisions.length : 0;
-  const averageEvidence =
-    decisions.length > 0
-      ? decisions.reduce((sum, item) => sum + item.evidence_score, 0) / decisions.length
-      : 0;
-  const domainPermission = permissionMessage(domainDecisions.error);
+  const domainPermission = permissionMessage(examples.error);
 
   return (
     <div className="routing-panel-stack">
@@ -136,47 +119,7 @@ export function LearningTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
         </InlineNotice>
       ) : null}
 
-      <SectionCard
-        title="도메인 결정 로그"
-        description="도메인 라우터가 어떤 근거로 라우트를 골랐는지 기록입니다."
-      >
-        {domainPermission ? (
-          <EmptyState title="표시할 수 없습니다." description={domainPermission} />
-        ) : decisions.length === 0 ? (
-          <EmptyState
-            title="결정 로그가 없습니다."
-            description="도메인 라우팅이 동작하면 신뢰도와 증거 점수가 쌓입니다."
-          />
-        ) : (
-          <>
-            <StatGrid label="도메인 결정 요약">
-              <StatCard label="결정 로그" value={formatNumber(decisions.length)} />
-              <StatCard label="평균 신뢰도" value={formatPercent(averageConfidence)} />
-              <StatCard label="평균 증거 점수" value={formatNumber(averageEvidence, 2)} />
-              <StatCard
-                label="폴백 사용"
-                value={formatNumber(decisions.filter((item) => item.fallback_used).length)}
-              />
-            </StatGrid>
-            <ul className="routing-steps">
-              {decisions.slice(0, 20).map((decision) => (
-                <li key={decision.id}>
-                  <Badge tone={decision.blocked_by_governance ? "danger" : "info"}>
-                    {decision.route || "—"}
-                  </Badge>
-                  <strong className="mono">{shortId(decision.request_id)}</strong>
-                  <span className="routing-meta">
-                    신뢰도 {formatPercent(decision.confidence)} · 증거{" "}
-                    {formatNumber(decision.evidence_score, 2)}({formatNumber(decision.evidence_count)}건) ·{" "}
-                    {formatDateTime(decision.created_at)}
-                    {decision.reason ? ` · ${decision.reason}` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </SectionCard>
+      <DomainDecisionsSection window={window} route={route} />
 
       <SectionCard
         title="도메인 학습 예시"

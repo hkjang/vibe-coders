@@ -1,0 +1,60 @@
+.domain-decisions-section .section-card-body,
+.domain-decision-dialog,
+.domain-decision-values {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.domain-decision-filter,
+.domain-decision-result-actions,
+.domain-decision-pagination {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.domain-decision-filter .form-field {
+  flex: 1 1 14rem;
+}
+.domain-decision-pagination {
+  align-items: center;
+  justify-content: flex-end;
+}
+.domain-decisions-section td,
+.domain-decisions-section p,
+.domain-decision-dialog p,
+.domain-decision-dialog dd {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+.domain-decision-values,
+.domain-decision-values dd {
+  margin: 0;
+}
+.domain-decision-values dt {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+.domain-decision-tool {
+  display: block;
+}
+.domain-decision-signals {
+  padding-left: var(--space-5);
+}
+.domain-decision-signals li + li {
+  margin-top: var(--space-6);
+}
+.dialog-content:has(> .dialog-body > .domain-decision-dialog) > .dialog-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  flex-wrap: wrap;
+}
+@media (max-width: 430px) {
+  .dialog-content:has(> .dialog-body > .domain-decision-dialog) > .dialog-footer > button {
+    flex: 1 1 auto;
+    white-space: normal;
+  }
+}

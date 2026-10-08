@@ -272,6 +272,8 @@ jobs:
         run: go test -race ./internal/proxy -run '^TestRoutingLearningRule' -count=1 -timeout=5m
       - name: Verify PostgreSQL domain review status-only, identity and permission contracts
         run: go test -race ./internal/proxy -run '^TestRoutingDomainReview' -count=1 -timeout=5m
+      - name: Verify PostgreSQL domain decision filters, signal identity and raw-read permission contracts
+        run: go test -race ./internal/proxy -run '^TestRoutingDomainDecisions' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
@@ -302,7 +304,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.43
+      SOURCE_SBOM_VERSION: v0.86.44
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

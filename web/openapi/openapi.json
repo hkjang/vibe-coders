@@ -4282,6 +4282,115 @@
         ],
         "type": "object"
       },
+      "RoutingDomainDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "blocked_by_governance": {
+            "description": "Recorded flag, true only for stored integer 1. The current MCP learning producer leaves it false; false does not prove no governance gate or block occurred.",
+            "type": "boolean"
+          },
+          "confidence": {
+            "description": "Stored score. The current MCP producer copies the first candidate FinalScore, or zero when no candidates exist; not a calibrated probability or normalized confidence range.",
+            "type": "number"
+          },
+          "created_at": {
+            "description": "Stored creation timestamp string, returned without date parsing or normalization; not a revision token.",
+            "type": "string"
+          },
+          "evidence_count": {
+            "description": "Stored integer; the current MCP producer records the number of filtered evidence entries, not a successful-tool or signal count. No storage validation minimum is imposed by this report.",
+            "type": "integer"
+          },
+          "evidence_score": {
+            "description": "Stored score. The current MCP producer takes the maximum filtered evidence score with a zero floor, not an average; stored values have no declared 0..1 validation range.",
+            "type": "number"
+          },
+          "fallback_used": {
+            "description": "Recorded flag, true only for stored integer 1. The current MCP learning producer leaves it false, including when an evidence_gate signal is emitted; false does not prove no fallback occurred.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Exact stored decision ID and signal-map key; arbitrary spelling is preserved, with no format or nonempty guarantee.",
+            "type": "string"
+          },
+          "query_hash": {
+            "description": "Stored query hash string. The current producer hashes the query, but this field is returned without hash-format validation and does not make the other raw fields PII-free.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Stored unmasked diagnostic reason, or empty string for an absent value. The current producer includes model/mode/first candidate and the first filtered evidence score, which need not equal the maximum evidence_score field.",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Stored request ID, returned without masking; not a signal join key or an authorization boundary.",
+            "type": "string"
+          },
+          "route": {
+            "description": "Recorded domain route, not a live routing rule or selected model. Current MCP producer maps its policy model to company_policy/legal/compliance/research/grounded; stored values remain extensible strings.",
+            "type": "string"
+          },
+          "team_id": {
+            "description": "Stored team ID; absent storage value is an empty string. The report is not team-scoped.",
+            "type": "string"
+          },
+          "tool_names": {
+            "description": "Stored tool-name array; the current MCP producer records candidate upstream-ID/tool-name pairs, not proof each tool was called. Ordering, duplicates and empty strings are preserved. NULL/null/undecodable storage normalizes to [] when no slice was decoded; partially decoded malformed arrays can contain empty strings. Never null.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "user_id": {
+            "description": "Stored user ID; absent storage value is an empty string. Not an implicit caller filter.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "request_id",
+          "user_id",
+          "team_id",
+          "query_hash",
+          "route",
+          "confidence",
+          "tool_names",
+          "evidence_score",
+          "evidence_count",
+          "fallback_used",
+          "blocked_by_governance",
+          "reason",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "RoutingDomainDecisionReport": {
+        "additionalProperties": false,
+        "properties": {
+          "decisions": {
+            "description": "Recent matching records; empty is [], not null. This is not a total count or paginated snapshot.",
+            "items": {
+              "$ref": "#/components/schemas/RoutingDomainDecision"
+            },
+            "type": "array"
+          },
+          "signals": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/RoutingDomainSignal"
+              },
+              "nullable": true,
+              "type": "array"
+            },
+            "description": "One key per returned decision, using its exact stored ID, including arbitrary or empty strings. Empty report is {}. Separate lookups are non-atomic with the decision list. A successful empty lookup is []; an ignored query/scan failure is null. A late iteration error may leave a partial array, so a non-null array is not a completeness guarantee. No per-entry error or completeness metadata is returned.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "decisions",
+          "signals"
+        ],
+        "type": "object"
+      },
       "RoutingDomainReviewAck": {
         "additionalProperties": false,
         "properties": {
@@ -4370,6 +4479,49 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "RoutingDomainSignal": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "description": "Stored timestamp string, returned without date parsing or normalization. Arrays sort by this value ascending then source ascending.",
+            "type": "string"
+          },
+          "decision_id": {
+            "description": "Exact decision ID used by the signal lookup, not the request ID.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Exact stored signal ID, returned without masking or format validation.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Stored unmasked reason, or empty string for an absent value; may include raw model/tool identifiers and upstream evidence error text. An evidence_gate reason does not establish automatic fallback or set the decision flags.",
+            "type": "string"
+          },
+          "route": {
+            "description": "Stored signal route; not assumed to equal the decision route or a live routing configuration.",
+            "type": "string"
+          },
+          "score": {
+            "description": "Stored source-specific score, not a common probability scale. Current producer uses 0.99 for explicit_model, candidate FinalScore for selector, every raw evidence score for mcp_evidence (including excluded/error evidence), and zero for evidence_gate. No declared 0..1 validation range.",
+            "type": "number"
+          },
+          "source": {
+            "description": "Extensible stored source string. Current producer sources include explicit_model, selector, mcp_evidence and evidence_gate; these are not a closed enum.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "decision_id",
+          "source",
+          "route",
+          "score",
+          "reason",
+          "created_at"
         ],
         "type": "object"
       },
@@ -5761,7 +5913,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.43"
+    "version": "v0.86.44"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -15738,10 +15890,107 @@
     },
     "/admin/routing/domain-decisions": {
       "get": {
+        "description": "Read recent recorded domain routing decisions and their signals with routing:read and raw-prompt permission; routing:write is not required. JWT roles super_admin, admin and security_admin may read raw data when they have the scope; the full legacy admin token and unauthenticated open mode also permit it. Legacy read-only credentials and other JWT roles cannot read this report. Stored strings, including identifiers, tools, reasons and embedded evidence errors, are unmasked; this is not a redacted or PII-free projection. route and request_id are trimmed, optional exact-match filters, combined with AND. A missing or blank window imposes no time bound. A supplied window accepts 24h, 7d, 30d, 90d or a positive Go duration; invalid/nonpositive input uses seven days. The time filter is inclusive on created_at. limit defaults to 50 for omitted/invalid/nonpositive text and is capped at 200 after integer parsing. Decisions are ordered by created_at descending, with no tie-break ordering guarantee. This is a limited recent list, not cursor pagination; no total, cursor or revision is returned. team and team_id do not filter results, and there is no implicit caller-team scope. The decision list and each exact decision-ID signal lookup are separate non-atomic queries, not a consistent snapshot. Successful empty signal reads produce []; ignored query/scan failures produce null, and a late iteration failure can leave a partial array. There is no signal-completeness flag or per-entry error metadata. Signal arrays are ordered by created_at ascending then source ascending, with no further tie-break guarantee. Recorded scores are not calibrated probabilities, and recorded false fallback/governance flags are not proof those events never occurred. GET does not change decisions, signals, review status, examples, routing rules or runtime caches and performs no automatic promotion.",
         "operationId": "get__admin_routing_domain_decisions",
+        "parameters": [
+          {
+            "description": "Trimmed exact stored route match; omitted/blank imposes no route filter. Extensible string, not a closed route enum, substring search or wildcard pattern.",
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trimmed exact stored request ID match; omitted/blank imposes no request filter. Combined with route and window, not used as the signal join key.",
+            "in": "query",
+            "name": "request_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Omitted/blank has no lower time bound. Trimmed 24h/7d/30d/90d or any positive Go duration is accepted; other nonblank input defaults to seven days. This is tolerant normalization, not an enum or validation range.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trimmed query text parsed by strconv.Atoi. Missing, invalid, overflow or nonpositive values use 50; positive parsed values above 200 are capped at 200. These are normalization rules, not rejection bounds.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": "50",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingDomainDecisionReport"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: existing authentication or routing:read scope rejection; a raw-prompt role or admin:read alone is insufficient."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "raw_prompt_access_required: the authenticated routing reader lacks raw-prompt permission; no decision payload is returned."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: the handler requires GET after authorization."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "domain_decisions_failed: decision-list storage read failed. The message contains storage error text and is not a safe display projection. Signal lookup failures alone remain HTTP 200."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
