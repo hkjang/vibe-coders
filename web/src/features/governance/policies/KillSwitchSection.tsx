@@ -16,11 +16,17 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { formatDateTime, formatNumber, formatRelative } from "@/shared/utils/format";
 
 const routeId = "governance.policies";
 
 export function KillSwitchSection({ canWrite }: { canWrite: boolean }): React.JSX.Element {
+  const access = useFeatureMutationAccess(
+    [routeId],
+    canWrite,
+    "긴급 정지 변경에는 admin:write 권한이 필요합니다.",
+  );
   const [confirming, setConfirming] = useState<"stop" | "resume" | undefined>();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -40,11 +46,14 @@ export function KillSwitchSection({ canWrite }: { canWrite: boolean }): React.JS
   });
 
   const setKillSwitch = useMutationFeedback({
-    mutate: (variables: { disabled: boolean; reason: string }) =>
-      apiClient.request(endpoints.domains.governance.killSwitch.set, {
+    mutate: (variables: { disabled: boolean; reason: string }) => {
+      access.assertCurrent();
+      return apiClient.request(endpoints.domains.governance.killSwitch.set, {
         body: variables,
         routeId,
-      }),
+        retryUnauthorized: false,
+      });
+    },
     invalidates: [["governance", "kill-switch"]],
     successMessage: (_result, variables) =>
       variables.disabled ? "게이트웨이를 긴급 정지했습니다." : "게이트웨이 운영을 재개했습니다.",
@@ -89,9 +98,14 @@ export function KillSwitchSection({ canWrite }: { canWrite: boolean }): React.JS
           disabled ? (
             <Button
               variant="primary"
-              disabled={!canWrite}
-              title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+              disabled={!access.allowed}
+              title={access.reason}
               onClick={(event) => {
+                try {
+                  access.assertCurrent();
+                } catch {
+                  return;
+                }
                 triggerRef.current = event.currentTarget;
                 setConfirming("resume");
               }}
@@ -101,9 +115,14 @@ export function KillSwitchSection({ canWrite }: { canWrite: boolean }): React.JS
           ) : (
             <Button
               variant="danger"
-              disabled={!canWrite}
-              title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+              disabled={!access.allowed}
+              title={access.reason}
               onClick={(event) => {
+                try {
+                  access.assertCurrent();
+                } catch {
+                  return;
+                }
                 triggerRef.current = event.currentTarget;
                 setConfirming("stop");
               }}
@@ -188,12 +207,21 @@ export function KillSwitchSection({ canWrite }: { canWrite: boolean }): React.JS
             : "차단을 해제하고 모든 /v1 호출을 다시 허용합니다."
         }
         confirmLabel={confirming === "stop" ? "즉시 차단" : "운영 재개"}
+        confirmDisabled={!access.allowed}
         tone="danger"
         requireReason
         onConfirm={async (reason) => {
+          access.assertCurrent();
           await setKillSwitch.mutateAsync({ disabled: confirming === "stop", reason });
         }}
-      />
+      >
+        {!access.allowed ? (
+          <InlineNotice tone="warning" title="긴급 정지 변경이 잠겼습니다.">
+            {access.reason} 입력한 사유는 유지됩니다. 권한이 복구되어도 직접 확인하기 전에는 전송하지
+            않습니다.
+          </InlineNotice>
+        ) : null}
+      </ConfirmDialog>
     </>
   );
 }

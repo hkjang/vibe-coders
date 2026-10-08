@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.46"
+var AppVersion = "v0.86.47"
 
 type Server struct {
 	cfg      config.Config

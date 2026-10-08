@@ -35,6 +35,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { formatNumber } from "@/shared/utils/format";
 
 const routeId = "governance.policies";
@@ -119,6 +120,11 @@ function actionsFrom(values: PolicyFormValues): Record<string, unknown> {
 
 export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const queryClient = useQueryClient();
+  const toggleAccess = useFeatureMutationAccess(
+    [routeId],
+    canWrite,
+    "정책 사용·중지 변경에는 admin:write 권한이 필요합니다.",
+  );
   const editorAccess = usePolicyEditorAccess(canWrite);
   const [editing, setEditing] = useState<{ baseline: Policy; owner: string }>();
   const editorSelection = useRef<typeof editing>(undefined);
@@ -197,8 +203,9 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
   });
 
   const togglePolicy = useMutationFeedback({
-    mutate: (variables: { policy: Policy; enabled: boolean }) =>
-      apiClient.request(endpoints.domains.governance.policies.save, {
+    mutate: (variables: { policy: Policy; enabled: boolean }) => {
+      toggleAccess.assertCurrent();
+      return apiClient.request(endpoints.domains.governance.policies.save, {
         body: {
           id: variables.policy.id,
           name: variables.policy.name ?? variables.policy.id,
@@ -216,7 +223,9 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
           })),
         },
         routeId,
-      }),
+        retryUnauthorized: false,
+      });
+    },
     invalidates: [["governance", "policies"]],
     successMessage: (_result, variables) =>
       variables.enabled ? "정책을 사용으로 전환했습니다." : "정책을 중지했습니다.",
@@ -366,10 +375,15 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
           </Button>
           <Button
             size="small"
-            disabled={!canWrite}
-            title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+            disabled={!toggleAccess.allowed}
+            title={toggleAccess.reason}
             aria-label={`${editorText(row.name || row.id, editorAccess.prefixes)} ${row.enabled ? "중지" : "사용"}`}
             onClick={(event) => {
+              try {
+                toggleAccess.assertCurrent();
+              } catch {
+                return;
+              }
               rowTriggerRef.current = event.currentTarget;
               setPendingToggle(row);
             }}
@@ -645,8 +659,10 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
             : "이 정책의 규칙이 즉시 적용됩니다."
         }
         confirmLabel={pendingToggle?.enabled ? "중지" : "사용"}
+        confirmDisabled={!toggleAccess.allowed}
         tone={pendingToggle?.enabled ? "danger" : "primary"}
         onConfirm={async () => {
+          toggleAccess.assertCurrent();
           if (pendingToggle) {
             await togglePolicy.mutateAsync({
               policy: pendingToggle,
@@ -654,7 +670,13 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
             });
           }
         }}
-      />
+      >
+        {!toggleAccess.allowed ? (
+          <InlineNotice tone="warning" title="정책 사용·중지 변경이 잠겼습니다.">
+            {toggleAccess.reason} 권한이 복구되어도 직접 확인하기 전에는 전송하지 않습니다.
+          </InlineNotice>
+        ) : null}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={pendingCaseDelete !== undefined}
