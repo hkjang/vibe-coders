@@ -29,6 +29,20 @@ export interface RequestNoteDraft {
   kind: "edit" | "delete";
   epoch: number;
   instance: number;
+  retention?: RequestNoteRetention;
+}
+export interface RequestNoteRetention {
+  owner: object;
+  isCurrent: () => boolean;
+  isSuspended?: () => boolean;
+}
+type RetainedOutcome = "none" | "pending" | "acknowledged" | "uncertain";
+interface RetainedDraft {
+  target: RequestNoteDraft;
+  values: Pick<RequestNoteValues, "noteMode" | "tagsMode"> &
+    Partial<Pick<RequestNoteValues, "note" | "tags">>;
+  dirty: boolean;
+  outcome: RetainedOutcome;
 }
 
 export function useRequestNoteQuery(requestId: string, epoch: number) {
@@ -57,11 +71,12 @@ export function useRequestNoteQuery(requestId: string, epoch: number) {
 }
 
 /** Page-local ownership lets a nested note form protect sheet and disclosure actions. */
-export function useRequestNoteEditor() {
+export function useRequestNoteEditor(retention?: RequestNoteRetention) {
   const auth = useAuth();
   const client = useQueryClient();
   const coordinator = useUnsavedChanges();
   if (!coordinator) throw new Error("Request notes require a draft coordinator");
+  const coordination = useSyncExternalStore(coordinator.subscribe, coordinator.getSnapshot);
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const supported = supportsRequestNoteContract(auth.backendVersion);
   const mutationAccess = useFeatureMutationAccess(
@@ -72,7 +87,11 @@ export function useRequestNoteEditor() {
   const writable = mutationAccess.allowed;
   const access = useRef({ writable, supported });
   const [selection, setSelection] = useState<RequestNoteDraft>();
-  const target = selection?.epoch === epoch ? selection : undefined;
+  const target =
+    selection?.epoch === epoch &&
+    (!selection.retention || (selection.retention.owner === retention?.owner && retention.isCurrent()))
+      ? selection
+      : undefined;
   const active = useRef<RequestNoteDraft | undefined>(undefined);
   const flight = useRef<RequestNoteDraft | undefined>(undefined);
   const sequence = useRef(0);
@@ -84,6 +103,11 @@ export function useRequestNoteEditor() {
   const leaveAction = useRef<(() => void) | undefined>(undefined);
   const afterClose = useRef<{ action: () => void; epoch: number } | undefined>(undefined);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const [retained, setRetained] = useState<RetainedDraft>();
+  const retainedRef = useRef<RetainedDraft | undefined>(undefined);
+  const transmission = useRef<
+    { draft: RequestNoteDraft; outcome: Exclude<RetainedOutcome, "none">; retired: boolean } | undefined
+  >(undefined);
   useLayoutEffect(() => {
     active.current = target;
     access.current = { writable, supported };
@@ -92,6 +116,8 @@ export function useRequestNoteEditor() {
     (instance: number): void => {
       if (active.current?.instance !== instance) return;
       active.current = undefined;
+      retainedRef.current = undefined;
+      setRetained(undefined);
       leaveAction.current = undefined;
       coordinator.removeForm(owner);
       setSelection(undefined);
@@ -144,7 +170,37 @@ export function useRequestNoteEditor() {
     [client],
   );
   const current = (draft: RequestNoteDraft): boolean =>
-    active.current === draft && draft.epoch === tokenStore.getSessionEpoch();
+    active.current === draft &&
+    draft.epoch === tokenStore.getSessionEpoch() &&
+    (!draft.retention || draft.retention.isCurrent());
+  const retain = useCallback(
+    (draft: RequestNoteDraft, values: RequestNoteValues, wasDirty: boolean): void => {
+      if (
+        !draft.retention ||
+        active.current !== draft ||
+        draft.epoch !== tokenStore.getSessionEpoch() ||
+        !draft.retention.isCurrent()
+      )
+        return;
+      const sent = transmission.current?.draft === draft ? transmission.current : undefined;
+      if (sent) sent.retired = true;
+      const next: RetainedDraft = {
+        target: draft,
+        dirty: wasDirty,
+        outcome: sent?.outcome ?? "none",
+        // Preserve user-selected replacement text, not a second copy of server originals.
+        values: {
+          noteMode: values.noteMode,
+          tagsMode: values.tagsMode,
+          ...(values.noteMode === "replace" ? { note: values.note } : {}),
+          ...(values.tagsMode === "replace" ? { tags: values.tags } : {}),
+        },
+      };
+      retainedRef.current = next;
+      setRetained(next);
+    },
+    [],
+  );
   const open = (requestId: string, kind: "edit" | "delete", trigger: HTMLElement): void => {
     if (
       !access.current.writable ||
@@ -161,6 +217,7 @@ export function useRequestNoteEditor() {
       baseline: { ...baseline, tags: [...baseline.tags], redacted_fields: [...baseline.redacted_fields] },
       epoch,
       instance: ++sequence.current,
+      ...(retention ? { retention } : {}),
     };
     Object.freeze(draft.baseline.tags);
     Object.freeze(draft.baseline.redacted_fields);
@@ -172,6 +229,9 @@ export function useRequestNoteEditor() {
     setPending(false);
     setCommitted(undefined);
     setUnsupportedInstance(undefined);
+    retainedRef.current = undefined;
+    setRetained(undefined);
+    transmission.current = undefined;
     returnFocusRef.current = trigger;
   };
   const requestLeave = (action: () => void): void => {
@@ -187,6 +247,12 @@ export function useRequestNoteEditor() {
     mutationAccess.assertCurrent();
     if (!current(draft) || !access.current.writable)
       throw new AppError("현재 세션의 요청 메모 쓰기 권한을 확인하세요.", { kind: "permission" });
+    if (draft.retention?.isSuspended?.())
+      throw new AppError("조회 권한을 다시 확인한 뒤 초안을 재개하세요.", { kind: "permission" });
+    if (retainedRef.current?.target === draft && retainedRef.current.outcome !== "none")
+      throw new AppError("이전에 전송한 저장 요청입니다. 현재 메모를 다시 조회해 결과를 확인하세요.", {
+        kind: "contract",
+      });
     if (!access.current.supported) throw new AppError(requestNoteContractMessage, { kind: "contract" });
     const latest = confirmedRequestNote(
       client.getQueryState(requestNoteKey(draft.requestId, draft.epoch)),
@@ -198,6 +264,10 @@ export function useRequestNoteEditor() {
       throw new AppError("처리 중입니다.", { kind: "aborted" });
     const body = requestNoteBody(values);
     flight.current = draft;
+    const sent = draft.retention
+      ? { draft, outcome: "pending" as Exclude<RetainedOutcome, "none">, retired: false }
+      : undefined;
+    if (sent) transmission.current = sent;
     setPending(true);
     setCommitted(undefined);
     setUnsupportedInstance(undefined);
@@ -205,14 +275,25 @@ export function useRequestNoteEditor() {
       if (draft.kind === "edit")
         await apiClient.request(
           withPathParams(endpoints.domains.observability.requests.saveNote, { id: draft.requestId }),
-          { body, routeId },
+          { body, routeId, ...(draft.retention ? { retryUnauthorized: false } : {}) },
         );
       else
         await apiClient.request(
           withPathParams(endpoints.domains.observability.requests.removeNote, { id: draft.requestId }),
-          { routeId },
+          { routeId, ...(draft.retention ? { retryUnauthorized: false } : {}) },
         );
       if (!current(draft)) return;
+      if (sent && draft.retention?.isSuspended?.()) sent.retired = true;
+      if (sent) sent.outcome = "acknowledged";
+      if (sent?.retired) {
+        const saved = retainedRef.current;
+        if (saved?.target === draft) {
+          const next = { ...saved, outcome: "acknowledged" as const };
+          retainedRef.current = next;
+          setRetained(next);
+        }
+        return;
+      }
       setCommitted({ id: draft.requestId, epoch: draft.epoch, kind: draft.kind });
       toast.success(
         draft.kind === "edit" ? "요청 메모·태그를 저장했습니다." : "요청 메모·태그를 삭제했습니다.",
@@ -224,6 +305,13 @@ export function useRequestNoteEditor() {
       ])
         void client.invalidateQueries({ queryKey: key }).catch(() => undefined);
     } catch (cause) {
+      if (sent && draft.retention?.isSuspended?.()) sent.retired = true;
+      if (sent) sent.outcome = "uncertain";
+      if (current(draft) && sent?.retired && retainedRef.current?.target === draft) {
+        const next = { ...retainedRef.current, outcome: "uncertain" as const };
+        retainedRef.current = next;
+        setRetained(next);
+      }
       if (current(draft) && draft.kind === "edit" && isAppError(cause) && cause.status === 405)
         setUnsupportedInstance(draft.instance);
       throw cause;
@@ -242,6 +330,10 @@ export function useRequestNoteEditor() {
     recipientUnsupported: Boolean(target) && unsupportedInstance === target?.instance,
     committed: committed?.epoch === epoch ? committed : undefined,
     returnFocusRef,
+    retain,
+    retainedDraft: retained?.target === target && target?.retention?.isCurrent() ? retained : undefined,
+    awaitingParentDecision:
+      coordination.confirmation?.kind === "close" && coordination.confirmation.owner === owner,
     open,
     close,
     requestLeave,

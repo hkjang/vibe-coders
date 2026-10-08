@@ -26,6 +26,7 @@ import "@/features/observability/request-insight/request-insight.css";
 import { RequestNoteBoundary } from "./RequestNoteBoundary";
 import { RequestNoteSection } from "./RequestNoteSection";
 import { useRequestNoteContext } from "./request-note-context";
+import { requestDetailQueryOptions, type RequestDetailReadScope } from "./request-detail-read-scope";
 
 const routeId = "observability.request-insight";
 
@@ -35,6 +36,8 @@ interface RequestInsightPanelProps {
   /** Operator may read prompt originals, so analysis and replay are allowed. */
   canInspectRaw: boolean;
   requestId: string;
+  /** Optional owner isolation for callers whose read identity can change in place. */
+  readScope?: RequestDetailReadScope;
 }
 
 function requestErrorText(error: unknown, fallback: string): string {
@@ -93,6 +96,7 @@ function RequestInsightPanelContent({
   canInspectRaw,
   canWriteNote,
   requestId,
+  readScope,
 }: RequestInsightPanelProps): React.JSX.Element {
   const auth = useAuth();
   const executionAccess = useFeatureMutationAccess(
@@ -108,14 +112,14 @@ function RequestInsightPanelContent({
   const replayTriggerRef = useRef<HTMLButtonElement>(null);
 
   const explain = useQuery({
-    queryKey: ["observability", "requests", requestId, "explain"],
     enabled: requestId !== "",
     staleTime: 30_000,
-    queryFn: ({ signal }) =>
+    ...requestDetailQueryOptions(readScope, requestId, "explain", (signal) =>
       apiClient.request(withPathParams(endpoints.domains.observability.requests.explain, { id: requestId }), {
         signal,
         routeId,
       }),
+    ),
   });
 
   const runAnalysis = useMutationFeedback({
@@ -153,7 +157,7 @@ function RequestInsightPanelContent({
 
   return (
     <div className="obs-section-stack">
-      <RequestSpanWaterfall requestId={requestId} />
+      <RequestSpanWaterfall requestId={requestId} readScope={readScope} />
 
       <SectionCard
         headingLevel={3}

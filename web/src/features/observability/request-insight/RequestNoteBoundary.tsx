@@ -1,23 +1,35 @@
 import { useContext, type ReactNode } from "react";
 
 import { RequestNoteContext } from "./request-note-context";
-import { useRequestNoteEditor } from "./use-request-note-editor";
+import { useRequestNoteEditor, type RequestNoteRetention } from "./use-request-note-editor";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
 import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
 
-export function RequestNoteBoundary({ children }: { children: ReactNode }): React.JSX.Element {
+export function RequestNoteBoundary({
+  children,
+  retainDraft,
+}: {
+  children: ReactNode;
+  retainDraft?: RequestNoteRetention;
+}): React.JSX.Element {
   const inherited = useContext(RequestNoteContext);
   const coordinator = useUnsavedChanges();
   if (inherited) return <>{children}</>;
   return coordinator ? (
-    <RequestNoteOwner>{children}</RequestNoteOwner>
+    <RequestNoteOwner retainDraft={retainDraft}>{children}</RequestNoteOwner>
   ) : (
     <UnsavedChangesProvider>
-      <RequestNoteOwner>{children}</RequestNoteOwner>
+      <RequestNoteOwner retainDraft={retainDraft}>{children}</RequestNoteOwner>
     </UnsavedChangesProvider>
   );
 }
-function RequestNoteOwner({ children }: { children: ReactNode }): React.JSX.Element {
-  const editor = useRequestNoteEditor();
+function RequestNoteOwner({
+  children,
+  retainDraft,
+}: {
+  children: ReactNode;
+  retainDraft?: RequestNoteRetention;
+}): React.JSX.Element {
+  const editor = useRequestNoteEditor(retainDraft);
   return <RequestNoteContext.Provider value={editor}>{children}</RequestNoteContext.Provider>;
 }
