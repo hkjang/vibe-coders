@@ -9,6 +9,7 @@ import {
   canWriteRequestNote,
 } from "@/features/observability/request-insight/request-access";
 import { RequestInsightPanel } from "@/features/observability/request-insight/RequestInsightPanel";
+import { useRequestDetailReadScope } from "@/features/observability/request-insight/request-detail-read-scope";
 import { ModelAggregatePanel } from "@/features/observability/xview/ModelAggregatePanel";
 import { SavedViewBar } from "@/features/observability/xview/SavedViewBar";
 import { savedViewParamKeys } from "@/features/observability/xview/saved-view-params";
@@ -156,6 +157,7 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
     () => ({ readOwner, retirement: live_.denialBoundary }),
     [readOwner, live_.denialBoundary],
   );
+  const detailReadScope = useRequestDetailReadScope(displayOwner, readOwner.isCurrent);
   const [selected, setSelected] = useState<{ owner: object; points: ReadonlyArray<ScatterPoint> }>();
   const [flow, setFlow] = useState<{ owner: object; id: string }>();
   const [insight, setInsight] = useState<{ owner: object; id: string }>();
@@ -709,6 +711,7 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
           <RequestInsightPanel
             key={noteRequestId}
             requestId={noteRequestId}
+            readScope={detailReadScope}
             canInspectRaw={canInspectRaw}
             canWriteNote={canWriteNote}
           />

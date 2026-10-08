@@ -13,6 +13,7 @@ import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { requestDetailQueryOptions, type RequestDetailReadScope } from "./request-detail-read-scope";
 import {
   flowCount,
   flowInteger,
@@ -42,6 +43,7 @@ function FlowError({ error, prefixes }: { error: unknown; prefixes: readonly str
 
 interface RequestSpanWaterfallProps {
   requestId: string;
+  readScope?: RequestDetailReadScope;
 }
 
 /**
@@ -49,25 +51,25 @@ interface RequestSpanWaterfallProps {
  * Error metadata can contain originals for privileged callers. The local display
  * protection does not replace the server's role/team policy or sanitize its payload.
  */
-export function RequestSpanWaterfall({ requestId }: RequestSpanWaterfallProps): React.JSX.Element {
+export function RequestSpanWaterfall({ requestId, readScope }: RequestSpanWaterfallProps): React.JSX.Element {
   const { credentialPrefixes } = useAuth();
   const trace = useQuery({
     enabled: requestId !== "",
-    queryKey: ["observability", "requests", requestId, "trace"],
-    queryFn: ({ signal }) =>
+    ...requestDetailQueryOptions(readScope, requestId, "trace", (signal) =>
       apiClient.request(withPathParams(endpoints.domains.observability.requests.trace, { id: requestId }), {
         routeId,
         signal,
       }),
+    ),
   });
   const links = useQuery({
     enabled: requestId !== "",
-    queryKey: ["observability", "requests", requestId, "links"],
-    queryFn: ({ signal }) =>
+    ...requestDetailQueryOptions(readScope, requestId, "links", (signal) =>
       apiClient.request(withPathParams(endpoints.domains.observability.requests.links, { id: requestId }), {
         routeId,
         signal,
       }),
+    ),
   });
 
   const spans = trace.data?.spans ?? [];
