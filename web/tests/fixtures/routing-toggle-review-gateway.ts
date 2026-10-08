@@ -46,7 +46,12 @@ const userFor = (email: string, read: boolean, write: boolean) => ({
   features: { "routing.rules": true },
 });
 type User = ReturnType<typeof userFor>;
-function bootstrap(user: User | undefined, mode: Mode, prefixes: string[]): UiBootstrapResponse {
+function bootstrap(
+  user: User | undefined,
+  mode: Mode,
+  prefixes: string[],
+  rawPromptView: boolean,
+): UiBootstrapResponse {
   return {
     backend_version: "v0.86.25",
     ui_version: "routing-toggle-fixture",
@@ -71,7 +76,7 @@ function bootstrap(user: User | undefined, mode: Mode, prefixes: string[]): UiBo
     roles: user?.roles ?? [],
     permissions: user?.scopes ?? [],
     allowed_features: user ? ["routing.rules"] : [],
-    capabilities: { raw_prompt_view: false },
+    capabilities: { raw_prompt_view: rawPromptView },
     migration_registry: [
       {
         feature_id: "routing.rules",
@@ -97,6 +102,7 @@ async function install(context: BrowserContext) {
   let mode: Mode = "writable",
     read = true,
     write = true,
+    rawPromptView = false,
     logins = 0;
   let rows = [rule(), rule(ruleB)];
   let prefixes = ["vc_sk_", "vc_sa_"];
@@ -146,7 +152,7 @@ async function install(context: BrowserContext) {
         user,
       });
     }
-    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(session, mode, prefixes));
+    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(session, mode, prefixes, rawPromptView));
     if (call === "GET /auth/me")
       return json({
         version: "v0.86.25",
@@ -246,6 +252,9 @@ async function install(context: BrowserContext) {
     setRead: (next: boolean) => {
       read = next;
       updateScopes();
+    },
+    setRawPromptView: (next: boolean) => {
+      rawPromptView = next;
     },
     setPrefixes: (next: string[]) => {
       prefixes = [...next];

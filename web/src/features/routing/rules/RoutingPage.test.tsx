@@ -614,7 +614,12 @@ describe("RoutingPage", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /검토 승인/u }));
     const dialog = await screen.findByRole("dialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: "승인" }));
+    await userEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "이 작업은 검토 상태만 기록함을 확인했습니다",
+      }),
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "승인 상태 기록" }));
 
     await waitFor(() =>
       expect(api.calls.some((call) => call.key === "POST /admin/routing/domain-review/rv_1%2Fapprove")).toBe(

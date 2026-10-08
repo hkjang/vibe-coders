@@ -5,4 +5,6 @@ overrides:
   # Build/test transitive dependencies: retain the patched compatible majors.
   brace-expansion: 5.0.12
   js-yaml: 4.3.2
+  # GHSA-68fv-2mgg-jv7q: validate indexed source-map offsets in build/test tools.
+  source-map-js: 1.2.2
   undici: 8.10.2
