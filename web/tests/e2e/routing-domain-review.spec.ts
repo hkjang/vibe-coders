@@ -25,6 +25,43 @@ const refreshFor = (dialog: Locator) =>
   dialog.getByRole("button", { name: "검토 목록 다시 조회", exact: true });
 const queueFor = (page: Page) => page.getByRole("table", { name: "도메인 라우팅 검토 큐", exact: true });
 
+test("조회 403은 열린 검토를 폐기하고 후속 503에서도 이전 내용이나 전송 동의를 복원하지 않는다", async ({
+  page,
+  reviewer,
+}) => {
+  await login(page);
+  const { dialog } = await open(page);
+  await consent(dialog);
+  const oldConfirm = await finalFor(dialog).elementHandle();
+  reviewer.setStatus("list", 403);
+  await refreshFor(dialog).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(queueFor(page)).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(reviewRow.reason);
+  await expect(page.getByText("서버가 조회를 허용하지 않아", { exact: false })).toBeVisible();
+  await expect(page.getByText("도메인 라우팅 검토 큐", { exact: true })).toBeFocused();
+  await oldConfirm?.evaluate((button) => (button as HTMLButtonElement).click());
+  expect(reviewer.posts()).toEqual([]);
+
+  reviewer.setStatus("list", 503);
+  await page.getByRole("button", { name: "검토 목록 다시 조회", exact: true }).click();
+  await expect(page.getByText("최신 검토 목록을 확인하지 못했습니다.", { exact: true })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(reviewRow.reason);
+  await expect(dialog).toHaveCount(0);
+  expect(reviewer.posts()).toEqual([]);
+
+  reviewer.setStatus("list", 200);
+  reviewer.setRows([{ ...reviewRow, id: "new-review-after-denial", reason: "새로 허용된 합성 검토" }]);
+  await page.getByRole("button", { name: "검토 목록 다시 조회", exact: true }).click();
+  await expect(queueFor(page)).toContainText("새로 허용된 합성 검토");
+  await expect(page.locator("body")).not.toContainText(reviewRow.reason);
+  await expect(dialog).toHaveCount(0);
+  const fresh = await open(page);
+  await expect(consentFor(fresh.dialog)).not.toBeChecked();
+  await expect(finalFor(fresh.dialog)).toBeDisabled();
+  expect(reviewer.posts()).toEqual([]);
+});
+
 async function login(page: Page, target = reviewUrl) {
   await page.goto(`login?return_to=${encodeURIComponent(target)}`);
   await page.getByLabel("이메일", { exact: true }).fill(firstEmail);
