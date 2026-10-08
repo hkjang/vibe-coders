@@ -18,7 +18,11 @@ export interface DomainReviewSnapshot {
   count: number;
   revision: number;
 }
-export function useDomainReviewQuery(status: DomainReviewStatus, access: DomainReviewAccess) {
+export function useDomainReviewQuery(
+  status: DomainReviewStatus,
+  access: DomainReviewAccess,
+  onDenied: (error: AppError) => void,
+) {
   const client = useQueryClient();
   const nonce = useId();
   const key = useMemo(
@@ -56,7 +60,15 @@ export function useDomainReviewQuery(status: DomainReviewStatus, access: DomainR
         assertRead(signal);
         return report;
       } catch (cause) {
-        throw domainReviewSafeError(cause, access.prefixes);
+        const error = domainReviewSafeError(cause, access.prefixes);
+        if (error.status === 401 || error.status === 403 || error.kind === "permission") {
+          // An authoritative GET denial retires this read/consent lifetime.
+          // Ignore late responses belonging to an already cancelled owner.
+          assertRead(signal);
+          active.current = false;
+          onDenied(error);
+        }
+        throw error;
       }
     },
   });

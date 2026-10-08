@@ -12,6 +12,7 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { createDataTableColumnHelper } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { DomainReviewDialog } from "./DomainReviewDialog";
+import { DomainReviewDenied } from "./DomainReviewDenied";
 import { useDomainReviewAccess, type DomainReviewAccess } from "./domain-review-access";
 import type { DomainReviewReview } from "./domain-review-operation";
 import { useDomainReviewQuery } from "./domain-review-query";
@@ -46,6 +47,8 @@ interface ContentProps {
   status: DomainReviewStatus;
   pendingOwner: object;
   onPendingCount: (value: PendingCount) => void;
+  onDenied: (error: AppError) => void;
+  returnFocusRef: { current: HTMLElement | null };
 }
 interface RowActions {
   access: DomainReviewAccess;
@@ -134,12 +137,11 @@ const columns = column.columns([
     cell: ({ row }) => <ReviewCell item={row.original} field="actions" />,
   }),
 ]);
-function Content({ access, status, pendingOwner, onPendingCount }: ContentProps) {
-  const query = useDomainReviewQuery(status, access);
+function Content({ access, status, pendingOwner, onPendingCount, onDenied, returnFocusRef }: ContentProps) {
+  const query = useDomainReviewQuery(status, access, onDenied);
   const [selected, setSelected] = useState<Selection>();
   const selection = useRef<Selection | undefined>(undefined);
   const serial = useRef(0);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
   const heading = useRef<HTMLSpanElement>(null);
   const triggers = useRef(
     new Map<RoutingDomainReviewItem, Partial<Record<DomainReviewAction, HTMLButtonElement>>>(),
@@ -274,24 +276,37 @@ function Content({ access, status, pendingOwner, onPendingCount }: ContentProps)
 export function DomainReviewSection({ canWrite, ...props }: Props) {
   const access = useDomainReviewAccess(canWrite);
   const [pending, setPending] = useState<PendingCount>();
+  const [attempt, setAttempt] = useState(0);
+  const [denial, setDenial] = useState<{ owner: object; error: AppError }>();
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   // A new object for every committed access/status transition prevents an old
   // count from becoming current again after an A -> B -> A owner change.
   const pendingOwner = useMemo(
-    () => ({ lifetime: access.lifetime, status: props.status }),
-    [access.lifetime, props.status],
+    () => ({ lifetime: access.lifetime, status: props.status, attempt }),
+    [access.lifetime, props.status, attempt],
   );
-  const pendingReviews = access.readable && pending?.owner === pendingOwner ? pending.count : undefined;
+  const denied = denial?.owner === pendingOwner ? denial.error : undefined;
+  const pendingReviews =
+    access.readable && !denied && pending?.owner === pendingOwner ? pending.count : undefined;
   return (
     <>
       {/* Recommendations own their existing query/dialog lifetime independently. */}
       {props.children(pendingReviews)}
-      {access.readable ? (
+      {access.readable && denied ? (
+        <DomainReviewDenied
+          error={denied}
+          returnFocusRef={returnFocusRef}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      ) : access.readable ? (
         <Content
-          key={`${access.key}:${props.status}`}
+          key={`${access.key}:${props.status}:${attempt}`}
           access={access}
           status={props.status}
           pendingOwner={pendingOwner}
           onPendingCount={setPending}
+          onDenied={(error) => setDenial({ owner: pendingOwner, error })}
+          returnFocusRef={returnFocusRef}
         />
       ) : (
         <InlineNotice tone="warning" title="도메인 검토 조회 권한을 확인하세요.">
