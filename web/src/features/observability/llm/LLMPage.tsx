@@ -1,21 +1,22 @@
 import { RequestNoteBoundary } from "@/features/observability/request-insight/RequestNoteBoundary";
 import { useRequestNoteContext } from "@/features/observability/request-insight/request-note-context";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquarePlus, RefreshCw, Search } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
-import { z } from "zod";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { TimeSeriesChart, type ChartSeries } from "@/features/observability/charts";
 import { LLMTraceDetail } from "@/features/observability/llm/LLMTraceDetail";
 import { PromptCompareDialog } from "@/features/observability/llm/PromptCompareDialog";
+import { useLLMReadOwner, type LLMReadOwner } from "./llm-read-access";
+import { llmReadQueryOptions } from "./llm-read-query";
+import { useLLMReadLifetime, type LLMReadLifetime } from "./llm-read-lifetime";
+import { LLMFeedbackComposer, LLMFeedbackRecoveryNotice } from "./LLMFeedbackComposer";
+import { useLLMFeedbackDraft } from "./llm-feedback-draft";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { apiClient } from "@/shared/api/client";
 import type { LLMScopeQuery } from "@/shared/api/domains/observability";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
-import { FormDialog } from "@/shared/components/form/FormDialog";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { ErrorState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -28,11 +29,9 @@ import { Select } from "@/shared/components/ui/Select";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { TabPanel, Tabs } from "@/shared/components/ui/Tabs";
-import { Textarea } from "@/shared/components/ui/Textarea";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
@@ -56,15 +55,6 @@ const scopeKeys = [
   "evaluation_name",
 ] as const;
 
-const feedbackSchema = z.object({
-  request_id: z.string().trim().min(1, "요청 ID를 입력하세요."),
-  rating: z.coerce.number().int().min(-1).max(1),
-  label: z.string().trim().max(64).optional(),
-  comment: z.string().trim().max(1000).optional(),
-});
-type FeedbackInput = z.input<typeof feedbackSchema>;
-type FeedbackOutput = z.output<typeof feedbackSchema>;
-
 function severityTone(severity: string): "danger" | "info" | "warning" {
   if (severity === "critical" || severity === "high") return "danger";
   if (severity === "medium" || severity === "warning") return "warning";
@@ -72,15 +62,33 @@ function severityTone(severity: string): "danger" | "info" | "warning" {
 }
 
 export function LLMPage(): React.JSX.Element {
+  const owner = useLLMReadOwner();
+  if (!owner.readable)
+    return (
+      <div className="page-stack">
+        <PageHeader title="LLM 관측" legacyHref="/admin#/llm" />
+        <InlineNotice tone="warning" title="LLM 조회 권한을 확인하세요.">
+          현재 사용자 범위의 자료를 조회할 수 없습니다. 이전 자료와 열린 입력은 표시하지 않습니다.
+        </InlineNotice>
+      </div>
+    );
+  // Only security ownership remounts private selections/forms; filters and polling never do.
+  return <LLMReadBoundary key={owner.id} owner={owner} />;
+}
+
+function LLMReadBoundary({ owner }: { owner: LLMReadOwner }): React.JSX.Element {
+  const lifetime = useLLMReadLifetime(owner);
   return (
-    <RequestNoteBoundary>
-      <LLMPageContent />
+    <RequestNoteBoundary retainDraft={lifetime.retention}>
+      <LLMPageContent lifetime={lifetime} />
     </RequestNoteBoundary>
   );
 }
 
-function LLMPageContent(): React.JSX.Element {
+function LLMPageContent({ lifetime }: { lifetime: LLMReadLifetime }): React.JSX.Element {
+  const { owner, detailScope: detailReadScope } = lifetime;
   const noteEditor = useRequestNoteContext();
+  const { returnFocusRef: noteReturnFocusRef } = noteEditor;
   const auth = useAuth();
   const queryClient = useQueryClient();
   const interval = useRefreshInterval();
@@ -114,121 +122,118 @@ function LLMPageContent(): React.JSX.Element {
     model: params.get("model") ?? "",
   }));
   const [filterError, setFilterError] = useState<string>();
-  const [selectedRequestId, setSelectedRequestId] = useState("");
-  const noteRequestId = noteEditor.target?.requestId ?? selectedRequestId;
-  const [feedbackTarget, setFeedbackTarget] = useState<{ requestId: string; traceId: string }>();
-  const [comparePrompt, setComparePrompt] = useState<{ name: string; version: string }>();
+  const [selection, setSelection] = useState<{ owner: LLMReadOwner; id: string }>();
+  const selectedRequestId = selection?.owner === owner && !lifetime.denied ? selection.id : "";
+  const setSelectedRequestId = (id: string) => setSelection({ owner, id });
+  const noteRequestId = selectedRequestId ? (noteEditor.target?.requestId ?? selectedRequestId) : "";
+  const [comparePrompt, setComparePrompt] = useState<{
+    name: string;
+    version: string;
+    owner: LLMReadOwner;
+  }>();
   const detailFocusRef = useRef<HTMLElement | null>(null);
   const feedbackFocusRef = useRef<HTMLElement | null>(null);
   const compareFocusRef = useRef<HTMLElement | null>(null);
+  const refreshFocusRef = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    if (!lifetime.denied) return;
+    detailFocusRef.current = refreshFocusRef.current;
+    feedbackFocusRef.current = refreshFocusRef.current;
+    compareFocusRef.current = refreshFocusRef.current;
+    noteReturnFocusRef.current = refreshFocusRef.current;
+    refreshFocusRef.current?.focus();
+  }, [lifetime.denied, noteReturnFocusRef]);
 
-  const commonQuery = { refetchInterval: interval, refetchIntervalInBackground: false } as const;
+  const commonQuery = {
+    enabled: !lifetime.denied,
+    refetchInterval: lifetime.denied ? false : interval,
+    refetchIntervalInBackground: false,
+  } as const;
 
   const timeseries = useQuery({
-    queryKey: ["observability", "llm", "timeseries", scope],
-    queryFn: ({ signal }) =>
+    ...llmReadQueryOptions(owner, ["observability", "llm", "timeseries", scope], (signal) =>
       apiClient.request(endpoints.domains.observability.llm.timeseries, {
         query: { ...scope, bucket: activeWindow === "24h" ? "hour" : "day" },
         signal,
         routeId: "observability.llm.timeseries",
       }),
-    placeholderData: keepPreviousData,
+    ),
     ...commonQuery,
   });
   const evaluations = useQuery({
-    queryKey: ["observability", "llm", "evaluations", scope],
-    queryFn: ({ signal }) =>
+    ...llmReadQueryOptions(owner, ["observability", "llm", "evaluations", scope], (signal) =>
       apiClient.request(endpoints.domains.observability.llm.evaluations, {
         query: { ...scope, limit: 100 },
         signal,
         routeId: "observability.llm.evaluations",
       }),
-    placeholderData: keepPreviousData,
+    ),
     ...commonQuery,
   });
   const feedback = useQuery({
-    queryKey: ["observability", "llm", "feedback", scope],
-    queryFn: ({ signal }) =>
+    ...llmReadQueryOptions(owner, ["observability", "llm", "feedback", scope], (signal) =>
       apiClient.request(endpoints.domains.observability.llm.feedback, {
         query: { ...scope, limit: 50 },
         signal,
         routeId: "observability.llm.feedback",
       }),
-    placeholderData: keepPreviousData,
+    ),
     ...commonQuery,
   });
   const prompts = useQuery({
-    queryKey: ["observability", "llm", "prompts", scope],
-    queryFn: ({ signal }) =>
+    ...llmReadQueryOptions(owner, ["observability", "llm", "prompts", scope], (signal) =>
       apiClient.request(endpoints.domains.observability.llm.prompts, {
         query: { ...scope, limit: 100 },
         signal,
         routeId: "observability.llm.prompts",
       }),
-    placeholderData: keepPreviousData,
-    enabled: tab === "prompts" || tab === "summary",
+    ),
     ...commonQuery,
+    enabled: !lifetime.denied && (tab === "prompts" || tab === "summary"),
   });
   const insights = useQuery({
-    queryKey: ["observability", "llm", "insights", scope],
-    queryFn: ({ signal }) =>
+    ...llmReadQueryOptions(owner, ["observability", "llm", "insights", scope], (signal) =>
       apiClient.request(endpoints.domains.observability.llm.insights, {
         query: { ...scope, limit: 50 },
         signal,
         routeId: "observability.llm.insights",
       }),
-    placeholderData: keepPreviousData,
-    enabled: tab === "insights" || tab === "summary",
+    ),
     ...commonQuery,
+    enabled: !lifetime.denied && (tab === "insights" || tab === "summary"),
   });
   const patterns = useQuery({
-    queryKey: ["observability", "llm", "patterns", scope],
-    queryFn: ({ signal }) =>
+    ...llmReadQueryOptions(owner, ["observability", "llm", "patterns", scope], (signal) =>
       apiClient.request(endpoints.domains.observability.llm.patterns, {
         query: { ...scope, limit: 50 },
         signal,
         routeId: "observability.llm.patterns",
       }),
-    placeholderData: keepPreviousData,
-    enabled: tab === "insights",
+    ),
     ...commonQuery,
+    enabled: !lifetime.denied && tab === "insights",
   });
 
-  const feedbackForm = useZodForm<FeedbackInput, FeedbackOutput>(feedbackSchema, {
-    request_id: "",
-    rating: 1,
-    label: "",
-    comment: "",
-  });
+  const feedbackDraft = useLLMFeedbackDraft(
+    lifetime,
+    feedbackAccess.assertCurrent,
+    canWrite,
+    feedbackFocusRef,
+  );
+  const openFeedback = feedbackDraft.open;
 
-  const submitFeedback = useMutationFeedback<FeedbackOutput, unknown>({
-    mutate: (values) => {
-      feedbackAccess.assertCurrent();
-      return apiClient.request(endpoints.domains.observability.llm.submitFeedback, {
-        body: {
-          request_id: values.request_id,
-          rating: values.rating,
-          ...(feedbackTarget?.traceId ? { trace_id: feedbackTarget.traceId } : {}),
-          ...(values.label ? { label: values.label } : {}),
-          ...(values.comment ? { comment: values.comment } : {}),
-          source: "console",
-        },
-        routeId: "observability.llm.feedback.create",
-      });
-    },
-    invalidates: [
-      ["observability", "llm", "feedback"],
-      ["observability", "llm", "trace"],
-    ],
-    successMessage: "피드백을 등록했습니다.",
-    errorMessage: "피드백을 등록하지 못했습니다.",
-  });
-
-  const openFeedback = (requestId: string, traceId: string, trigger?: HTMLElement): void => {
-    if (!canWrite) return;
-    feedbackFocusRef.current = trigger ?? null;
-    setFeedbackTarget({ requestId, traceId });
-    feedbackForm.reset({ request_id: requestId, rating: 1, label: "", comment: "" });
+  const openTrace = (requestId: string, trigger: HTMLElement): void => {
+    if (!owner.isCurrent()) return;
+    const open = () => {
+      detailFocusRef.current = trigger;
+      setSelectedRequestId(requestId);
+    };
+    if (
+      noteEditor.retainedDraft?.target.requestId === requestId &&
+      noteEditor.target?.retention?.owner === lifetime.principal
+    )
+      open();
+    else noteEditor.requestLeave(open);
   };
 
   const applyFilters = (event: React.FormEvent<HTMLFormElement>): void => {
@@ -261,6 +266,10 @@ function LLMPageContent(): React.JSX.Element {
   };
 
   const refreshAll = (): void => {
+    if (lifetime.denied) {
+      lifetime.restart();
+      return;
+    }
     void queryClient.invalidateQueries({ queryKey: ["observability", "llm"] });
   };
 
@@ -307,6 +316,28 @@ function LLMPageContent(): React.JSX.Element {
   const alignment = feedback.data?.alignment;
 
   const allFailed = timeseries.isError && evaluations.isError && feedback.isError;
+  if (lifetime.denied)
+    return (
+      <div className="page-stack">
+        <PageHeader
+          title="LLM 관측"
+          legacyHref="/admin#/llm"
+          actions={
+            <Button ref={refreshFocusRef} onClick={refreshAll}>
+              새로고침
+            </Button>
+          }
+        />
+        <InlineNotice tone="warning" title="조회 권한을 다시 확인하세요.">
+          조회가 거부되어 LLM 자료와 열린 창을 숨겼습니다. 새로고침한 뒤 현재 목록에서 다시 선택하세요. 같은
+          사용자 범위의 미저장 입력은 임시 보관하며, 이전 서버 원문은 복구하지 않습니다. 이미 보낸 저장 요청이
+          취소된 것은 아닙니다.
+          {owner.denial?.requestId ? (
+            <span className="request-id"> 요청 ID: {owner.denial.requestId}</span>
+          ) : null}
+        </InlineNotice>
+      </div>
+    );
   if (allFailed && !timeseries.data && !evaluations.data && !feedback.data) {
     return (
       <div className="page-stack">
@@ -332,11 +363,13 @@ function LLMPageContent(): React.JSX.Element {
         description="모델 호출의 품질 평가, 사용자 피드백, 프롬프트 성능을 함께 확인합니다."
         legacyHref="/admin#/llm"
         actions={
-          <Button onClick={refreshAll}>
+          <Button ref={refreshFocusRef} onClick={refreshAll}>
             <RefreshCw aria-hidden="true" /> 새로고침
           </Button>
         }
       />
+
+      <LLMFeedbackRecoveryNotice draft={feedbackDraft} />
 
       <form onSubmit={applyFilters}>
         <Toolbar
@@ -602,13 +635,7 @@ function LLMPageContent(): React.JSX.Element {
                           <td>
                             <Button
                               size="small"
-                              onClick={(event) => {
-                                const trigger = event.currentTarget;
-                                noteEditor.requestLeave(() => {
-                                  detailFocusRef.current = trigger;
-                                  setSelectedRequestId(item.request_id);
-                                });
-                              }}
+                              onClick={(event) => openTrace(item.request_id, event.currentTarget)}
                               aria-label={`${item.request_id} 호출 상세 열기`}
                             >
                               상세
@@ -695,13 +722,7 @@ function LLMPageContent(): React.JSX.Element {
                           <td>
                             <Button
                               size="small"
-                              onClick={(event) => {
-                                const trigger = event.currentTarget;
-                                noteEditor.requestLeave(() => {
-                                  detailFocusRef.current = trigger;
-                                  setSelectedRequestId(item.request_id);
-                                });
-                              }}
+                              onClick={(event) => openTrace(item.request_id, event.currentTarget)}
                               aria-label={`${item.request_id} 호출 상세 열기`}
                             >
                               상세
@@ -798,6 +819,7 @@ function LLMPageContent(): React.JSX.Element {
                             onClick={(event) => {
                               compareFocusRef.current = event.currentTarget;
                               setComparePrompt({
+                                owner,
                                 name: item.prompt_name,
                                 version: item.prompt_version,
                               });
@@ -913,6 +935,10 @@ function LLMPageContent(): React.JSX.Element {
       >
         {noteRequestId ? (
           <LLMTraceDetail
+            owner={owner}
+            resumeNote={lifetime.resumeNote}
+            feedbackRecovery={feedbackDraft.recovery}
+            detailReadScope={detailReadScope}
             requestId={noteRequestId}
             canWriteFeedback={canWrite}
             writeDeniedReason={writeDeniedReason}
@@ -921,62 +947,11 @@ function LLMPageContent(): React.JSX.Element {
         ) : null}
       </Sheet>
 
-      <FormDialog
-        open={feedbackTarget !== undefined}
-        onOpenChange={(next) => {
-          if (!next) setFeedbackTarget(undefined);
-        }}
-        returnFocusRef={feedbackFocusRef}
-        form={feedbackForm}
-        title="피드백 남기기"
-        description="이 호출의 품질을 평가합니다. 프롬프트 원문은 입력하지 마세요."
-        submitLabel="등록"
-        submitDisabled={!canWrite}
-        onSubmit={async (values) => {
-          await submitFeedback.mutateAsync(values);
-        }}
-      >
-        {!canWrite ? (
-          <InlineNotice tone="warning" title="피드백 등록 잠김">
-            {writeDeniedReason}
-          </InlineNotice>
-        ) : null}
-        <FormField label="요청 ID" required error={feedbackForm.formState.errors.request_id?.message}>
-          {(control) => <Input {...control} {...feedbackForm.register("request_id")} disabled={!canWrite} />}
-        </FormField>
-        <FormField label="평점" required error={feedbackForm.formState.errors.rating?.message}>
-          {(control) => (
-            <Select
-              {...control}
-              {...feedbackForm.register("rating")}
-              disabled={!canWrite}
-              options={[
-                { value: "1", label: "긍정 (+1)" },
-                { value: "0", label: "보통 (0)" },
-                { value: "-1", label: "부정 (-1)" },
-              ]}
-            />
-          )}
-        </FormField>
-        <FormField label="라벨" error={feedbackForm.formState.errors.label?.message}>
-          {(control) => (
-            <Input
-              {...control}
-              {...feedbackForm.register("label")}
-              placeholder="예: 근거 부족"
-              disabled={!canWrite}
-            />
-          )}
-        </FormField>
-        <FormField label="의견" error={feedbackForm.formState.errors.comment?.message}>
-          {(control) => (
-            <Textarea {...control} rows={3} {...feedbackForm.register("comment")} disabled={!canWrite} />
-          )}
-        </FormField>
-      </FormDialog>
+      <LLMFeedbackComposer draft={feedbackDraft} canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
 
       <PromptCompareDialog
-        prompt={comparePrompt}
+        owner={owner}
+        prompt={comparePrompt?.owner === owner ? comparePrompt : undefined}
         scope={scope}
         returnFocusRef={compareFocusRef}
         onOpenChange={(next) => {

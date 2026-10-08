@@ -269,7 +269,7 @@ test("루트 기록0·도구 미기록·Text2SQL 기록 상대위치를 실제 �
   await expect(card(page)).not.toContainText("프롬프트나 SQL 원문은 포함하지 않습니다.");
   await expect(card(page)).toContainText(/오류.*원문|민감.*포함/u);
 });
-test("현재 접두사 변경은 이름·오류·대체 ID·종류와 세션 링크를 재조회 없이 표시 보호한다", async ({
+test("현재 접두사 변경은 이전 상세를 퇴역하고 명시 재조회한 이름·오류·대체 ID·종류와 세션 링크를 표시 보호한다", async ({
   page,
   gateway,
 }) => {
@@ -289,10 +289,31 @@ test("현재 접두사 변경은 이름·오류·대체 ID·종류와 세션 링
   await expect(card(page)).toContainText(marker);
   gateway.setPrefixes([prefix]);
   await runtime(page);
-  await expect.poll(() => card(page).evaluate((element) => element.outerHTML)).not.toContain(marker);
-  await expect(card(page).getByRole("link", { name: "세션 흐름 보기" })).toHaveCount(0);
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(card(page)).toHaveCount(0);
+  await expect.poll(() => page.locator("body").innerHTML()).not.toContain(marker);
   expect(gateway.count("trace")).toBe(1);
   expect(gateway.count("links")).toBe(1);
+  await noSecretLocation(page, marker);
+  await open(page);
+  await expect.poll(() => gateway.finished.has("trace:2")).toBe(true);
+  await expect.poll(() => gateway.finished.has("links:2")).toBe(true);
+  await expect(card(page).getByRole("list", { name: "요청 스팬 흐름" }).locator("code")).toHaveText([
+    "민감정보가 포함될 수 있어 표시하지 않습니다.",
+    "민감정보가 포함될 수 있어 표시하지 않습니다.",
+  ]);
+  await expect(card(page).getByText("MCP 1건", { exact: true })).toBeVisible();
+  await expect(
+    card(page).getByText("세션 식별자를 안전하게 확인할 수 없어 이동 링크를 표시하지 않습니다.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(card(page).getByText("처리 흐름을 불러오는 중입니다.", { exact: true })).toHaveCount(0);
+  await expect(card(page).getByText("연결 기록을 불러오는 중입니다.", { exact: true })).toHaveCount(0);
+  await expect.poll(() => card(page).evaluate((element) => element.outerHTML)).not.toContain(marker);
+  await expect(card(page).getByRole("link", { name: "세션 흐름 보기" })).toHaveCount(0);
+  expect(gateway.count("trace")).toBe(2);
+  expect(gateway.count("links")).toBe(2);
   await noSecretLocation(page, marker);
 });
 test("기본 비밀 형태의 응답 세션 ID를 href나 DOM에 넣지 않는다", async ({ page, gateway }) => {

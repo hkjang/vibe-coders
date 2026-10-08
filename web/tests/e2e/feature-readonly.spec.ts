@@ -464,8 +464,13 @@ test("readonly 해제는 기존 admin:write와 원문 보기 권한을 새로 �
   gateway.setWritable(false);
   gateway.setRaw(false);
   await refreshRuntime(page);
+  // Raw capability changes retire the read owner, unlike write-only restrictions.
+  await expect(page.getByRole("dialog", { name: "LLM 호출 상세", exact: true })).toHaveCount(0);
+  await expect(noteCard(page)).toHaveCount(0);
   gateway.setMode("observability.llm", "writable");
   await refreshRuntime(page);
+  await expect(page.getByRole("dialog", { name: "LLM 호출 상세", exact: true })).toHaveCount(0);
+  await showInsight(page, "observability.llm");
   await expect(noteCard(page).getByRole("button", { name: "메모·태그 수정", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "분석 실행", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "재실행", exact: true })).toBeDisabled();
