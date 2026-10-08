@@ -25,8 +25,9 @@ import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-r
 import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { containsPotentialSecret } from "@/shared/security/secrets";
+import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
+import { sortModelCatalogRows } from "./model-catalog-table-state";
 
-const pageSize = 10;
 const defaultRange: HealthRange = "24h";
 
 type ModelTabId = "catalog" | "contracts" | "deprecations";
@@ -52,6 +53,11 @@ export function ModelPage(): React.JSX.Element {
   const requestedModelProvider = searchParams.get("model_provider")?.trim() ?? "";
   const requestedSource = searchParams.get("source");
   const requestedQuery = searchParams.get("q") ?? "";
+  const sort = readModelCatalogSort(searchParams.getAll("sort"));
+  const parsedPageSize = readModelCatalogPageSize(searchParams.getAll("page_size"));
+  const pageSize = parsedPageSize ?? 10;
+  const invalidSort = searchParams.has("sort") && !sort;
+  const invalidPageSize = searchParams.has("page_size") && !parsedPageSize;
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isModelStatusFilter(requestedStatus) ? requestedStatus : "all";
   const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
@@ -68,8 +74,7 @@ export function ModelPage(): React.JSX.Element {
   const selectedSource = isModelSource(requestedSource) ? requestedSource : undefined;
   const currentPage = positivePage(requestedPage);
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
-  // `/gateway/models` has a fixed URL query allowlist, so the section selection
-  // stays in component state rather than in `?tab=`.
+  // Catalogue view controls are URL-owned; governance tabs keep their existing local state.
   const [tab, setTab] = useState<ModelTabId>("catalog");
   const { models, pricing, quality, tags } = useModelCatalogQueries(range);
 
@@ -87,6 +92,8 @@ export function ModelPage(): React.JSX.Element {
 
   useEffect(() => {
     const updates: Record<string, string | undefined> = {};
+    if (invalidSort) updates.sort = undefined;
+    if (invalidPageSize) updates.page_size = undefined;
     if (requestedRange !== null && !isHealthRange(requestedRange)) updates.range = defaultRange;
     if (requestedStatus !== null && !isModelStatusFilter(requestedStatus)) updates.status = undefined;
     if (requestedSource !== null && !isModelSource(requestedSource)) updates.source = undefined;
@@ -113,6 +120,8 @@ export function ModelPage(): React.JSX.Element {
     }
     if (Object.keys(updates).length > 0) updateSearch(updates);
   }, [
+    invalidSort,
+    invalidPageSize,
     requestedModelProvider,
     requestedPage,
     requestedProviderFilter,
@@ -143,7 +152,8 @@ export function ModelPage(): React.JSX.Element {
   );
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const page = Math.min(currentPage, pageCount);
-  const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
+  const sortedRows = useMemo(() => sortModelCatalogRows(filteredRows, sort), [filteredRows, sort]);
+  const pageRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
   const selectedMatches =
     selectedModel && !selectedProviderInvalid
       ? allRows.filter(
@@ -310,16 +320,27 @@ export function ModelPage(): React.JSX.Element {
               loading={models.isPending}
               modelUnavailable={models.isError && !models.data}
               onPageChange={(pageIndex) =>
-                updateSearch({
-                  page: pageIndex === 0 ? undefined : String(pageIndex + 1),
-                  model: undefined,
-                  model_provider: undefined,
-                  source: undefined,
-                })
+                updateSearch(
+                  {
+                    page: pageIndex === 0 ? undefined : String(pageIndex + 1),
+                    model: undefined,
+                    model_provider: undefined,
+                    source: undefined,
+                  },
+                  false,
+                )
               }
               onRowClick={openModel}
               pageCount={pageCount}
               pageIndex={page - 1}
+              pageSize={pageSize}
+              onPageSizeChange={(size) => {
+                const next = readModelCatalogPageSize([String(size)]);
+                if (next)
+                  updateSearch({ page_size: next === 10 ? undefined : String(next), page: undefined }, false);
+              }}
+              sort={sort}
+              onSortChange={(next) => updateSearch({ sort: next, page: undefined }, false)}
               rememberTrigger={rememberTrigger}
               rows={pageRows}
               updatedAt={updatedAt}

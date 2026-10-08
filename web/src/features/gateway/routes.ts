@@ -15,7 +15,19 @@ export const gatewayFeatureModules = defineFeatureModules([
   {
     featureId: "gateway.models",
     load: () => import("./models/ModelPage").then((module) => module.ModelPage),
-    queryKeys: ["model", "model_provider", "page", "provider", "q", "range", "source", "status", "tab"],
+    queryKeys: [
+      "model",
+      "model_provider",
+      "page",
+      "provider",
+      "q",
+      "range",
+      "source",
+      "status",
+      "tab",
+      "sort",
+      "page_size",
+    ],
   },
   {
     featureId: "gateway.chat",
