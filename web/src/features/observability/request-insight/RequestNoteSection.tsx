@@ -15,7 +15,7 @@ export function RequestNoteSection({
   canWrite: boolean;
 }): React.JSX.Element {
   const editor = useRequestNoteContext();
-  const current = useRequestNoteQuery(requestId, editor.epoch);
+  const current = useRequestNoteQuery(requestId, editor.epoch, editor.readScope);
   const confirmed = editor.supported ? current.confirmed : undefined;
   const allowed = canWrite && editor.writable;
   return (

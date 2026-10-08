@@ -7,6 +7,9 @@ import {
   canWriteRequestNote,
 } from "@/features/observability/request-insight/request-access";
 import { RequestInsightPanel } from "@/features/observability/request-insight/RequestInsightPanel";
+import type { RequestDetailReadScope } from "@/features/observability/request-insight/request-detail-read-scope";
+import type { LLMReadOwner } from "./llm-read-access";
+import { llmReadQueryOptions } from "./llm-read-query";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { apiClient } from "@/shared/api/client";
 import { withPathParams } from "@/shared/api/endpoint-factory";
@@ -23,6 +26,10 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
 
 interface LLMTraceDetailProps {
+  owner: LLMReadOwner;
+  detailReadScope: RequestDetailReadScope;
+  resumeNote: () => void;
+  feedbackRecovery?: { requestId: string; resume: (traceId: string) => void };
   requestId: string;
   /** Opens the feedback composer for this request. */
   onWriteFeedback?: (requestId: string, traceId: string) => void;
@@ -43,6 +50,10 @@ export function LLMTraceDetail({
   onWriteFeedback,
   requestId,
   writeDeniedReason,
+  owner,
+  detailReadScope,
+  resumeNote,
+  feedbackRecovery,
 }: LLMTraceDetailProps): React.JSX.Element {
   const auth = useAuth();
   const noteEditor = useRequestNoteContext();
@@ -51,12 +62,13 @@ export function LLMTraceDetail({
   // them: the analysis and replay answers can quote the captured prompt.
   const [insightOpen, setInsightOpen] = useState(false);
   const detail = useQuery({
-    queryKey: ["observability", "llm", "trace", requestId],
-    queryFn: ({ signal }) =>
+    ...llmReadQueryOptions(owner, ["observability", "llm", "trace", requestId], (signal) =>
       apiClient.request(withPathParams(endpoints.domains.observability.llm.traceDetail, { id: requestId }), {
         signal,
         routeId: "observability.llm.trace",
       }),
+    ),
+    placeholderData: undefined,
     enabled: requestId !== "",
     staleTime: 30_000,
   });
@@ -69,7 +81,7 @@ export function LLMTraceDetail({
     );
   }
 
-  if (detail.isError || !detail.data) {
+  if (!detail.data) {
     return (
       <InlineNotice
         tone="danger"
@@ -93,6 +105,20 @@ export function LLMTraceDetail({
 
   return (
     <div className="obs-section-stack">
+      {feedbackRecovery?.requestId === request.id ? (
+        <Button
+          disabled={!detail.isSuccess || detail.isFetching}
+          onClick={() => {
+            if (owner.isCurrent() && detail.isSuccess && !detail.isFetching)
+              feedbackRecovery.resume(request.trace_id);
+          }}
+        >
+          피드백 초안 다시 열기
+        </Button>
+      ) : null}
+      {detail.isError ? (
+        <InlineNotice tone="warning">상세 재조회에 실패해 이전 응답을 표시합니다.</InlineNotice>
+      ) : null}
       <StatGrid label="호출 요약">
         <StatCard label="지연" value={formatDuration(request.latency_ms)} />
         <StatCard label="첫 응답" value={formatDuration(request.first_chunk_ms)} />
@@ -112,7 +138,7 @@ export function LLMTraceDetail({
           { label: "추적 ID", value: request.trace_id, mono: true },
           { label: "세션 ID", value: request.session_id, mono: true },
           { label: "모델", value: request.model },
-          { label: "Provider", value: request.provider },
+          { label: "공급자", value: request.provider },
           { label: "엔드포인트", value: request.endpoint },
           { label: "상태", value: `HTTP ${formatNumber(request.status_code)}` },
           { label: "프롬프트", value: `${request.prompt_name || "—"} ${request.prompt_version}` },
@@ -130,12 +156,17 @@ export function LLMTraceDetail({
             size="small"
             ref={insightTrigger}
             disabled={noteEditor.pending}
-            onClick={() =>
+            onClick={() => {
+              if (!insightOpen && owner.isCurrent() && detail.isSuccess && !detail.isFetching) {
+                resumeNote();
+                // Establish a real destination before the discard/keep-editing decision.
+                if (noteEditor.retainedDraft?.target.requestId === requestId) setInsightOpen(true);
+              }
               noteEditor.requestLeave(() => {
                 noteEditor.returnFocusRef.current = insightTrigger.current;
                 setInsightOpen((current) => !current);
-              })
-            }
+              });
+            }}
           >
             {insightOpen ? "접기" : "원인 설명 열기"}
           </Button>
@@ -143,6 +174,7 @@ export function LLMTraceDetail({
       >
         {insightOpen ? (
           <RequestInsightPanel
+            readScope={detailReadScope}
             key={request.id}
             requestId={request.id}
             canInspectRaw={canInspectRawRequest(auth)}
@@ -169,8 +201,8 @@ export function LLMTraceDetail({
               items={[
                 { label: "코드 블록", value: formatNumber(codeVerify.block_count) },
                 { label: "언어", value: codeVerify.languages },
-                { label: "High 지적", value: formatNumber(codeVerify.high_count) },
-                { label: "Medium 지적", value: formatNumber(codeVerify.medium_count) },
+                { label: "높은 위험 지적", value: formatNumber(codeVerify.high_count) },
+                { label: "중간 위험 지적", value: formatNumber(codeVerify.medium_count) },
                 { label: "문법 오류", value: formatNumber(codeVerify.syntax_count) },
                 { label: "시크릿 탐지", value: formatNumber(codeVerify.secret_count) },
                 { label: "테스트 가능", value: formatNumber(codeVerify.testable_count) },

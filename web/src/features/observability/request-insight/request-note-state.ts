@@ -5,8 +5,14 @@ import type { RequestNoteBody } from "@/shared/api/domains/observability";
 import { requestNoteSchema, type RequestNote } from "@/shared/api/domains/observability.schemas";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 
-export const requestNoteKey = (id: string, epoch: number) =>
-  ["observability", "requests", id, "note", epoch] as const;
+export interface RequestNoteReadScope {
+  readonly id: number;
+  isCurrent: () => boolean;
+}
+export const requestNoteKey = (id: string, epoch: number, scope?: RequestNoteReadScope) =>
+  scope
+    ? (["observability", "requests", id, "note", epoch, "note-read-scope", scope.id] as const)
+    : (["observability", "requests", id, "note", epoch] as const);
 export const requestNoteContractMessage =
   "메모·태그를 안전하게 편집하려면 백엔드 v0.86.16 이상이 필요합니다. 서버 버전을 확인하거나 업그레이드하세요.";
 export const supportsRequestNoteContract = (version: unknown): boolean =>

@@ -47,7 +47,7 @@ export function RequestNoteDialog({
   const refetch = current.query.refetch;
   const readRecovery = useCallback(async () => {
     if (!target.retention?.isCurrent()) return;
-    const key = requestNoteKey(target.requestId, target.epoch);
+    const key = requestNoteKey(target.requestId, target.epoch, target.retention?.readScope);
     const before = client.getQueryCache().find<RequestNote>({ queryKey: key, exact: true });
     const count = before?.state.dataUpdateCount ?? 0;
     try {
@@ -87,7 +87,7 @@ export function RequestNoteDialog({
   const freshRecovery = () => {
     if (!recovery) return true;
     const query = client.getQueryCache().find<RequestNote>({
-      queryKey: requestNoteKey(target.requestId, target.epoch),
+      queryKey: requestNoteKey(target.requestId, target.epoch, target.retention?.readScope),
       exact: true,
     });
     return (

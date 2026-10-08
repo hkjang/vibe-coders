@@ -13,6 +13,7 @@ import {
   requestNoteKey,
   supportsRequestNoteContract,
   type RequestNoteValues,
+  type RequestNoteReadScope,
 } from "./request-note-state";
 import { apiClient } from "@/shared/api/client";
 import type { RequestNote } from "@/shared/api/domains/observability.schemas";
@@ -35,6 +36,8 @@ export interface RequestNoteRetention {
   owner: object;
   isCurrent: () => boolean;
   isSuspended?: () => boolean;
+  /** Optional caller-owned read namespace; existing note and XView callers stay unchanged. */
+  readScope?: RequestNoteReadScope;
 }
 type RetainedOutcome = "none" | "pending" | "acknowledged" | "uncertain";
 interface RetainedDraft {
@@ -45,26 +48,39 @@ interface RetainedDraft {
   outcome: RetainedOutcome;
 }
 
-export function useRequestNoteQuery(requestId: string, epoch: number) {
+export function useRequestNoteQuery(requestId: string, epoch: number, readScope?: RequestNoteReadScope) {
   const client = useQueryClient();
-  const key = requestNoteKey(requestId, epoch);
+  const key = requestNoteKey(requestId, epoch, readScope);
   const query = useQuery({
     queryKey: key,
     enabled: requestId !== "",
     retry: false,
     gcTime: 0,
     refetchOnMount: "always",
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(endpoints.domains.observability.requests.note, { id: requestId }), {
-        signal,
-        routeId,
-      }),
+    queryFn: async ({ signal }) => {
+      const assertRead = () => {
+        if (readScope && (signal.aborted || !readScope.isCurrent()))
+          throw new AppError("이전 사용자 범위의 메모 조회를 종료했습니다.", { kind: "aborted" });
+      };
+      assertRead();
+      try {
+        const result = await apiClient.request(
+          withPathParams(endpoints.domains.observability.requests.note, { id: requestId }),
+          { signal, routeId },
+        );
+        assertRead();
+        return result;
+      } catch (error) {
+        assertRead();
+        throw error;
+      }
+    },
   });
   const state = useSyncExternalStore(
     useCallback((listener) => client.getQueryCache().subscribe(listener), [client]),
     useCallback(
-      () => client.getQueryState<RequestNote>(requestNoteKey(requestId, epoch)),
-      [client, epoch, requestId],
+      () => client.getQueryState<RequestNote>(requestNoteKey(requestId, epoch, readScope)),
+      [client, epoch, requestId, readScope],
     ),
   );
   return { query, confirmed: confirmedRequestNote(state, requestId) };
@@ -159,15 +175,16 @@ export function useRequestNoteEditor(retention?: RequestNoteRetention) {
         setCommitted((previous) =>
           previous &&
           event.query ===
-            client
-              .getQueryCache()
-              .find({ queryKey: requestNoteKey(previous.id, previous.epoch), exact: true }) &&
+            client.getQueryCache().find({
+              queryKey: requestNoteKey(previous.id, previous.epoch, retention?.readScope),
+              exact: true,
+            }) &&
           confirmedRequestNote(event.query.state, previous.id)
             ? undefined
             : previous,
         );
       }),
-    [client],
+    [client, retention?.readScope],
   );
   const current = (draft: RequestNoteDraft): boolean =>
     active.current === draft &&
@@ -209,7 +226,10 @@ export function useRequestNoteEditor(retention?: RequestNoteRetention) {
       epoch !== tokenStore.getSessionEpoch()
     )
       return;
-    const baseline = confirmedRequestNote(client.getQueryState(requestNoteKey(requestId, epoch)), requestId);
+    const baseline = confirmedRequestNote(
+      client.getQueryState(requestNoteKey(requestId, epoch, retention?.readScope)),
+      requestId,
+    );
     if (!baseline || (kind === "delete" && !baseline.exists)) return;
     const draft: RequestNoteDraft = {
       requestId,
@@ -255,7 +275,7 @@ export function useRequestNoteEditor(retention?: RequestNoteRetention) {
       });
     if (!access.current.supported) throw new AppError(requestNoteContractMessage, { kind: "contract" });
     const latest = confirmedRequestNote(
-      client.getQueryState(requestNoteKey(draft.requestId, draft.epoch)),
+      client.getQueryState(requestNoteKey(draft.requestId, draft.epoch, draft.retention?.readScope)),
       draft.requestId,
     );
     if (!latest || (draft.kind === "delete" && !latest.exists))
@@ -299,7 +319,7 @@ export function useRequestNoteEditor(retention?: RequestNoteRetention) {
         draft.kind === "edit" ? "요청 메모·태그를 저장했습니다." : "요청 메모·태그를 삭제했습니다.",
       );
       for (const key of [
-        requestNoteKey(draft.requestId, draft.epoch),
+        requestNoteKey(draft.requestId, draft.epoch, draft.retention?.readScope),
         ["admin", "requests"],
         ["observability", "llm", "prompts"],
       ])
@@ -322,6 +342,7 @@ export function useRequestNoteEditor(retention?: RequestNoteRetention) {
   };
   return {
     epoch,
+    readScope: retention?.readScope,
     supported,
     writable,
     writeDisabledReason: mutationAccess.reason,

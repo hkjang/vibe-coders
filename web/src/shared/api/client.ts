@@ -127,7 +127,8 @@ export class ApiClient {
 
     const epoch = this.dependencies.getSessionEpoch();
     const accessTokenAtRequestStart = this.dependencies.getAccessToken();
-    let response = await this.inSession(epoch, () => this.perform(endpoint, options));
+    let response = await this.inSession(epoch, () => this.perform(endpoint, options), options.signal);
+    this.assertSession(epoch, options.signal);
     if (
       response.status === 401 &&
       options.retryUnauthorized !== false &&
@@ -135,19 +136,31 @@ export class ApiClient {
     ) {
       const currentAccessToken = this.dependencies.getAccessToken();
       if (currentAccessToken && currentAccessToken !== accessTokenAtRequestStart) {
-        response = await this.inSession(epoch, () =>
-          this.perform(endpoint, { ...options, retryUnauthorized: false }),
+        response = await this.inSession(
+          epoch,
+          () => this.perform(endpoint, { ...options, retryUnauthorized: false }),
+          options.signal,
         );
       } else if (this.dependencies.getRefreshToken()) {
-        await this.refreshOnce(epoch);
-        this.assertSession(epoch);
-        response = await this.inSession(epoch, () =>
-          this.perform(endpoint, { ...options, retryUnauthorized: false }),
+        // A caller cannot cancel the shared refresh needed by other active requests.
+        // Once it settles, only this caller's retry is suppressed if it was cancelled.
+        try {
+          await this.refreshOnce(epoch);
+        } catch (error) {
+          this.assertNotAborted(options.signal);
+          throw error;
+        }
+        this.assertSession(epoch, options.signal);
+        response = await this.inSession(
+          epoch,
+          () => this.perform(endpoint, { ...options, retryUnauthorized: false }),
+          options.signal,
         );
       }
     }
 
-    const body = await this.inSession(epoch, () => readResponseBody(response));
+    const body = await this.inSession(epoch, () => readResponseBody(response), options.signal);
+    this.assertSession(epoch, options.signal);
     if (!response.ok) throw this.endpointError(endpoint, response, body);
 
     const parsed = endpoint.schema.safeParse(body);
@@ -162,21 +175,30 @@ export class ApiClient {
     return parsed.data as ApiEndpointOutput<Endpoint>;
   }
 
-  private assertSession(epoch: number): void {
+  private assertNotAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) throw new AppError("API 요청이 취소되었습니다.", { kind: "aborted" });
+  }
+
+  private assertSession(epoch: number, signal?: AbortSignal): void {
     if (epoch !== this.dependencies.getSessionEpoch()) {
       throw new AppError("인증 세션이 변경되어 이전 요청을 취소했습니다.", { kind: "aborted" });
     }
+    this.assertNotAborted(signal);
   }
 
-  private async inSession<Value>(epoch: number, read: () => Promise<Value>): Promise<Value> {
-    this.assertSession(epoch);
+  private async inSession<Value>(
+    epoch: number,
+    read: () => Promise<Value>,
+    signal?: AbortSignal,
+  ): Promise<Value> {
+    this.assertSession(epoch, signal);
     try {
       const value = await read();
-      this.assertSession(epoch);
+      this.assertSession(epoch, signal);
       return value;
     } catch (error) {
-      // Network/timeout/JSON errors can also arrive after the owning session ends.
-      this.assertSession(epoch);
+      // A transport or body reader may settle after its session or caller has retired.
+      this.assertSession(epoch, signal);
       throw error;
     }
   }
@@ -296,6 +318,7 @@ export class ApiClient {
     timeoutMs: number,
     externalSignal?: AbortSignal,
   ): Promise<Response> {
+    this.assertNotAborted(externalSignal);
     const controller = new AbortController();
     let timedOut = false;
     const abortFromCaller = (): void => controller.abort(externalSignal?.reason);
@@ -307,7 +330,10 @@ export class ApiClient {
     }, timeoutMs);
 
     try {
-      return await this.dependencies.fetch(path, { ...init, signal: controller.signal });
+      const response = await this.dependencies.fetch(path, { ...init, signal: controller.signal });
+      // Fulfilled transports must honor cancellation too, before any auth retry.
+      if (controller.signal.aborted) throw new AppError("종료된 API 응답입니다.", { kind: "aborted" });
+      return response;
     } catch (cause) {
       if (timedOut) {
         throw new AppError("API 요청 시간이 초과되었습니다.", {

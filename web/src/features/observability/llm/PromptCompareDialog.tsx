@@ -12,8 +12,11 @@ import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { Select } from "@/shared/components/ui/Select";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatKRW, formatNumber, formatPercent } from "@/shared/utils/format";
+import type { LLMReadOwner } from "./llm-read-access";
+import { llmReadQueryOptions } from "./llm-read-query";
 
 interface PromptCompareDialogProps {
+  owner: LLMReadOwner;
   onOpenChange: (open: boolean) => void;
   prompt: { name: string; version: string } | undefined;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -30,23 +33,28 @@ export function PromptCompareDialog({
   prompt,
   returnFocusRef,
   scope,
+  owner,
 }: PromptCompareDialogProps): React.JSX.Element {
   const [baseline, setBaseline] = useState("");
   const open = prompt !== undefined;
 
   const comparison = useQuery({
-    queryKey: ["observability", "llm", "prompt-compare", prompt?.name, prompt?.version, baseline, scope],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.observability.llm.promptCompare, {
-        query: {
-          ...scope,
-          prompt_name: prompt?.name ?? "",
-          ...(prompt?.version ? { candidate: prompt.version } : {}),
-          ...(baseline ? { baseline } : {}),
-        },
-        signal,
-        routeId: "observability.llm.prompt-compare",
-      }),
+    ...llmReadQueryOptions(
+      owner,
+      ["observability", "llm", "prompt-compare", prompt?.name, prompt?.version, baseline, scope],
+      (signal) =>
+        apiClient.request(endpoints.domains.observability.llm.promptCompare, {
+          query: {
+            ...scope,
+            prompt_name: prompt?.name ?? "",
+            ...(prompt?.version ? { candidate: prompt.version } : {}),
+            ...(baseline ? { baseline } : {}),
+          },
+          signal,
+          routeId: "observability.llm.prompt-compare",
+        }),
+    ),
+    placeholderData: undefined,
     enabled: open && (prompt?.name ?? "") !== "",
     staleTime: 30_000,
   });
