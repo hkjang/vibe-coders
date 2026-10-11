@@ -84,7 +84,7 @@ CI에서도 기존 인증 시나리오와 다른 단계로 실행하며 운영 �
 
 아래 예시는 Linux x86-64의 **검증용 checkout 루트**에서 실행한다. 다른 작업의 배포 파일과 섞이지 않도록 별도 checkout을 권장한다. 경로는 현재 사용자가 선택한 checkout에서 계산하며, 특정 임시 worktree 경로를 가정하지 않는다.
 
-필요한 도구는 `go.mod`의 Go 버전, `web/.node-version`의 Node, `web/package.json`의 pnpm 버전과 Docker다. 현재 고정값은 Go 1.26.8, Node 24.20.0, pnpm 11.25.0이다. 아래 이미지와 의존성을 처음 준비하는 단계에는 네트워크가 필요할 수 있다. **오프라인 실행 전 도구·Go 모듈·패키지·이미지 캐시를 미리 준비**해야 한다.
+필요한 도구는 `go.mod`의 Go 버전, `web/.node-version`의 Node, `web/package.json`의 pnpm 버전과 Docker다. 현재 고정값은 Go 1.26.9, Node 24.20.0, pnpm 11.25.0이다. 아래 이미지와 의존성을 처음 준비하는 단계에는 네트워크가 필요할 수 있다. **오프라인 실행 전 도구·Go 모듈·패키지·이미지 캐시를 미리 준비**해야 한다.
 
 ```sh
 set -eu
@@ -92,8 +92,8 @@ AUTH_CHECKOUT="$(pwd -P)"
 AUTH_VERIFICATION="$(mktemp -d /tmp/vibe-auth-browser.XXXXXX)"
 AUTH_REPORTS="$(mktemp -d /tmp/vibe-auth-reports.XXXXXX)"
 AUTH_IMAGE='mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e'
-AUTH_GO_ROOT="$(GOTOOLCHAIN=go1.26.8 go env GOROOT)"
-test "$(GOTOOLCHAIN=local "$AUTH_GO_ROOT/bin/go" env GOVERSION)" = go1.26.8
+AUTH_GO_ROOT="$(GOTOOLCHAIN=go1.26.9 go env GOROOT)"
+test "$(GOTOOLCHAIN=local "$AUTH_GO_ROOT/bin/go" env GOVERSION)" = go1.26.9
 
 test -f "$AUTH_CHECKOUT/go.mod"
 test -f "$AUTH_CHECKOUT/web/playwright.auth.config.ts"

@@ -778,7 +778,7 @@ pwsh -File scripts/release.ps1 -Version v0.86.40
 
 | 단계 | 설명 |
 |------|------|
-| **[1/5] docker build** | Node 24+pnpm frozen → Go 1.26.8 embed → distroless nonroot 3-stage 이미지 생성 |
+| **[1/5] docker build** | Node 24+pnpm frozen → Go 1.26.9 embed → distroless nonroot 3-stage 이미지 생성 |
 | **[verify] container smoke** | `/admin`, `/app` 308/deep link, hashed asset cache, `/auth/me` build version, root 소유 볼륨의 진단·`repair-data-dir` 복구·재기동 검증 |
 | **[verify] image CVE** | Grype 0.117.0으로 최종 이미지의 High·Critical 취약점 차단 |
 | **[2/5] docker save** | OCI tar 파일 추출 |

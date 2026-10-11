@@ -25,7 +25,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `modernc.org/mathutil` | v1.6.0 | BSD-3-Clause |
 | `modernc.org/memory` | v1.8.0 | BSD-3-Clause |
 | `modernc.org/sqlite` | v1.34.5 | BSD-3-Clause |
-| `stdlib` | go1.26.8 | BSD-3-Clause |
+| `stdlib` | go1.26.9 | BSD-3-Clause |
 
 ## React / npm dependency graph
 

@@ -342,8 +342,8 @@
     },
     {
       "name": "stdlib",
-      "SPDXID": "SPDXRef-Package-go-stdlib-007fffd04856aa79",
-      "versionInfo": "go1.26.8",
+      "SPDXID": "SPDXRef-Package-go-stdlib-d1d766863629f955",
+      "versionInfo": "go1.26.9",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
@@ -353,7 +353,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/stdlib@1.26.8"
+          "referenceLocator": "pkg:golang/stdlib@1.26.9"
         }
       ]
     },
@@ -6985,7 +6985,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-go-stdlib-007fffd04856aa79"
+      "relatedSpdxElement": "SPDXRef-Package-go-stdlib-d1d766863629f955"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
