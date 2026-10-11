@@ -46,7 +46,7 @@ test("10/25/50 controls remain local and reset the page before slicing", async (
   await expect(links(page)).toHaveCount(25);
   expect(await links(page).allTextContents()).toEqual(ordinaryIds.slice(0, 25));
   await page.getByRole("button", { name: "다음", exact: true }).click();
-  expect(await links(page).allTextContents()).toEqual(ordinaryIds.slice(25, 50));
+  await expect(links(page)).toHaveText(ordinaryIds.slice(25, 50));
   await size(page).selectOption("50");
   await expect(links(page)).toHaveCount(50);
   expect(await links(page).allTextContents()).toEqual(ordinaryIds.slice(0, 50));
