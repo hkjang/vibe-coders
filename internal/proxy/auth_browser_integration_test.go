@@ -111,6 +111,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	}
 	logger := store.NewAsyncLogger(db, 32, filepath.Join(scratch, "fallback.ndjson"))
 	seedBrowserChangeSetFixture(t, db)
+	seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
 	logger.Start()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

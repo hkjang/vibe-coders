@@ -17,7 +17,13 @@ process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 
 export default defineConfig({
   testDir: "./tests/auth-live",
-  testMatch: ["auth-live.spec.ts", "access-live.spec.ts", "recovery-live.spec.ts", "change-set-live.spec.ts"],
+  testMatch: [
+    "auth-live.spec.ts",
+    "access-live.spec.ts",
+    "recovery-live.spec.ts",
+    "change-set-live.spec.ts",
+    "resource-search-live.spec.ts",
+  ],
   fullyParallel: false,
   workers: 1,
   retries: 0,

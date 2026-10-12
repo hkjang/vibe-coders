@@ -23,6 +23,7 @@ type apiEndpoint struct {
 // the route registrations in Routes(). It drives the generated /openapi.json so the spec
 // covers every endpoint rather than a curated subset.
 var apiEndpoints = []apiEndpoint{
+	{"/admin/resource-search", []string{"post"}, "admin", "Search permission-scoped navigation metadata", false},
 	// ---- ops / docs (public) ----
 	{"/health", []string{"get"}, "ops", "Liveness probe", true},
 	{"/ready", []string{"get"}, "ops", "Readiness probe", true},
@@ -632,6 +633,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "post /admin/resource-search":
+		enrichResourceSearchOpenAPI(op, responses)
 	case "get /health":
 		responses["200"] = successResponse("HealthResponse")
 	case "get /admin/app/request-flow":
@@ -1100,6 +1103,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range routingDomainDecisionsOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range resourceSearchOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas
