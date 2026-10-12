@@ -906,7 +906,9 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		op["description"] = "Delete by the exact decoded model path identifier without POST trimming. The existing 200 acknowledgment also covers an absent row; it does not report an affected-row count or successful admin audit."
 		responses["200"] = successResponse("ModelUsageTagDeleteResponse")
 	case "delete /admin/change-sets/{id}":
-		op["description"] = "Delete an existing change set without restoring applied settings. Optional note is Go TrimSpace-normalized and passed to the existing audit writer. Legacy missing, null or malformed bodies remain accepted. A successful deletion is not an atomic guarantee that its audit was persisted."
+		op["description"] = "Delete an existing change set without restoring applied settings. Optional note is Go TrimSpace-normalized and recorded in the audit. Legacy missing, null or malformed bodies remain accepted. Deletion and its audit commit atomically after comparing the current server snapshot status and updated_at; this is not a client-supplied revision check or retry/idempotency guarantee. apply_pending and rollback_pending cannot be deleted until recovery finishes."
+		responses["409"] = map[string]any{"description": "change_set_conflict: server snapshot changed before deletion; or change_set_recovery_pending: finish apply/rollback recovery first. No deletion or success audit", "content": jsonContent(schemaRef("AppError"))}
+		responses["500"] = map[string]any{"description": "delete_failed: transaction failed; inspect current state before retrying after an uncertain response", "content": jsonContent(schemaRef("AppError"))}
 		op["requestBody"] = map[string]any{"required": false, "content": jsonContent(map[string]any{
 			"type": "object", "nullable": true,
 			"properties": map[string]any{"note": map[string]any{"type": "string", "nullable": true}},
@@ -915,6 +917,25 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			"type": "object", "required": []string{"status"},
 			"properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"deleted"}}},
 		})}
+	case "post /admin/change-sets/{id}/submit", "post /admin/change-sets/{id}/approve":
+		op["description"] = "Move the currently read server snapshot from draft to pending or pending to approved. The review fields and audit commit atomically after matching status and updated_at. This is not a client-supplied revision check or retry/idempotency guarantee. Optional note preserves the existing Legacy request behavior."
+		op["requestBody"] = map[string]any{"required": false, "content": jsonContent(map[string]any{
+			"type": "object", "nullable": true,
+			"properties": map[string]any{"note": map[string]any{"type": "string", "nullable": true}},
+		})}
+		responses["200"] = map[string]any{"description": "Reviewed change set snapshot"}
+		responses["409"] = map[string]any{"description": "change_set_conflict: server snapshot changed before review; no review or success audit", "content": jsonContent(schemaRef("AppError"))}
+		responses["500"] = map[string]any{"description": "update_failed: transaction failed; inspect current state before retrying after an uncertain response", "content": jsonContent(schemaRef("AppError"))}
+	case "post /admin/change-sets/{id}/apply", "post /admin/change-sets/{id}/rollback":
+		op["description"] = "Persist setting values, setting history, the recovery marker and change_set.apply.persisted or change_set.rollback.persisted audit in one transaction. Then reload this process outside SQL and atomically finalize status with the existing change_set.apply or change_set.rollback audit. Concurrent finalizers append one completion audit. Pending recovery retries never rewrite settings/history. Older pending rows may lack the new persistence event; original actor/reason are not invented. This does not provide client revision guards, general request idempotency or multi-pod activation guarantees."
+		op["requestBody"] = map[string]any{"required": false, "content": jsonContent(map[string]any{
+			"type": "object", "nullable": true,
+			"properties": map[string]any{"note": map[string]any{"type": "string", "nullable": true}},
+		})}
+		responses["200"] = map[string]any{"description": "Completed status, applied_count or restored_count, and the committed change_set snapshot"}
+		responses["409"] = map[string]any{"description": "change_set_conflict: server snapshot or setting version changed; read current state before further actions", "content": jsonContent(schemaRef("AppError"))}
+		responses["500"] = map[string]any{"description": "apply_failed or rollback_failed: persistence failed; inspect current state after an uncertain response", "content": jsonContent(schemaRef("AppError"))}
+		responses["503"] = map[string]any{"description": "setting_reload_pending or change_set_finalize_pending: settings already persisted; pending recovery resumes runtime reload/finalization without duplicate setting history", "content": jsonContent(schemaRef("AppError"))}
 	default:
 		return
 	}

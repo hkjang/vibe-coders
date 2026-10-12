@@ -130,7 +130,7 @@ func TestChangeSetApplyRollbackPendingResumeWithoutRewrite(t *testing.T) {
 
 	writeReloadBlockingSecret(t, db, "not-a-valid-ciphertext")
 	applyURL := ts.URL + "/admin/change-sets/" + cs.ID + "/apply"
-	resp, _ := req(t, http.MethodPost, applyURL, "")
+	resp, _ := req(t, http.MethodPost, applyURL, `{"note":"original apply reason"}`)
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("apply with reload failure status=%d, want 503", resp.StatusCode)
 	}
@@ -149,7 +149,7 @@ func TestChangeSetApplyRollbackPendingResumeWithoutRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeReloadBlockingSecret(t, db, validCiphertext)
-	resp, out := req(t, http.MethodPost, applyURL, "")
+	resp, out := req(t, http.MethodPost, applyURL, `{"note":"apply recovery reason"}`)
 	if resp.StatusCode != http.StatusOK || out["status"] != "applied" {
 		t.Fatalf("resumed apply status=%d body=%+v", resp.StatusCode, out)
 	}
@@ -161,7 +161,7 @@ func TestChangeSetApplyRollbackPendingResumeWithoutRewrite(t *testing.T) {
 
 	writeReloadBlockingSecret(t, db, "invalid-again")
 	rollbackURL := ts.URL + "/admin/change-sets/" + cs.ID + "/rollback"
-	resp, _ = req(t, http.MethodPost, rollbackURL, "")
+	resp, _ = req(t, http.MethodPost, rollbackURL, `{"note":"original rollback reason"}`)
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("rollback with reload failure status=%d, want 503", resp.StatusCode)
 	}
@@ -180,7 +180,7 @@ func TestChangeSetApplyRollbackPendingResumeWithoutRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeReloadBlockingSecret(t, db, validCiphertext)
-	resp, out = req(t, http.MethodPost, rollbackURL, "")
+	resp, out = req(t, http.MethodPost, rollbackURL, `{"note":"rollback recovery reason"}`)
 	if resp.StatusCode != http.StatusOK || out["status"] != "rolled_back" {
 		t.Fatalf("resumed rollback status=%d body=%+v", resp.StatusCode, out)
 	}
@@ -188,6 +188,31 @@ func TestChangeSetApplyRollbackPendingResumeWithoutRewrite(t *testing.T) {
 	rollbackResumeHistory, _ := db.ListAdminSettingHistory(ctx, target, 10)
 	if afterRollbackResume.Version != afterRollback.Version || len(rollbackResumeHistory) != len(rollbackHistory) {
 		t.Fatalf("resumed rollback rewrote target: before=%+v/%d after=%+v/%d", afterRollback, len(rollbackHistory), afterRollbackResume, len(rollbackResumeHistory))
+	}
+	audits, err := db.ListAdminAudit(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"change_set.apply.persisted": "original apply reason", "change_set.apply": "apply recovery reason",
+		"change_set.rollback.persisted": "original rollback reason", "change_set.rollback": "rollback recovery reason",
+	}
+	counts := map[string]int{}
+	for _, audit := range audits {
+		if reason, ok := want[audit.Action]; ok {
+			counts[audit.Action]++
+			var detail struct {
+				Reason string `json:"reason"`
+			}
+			if json.Unmarshal([]byte(audit.AfterValue), &detail) != nil || detail.Reason != reason {
+				t.Error("recovery replaced the original persistence reason")
+			}
+		}
+	}
+	for action := range want {
+		if counts[action] != 1 {
+			t.Error("persistence/recovery audit missing or duplicated")
+		}
 	}
 }
 

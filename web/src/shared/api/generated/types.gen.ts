@@ -2972,6 +2972,14 @@ export type DeleteAdminChangeSetsIdData = {
 
 export type DeleteAdminChangeSetsIdErrors = {
     /**
+     * change_set_conflict: server snapshot changed before deletion; or change_set_recovery_pending: finish apply/rollback recovery first. No deletion or success audit
+     */
+    409: AppError;
+    /**
+     * delete_failed: transaction failed; inspect current state before retrying after an uncertain response
+     */
+    500: AppError;
+    /**
      * Error
      */
     default: AppError;
@@ -3007,7 +3015,9 @@ export type GetAdminChangeSetsIdResponses = {
 };
 
 export type PostAdminChangeSetsIdApplyData = {
-    body?: never;
+    body?: {
+        note?: string | null;
+    } | null;
     path: {
         id: string;
     };
@@ -3015,15 +3025,38 @@ export type PostAdminChangeSetsIdApplyData = {
     url: '/admin/change-sets/{id}/apply';
 };
 
+export type PostAdminChangeSetsIdApplyErrors = {
+    /**
+     * change_set_conflict: server snapshot or setting version changed; read current state before further actions
+     */
+    409: AppError;
+    /**
+     * apply_failed or rollback_failed: persistence failed; inspect current state after an uncertain response
+     */
+    500: AppError;
+    /**
+     * setting_reload_pending or change_set_finalize_pending: settings already persisted; pending recovery resumes runtime reload/finalization without duplicate setting history
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminChangeSetsIdApplyError = PostAdminChangeSetsIdApplyErrors[keyof PostAdminChangeSetsIdApplyErrors];
+
 export type PostAdminChangeSetsIdApplyResponses = {
     /**
-     * OK
+     * Completed status, applied_count or restored_count, and the committed change_set snapshot
      */
     200: unknown;
 };
 
 export type PostAdminChangeSetsIdApproveData = {
-    body?: never;
+    body?: {
+        note?: string | null;
+    } | null;
     path: {
         id: string;
     };
@@ -3031,9 +3064,26 @@ export type PostAdminChangeSetsIdApproveData = {
     url: '/admin/change-sets/{id}/approve';
 };
 
+export type PostAdminChangeSetsIdApproveErrors = {
+    /**
+     * change_set_conflict: server snapshot changed before review; no review or success audit
+     */
+    409: AppError;
+    /**
+     * update_failed: transaction failed; inspect current state before retrying after an uncertain response
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminChangeSetsIdApproveError = PostAdminChangeSetsIdApproveErrors[keyof PostAdminChangeSetsIdApproveErrors];
+
 export type PostAdminChangeSetsIdApproveResponses = {
     /**
-     * OK
+     * Reviewed change set snapshot
      */
     200: unknown;
 };
@@ -3055,7 +3105,9 @@ export type PostAdminChangeSetsIdDryrunResponses = {
 };
 
 export type PostAdminChangeSetsIdRollbackData = {
-    body?: never;
+    body?: {
+        note?: string | null;
+    } | null;
     path: {
         id: string;
     };
@@ -3063,15 +3115,38 @@ export type PostAdminChangeSetsIdRollbackData = {
     url: '/admin/change-sets/{id}/rollback';
 };
 
+export type PostAdminChangeSetsIdRollbackErrors = {
+    /**
+     * change_set_conflict: server snapshot or setting version changed; read current state before further actions
+     */
+    409: AppError;
+    /**
+     * apply_failed or rollback_failed: persistence failed; inspect current state after an uncertain response
+     */
+    500: AppError;
+    /**
+     * setting_reload_pending or change_set_finalize_pending: settings already persisted; pending recovery resumes runtime reload/finalization without duplicate setting history
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminChangeSetsIdRollbackError = PostAdminChangeSetsIdRollbackErrors[keyof PostAdminChangeSetsIdRollbackErrors];
+
 export type PostAdminChangeSetsIdRollbackResponses = {
     /**
-     * OK
+     * Completed status, applied_count or restored_count, and the committed change_set snapshot
      */
     200: unknown;
 };
 
 export type PostAdminChangeSetsIdSubmitData = {
-    body?: never;
+    body?: {
+        note?: string | null;
+    } | null;
     path: {
         id: string;
     };
@@ -3079,9 +3154,26 @@ export type PostAdminChangeSetsIdSubmitData = {
     url: '/admin/change-sets/{id}/submit';
 };
 
+export type PostAdminChangeSetsIdSubmitErrors = {
+    /**
+     * change_set_conflict: server snapshot changed before review; no review or success audit
+     */
+    409: AppError;
+    /**
+     * update_failed: transaction failed; inspect current state before retrying after an uncertain response
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminChangeSetsIdSubmitError = PostAdminChangeSetsIdSubmitErrors[keyof PostAdminChangeSetsIdSubmitErrors];
+
 export type PostAdminChangeSetsIdSubmitResponses = {
     /**
-     * OK
+     * Reviewed change set snapshot
      */
     200: unknown;
 };

@@ -356,7 +356,10 @@ func impactFailureStore(t *testing.T) (*store.SQLStore, *sql.DB) {
 	if err := db.Migrate(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", path)
+	// Fault injection shares the database with live server background workers.
+	// Match SQLStore's per-connection lock wait rather than failing immediately
+	// when a valid background write briefly owns the SQLite writer lock.
+	raw, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(10000)")
 	if err != nil {
 		t.Fatal(err)
 	}

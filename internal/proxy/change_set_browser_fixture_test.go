@@ -37,7 +37,12 @@ func verifyBrowserChangeSetFixture(t *testing.T, db *store.SQLStore) {
 	if err != nil {
 		t.Fatal("browser change set audit unavailable")
 	}
-	want := map[string]string{"change_set.pending": "submit", "change_set.approved": "approve", "change_set.apply": "apply", "change_set.rollback": "rollback", "change_set.delete": "delete"}
+	want := map[string]string{
+		"change_set.pending": "submit", "change_set.approved": "approve",
+		"change_set.apply.persisted": "apply", "change_set.apply": "apply",
+		"change_set.rollback.persisted": "rollback", "change_set.rollback": "rollback",
+		"change_set.delete": "delete",
+	}
 	counts := map[string]int{}
 	for _, audit := range audits {
 		if !strings.HasPrefix(audit.Action, "change_set.") {
@@ -56,7 +61,7 @@ func verifyBrowserChangeSetFixture(t *testing.T, db *store.SQLStore) {
 			}
 		}
 	}
-	if len(counts) != 6 || counts["change_set.create"] != 1 {
+	if len(counts) != len(want)+1 || counts["change_set.create"] != 1 {
 		t.Fatal("unexpected browser change set audit actions")
 	}
 	for action := range want {
