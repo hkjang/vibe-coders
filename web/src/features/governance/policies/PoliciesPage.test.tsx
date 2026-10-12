@@ -418,11 +418,11 @@ describe("PoliciesPage", () => {
   });
 
   it("쓰기 권한이 없으면 긴급 정지와 승인 버튼을 비활성화한다", async () => {
-    authRuntime.scopes = ["security:read"];
+    authRuntime.scopes = ["admin:read", "security:read"];
     mockAllEndpoints();
     render();
 
-    const stopButton = await screen.findByRole("button", { name: /모든 \/v1 호출 즉시 차단/u });
+    const stopButton = await screen.findByRole("button", { name: /새 요청 긴급 차단/u });
     expect(stopButton).toBeDisabled();
     expect(stopButton).toHaveAttribute("title", expect.stringContaining("admin:write"));
     expect(await screen.findByRole("button", { name: "승인 요청 apr_1 승인" })).toBeDisabled();
@@ -432,17 +432,34 @@ describe("PoliciesPage", () => {
     expect(screen.getByText("읽기 전용으로 열려 있습니다.")).toBeInTheDocument();
   });
 
-  it("긴급 정지는 사유를 받은 뒤에만 서버에 전달한다", async () => {
+  it("긴급 정지 조회 권한도 없으면 이전 상태 대신 접근 안내를 표시하고 조회·변경을 보내지 않는다", async () => {
+    authRuntime.scopes = ["security:read"];
     const api = mockAllEndpoints();
+    render();
+    expect(await screen.findByText("긴급 정지 상태를 조회할 수 없습니다.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /새 요청 긴급 차단/u })).not.toBeInTheDocument();
+    expect(api.calls.filter((call) => call.key.endsWith(" /admin/kill-switch"))).toEqual([]);
+  });
+
+  it("긴급 정지는 사유와 대상 문구를 받은 뒤에만 서버에 전달한다", async () => {
+    const api = mockAllEndpoints({
+      "POST /admin/kill-switch": () => ({
+        ...killSwitchResponse,
+        disabled: true,
+        reason: "공급자 전면 장애",
+      }),
+    });
     const user = userEvent.setup();
     render();
 
     await screen.findByText("정상 운영");
-    await user.click(screen.getByRole("button", { name: /모든 \/v1 호출 즉시 차단/u }));
+    await user.click(screen.getByRole("button", { name: /새 요청 긴급 차단/u }));
 
-    const confirm = await screen.findByRole("button", { name: "즉시 차단" });
+    const confirm = await screen.findByRole("button", { name: "긴급 차단" });
     expect(confirm).toBeDisabled();
     await user.type(screen.getByLabelText(/변경 사유/u), "공급자 전면 장애");
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByRole("textbox", { name: "확인 문구" }), "게이트웨이 전체 정지");
     await user.click(confirm);
 
     await waitFor(() =>

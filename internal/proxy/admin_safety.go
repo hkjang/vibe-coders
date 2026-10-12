@@ -16,7 +16,23 @@ func (s *Server) handleKillSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, killSwitchPayload(s.killSnapshot(r.Context())))
+		w.Header().Set("Cache-Control", "no-store")
+		flag, found, err := s.db.GetFlag(r.Context(), "gateway_disabled")
+		snap, valid := confirmedKillState(flag, found)
+		if err != nil || !valid {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "kill switch state is unavailable", "server_error", "kill_switch_state_unavailable")
+			return
+		}
+		payload := killSwitchPayload(snap)
+		if s.metrics != nil {
+			payload["traffic"] = map[string]any{
+				"scope":          "responding_process",
+				"instance_ref":   "process_" + hashProxyKey(s.instanceID)[:16],
+				"observed_at":    time.Now().UTC().Format(time.RFC3339Nano),
+				"proxy_inflight": s.metrics.proxyInflight.Load(),
+			}
+		}
+		writeJSON(w, http.StatusOK, payload)
 	case http.MethodPost:
 		var payload struct {
 			Disabled bool   `json:"disabled"`
@@ -33,16 +49,43 @@ func (s *Server) handleKillSwitch(w http.ResponseWriter, r *http.Request) {
 			UpdatedBy: adminID(r),
 			Note:      strings.TrimSpace(payload.Reason),
 		}
-		if err := s.db.SetFlag(r.Context(), flag); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "kill_switch_save_failed")
+		audit := store.AdminAuditLog{
+			ID: newID("audit"), AdminID: flag.UpdatedBy, Action: "kill_switch.set", CreatedAt: flag.UpdatedAt,
+			AfterValue: auditJSON(map[string]any{"disabled": payload.Disabled, "reason": payload.Reason}),
+		}
+		committed, err := s.db.SaveRuntimeFlagAudited(r.Context(), flag, audit)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "kill switch state and audit could not be saved", "server_error", "kill_switch_save_failed")
 			return
 		}
 		s.invalidateKillCache()
-		s.auditAdmin(r, "kill_switch.set", "", auditJSON(map[string]any{"disabled": payload.Disabled, "reason": payload.Reason}))
-		writeJSON(w, http.StatusOK, killSwitchPayload(s.killSnapshot(r.Context())))
+		s.runAdminPostChange(r, audit.Action, audit.BeforeValue, audit.AfterValue, "")
+		// This acknowledgment belongs to the committed transaction, not a later
+		// flag read or a cache refresh that could fail after the write succeeded.
+		writeJSON(w, http.StatusOK, killSwitchPayload(&killSnapshot{
+			disabled: payload.Disabled, reason: committed.Note, updatedAt: committed.UpdatedAt, updatedBy: committed.UpdatedBy,
+		}))
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+// Admin reads are uncached and reject unrecognized values rather than fabricating
+// normal operation. Keep the inference cache and its existing TTL independent.
+func confirmedKillState(flag store.RuntimeFlag, found bool) (*killSnapshot, bool) {
+	if !found {
+		return &killSnapshot{}, true
+	}
+	value := strings.ToLower(strings.TrimSpace(flag.Value))
+	var disabled bool
+	switch {
+	case value == "true" || flag.Value == "1":
+		disabled = true
+	case value == "false" || flag.Value == "0":
+	default:
+		return nil, false
+	}
+	return &killSnapshot{disabled: disabled, reason: flag.Note, updatedAt: flag.UpdatedAt, updatedBy: flag.UpdatedBy}, true
 }
 
 func killSwitchPayload(snap *killSnapshot) map[string]any {

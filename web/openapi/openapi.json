@@ -1479,6 +1479,75 @@
         ],
         "type": "object"
       },
+      "KillSwitchChangeRequest": {
+        "nullable": true,
+        "properties": {
+          "disabled": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "reason": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "KillSwitchState": {
+        "properties": {
+          "disabled": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "traffic": {
+            "$ref": "#/components/schemas/KillSwitchTrafficObservation"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "disabled"
+        ],
+        "type": "object"
+      },
+      "KillSwitchTrafficObservation": {
+        "description": "Optional GET observation. Absence means unavailable, not zero. A responding-process snapshot, not cluster-wide traffic or confirmation of flag propagation. Counts common OpenAI proxy handlers (including local checks, streaming and cleanup), not separately registered workflow/app/receipt/skill routes, MCP or admin requests.",
+        "properties": {
+          "instance_ref": {
+            "description": "Opaque process reference; may change between load-balanced responses or restarts. Not a hostname.",
+            "pattern": "^process_[a-f0-9]{16}$",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "proxy_inflight": {
+            "description": "Active common proxy handlers observed in this process. Does not estimate how many requests the stop will cancel; admitted work is not cancelled.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "responding_process"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "instance_ref",
+          "observed_at",
+          "proxy_inflight"
+        ],
+        "type": "object"
+      },
       "LanguageGroupedStat": {
         "additionalProperties": false,
         "properties": {
@@ -5913,7 +5982,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.49"
+    "version": "v0.86.50"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -9268,10 +9337,48 @@
     },
     "/admin/kill-switch": {
       "get": {
+        "description": "Uncached persisted flag read plus an optional fresh responding-process traffic observation, served with Cache-Control:no-store. Missing flag means false; database failures and unrecognized persisted values return503, not fabricated normal operation. State and traffic are separate snapshots, not an atomic cluster snapshot. Common proxy entry gate only; admitted work and separately registered /v1 features are not all stopped. Inference cache TTL and error behavior remain independent.",
         "operationId": "get__admin_kill_switch",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchState"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Admin read permission required for GET; admin write required for POST"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "kill_switch_state_unavailable: database read failed, was cancelled, or contained an unrecognized flag"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -9285,10 +9392,68 @@
         ]
       },
       "post": {
+        "description": "Commits the flag and kill_switch.set admin audit atomically, then returns that transaction's snapshot without a follow-up read. Statement or validation failures roll back both; a commit acknowledgment error returns no success snapshot and must be treated as uncertain, not automatically replayed. Cache invalidation and external post-change work happen only after successful commit. Other processes retain the existing cache TTL. Legacy omission/null behavior is retained: disabled defaults false, reason defaults empty; the React review requires a nonempty reason and local target phrase. No optimistic concurrency or idempotency key.",
         "operationId": "post__admin_kill_switch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KillSwitchChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchState"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body: JSON cannot be decoded"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Admin read permission required for GET; admin write required for POST"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "kill_switch_save_failed: flag/audit transaction could not be confirmed; verify state before a new explicit change"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

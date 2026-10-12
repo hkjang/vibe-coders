@@ -15,6 +15,7 @@ import type {
   GetAdminCostData,
   GetAdminIncidentsData,
   GetAdminKillSwitchData,
+  GetAdminKillSwitchResponses,
   GetAdminModelDeprecationsData,
   GetAdminPoliciesCanaryStatusData,
   GetAdminPoliciesData,
@@ -29,6 +30,7 @@ import type {
   PostAdminApprovalsIdRejectData,
   PostAdminCostData,
   PostAdminKillSwitchData,
+  PostAdminKillSwitchResponses,
   PostAdminModelDeprecationsData,
   PostAdminPoliciesData,
   PostAdminPoliciesRegressionCasesData,
@@ -41,11 +43,19 @@ import { looseList, looseObject, numberish, unknownRecord } from "@/shared/api/l
 
 // ---------- kill switch ----------
 
-const killSwitchSchema = looseObject({
+export const killSwitchSchema = looseObject({
   disabled: z.boolean(),
   reason: z.string().optional(),
   updated_at: z.string().optional(),
   updated_by: z.string().optional(),
+  traffic: z
+    .object({
+      scope: z.literal("responding_process"),
+      instance_ref: z.string().regex(/^process_[a-f0-9]{16}$/u),
+      observed_at: z.iso.datetime({ offset: true }),
+      proxy_inflight: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    })
+    .optional(),
 });
 export type KillSwitchState = z.infer<typeof killSwitchSchema>;
 
@@ -509,8 +519,12 @@ export interface RemediationApplyBody {
 export const governanceEndpoints = {
   policyImport: policyImportEndpoints,
   killSwitch: {
-    get: operation<GetAdminKillSwitchData, unknown>()("GET", "/admin/kill-switch", killSwitchSchema),
-    set: operation<WithBody<PostAdminKillSwitchData, KillSwitchBody>, unknown>()(
+    get: operation<GetAdminKillSwitchData, GetAdminKillSwitchResponses[200]>()(
+      "GET",
+      "/admin/kill-switch",
+      killSwitchSchema,
+    ),
+    set: operation<WithBody<PostAdminKillSwitchData, KillSwitchBody>, PostAdminKillSwitchResponses[200]>()(
       "POST",
       "/admin/kill-switch",
       killSwitchSchema,
