@@ -10,7 +10,7 @@ export const gatewayFeatureModules = defineFeatureModules([
   {
     featureId: "gateway.providers",
     load: () => import("./providers/ProviderPage").then((module) => module.ProviderPage),
-    queryKeys: ["page", "provider", "q", "range", "status"],
+    queryKeys: ["page", "provider", "q", "range", "status", "sort", "page_size"],
   },
   {
     featureId: "gateway.models",

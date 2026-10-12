@@ -31,7 +31,14 @@ export function useProviderDialogFocus(
       const currentProviderTrigger = Array.from(
         document.querySelectorAll<HTMLElement>("[data-provider-trigger]"),
       ).find((candidate) => candidate.dataset.providerTrigger === returnProvider);
-      const returnTarget = currentProviderTrigger ?? returnFocusRef.current;
+      const returnTarget =
+        currentProviderTrigger ??
+        (returnFocusRef.current?.isConnected
+          ? returnFocusRef.current
+          : returnProvider !== ""
+            ? document.getElementById("provider-list-title")
+            : null);
+      returnFocusRef.current = returnTarget;
       if (returnTarget?.isConnected && !returnTarget.matches(":disabled")) returnTarget.focus();
     }, 50);
     return () => clearTimeout(timer);
@@ -49,6 +56,9 @@ export function useProviderDialogFocus(
 
   const closeProvider = useCallback((): void => {
     restoreFocusPendingRef.current = true;
+    // Direct links/reloads have no remembered row; retain Dialog's main-content fallback.
+    if (returnFocusProviderRef.current !== "" && !returnFocusRef.current?.isConnected)
+      returnFocusRef.current = document.getElementById("provider-list-title");
     updateSearch({ provider: undefined });
   }, [updateSearch]);
 

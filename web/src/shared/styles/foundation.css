@@ -381,7 +381,8 @@
   width: auto;
 }
 
-.model-catalog-sort-summary {
+.model-catalog-sort-summary,
+.provider-catalog-sort-summary {
   display: flex;
   align-items: center;
   justify-content: space-between;

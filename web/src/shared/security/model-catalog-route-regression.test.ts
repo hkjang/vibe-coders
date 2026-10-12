@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe("model catalog public URL security regression", () => {
-  it("registers the two finite keys on the actual gateway.models feature only", () => {
+  it("registers finite catalog keys while preserving the model feature contract", () => {
     expect(featureQueryKeys("/gateway/models")).toEqual(
       new Set([
         "model",
@@ -54,8 +54,8 @@ describe("model catalog public URL security regression", () => {
         "page_size",
       ]),
     );
-    expect(featureQueryKeys("/gateway/providers")?.has("sort")).toBe(false);
-    expect(featureQueryKeys("/gateway/providers")?.has("page_size")).toBe(false);
+    expect(featureQueryKeys("/gateway/providers")?.has("sort")).toBe(true);
+    expect(featureQueryKeys("/gateway/providers")?.has("page_size")).toBe(true);
   });
 
   describe.each(modelPaths)("%s including its /app entry", (path) => {
@@ -196,11 +196,12 @@ describe("model catalog public URL security regression", () => {
     "/routing/rules/learning",
     "/gateway/models/detail",
   ])("does not widen the query boundary for %s", (path) => {
+    const providerCatalog = path === "/providers" || path === "/gateway/providers";
     for (const entry of [path, `/app${path}`]) {
       expect(sanitizeAppRouteSearch(entry, "?sort=model_asc&page_size=25")).toEqual({
-        rejectedKeys: ["sort", "page_size"],
+        rejectedKeys: providerCatalog ? ["sort"] : ["sort", "page_size"],
         sensitiveKeys: [],
-        search: "",
+        search: providerCatalog ? "?page_size=25" : "",
       });
     }
   });
