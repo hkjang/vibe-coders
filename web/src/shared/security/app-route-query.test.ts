@@ -21,6 +21,24 @@ describe("app route query security", () => {
 
   afterEach(() => window.history.replaceState(null, "", initialURL));
 
+  it("개요 추이 기간은 세 가지 단일 값만 보존한다", () => {
+    for (const value of ["24h", "7d", "30d"]) {
+      expect(sanitizeAppRouteSearch("/app/overview", `?tab=usage&trend=${value}`).search).toBe(
+        `?tab=usage&trend=${value}`,
+      );
+    }
+    for (const search of [
+      "?trend=30d&trend=7d",
+      "?trend=arbitrary",
+      "?trend=",
+      "?trend=30D",
+      "?trend=%20api_key%3Dtest",
+    ]) {
+      expect(sanitizeAppRouteSearch("/app/overview", search).search).toBe("");
+    }
+    expect(sanitizeAppRouteSearch("/app/gateway/providers", "?trend=30d").search).toBe("");
+  });
+
   it("도메인 결정의 요청 ID를 학습 화면에서만 안전하게 복원한다", () => {
     const id = "\ufeff한글 / %2f ?#";
     const search = `?request_id=${encodeURIComponent(id)}&window=7d&route=chat`;

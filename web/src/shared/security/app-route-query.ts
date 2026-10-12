@@ -95,6 +95,12 @@ export function sanitizeAppRouteSearch(
   const rejectedValues = new Map<string, boolean>();
   const route = routerPath(pathname);
   const invalidOperationalKeys = new Set<string>();
+  if (route === "/overview" && parameters.has("trend")) {
+    const values = parameters.getAll("trend");
+    if (values.length !== 1 || !["24h", "7d", "30d"].includes(values[0] ?? "")) {
+      invalidOperationalKeys.add("trend");
+    }
+  }
   if (route === "/providers" || route === "/gateway/providers" || route.startsWith("/gateway/providers/")) {
     const exactCatalogueRoute = route === "/providers" || route === "/gateway/providers";
     if (

@@ -1,13 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 
 import { TimeSeriesChart, type ChartSeries } from "@/features/observability/charts";
+import { refreshIntervalMs } from "@/features/health/health-utils";
+import { OverviewQueryFeedback } from "@/features/overview/OverviewQueryFeedback";
+import { overviewReadDenied } from "@/features/overview/overview-query-state";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
+import { useTabParam } from "@/shared/hooks/use-tab-param";
+import { usePreferences } from "@/shared/stores/preferences";
 import { formatKRW, formatNumber } from "@/shared/utils/format";
 import "@/features/observability/observability.css";
 
@@ -19,6 +22,7 @@ const windows = [
   { id: "30d", label: "최근 30일", bucket: "day", heatmap: "30d" },
 ] as const;
 type WindowId = (typeof windows)[number]["id"];
+const windowIds = windows.map((window) => window.id);
 
 const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -33,10 +37,13 @@ function heatLevel(requests: number, peak: number): number {
  * (KST), both of which the legacy console drew and the new overview was missing.
  */
 export function OverviewTrendPanel(): React.JSX.Element {
-  const [range, setRange] = useState<WindowId>("7d");
+  const interval = refreshIntervalMs(usePreferences((state) => state.refreshInterval));
+  const [range, setRange] = useTabParam<WindowId>(windowIds, "7d", "trend");
   const selected = windows.find((item) => item.id === range) ?? windows[1];
 
   const timeseries = useQuery({
+    refetchInterval: interval,
+    refetchIntervalInBackground: false,
     queryKey: ["overview", "timeseries", selected.id],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.admin.timeseries, {
@@ -46,6 +53,8 @@ export function OverviewTrendPanel(): React.JSX.Element {
       }),
   });
   const heatmap = useQuery({
+    refetchInterval: interval,
+    refetchIntervalInBackground: false,
     queryKey: ["overview", "heatmap", selected.heatmap],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.admin.heatmap, {
@@ -98,15 +107,18 @@ export function OverviewTrendPanel(): React.JSX.Element {
           </div>
         }
       >
-        {timeseries.isError ? (
-          <InlineNotice tone="warning" title="사용 추이를 불러오지 못했습니다.">
-            잠시 후 다시 시도해 주세요.
-          </InlineNotice>
-        ) : timeseries.isPending ? (
+        <OverviewQueryFeedback
+          label="사용 추이"
+          error={timeseries.error}
+          fetching={timeseries.isFetching}
+          updatedAt={timeseries.dataUpdatedAt}
+          retry={() => void timeseries.refetch()}
+        />
+        {timeseries.isPending ? (
           <p className="obs-meta" role="status">
             추이를 불러오는 중입니다.
           </p>
-        ) : (
+        ) : timeseries.data && !overviewReadDenied(timeseries.error) ? (
           <>
             <TimeSeriesChart
               caption={`${selected.label} 요청 수`}
@@ -121,7 +133,7 @@ export function OverviewTrendPanel(): React.JSX.Element {
               format={(value) => formatKRW(value)}
             />
           </>
-        )}
+        ) : null}
       </SectionCard>
 
       <SectionCard
@@ -129,15 +141,18 @@ export function OverviewTrendPanel(): React.JSX.Element {
         description="한국 시간 기준으로 요청이 몰리는 시간대입니다."
         actions={<Badge tone="muted">{selected.heatmap === "30d" ? "최근 30일" : "최근 7일"}</Badge>}
       >
-        {heatmap.isError ? (
-          <InlineNotice tone="warning" title="활동 분포를 불러오지 못했습니다.">
-            잠시 후 다시 시도해 주세요.
-          </InlineNotice>
-        ) : heatmap.isPending ? (
+        <OverviewQueryFeedback
+          label="활동 분포"
+          error={heatmap.error}
+          fetching={heatmap.isFetching}
+          updatedAt={heatmap.dataUpdatedAt}
+          retry={() => void heatmap.refetch()}
+        />
+        {heatmap.isPending ? (
           <p className="obs-meta" role="status">
             활동 분포를 불러오는 중입니다.
           </p>
-        ) : peak === 0 ? (
+        ) : !heatmap.data || overviewReadDenied(heatmap.error) ? null : peak === 0 ? (
           <p className="obs-meta">이 기간에 기록된 요청이 없습니다.</p>
         ) : (
           <div className="overview-heatmap-scroll" tabIndex={0} aria-label="요일·시간대 활동 표 영역">

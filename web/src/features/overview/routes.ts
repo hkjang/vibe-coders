@@ -6,6 +6,6 @@ export const overviewFeatureModules = defineFeatureModules([
   {
     featureId: "overview",
     load: () => import("./OverviewPage").then((module) => module.OverviewPage),
-    queryKeys: ["range", "tab"],
+    queryKeys: ["range", "tab", "trend"],
   },
 ]);
