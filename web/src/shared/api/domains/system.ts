@@ -229,11 +229,11 @@ export const systemEndpoints = {
       changeSetSchema,
     ),
     detail: operation<GetAdminChangeSetsIdData, unknown>()("GET", "/admin/change-sets/{id}", changeSetSchema),
-    remove: operation<DeleteAdminChangeSetsIdData, unknown>()(
-      "DELETE",
-      "/admin/change-sets/{id}",
-      systemAcknowledgementSchema,
-    ),
+    // The server accepts an optional body; this UI always supplies the generated note contract.
+    remove: operation<
+      WithBody<DeleteAdminChangeSetsIdData, NonNullable<DeleteAdminChangeSetsIdData["body"]>>,
+      unknown
+    >()("DELETE", "/admin/change-sets/{id}", systemAcknowledgementSchema),
     dryRun: operation<PostAdminChangeSetsIdDryrunData, unknown>()(
       "POST",
       "/admin/change-sets/{id}/dryrun",

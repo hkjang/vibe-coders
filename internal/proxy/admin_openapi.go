@@ -905,6 +905,16 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	case "delete /admin/model-tags/{id}":
 		op["description"] = "Delete by the exact decoded model path identifier without POST trimming. The existing 200 acknowledgment also covers an absent row; it does not report an affected-row count or successful admin audit."
 		responses["200"] = successResponse("ModelUsageTagDeleteResponse")
+	case "delete /admin/change-sets/{id}":
+		op["description"] = "Delete an existing change set without restoring applied settings. Optional note is Go TrimSpace-normalized and passed to the existing audit writer. Legacy missing, null or malformed bodies remain accepted. A successful deletion is not an atomic guarantee that its audit was persisted."
+		op["requestBody"] = map[string]any{"required": false, "content": jsonContent(map[string]any{
+			"type": "object", "nullable": true,
+			"properties": map[string]any{"note": map[string]any{"type": "string", "nullable": true}},
+		})}
+		responses["200"] = map[string]any{"description": "Deleted", "content": jsonContent(map[string]any{
+			"type": "object", "required": []string{"status"},
+			"properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"deleted"}}},
+		})}
 	default:
 		return
 	}
