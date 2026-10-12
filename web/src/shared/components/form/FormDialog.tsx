@@ -25,6 +25,18 @@ interface FormDialogProps<Input extends FieldValues, Output> {
   title: string;
 }
 
+function canRestoreFocus(origin: HTMLElement, target: HTMLElement): boolean {
+  const dialog = target.closest('[role="dialog"]');
+  return (
+    origin.isConnected &&
+    origin.matches(":disabled") &&
+    dialog !== null &&
+    origin.closest('[role="dialog"]') === dialog &&
+    dialog.getAttribute("aria-hidden") !== "true" &&
+    (document.activeElement === origin || document.activeElement === document.body)
+  );
+}
+
 /**
  * Dialog around a react-hook-form form. Field components render inside as
  * children; submission errors from the API show inline with the request ID.
@@ -65,13 +77,23 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   const epoch = useRef(0);
   const mounted = useRef(false);
   const scrollHintRef = useRef<HTMLParagraphElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const focusedField = useRef<HTMLElement | undefined>(undefined);
   const pendingFocus = useRef<{ origin: HTMLElement; epoch: number } | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<{ message: string; requestId?: string } | undefined>();
   const dirty = form.formState.isDirty;
   useLayoutEffect(() => {
     submissionAllowed.current = !submitDisabled;
-  }, [submitDisabled]);
+    if (!open || !submitDisabled || pending) return;
+    const origin = focusedField.current;
+    const cancel = cancelRef.current;
+    if (!origin || !cancel?.isConnected || cancel.disabled || !canRestoreFocus(origin, cancel)) return;
+    // A runtime readonly transition can disable the focused field before Radix
+    // restores its trap. Keep focus in this topmost dialog, without stealing a
+    // valid focus chosen elsewhere or closing/discarding the operator's draft.
+    cancel.focus();
+  }, [open, pending, submitDisabled]);
   const close = useCallback((): void => {
     // Invalidate immediately, including a logout and mutation resolution in the
     // same tick before React commits the closed state.
@@ -102,19 +124,10 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
     const hint = scrollHintRef.current;
     if (!scrollHint || !pending || !open || !mounted.current || !captured || !hint?.isConnected) return;
     const { origin } = captured;
-    const dialog = hint.closest('[role="dialog"]');
-    if (
-      captured.epoch !== epoch.current ||
-      !origin.isConnected ||
-      !origin.matches(":disabled") ||
-      !dialog ||
-      origin.closest('[role="dialog"]') !== dialog ||
-      dialog.getAttribute("aria-hidden") === "true"
-    )
-      return;
+    if (captured.epoch !== epoch.current || !canRestoreFocus(origin, hint)) return;
     // Disabling the focused control can leave BODY active, where Radix cannot
     // return focus to its now-disabled last target. Do not steal valid focus.
-    if (document.activeElement === origin || document.activeElement === document.body) hint.focus();
+    hint.focus();
   }, [open, pending, scrollHint]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
@@ -169,7 +182,12 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
       returnFocusRef={returnFocusRef}
       footer={
         <>
-          <Button variant="secondary" onClick={() => coordinator.requestClose(guardId)} disabled={pending}>
+          <Button
+            ref={cancelRef}
+            variant="secondary"
+            onClick={() => coordinator.requestClose(guardId)}
+            disabled={pending}
+          >
             취소
           </Button>
           <Button form={formId} type="submit" variant="primary" disabled={pending || submitDisabled}>
@@ -178,7 +196,15 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
         </>
       }
     >
-      <form id={formId} className="form-grid" noValidate onSubmit={(event) => void submit(event)}>
+      <form
+        id={formId}
+        className="form-grid"
+        noValidate
+        onFocusCapture={(event) => {
+          if (event.target instanceof HTMLElement) focusedField.current = event.target;
+        }}
+        onSubmit={(event) => void submit(event)}
+      >
         <fieldset className="form-grid form-dialog-fields" disabled={pending} aria-label="입력 항목">
           {children}
         </fieldset>

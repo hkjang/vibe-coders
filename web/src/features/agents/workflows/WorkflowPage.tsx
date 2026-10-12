@@ -1,24 +1,28 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
-import { withPathParams } from "@/features/agents/endpoint-path";
+import { useWorkflowMutations, workflowsKey } from "./use-workflow-mutations";
+import { useWorkflowColumns } from "./workflow-tables";
 import { WorkflowDetailSheet } from "@/features/agents/workflows/WorkflowDetailSheet";
 import { WorkflowFormDialog } from "@/features/agents/workflows/WorkflowFormDialog";
 import { WorkflowReceiptDialog } from "@/features/agents/workflows/WorkflowReceiptDialog";
-import {
-  matchesWorkflowQuery,
-  workflowUpsertBody,
-  type WorkflowFormOutput,
-} from "@/features/agents/workflows/workflow-form";
+import { matchesWorkflowQuery } from "@/features/agents/workflows/workflow-form";
 import { apiClient } from "@/shared/api/client";
-import type { Workflow, WorkflowDryRun, WorkflowRun } from "@/shared/api/domains/agents.schemas";
+import type { Workflow } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
@@ -28,47 +32,63 @@ import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Tabs, TabPanel } from "@/shared/components/ui/Tabs";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
-import type { DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { displayColumn } from "@/features/agents/table-columns";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
+import { tokenStore } from "@/shared/auth/token-store";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
-import { formatDateTime, formatDuration, formatNumber } from "@/shared/utils/format";
+import { formatDateTime, formatNumber } from "@/shared/utils/format";
 import "@/features/agents/agents.css";
 
 const tabIds = ["list", "runs"] as const;
 type TabId = (typeof tabIds)[number];
-const workflowsKey = ["agents", "workflows"] as const;
 const writeScope = "admin:write";
-const writeDisabledReason = "워크플로를 변경하려면 admin:write 권한이 필요합니다.";
+const scopeWriteDisabledReason = "워크플로를 변경하려면 admin:write 권한이 필요합니다.";
 const statusFilters = [
   { value: "all", label: "전체 상태" },
   { value: "enabled", label: "사용" },
   { value: "disabled", label: "중지" },
 ];
 
-function statusTone(status: string | undefined): "danger" | "info" | "muted" | "success" | "warning" {
-  switch (status) {
-    case "ok":
-      return "success";
-    case "error":
-      return "danger";
-    case "pending_approval":
-      return "warning";
-    case "planned":
-      return "info";
-    default:
-      return "muted";
-  }
-}
-
 export function WorkflowPage(): React.JSX.Element {
   const auth = useAuth();
-  const canWrite = auth.user?.scopes.includes(writeScope) ?? false;
+  const context = useContext(FeatureAccessContext);
+  const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
+  const owner = JSON.stringify([
+    epoch,
+    auth.mode,
+    auth.user?.id,
+    auth.user?.role,
+    auth.user?.roles,
+    auth.user?.team_id,
+    context?.featureId,
+    context?.permitted,
+    auth.user?.scopes.includes("admin:read"),
+  ]);
+  return <WorkflowPageContent key={owner} />;
+}
+
+function WorkflowPageContent(): React.JSX.Element {
+  const auth = useAuth();
+  const alive = useRef(false);
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const ownsResult = useCallback(() => alive.current, []);
+  const mutationAccess = useFeatureMutationAccess(
+    ["agents.workflows"],
+    auth.user?.scopes.includes(writeScope) === true && auth.user.scopes.includes("admin:read"),
+    scopeWriteDisabledReason,
+  );
+  const canWrite = mutationAccess.allowed;
+  const writeDisabledReason = mutationAccess.reason ?? scopeWriteDisabledReason;
   const [tab, setTab] = useTabParam<TabId>([...tabIds]);
   const [params, updateSearch] = useSearchState();
   const refreshInterval = useRefreshInterval();
@@ -76,6 +96,10 @@ export function WorkflowPage(): React.JSX.Element {
   const query = containsPotentialSecret(rawQuery) ? "" : rawQuery;
   const status = params.get("status") ?? "all";
   const selectedId = params.get("workflow") ?? "";
+  const currentSelection = useRef(selectedId);
+  useLayoutEffect(() => {
+    currentSelection.current = selectedId;
+  }, [selectedId]);
   const [searchError, setSearchError] = useState<string | undefined>(
     containsPotentialSecret(rawQuery) ? secretSearchMessage : undefined,
   );
@@ -83,7 +107,6 @@ export function WorkflowPage(): React.JSX.Element {
   const [editing, setEditing] = useState<Workflow | undefined>();
   const [publishTarget, setPublishTarget] = useState<Workflow | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<Workflow | undefined>();
-  const [dryRunResult, setDryRunResult] = useState<WorkflowDryRun | undefined>();
   const [receiptRunId, setReceiptRunId] = useState("");
   const createButtonRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
@@ -126,93 +149,17 @@ export function WorkflowPage(): React.JSX.Element {
   const selected = workflows.find((workflow) => workflow.id === selectedId);
 
   const closeSheet = useCallback((): void => {
-    setDryRunResult(undefined);
     updateSearch({ workflow: undefined });
   }, [updateSearch]);
 
-  const upsert = useMutationFeedback({
-    mutate: (variables: { values: WorkflowFormOutput; id?: string }) =>
-      apiClient.request(endpoints.domains.agents.workflows.upsert, {
-        body: workflowUpsertBody(variables.values, variables.id),
-        routeId: "agents.workflows",
-      }),
-    invalidates: [workflowsKey],
-    successMessage: "워크플로를 저장했습니다.",
-    errorMessage: "워크플로를 저장하지 못했습니다.",
+  const { upsert, remove, publish } = useWorkflowMutations({
+    assertCurrent: mutationAccess.assertCurrent,
+    ownsResult,
+    onRemoved: (id) => {
+      if (currentSelection.current === id) closeSheet();
+    },
   });
-
-  const remove = useMutationFeedback({
-    mutate: (id: string) =>
-      apiClient.request(endpoints.domains.agents.workflows.remove, {
-        query: { id },
-        routeId: "agents.workflows",
-      }),
-    invalidates: [workflowsKey],
-    successMessage: "워크플로를 삭제했습니다.",
-    errorMessage: "워크플로를 삭제하지 못했습니다.",
-    onSuccess: () => closeSheet(),
-  });
-
-  const publish = useMutationFeedback({
-    mutate: (variables: { id: string; note: string }) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.workflows.publish, { id: variables.id }), {
-        body: { note: variables.note },
-        routeId: "agents.workflows",
-      }),
-    invalidates: [workflowsKey],
-    successMessage: (result) => `워크플로를 게시했습니다. (v${formatNumber(result.version ?? 0)})`,
-    errorMessage: "워크플로를 게시하지 못했습니다.",
-  });
-
-  const dryRun = useMutation({
-    mutationFn: (id: string) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.workflows.dryRun, { id }), {
-        routeId: "agents.workflows",
-      }),
-    onSuccess: (result) => setDryRunResult(result),
-  });
-
-  const columns = useMemo<ReadonlyArray<DataTableColumn<Workflow>>>(
-    () => [
-      displayColumn<Workflow>("name", "이름", (row) => (
-        <span className="truncate">{row.name ?? row.id}</span>
-      )),
-      displayColumn<Workflow>("steps", "단계", (row) => (
-        <span className="cell-number">{formatNumber(row.steps?.length ?? 0)}</span>
-      )),
-      displayColumn<Workflow>("teams", "허용 팀", (row) => row.allowed_teams || "전체"),
-      displayColumn<Workflow>("enabled", "상태", (row) => (
-        <Badge tone={row.enabled ? "success" : "muted"}>{row.enabled ? "사용" : "중지"}</Badge>
-      )),
-      displayColumn<Workflow>("updated_at", "수정일", (row) => formatDateTime(row.updated_at)),
-    ],
-    [],
-  );
-
-  const runColumns = useMemo<ReadonlyArray<DataTableColumn<WorkflowRun>>>(
-    () => [
-      displayColumn<WorkflowRun>("created_at", "실행 시각", (row) => formatDateTime(row.created_at)),
-      displayColumn<WorkflowRun>(
-        "workflow",
-        "워크플로",
-        (row) =>
-          workflows.find((workflow) => workflow.id === row.workflow_id)?.name ?? row.workflow_id ?? "—",
-      ),
-      displayColumn<WorkflowRun>("status", "상태", (row) => (
-        <Badge tone={statusTone(row.status)}>{row.status || "—"}</Badge>
-      )),
-      displayColumn<WorkflowRun>(
-        "steps",
-        "단계 성공",
-        (row) => `${formatNumber(row.steps_ok ?? 0)}/${formatNumber(row.steps_total ?? 0)}`,
-      ),
-      displayColumn<WorkflowRun>("latency", "소요", (row) => (
-        <span className="cell-number">{formatDuration(row.latency_ms ?? 0)}</span>
-      )),
-      displayColumn<WorkflowRun>("error", "오류 분류", (row) => row.error_class || "—"),
-    ],
-    [workflows],
-  );
+  const { columns, runColumns } = useWorkflowColumns(workflows);
 
   const enabledCount = workflows.filter((workflow) => workflow.enabled === true).length;
   const stepTotal = workflows.reduce((total, workflow) => total + (workflow.steps?.length ?? 0), 0);
@@ -393,7 +340,6 @@ export function WorkflowPage(): React.JSX.Element {
               loading={list.isFetching && !list.data}
               onRowClick={(row) => {
                 rowTriggerRef.current = document.activeElement as HTMLElement | null;
-                setDryRunResult(undefined);
                 updateSearch({ workflow: row.id });
               }}
             />
@@ -444,14 +390,9 @@ export function WorkflowPage(): React.JSX.Element {
       />
 
       <WorkflowDetailSheet
+        key={JSON.stringify([selectedId, selected])}
         canWrite={canWrite}
-        dryRun={dryRunResult}
-        dryRunError={dryRun.error}
-        dryRunPending={dryRun.isPending}
         onDelete={() => setDeleteTarget(selected)}
-        onDryRun={() => {
-          if (selected) dryRun.mutate(selected.id);
-        }}
         onEdit={() => {
           setEditing(selected);
           setFormOpen(true);
@@ -467,6 +408,8 @@ export function WorkflowPage(): React.JSX.Element {
       />
 
       <WorkflowFormDialog
+        canWrite={canWrite}
+        writeDisabledReason={writeDisabledReason}
         onOpenChange={setFormOpen}
         onSubmit={async (values) => {
           await upsert.mutateAsync({ values, id: editing?.id });
@@ -481,6 +424,7 @@ export function WorkflowPage(): React.JSX.Element {
         description={`'${publishTarget?.name ?? ""}' 워크플로의 현재 정의를 새 버전으로 게시합니다. 검증에 실패한 단계가 있으면 게시되지 않습니다.`}
         confirmLabel="게시"
         requireReason
+        confirmDisabled={!canWrite}
         open={publishTarget !== undefined}
         onOpenChange={(open) => {
           if (!open) setPublishTarget(undefined);
@@ -496,6 +440,7 @@ export function WorkflowPage(): React.JSX.Element {
         description={`'${deleteTarget?.name ?? ""}' 워크플로를 삭제합니다. 이 작업은 되돌릴 수 없습니다.`}
         confirmLabel="삭제"
         tone="danger"
+        confirmDisabled={!canWrite}
         open={deleteTarget !== undefined}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(undefined);

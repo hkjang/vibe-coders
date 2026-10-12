@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState, type RefObject } from "react";
 
 import { workflowStepTypeLabels } from "@/features/agents/workflows/workflow-form";
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { apiClient } from "@/shared/api/client";
-import type { Workflow, WorkflowDryRun, WorkflowStep } from "@/shared/api/domains/agents.schemas";
+import type { Workflow, WorkflowStep } from "@/shared/api/domains/agents.schemas";
+import { AppError, isAppError } from "@/shared/api/error";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -18,11 +19,7 @@ import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 interface WorkflowDetailSheetProps {
   canWrite: boolean;
-  dryRun: WorkflowDryRun | undefined;
-  dryRunError: Error | null;
-  dryRunPending: boolean;
   onDelete: () => void;
-  onDryRun: () => void;
   onEdit: () => void;
   onOpenChange: (open: boolean) => void;
   onPublish: () => void;
@@ -80,11 +77,7 @@ function StepTable({ steps }: { steps: readonly WorkflowStep[] }): React.JSX.Ele
 
 export function WorkflowDetailSheet({
   canWrite,
-  dryRun,
-  dryRunError,
-  dryRunPending,
   onDelete,
-  onDryRun,
   onEdit,
   onOpenChange,
   onPublish,
@@ -96,6 +89,24 @@ export function WorkflowDetailSheet({
   const [showVersions, setShowVersions] = useState(false);
   const versionsButtonRef = useRef<HTMLButtonElement>(null);
   const workflowId = workflow?.id ?? "";
+  // The parent keys this detail lifetime by the selected definition and session.
+  // A late response from an unmounted selection never belongs to its replacement.
+  const simulation = useMutation({
+    retry: false,
+    mutationFn: async () => {
+      const result = await apiClient.request(
+        withPathParams(endpoints.domains.agents.workflows.dryRun, { id: workflowId }),
+        { routeId: "agents.workflows" },
+      );
+      if (result.workflow_id !== workflowId) {
+        throw new AppError("검사 대상이 일치하지 않습니다. 다시 조회하세요.", { kind: "contract" });
+      }
+      return result;
+    },
+  });
+  const dryRun = simulation.data;
+  const dryRunError = simulation.error;
+  const dryRunPending = simulation.isPending;
   const versions = useQuery({
     queryKey: ["agents", "workflows", workflowId, "versions"],
     enabled: open && showVersions && workflowId !== "",
@@ -143,7 +154,7 @@ export function WorkflowDetailSheet({
           />
 
           <div className="agents-detail-actions">
-            <Button variant="primary" onClick={onDryRun} disabled={dryRunPending}>
+            <Button variant="primary" onClick={() => simulation.mutate()} disabled={dryRunPending}>
               {dryRunPending ? "검증 중" : "드라이런"}
             </Button>
             <Button
@@ -185,13 +196,16 @@ export function WorkflowDetailSheet({
           {dryRunError ? (
             <InlineNotice tone="danger" title="드라이런에 실패했습니다.">
               {safeAppErrorMessage(dryRunError, "드라이런을 실행하지 못했습니다.")}
+              {isAppError(dryRunError) && dryRunError.requestId ? (
+                <p>요청 ID: {dryRunError.requestId}</p>
+              ) : null}
             </InlineNotice>
           ) : null}
           {dryRun ? (
             <SectionCard title="드라이런 결과" headingLevel={3} description={dryRun.note ?? undefined}>
               <InlineNotice tone={dryRun.ok ? "success" : "warning"}>
                 {dryRun.ok
-                  ? "모든 단계가 확인되었습니다. 게시할 수 있습니다."
+                  ? "조회한 정의의 단계 검사를 통과했습니다. 게시할 때 서버에서 다시 검증합니다."
                   : "해결되지 않은 단계가 있어 게시할 수 없습니다."}
               </InlineNotice>
               {(dryRun.issues ?? []).length > 0 ? (

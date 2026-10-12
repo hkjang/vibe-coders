@@ -17,7 +17,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function setup(mutate: (value: string) => Promise<string>, onSuccess = vi.fn()) {
+function setup(mutate: (value: string) => Promise<string>, onSuccess = vi.fn(), ownsResult = () => true) {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
   const invalidate = vi.spyOn(client, "invalidateQueries");
   const success = vi.spyOn(toast, "success").mockImplementation(() => 1);
@@ -26,7 +26,14 @@ function setup(mutate: (value: string) => Promise<string>, onSuccess = vi.fn()) 
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
   const hook = renderHook(
-    () => useMutationFeedback({ mutate, onSuccess, invalidates: [["private"]], successMessage: "저장 완료" }),
+    () =>
+      useMutationFeedback({
+        mutate,
+        onSuccess,
+        ownsResult,
+        invalidates: [["private"]],
+        successMessage: "저장 완료",
+      }),
     { wrapper },
   );
   return { ...hook, client, invalidate, success, error, onSuccess };
@@ -35,6 +42,37 @@ function setup(mutate: (value: string) => Promise<string>, onSuccess = vi.fn()) 
 afterEach(() => tokenStore.clearAll());
 
 describe("mutation authentication boundary", () => {
+  it.each(["success", "failure"])(
+    "suppresses %s after the owning screen retires without logout",
+    async (outcome) => {
+      const pending = deferred();
+      let current = true;
+      const hook = setup(
+        () => pending.promise,
+        vi.fn(),
+        () => current,
+      );
+      const continuation = vi.fn();
+      let completion: Promise<unknown> = Promise.resolve();
+      act(() => {
+        completion = hook.result.current
+          .mutateAsync("old screen")
+          .then(continuation, (error: unknown) => error);
+      });
+      await waitFor(() => expect(hook.result.current.isPending).toBe(true));
+      current = false;
+      await act(async () => {
+        if (outcome === "success") pending.resolve("old result");
+        else pending.reject(new Error("old error"));
+        await completion;
+      });
+      expect(continuation).not.toHaveBeenCalled();
+      expect(hook.success).not.toHaveBeenCalled();
+      expect(hook.error).not.toHaveBeenCalled();
+      expect(hook.onSuccess).not.toHaveBeenCalled();
+      expect(hook.invalidate).not.toHaveBeenCalled();
+    },
+  );
   it.each(["success", "failure"])(
     "suppresses stale %s callbacks and rejects the caller continuation",
     async (outcome) => {

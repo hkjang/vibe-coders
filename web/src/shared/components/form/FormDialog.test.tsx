@@ -9,9 +9,11 @@ import { FormDialog } from "./FormDialog";
 const hint = "내용이 길면 이 안내에 초점을 둔 뒤 방향키로 살펴보세요.";
 function Harness({
   scrollHint,
+  locked = false,
   save = () => undefined,
 }: {
   scrollHint?: string;
+  locked?: boolean;
   save?: (values: { name: string }) => unknown | Promise<unknown>;
 }) {
   const [open, setOpen] = useState(false);
@@ -31,10 +33,11 @@ function Harness({
         title="안내 선택 폼"
         description="공개 테스트 입력"
         scrollHint={scrollHint}
+        submitDisabled={locked}
       >
         <label>
           이름
-          <input {...form.register("name", { required: "이름을 입력하세요." })} />
+          <input disabled={locked} {...form.register("name", { required: "이름을 입력하세요." })} />
         </label>
         {form.formState.errors.name ? <p role="alert">{form.formState.errors.name.message}</p> : null}
       </FormDialog>
@@ -52,6 +55,28 @@ async function open() {
 }
 
 describe("FormDialog 선택적 평문 스크롤 안내", () => {
+  it("읽기 전용 전환이 입력을 비활성화하면 초안을 보존하고 취소로 포커스를 옮긴다", async () => {
+    const view = render(<Harness />);
+    const { user, dialog, input } = await open();
+    await user.type(input, "보존할 초안");
+    expect(input).toHaveFocus();
+    view.rerender(<Harness locked />);
+    expect(input).toBeDisabled();
+    expect(input).toHaveValue("보존할 초안");
+    expect(within(dialog).getByRole("button", { name: "취소" })).toHaveFocus();
+    expect(within(dialog).getByRole("button", { name: "저장" })).toBeDisabled();
+  });
+
+  it("읽기 전용 전환 전에 닫기 버튼으로 옮긴 유효한 포커스는 유지한다", async () => {
+    const view = render(<Harness />);
+    const { user, dialog, input } = await open();
+    await user.type(input, "보존할 초안");
+    const close = within(dialog).getByRole("button", { name: "대화상자 닫기" });
+    act(() => close.focus());
+    view.rerender(<Harness locked />);
+    expect(close).toHaveFocus();
+    expect(input).toHaveValue("보존할 초안");
+  });
   it("미지정 기본값은 기존 fieldset DOM과 초기 포커스 순서를 유지한다", async () => {
     render(<Harness />);
     const { user, dialog, form, input } = await open();

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowPage } from "@/features/agents/workflows/WorkflowPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
 
@@ -32,7 +33,12 @@ const workflow = {
 const listHandler = () => ({ workflows: [workflow] });
 
 function renderPage(route = "/agents/workflows"): ReturnType<typeof renderScreen> {
-  return renderScreen(<WorkflowPage />, { path: "/agents/workflows", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="agents.workflows">
+      <WorkflowPage />
+    </FeatureAccessHarness>,
+    { path: "/agents/workflows", route },
+  );
 }
 
 describe("WorkflowPage", () => {
