@@ -190,7 +190,15 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
           >
             취소
           </Button>
-          <Button form={formId} type="submit" variant="primary" disabled={pending || submitDisabled}>
+          <Button
+            form={formId}
+            type="submit"
+            variant="primary"
+            disabled={pending || submitDisabled}
+            onFocus={(event) => {
+              focusedField.current = event.currentTarget;
+            }}
+          >
             {pending ? "저장 중" : submitLabel}
           </Button>
         </>

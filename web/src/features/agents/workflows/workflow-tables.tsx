@@ -42,7 +42,7 @@ export function useWorkflowColumns(workflows: readonly Workflow[]) {
         const state = Object.hasOwn(states, row.status ?? "")
           ? states[row.status as keyof typeof states]
           : undefined;
-        return <Badge tone={state?.tone ?? "muted"}>{state?.label ?? row.status ?? "—"}</Badge>;
+        return <Badge tone={state?.tone ?? "muted"}>{state?.label ?? (row.status || "—")}</Badge>;
       }),
       displayColumn<WorkflowRun>(
         "steps",

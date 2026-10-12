@@ -131,7 +131,15 @@ describe("WorkflowPage", () => {
     });
   });
 
-  it("restores the runs tab from the URL", async () => {
+  it.each([
+    ["ok", "완료"],
+    ["error", "오류"],
+    ["pending_approval", "승인 대기"],
+    ["planned", "계획됨"],
+    ["unknown_status", "unknown_status"],
+    ["", "—"],
+    [undefined, "—"],
+  ])("주소의 실행 탭을 복원하고 %s 상태를 %s로 표시한다", async (status, label) => {
     mockApi({
       "GET /admin/workflows": listHandler,
       "GET /me/workflow-runs": () => ({
@@ -141,7 +149,7 @@ describe("WorkflowPage", () => {
             workflow_id: "wf_reporting",
             user_id: "usr_test",
             team: "platform",
-            status: "ok",
+            status,
             steps_total: 2,
             steps_ok: 2,
             latency_ms: 1500,
@@ -158,6 +166,7 @@ describe("WorkflowPage", () => {
     const table = await screen.findByRole("table", { name: "내 워크플로 실행 이력" });
     expect(within(table).getByText("주간 보고 자동화")).toBeVisible();
     expect(within(table).getByText("2/2")).toBeVisible();
+    expect(table.querySelector(".badge")).toHaveTextContent(label ?? "—");
   });
 
   it("opens the receipt for a workflow run", async () => {

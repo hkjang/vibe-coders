@@ -55,6 +55,16 @@ async function open() {
 }
 
 describe("FormDialog 선택적 평문 스크롤 안내", () => {
+  it("입력을 거치지 않고 외부 저장 버튼에 둔 포커스도 읽기 전용 전환 시 취소로 복구한다", async () => {
+    const view = render(<Harness />);
+    const { user, dialog } = await open();
+    expect(within(dialog).getByRole("button", { name: "대화상자 닫기" })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(within(dialog).getByRole("button", { name: "저장" })).toHaveFocus();
+    view.rerender(<Harness locked />);
+    expect(within(dialog).getByRole("button", { name: "취소" })).toHaveFocus();
+  });
+
   it("읽기 전용 전환이 입력을 비활성화하면 초안을 보존하고 취소로 포커스를 옮긴다", async () => {
     const view = render(<Harness />);
     const { user, dialog, input } = await open();

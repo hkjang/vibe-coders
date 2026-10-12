@@ -74,6 +74,23 @@ test("모바일 편집 초안을 보존하고 읽기 전용 전환 뒤 직접 �
   await expect(dialog.getByLabel(/^이름/)).toHaveValue("보존할 합성 초안");
 });
 
+test("입력 전 Shift+Tab으로 선택한 저장 버튼의 포커스를 읽기 전용 전환 뒤 복구한다", async ({
+  page,
+  gateway,
+}) => {
+  await open(page);
+  await page.getByRole("button", { name: "수정", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "워크플로 수정", exact: true });
+  await expect(dialog.getByRole("button", { name: "대화상자 닫기", exact: true })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "수정 저장", exact: true })).toBeFocused();
+  gateway.setMode("read_only");
+  await runtime(page);
+  await expect(dialog.getByRole("button", { name: "수정 저장", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "취소", exact: true })).toBeFocused();
+  expect(gateway.writes).toEqual([]);
+});
+
 test("늦은 모의 검사 결과가 다른 업무 상세에 섞이지 않는다", async ({ page, gateway }) => {
   gateway.holdSimulation();
   await open(page);
