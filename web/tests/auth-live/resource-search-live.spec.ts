@@ -1,6 +1,15 @@
-import { expect } from "@playwright/test";
+import { expect, type Response } from "@playwright/test";
 
-import { login, reader, sessionIsEmpty, signIn, signOut, test } from "./live-fixture";
+import {
+  login,
+  reader,
+  required,
+  sessionIsEmpty,
+  signIn,
+  signOut,
+  test,
+  waitForActualAccessExpiry,
+} from "./live-fixture";
 
 // No response mocking, credential artifacts, or external services. The real Go
 // harness owns the database, users, metadata and all HTTP routes.
@@ -17,12 +26,38 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     await page.keyboard.press("Control+k");
     const palette = page.getByRole("dialog", { name: "명령 팔레트", exact: true });
     await palette.getByRole("button", { name: "자원 검색", exact: true }).click();
+    if (target === targets[0]) {
+      const access = await page.evaluate(() => sessionStorage.getItem("vibe.app.auth.access") ?? "");
+      await waitForActualAccessExpiry(page, access, Number(required("VIBE_AUTH_ACCESS_TTL_SECONDS")));
+      expect(
+        await page.evaluate(
+          (previous) => sessionStorage.getItem("vibe.app.auth.access") === previous,
+          access,
+        ),
+      ).toBe(true);
+    }
+    const searchStatuses: number[] = [];
+    const refreshStatuses: number[] = [];
+    const collect = (value: Response): void => {
+      const path = new URL(value.url()).pathname;
+      if (path === "/admin/resource-search") searchStatuses.push(value.status());
+      if (path === "/auth/refresh") refreshStatuses.push(value.status());
+    };
+    page.on("response", collect);
+    // The read-only POST uses the common client's single refresh. The first
+    // response may legitimately be 401; assert the final response, not timing.
+    // Any non-401 error still fails the 200 assertion; failed refresh times out.
     const response = page.waitForResponse(
-      (value) => new URL(value.url()).pathname === "/admin/resource-search",
+      (value) => new URL(value.url()).pathname === "/admin/resource-search" && value.status() !== 401,
     );
     await palette.getByRole("combobox", { name: "자원 이름 검색" }).fill("검색검증");
     const actual = await response;
+    page.off("response", collect);
     expect(actual.status()).toBe(200);
+    if (target === targets[0]) {
+      expect(searchStatuses).toEqual([401, 200]);
+      expect(refreshStatuses).toEqual([200]);
+    }
     expect(actual.request().method()).toBe("POST");
     expect(new URL(actual.url()).search).toBe("");
     expect(await actual.headerValue("cache-control")).toBe("no-store");
