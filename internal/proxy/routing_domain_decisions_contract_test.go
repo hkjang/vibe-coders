@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -270,7 +271,12 @@ func TestRoutingDomainDecisionsHTTPNullableStorage(t *testing.T) {
 	at := time.Now().Add(-time.Hour)
 	domainDecisionsSeed(t, db, "null-fields", "legal", "null-request", at, []store.DomainRoutingSignal{{ID: "null-signal", Source: "synthetic", Route: "legal", Score: 0.5}})
 	if _, err := raw.ExecContext(t.Context(), "UPDATE domain_routing_decisions SET user_id=NULL, team_id=NULL, reason=NULL, tool_names_json=NULL, fallback_used=2, blocked_by_governance=-1 WHERE id='null-fields'"); err != nil {
-		t.Fatal("nullable decision setup failed")
+		var coded interface{ Code() int }
+		code := 0
+		if errors.As(err, &coded) {
+			code = coded.Code()
+		}
+		t.Fatalf("nullable decision setup failed: error_type=%T sqlite_code=%d", err, code)
 	}
 	if _, err := raw.ExecContext(t.Context(), "UPDATE domain_routing_signals SET reason=NULL WHERE id='null-signal'"); err != nil {
 		t.Fatal("nullable signal setup failed")

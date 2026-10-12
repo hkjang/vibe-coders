@@ -99,12 +99,16 @@ func (s *Server) handleAdminChangeSets(w http.ResponseWriter, r *http.Request) {
 		if cs.Items == nil {
 			cs.Items = []store.ChangeSetItem{}
 		}
-		if err := s.db.CreateChangeSet(r.Context(), cs); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "create_failed")
+		detail := auditJSON(map[string]any{"title": cs.Title, "items": len(cs.Items)})
+		created, err := s.db.CreateChangeSetAudited(r.Context(), cs, store.AdminAuditLog{
+			ID: newID("audit"), AdminID: adminID(r), Action: "change_set.create", BeforeValue: cs.ID, AfterValue: detail,
+		})
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "변경 세트와 감사 기록을 저장하지 못했습니다.", "server_error", "create_failed")
 			return
 		}
-		s.auditAdmin(r, "change_set.create", cs.ID, auditJSON(map[string]any{"title": cs.Title, "items": len(cs.Items)}))
-		writeJSON(w, http.StatusCreated, sanitizeChangeSet(cs))
+		s.runAdminPostChange(r, "change_set.create", cs.ID, detail, "")
+		writeJSON(w, http.StatusCreated, sanitizeChangeSet(created))
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -142,11 +146,22 @@ func (s *Server) handleAdminChangeSetByID(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusOK, sanitizeChangeSet(cs))
 		case http.MethodDelete:
 			reason := changeSetReason(r)
-			if err := s.db.DeleteChangeSet(r.Context(), id); err != nil {
-				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "delete_failed")
+			detail := auditJSON(map[string]any{"status": cs.Status, "reason": reason})
+			if err := s.db.DeleteChangeSetAudited(r.Context(), cs, store.AdminAuditLog{
+				ID: newID("audit"), AdminID: adminID(r), Action: "change_set.delete", BeforeValue: id, AfterValue: detail,
+			}); err != nil {
+				status, code := http.StatusInternalServerError, "delete_failed"
+				if errors.Is(err, store.ErrChangeSetConflict) {
+					status, code = http.StatusConflict, "change_set_conflict"
+				}
+				if errors.Is(err, store.ErrChangeSetRecoveryPending) {
+					writeOpenAIError(w, http.StatusConflict, "적용 또는 되돌리기 복구가 대기 중입니다. 복구를 마친 뒤 삭제해 주세요.", "invalid_request_error", "change_set_recovery_pending")
+					return
+				}
+				writeOpenAIError(w, status, "변경 세트 삭제를 완료하지 못했습니다. 최신 상태를 확인해 주세요.", "server_error", code)
 				return
 			}
-			s.auditAdmin(r, "change_set.delete", id, auditJSON(map[string]any{"status": cs.Status, "reason": reason}))
+			s.runAdminPostChange(r, "change_set.delete", id, detail, "")
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 		default:
 			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -274,12 +289,21 @@ func (s *Server) changeSetTransition(w http.ResponseWriter, r *http.Request, cs 
 	if to == "approved" {
 		cs.Reviewer = adminID(r)
 	}
-	if err := s.db.UpdateChangeSet(r.Context(), cs); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "update_failed")
+	action := "change_set." + to
+	detail := auditJSON(map[string]any{"reason": reason})
+	updated, err := s.db.TransitionChangeSetAudited(r.Context(), cs, from, store.AdminAuditLog{
+		ID: newID("audit"), AdminID: adminID(r), Action: action, BeforeValue: cs.ID, AfterValue: detail,
+	})
+	if err != nil {
+		status, code := http.StatusInternalServerError, "update_failed"
+		if errors.Is(err, store.ErrChangeSetConflict) {
+			status, code = http.StatusConflict, "change_set_conflict"
+		}
+		writeOpenAIError(w, status, "변경 세트 검토를 저장하지 못했습니다. 최신 상태를 확인해 주세요.", "server_error", code)
 		return
 	}
-	s.auditAdmin(r, "change_set."+to, cs.ID, auditJSON(map[string]any{"reason": reason}))
-	writeJSON(w, http.StatusOK, sanitizeChangeSet(cs))
+	s.runAdminPostChange(r, action, cs.ID, detail, "")
+	writeJSON(w, http.StatusOK, sanitizeChangeSet(updated))
 }
 
 // changeSetApply validates all setting items, captures their prior effective values (for
@@ -355,15 +379,19 @@ func (s *Server) changeSetApply(w http.ResponseWriter, r *http.Request, cs store
 	cs.Prior = prior
 	cs.Status = "apply_pending"
 	cs.AppliedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	if err := s.db.StageChangeSetSettings(r.Context(), cs, "approved", adminID(r), "change-set "+cs.ID, records); err != nil {
+	persisted, err := s.db.StageChangeSetSettingsAudited(r.Context(), cs, "approved", adminID(r), "change-set "+cs.ID, records, store.AdminAuditLog{
+		ID: newID("audit"), AdminID: adminID(r), Action: "change_set.apply.persisted", BeforeValue: cs.ID,
+		AfterValue: auditJSON(map[string]any{"applied": len(prior), "reason": reason, "status": "apply_pending"}),
+	})
+	if err != nil {
 		status, code := http.StatusInternalServerError, "apply_failed"
 		if errors.Is(err, store.ErrAdminSettingConflict) || errors.Is(err, store.ErrChangeSetConflict) {
 			status, code = http.StatusConflict, "change_set_conflict"
 		}
-		writeOpenAIError(w, status, err.Error(), "server_error", code)
+		writeOpenAIError(w, status, "설정과 적용 감사 기록을 저장하지 못했습니다. 최신 상태를 확인해 주세요.", "server_error", code)
 		return
 	}
-	s.finishPendingChangeSet(w, r, cs, "apply_pending", "applied", "apply", len(prior), reason)
+	s.finishPendingChangeSet(w, r, persisted, "apply_pending", "applied", "apply", len(prior), reason)
 }
 
 // changeSetRollback restores the prior effective values captured at apply time.
@@ -413,15 +441,19 @@ func (s *Server) changeSetRollback(w http.ResponseWriter, r *http.Request, cs st
 		records = append(records, record)
 	}
 	cs.Status = "rollback_pending"
-	if err := s.db.StageChangeSetSettings(r.Context(), cs, "applied", adminID(r), "rollback "+cs.ID, records); err != nil {
+	persisted, err := s.db.StageChangeSetSettingsAudited(r.Context(), cs, "applied", adminID(r), "rollback "+cs.ID, records, store.AdminAuditLog{
+		ID: newID("audit"), AdminID: adminID(r), Action: "change_set.rollback.persisted", BeforeValue: cs.ID,
+		AfterValue: auditJSON(map[string]any{"restored": len(records), "reason": reason, "status": "rollback_pending"}),
+	})
+	if err != nil {
 		status, code := http.StatusInternalServerError, "rollback_failed"
 		if errors.Is(err, store.ErrAdminSettingConflict) || errors.Is(err, store.ErrChangeSetConflict) {
 			status, code = http.StatusConflict, "change_set_conflict"
 		}
-		writeOpenAIError(w, status, err.Error(), "server_error", code)
+		writeOpenAIError(w, status, "설정과 되돌리기 감사 기록을 저장하지 못했습니다. 최신 상태를 확인해 주세요.", "server_error", code)
 		return
 	}
-	s.finishPendingChangeSet(w, r, cs, "rollback_pending", "rolled_back", "rollback", len(records), reason)
+	s.finishPendingChangeSet(w, r, persisted, "rollback_pending", "rolled_back", "rollback", len(records), reason)
 }
 
 // finishPendingChangeSet performs only the resumable portion of apply/rollback. Settings are
@@ -432,21 +464,26 @@ func (s *Server) finishPendingChangeSet(w http.ResponseWriter, r *http.Request, 
 		writeOpenAIError(w, http.StatusServiceUnavailable, "settings were stored atomically but runtime reload is pending", "server_error", "setting_reload_pending")
 		return
 	}
-	if err := s.db.FinalizeChangeSetStatus(r.Context(), cs.ID, pendingStatus, finalStatus); err != nil {
-		status, code := http.StatusInternalServerError, "update_failed"
-		if errors.Is(err, store.ErrChangeSetConflict) {
-			status, code = http.StatusConflict, "change_set_conflict"
-		}
-		writeOpenAIError(w, status, err.Error(), "server_error", code)
-		return
-	}
-	cs.Status = finalStatus
 	metric := "applied"
 	countField := "applied_count"
 	if action == "rollback" {
 		metric = "restored"
 		countField = "restored_count"
 	}
-	s.auditAdmin(r, "change_set."+action, cs.ID, auditJSON(map[string]any{metric: count, "reason": reason}))
-	writeJSON(w, http.StatusOK, map[string]any{"status": finalStatus, countField: count, "change_set": sanitizeChangeSet(cs)})
+	detail := auditJSON(map[string]any{metric: count, "reason": reason})
+	finalized, changed, err := s.db.FinalizeChangeSetAudited(r.Context(), cs, pendingStatus, finalStatus, store.AdminAuditLog{
+		ID: newID("audit"), AdminID: adminID(r), Action: "change_set." + action, BeforeValue: cs.ID, AfterValue: detail,
+	})
+	if err != nil {
+		status, code := http.StatusServiceUnavailable, "change_set_finalize_pending"
+		if errors.Is(err, store.ErrChangeSetConflict) {
+			status, code = http.StatusConflict, "change_set_conflict"
+		}
+		writeOpenAIError(w, status, "설정은 저장됐지만 완료 상태와 감사 기록을 확정하지 못했습니다. 현재 상태를 확인한 뒤 복구를 진행해 주세요.", "server_error", code)
+		return
+	}
+	if changed {
+		s.runAdminPostChange(r, "change_set."+action, cs.ID, detail, "")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": finalStatus, countField: count, "change_set": sanitizeChangeSet(finalized)})
 }

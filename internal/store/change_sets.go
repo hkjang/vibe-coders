@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -38,18 +39,32 @@ type ChangeSet struct {
 }
 
 func (s *SQLStore) CreateChangeSet(ctx context.Context, cs ChangeSet) error {
+	_, err := s.insertChangeSet(ctx, s.db, cs)
+	return err
+}
+
+func (s *SQLStore) insertChangeSet(ctx context.Context, exec adminAuditExecer, cs ChangeSet) (ChangeSet, error) {
 	if cs.Status == "" {
 		cs.Status = "draft"
+	}
+	if cs.Items == nil {
+		cs.Items = []ChangeSetItem{}
+	}
+	if cs.Prior == nil {
+		cs.Prior = []ChangeSetItem{}
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	cs.CreatedAt, cs.UpdatedAt = now, now
 	items, _ := json.Marshal(cs.Items)
 	prior, _ := json.Marshal(cs.Prior)
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO change_sets
+	_, err := exec.ExecContext(ctx, s.bind(`INSERT INTO change_sets
 		(id, title, description, status, items, prior, canary_scope, created_by, reviewer, note, created_at, updated_at, applied_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		cs.ID, cs.Title, cs.Description, cs.Status, string(items), string(prior), cs.CanaryScope, cs.CreatedBy, cs.Reviewer, cs.Note, cs.CreatedAt, cs.UpdatedAt, cs.AppliedAt)
-	return err
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	return cs, nil
 }
 
 func scanChangeSet(sc interface{ Scan(...any) error }) (ChangeSet, error) {
@@ -117,6 +132,18 @@ func (s *SQLStore) UpdateChangeSet(ctx context.Context, cs ChangeSet) error {
 // marker in one transaction. The marker makes the operation resumable: once this commits, callers
 // only need to reload the runtime and finalize the status; they must not write the settings again.
 func (s *SQLStore) StageChangeSetSettings(ctx context.Context, cs ChangeSet, expectedStatus, changedBy, reason string, settings []AdminSetting) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.stageChangeSetSettingsTx(ctx, tx, cs, expectedStatus, changedBy, reason, settings, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLStore) stageChangeSetSettingsTx(ctx context.Context, tx *sql.Tx, cs ChangeSet, expectedStatus, changedBy, reason string, settings []AdminSetting, now string) error {
 	if cs.ID == "" || expectedStatus == "" || cs.Status == "" {
 		return fmt.Errorf("change set id, expected status, and pending status are required")
 	}
@@ -124,15 +151,30 @@ func (s *SQLStore) StageChangeSetSettings(ctx context.Context, cs ChangeSet, exp
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	tx, err := s.db.BeginTx(ctx, nil)
+	// Lock the change set before its settings; all setting keys are then visited
+	// in the same order even when two different sets contain reversed item lists.
+	query := `UPDATE change_sets SET status = ?, reviewer = ?, note = ?, prior = ?,
+		applied_at = ?, updated_at = ? WHERE id = ? AND status = ?`
+	args := []any{cs.Status, cs.Reviewer, cs.Note, string(prior), cs.AppliedAt, now, cs.ID, expectedStatus}
+	if cs.UpdatedAt != "" {
+		query += ` AND updated_at = ?`
+		args = append(args, cs.UpdatedAt)
+	}
+	result, err := tx.ExecContext(ctx, s.bind(query), args...)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("%w: pending snapshot is no longer current", ErrChangeSetConflict)
+	}
+	ordered := append([]AdminSetting(nil), settings...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Key < ordered[j].Key })
 	seen := make(map[string]struct{}, len(settings))
-	for _, setting := range settings {
+	for _, setting := range ordered {
 		if setting.Key == "" {
 			return fmt.Errorf("admin setting key is required")
 		}
@@ -145,20 +187,7 @@ func (s *SQLStore) StageChangeSetSettings(ctx context.Context, cs ChangeSet, exp
 		}
 	}
 
-	result, err := tx.ExecContext(ctx, s.bind(`UPDATE change_sets SET status = ?, reviewer = ?, note = ?, prior = ?,
-		applied_at = ?, updated_at = ? WHERE id = ? AND status = ?`),
-		cs.Status, cs.Reviewer, cs.Note, string(prior), cs.AppliedAt, now, cs.ID, expectedStatus)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected != 1 {
-		return fmt.Errorf("%w: %s expected status %s", ErrChangeSetConflict, cs.ID, expectedStatus)
-	}
-	return tx.Commit()
+	return nil
 }
 
 // FinalizeChangeSetStatus completes a pending transition after the runtime snapshot was reloaded.

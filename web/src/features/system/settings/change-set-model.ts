@@ -97,15 +97,7 @@ export const lifecycleConfigs: Record<LifecycleAction, LifecycleConfig> = {
     description: (changeSet) =>
       `${changeSet.title || changeSet.id} 변경 세트와 기록된 항목이 사라집니다. 이미 적용된 설정은 되돌아가지 않습니다.`,
     confirmLabel: "삭제",
-    enabledFor: [
-      "draft",
-      "pending",
-      "approved",
-      "applied",
-      "rolled_back",
-      "apply_pending",
-      "rollback_pending",
-    ],
+    enabledFor: ["draft", "pending", "approved", "applied", "rolled_back"],
     tone: "danger",
     reasonNote: "삭제 사유를 기존 감사 API에 전달합니다. 적용된 설정을 복구하는 작업은 아닙니다.",
     successMessage: "변경 세트를 삭제했습니다.",

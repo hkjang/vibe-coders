@@ -119,11 +119,6 @@ export interface ChangeSetCreateBody {
   items: ReadonlyArray<{ kind: string; key: string; value: string; note?: string }>;
 }
 
-/** submit/approve record an optional reviewer note on the change set. */
-export interface ChangeSetNoteBody {
-  note?: string;
-}
-
 export interface ChangeImpactBody {
   change_type: string;
   days: number;
@@ -239,26 +234,22 @@ export const systemEndpoints = {
       "/admin/change-sets/{id}/dryrun",
       changeSetDryRunSchema,
     ),
-    submit: operation<WithBody<PostAdminChangeSetsIdSubmitData, ChangeSetNoteBody>, unknown>()(
-      "POST",
-      "/admin/change-sets/{id}/submit",
-      changeSetSchema,
-    ),
-    approve: operation<WithBody<PostAdminChangeSetsIdApproveData, ChangeSetNoteBody>, unknown>()(
-      "POST",
-      "/admin/change-sets/{id}/approve",
-      changeSetSchema,
-    ),
-    apply: operation<WithBody<PostAdminChangeSetsIdApplyData, ChangeSetNoteBody>, unknown>()(
-      "POST",
-      "/admin/change-sets/{id}/apply",
-      changeSetApplySchema,
-    ),
-    rollback: operation<WithBody<PostAdminChangeSetsIdRollbackData, ChangeSetNoteBody>, unknown>()(
-      "POST",
-      "/admin/change-sets/{id}/rollback",
-      changeSetApplySchema,
-    ),
+    submit: operation<
+      WithBody<PostAdminChangeSetsIdSubmitData, NonNullable<PostAdminChangeSetsIdSubmitData["body"]>>,
+      unknown
+    >()("POST", "/admin/change-sets/{id}/submit", changeSetSchema),
+    approve: operation<
+      WithBody<PostAdminChangeSetsIdApproveData, NonNullable<PostAdminChangeSetsIdApproveData["body"]>>,
+      unknown
+    >()("POST", "/admin/change-sets/{id}/approve", changeSetSchema),
+    apply: operation<
+      WithBody<PostAdminChangeSetsIdApplyData, NonNullable<PostAdminChangeSetsIdApplyData["body"]>>,
+      unknown
+    >()("POST", "/admin/change-sets/{id}/apply", changeSetApplySchema),
+    rollback: operation<
+      WithBody<PostAdminChangeSetsIdRollbackData, NonNullable<PostAdminChangeSetsIdRollbackData["body"]>>,
+      unknown
+    >()("POST", "/admin/change-sets/{id}/rollback", changeSetApplySchema),
     simulateImpact: operation<WithBody<PostAdminChangeImpactSimulateData, ChangeImpactBody>, unknown>()(
       "POST",
       "/admin/change-impact/simulate",

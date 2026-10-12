@@ -9,10 +9,10 @@ const row = {
   items: [{ kind: "setting", key: "upstream.timeout", value: "30s" }],
   prior: [],
 };
-async function install(page: Page, readOnly = false, uncertain = false) {
+async function install(page: Page, readOnly = false, uncertain = false, initialStatus = row.status) {
   const writes: Request[] = [];
   const unexpected: string[] = [];
-  let status = row.status;
+  let status = initialStatus;
   const bootstrap: UiBootstrapResponse = {
     backend_version: "v0.86.52",
     ui_version: "changeset-browser-fixture",
@@ -81,6 +81,11 @@ async function install(page: Page, readOnly = false, uncertain = false) {
       status = "applied";
       return json(uncertain ? { status } : { status, applied_count: 1, change_set: { ...row, status } });
     }
+    if (call === `POST /admin/change-sets/${row.id}/rollback`) {
+      writes.push(request);
+      status = "rolled_back";
+      return json({ status, restored_count: 1, change_set: { ...row, status } });
+    }
     if (path.startsWith("/admin/") || path.startsWith("/auth/")) {
       unexpected.push(call);
       return json({ error: { message: "Unexpected fixture call" } }, 501);
@@ -90,13 +95,53 @@ async function install(page: Page, readOnly = false, uncertain = false) {
   return { writes, unexpected };
 }
 async function open(page: Page) {
+  // Each test has a fresh browser context; the production refresh default is
+  // already 0. The desktop-only select is intentionally hidden at mobile width.
   await page.goto("system/settings?tab=changesets");
-  await page.getByLabel("자동 새로고침 간격").selectOption("0");
   await page.getByRole("button", { name: `${row.title} 상세` }).click();
   const sheet = page.getByRole("dialog", { name: row.title, exact: true });
   return sheet;
 }
 const review = (page: Page) => page.getByRole("dialog", { name: "설정을 실제로 적용할까요?", exact: true });
+
+for (const [status, label, heading, finalLabel] of [
+  ["apply_pending", "적용", "설정을 실제로 적용할까요?", "적용됨"],
+  ["rollback_pending", "되돌리기", "적용 전 값으로 되돌릴까요?", "되돌림 완료"],
+] as const) {
+  test(`${status} 복구 안내와 삭제 보호를 유지하고 한 번만 복구한다`, async ({ page }, info) => {
+    const api = await install(page, false, false, status);
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const sheet = await open(page);
+    await expect(sheet.getByText("설정 저장 후 복구 대기 중", { exact: true })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: "삭제", exact: true })).toBeDisabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const violations = await page.evaluate(async () => {
+      const engine = (
+        window as Window & { axe?: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }
+      ).axe;
+      if (!engine) throw new Error("Missing accessibility engine");
+      return (await engine.run(document)).violations.map((item) => item.id);
+    });
+    expect(violations).toEqual([]);
+    await page.screenshot({ path: info.outputPath("pending-recovery-mobile-dark.png") });
+    const trigger = sheet.getByRole("button", { name: label, exact: true });
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: heading, exact: true });
+    await dialog.getByRole("textbox", { name: "변경 사유", exact: true }).fill("공개 복구 검토");
+    await dialog.getByRole("textbox", { name: "확인 문구", exact: true }).fill(row.id);
+    await dialog.getByRole("button", { name: label, exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(sheet.getByText(finalLabel, { exact: true })).toBeVisible();
+    await expect(sheet.getByText("설정 저장 후 복구 대기 중", { exact: true })).toBeHidden();
+    await expect(sheet.getByRole("button", { name: "삭제", exact: true })).toBeEnabled();
+    expect(api.writes).toHaveLength(1);
+    expect(api.writes[0]?.postDataJSON()).toEqual({ note: "공개 복구 검토" });
+    expect(api.unexpected).toEqual([]);
+  });
+}
 
 test("대상과 사유를 확인한 적용은 한 번만 전송하고 새로고침 후 한글 상태를 복원한다", async ({ page }) => {
   const api = await install(page);

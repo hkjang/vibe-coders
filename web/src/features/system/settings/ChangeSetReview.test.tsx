@@ -94,6 +94,26 @@ async function openReview(action = "적용") {
 }
 
 describe("변경 세트의 현재 검토 기준", () => {
+  it.each([
+    ["apply_pending", "적용"],
+    ["rollback_pending", "되돌리기"],
+  ] as const)("%s에서는 복구 안내를 표시하고 삭제를 차단한다", async (status, resumeLabel) => {
+    const view = setup(false, {
+      "GET /admin/change-sets": () => ({ change_sets: [{ ...changeSet, status }] }),
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "요청 제한 검토 상세" }));
+    const sheet = screen.getByRole("dialog", { name: changeSet.title });
+    expect(within(sheet).getByText("설정 저장 후 복구 대기 중")).toBeVisible();
+    expect(within(sheet).getByText(/설정을 중복 저장하지 않고/)).toBeVisible();
+    expect(within(sheet).getByRole("button", { name: resumeLabel })).toBeEnabled();
+    const remove = within(sheet).getByRole("button", { name: "삭제" });
+    expect(remove).toBeDisabled();
+    fireEvent.click(remove);
+    expect(screen.queryByRole("dialog", { name: "변경 세트를 삭제할까요?" })).not.toBeInTheDocument();
+    expect(view.api.bodies("DELETE /admin/change-sets/cset_review")).toHaveLength(0);
+  });
+
   it.each(["network", "empty-id", "wrong-status"])(
     "생성 %s 결과가 불확실하면 초안을 유지하고 같은 창의 재전송을 잠근다",
     async (outcome) => {

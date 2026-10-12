@@ -6043,7 +6043,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.53"
+    "version": "v0.86.54"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -7491,7 +7491,7 @@
     },
     "/admin/change-sets/{id}": {
       "delete": {
-        "description": "Delete an existing change set without restoring applied settings. Optional note is Go TrimSpace-normalized and passed to the existing audit writer. Legacy missing, null or malformed bodies remain accepted. A successful deletion is not an atomic guarantee that its audit was persisted.",
+        "description": "Delete an existing change set without restoring applied settings. Optional note is Go TrimSpace-normalized and recorded in the audit. Legacy missing, null or malformed bodies remain accepted. Deletion and its audit commit atomically after comparing the current server snapshot status and updated_at; this is not a client-supplied revision check or retry/idempotency guarantee. apply_pending and rollback_pending cannot be deleted until recovery finishes.",
         "operationId": "delete__admin_change_sets_id",
         "parameters": [
           {
@@ -7541,6 +7541,26 @@
               }
             },
             "description": "Deleted"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "change_set_conflict: server snapshot changed before deletion; or change_set_recovery_pending: finish apply/rollback recovery first. No deletion or success audit"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "delete_failed: transaction failed; inspect current state before retrying after an uncertain response"
           },
           "default": {
             "content": {
@@ -7593,6 +7613,7 @@
     },
     "/admin/change-sets/{id}/apply": {
       "post": {
+        "description": "Persist setting values, setting history, the recovery marker and change_set.apply.persisted or change_set.rollback.persisted audit in one transaction. Then reload this process outside SQL and atomically finalize status with the existing change_set.apply or change_set.rollback audit. Concurrent finalizers append one completion audit. Pending recovery retries never rewrite settings/history. Older pending rows may lack the new persistence event; original actor/reason are not invented. This does not provide client revision guards, general request idempotency or multi-pod activation guarantees.",
         "operationId": "post__admin_change_sets_id_apply",
         "parameters": [
           {
@@ -7604,9 +7625,66 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "nullable": true,
+                "properties": {
+                  "note": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Completed status, applied_count or restored_count, and the committed change_set snapshot"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "change_set_conflict: server snapshot or setting version changed; read current state before further actions"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "apply_failed or rollback_failed: persistence failed; inspect current state after an uncertain response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "setting_reload_pending or change_set_finalize_pending: settings already persisted; pending recovery resumes runtime reload/finalization without duplicate setting history"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -7622,6 +7700,7 @@
     },
     "/admin/change-sets/{id}/approve": {
       "post": {
+        "description": "Move the currently read server snapshot from draft to pending or pending to approved. The review fields and audit commit atomically after matching status and updated_at. This is not a client-supplied revision check or retry/idempotency guarantee. Optional note preserves the existing Legacy request behavior.",
         "operationId": "post__admin_change_sets_id_approve",
         "parameters": [
           {
@@ -7633,9 +7712,56 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "nullable": true,
+                "properties": {
+                  "note": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Reviewed change set snapshot"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "change_set_conflict: server snapshot changed before review; no review or success audit"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "update_failed: transaction failed; inspect current state before retrying after an uncertain response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -7680,6 +7806,7 @@
     },
     "/admin/change-sets/{id}/rollback": {
       "post": {
+        "description": "Persist setting values, setting history, the recovery marker and change_set.apply.persisted or change_set.rollback.persisted audit in one transaction. Then reload this process outside SQL and atomically finalize status with the existing change_set.apply or change_set.rollback audit. Concurrent finalizers append one completion audit. Pending recovery retries never rewrite settings/history. Older pending rows may lack the new persistence event; original actor/reason are not invented. This does not provide client revision guards, general request idempotency or multi-pod activation guarantees.",
         "operationId": "post__admin_change_sets_id_rollback",
         "parameters": [
           {
@@ -7691,9 +7818,66 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "nullable": true,
+                "properties": {
+                  "note": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Completed status, applied_count or restored_count, and the committed change_set snapshot"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "change_set_conflict: server snapshot or setting version changed; read current state before further actions"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "apply_failed or rollback_failed: persistence failed; inspect current state after an uncertain response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "setting_reload_pending or change_set_finalize_pending: settings already persisted; pending recovery resumes runtime reload/finalization without duplicate setting history"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -7709,6 +7893,7 @@
     },
     "/admin/change-sets/{id}/submit": {
       "post": {
+        "description": "Move the currently read server snapshot from draft to pending or pending to approved. The review fields and audit commit atomically after matching status and updated_at. This is not a client-supplied revision check or retry/idempotency guarantee. Optional note preserves the existing Legacy request behavior.",
         "operationId": "post__admin_change_sets_id_submit",
         "parameters": [
           {
@@ -7720,9 +7905,56 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "nullable": true,
+                "properties": {
+                  "note": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Reviewed change set snapshot"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "change_set_conflict: server snapshot changed before review; no review or success audit"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "update_failed: transaction failed; inspect current state before retrying after an uncertain response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

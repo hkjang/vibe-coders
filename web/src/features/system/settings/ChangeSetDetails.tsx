@@ -31,6 +31,15 @@ export function ChangeSetDetails({
       />
       {selected.description ? <p>{selected.description}</p> : null}
       {selected.note ? <p>검토 메모: {selected.note}</p> : null}
+      {selected.status === "apply_pending" || selected.status === "rollback_pending" ? (
+        <InlineNotice tone="warning" title="설정 저장 후 복구 대기 중">
+          <p>
+            설정은 저장되었지만 응답 서버의 설정 재읽기 또는 완료 기록이 대기 중입니다. 현재 상태를 확인한 뒤
+            {selected.status === "apply_pending" ? " 적용" : " 되돌리기"}를 다시 실행하면 설정을 중복 저장하지
+            않고 복구를 이어갑니다. 복구를 마치기 전에는 삭제할 수 없습니다.
+          </p>
+        </InlineNotice>
+      ) : null}
       {dryRunResult ? (
         <SectionCard
           headingLevel={3}
