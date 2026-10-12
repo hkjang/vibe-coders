@@ -205,6 +205,37 @@
   text-overflow: ellipsis;
 }
 
+.data-table-sort-button {
+  display: flex;
+  max-width: 100%;
+  min-height: 2rem;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.data-table-sort-button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-table-sort-button > svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.data-table-sort-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
 .data-table-resizable-heading .data-table-header-content {
   padding-right: 0.75rem;
 }
@@ -332,6 +363,30 @@
   border-top: 1px solid var(--color-border);
   color: var(--color-muted);
   font-size: 0.8125rem;
+}
+
+.data-table-pagination-configurable {
+  flex-wrap: wrap;
+}
+
+.data-table-page-size {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+.data-table-page-size select {
+  width: auto;
+}
+
+.model-catalog-sort-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .data-table-settings-list {

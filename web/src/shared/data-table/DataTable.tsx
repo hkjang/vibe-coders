@@ -1,8 +1,9 @@
 import type { RowData } from "@tanstack/react-table";
-import { Columns3, GripVertical, MoveHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Columns3, GripVertical, MoveHorizontal } from "lucide-react";
 import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 
 import { Button } from "@/shared/components/ui/Button";
+import { Select } from "@/shared/components/ui/Select";
 import { type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTableSettingsDialog } from "@/shared/data-table/DataTableSettingsDialog";
 import {
@@ -14,6 +15,11 @@ import {
   maximumDataTableColumnWidth,
   minimumDataTableColumnWidth,
 } from "@/shared/data-table/table-preferences";
+
+export interface DataTableSort {
+  columnId: string;
+  direction: "asc" | "desc";
+}
 
 interface DataTableBaseProps<TData extends RowData> {
   caption: string;
@@ -29,6 +35,18 @@ interface DataTableBaseProps<TData extends RowData> {
   onRetry?: () => void;
   pageCount?: number;
   pageIndex?: number;
+  /** Controlled header UI only. Callers sort the full response before slicing pages. */
+  sorting?: {
+    columns: readonly { id: string; initialDirection?: "asc" | "desc" }[];
+    value?: DataTableSort;
+    onChange: (sort: DataTableSort) => void;
+  };
+  /** Opt-in display control; never changes or persists row data in this component. */
+  pageSizeControl?: {
+    value: number;
+    options: readonly number[];
+    onChange: (size: number) => void;
+  };
   /**
    * Enables layout controls and persists only column ids, order, visibility and
    * widths. Row data, filters and cursors are never written to storage.
@@ -59,6 +77,8 @@ export function DataTable<TData extends RowData>({
   onRowClick,
   pageCount = 1,
   pageIndex = 0,
+  pageSizeControl,
+  sorting,
   tableId,
 }: DataTableProps<TData>): React.JSX.Element {
   const layout = useDataTableLayout({ columns, data, getRowId, lockedColumnIds, tableId });
@@ -147,16 +167,54 @@ export function DataTable<TData extends RowData>({
                       layout.configurable && header.subHeaders.length === 0 && header.column.getCanResize();
                     const size = header.getSize();
                     const label = dataTableColumnLabel(header.column);
+                    const sortOption =
+                      header.subHeaders.length === 0 && !header.isPlaceholder
+                        ? sorting?.columns.find((column) => column.id === header.column.id)
+                        : undefined;
+                    const direction =
+                      sortOption && sorting?.value?.columnId === header.column.id
+                        ? sorting.value.direction
+                        : undefined;
+                    const nextDirection =
+                      direction === "asc"
+                        ? "desc"
+                        : direction === "desc"
+                          ? "asc"
+                          : (sortOption?.initialDirection ?? "asc");
+                    const heading = header.isPlaceholder ? null : <table.FlexRender header={header} />;
                     return (
                       <th
                         key={header.id}
                         className={resizable ? "data-table-resizable-heading" : undefined}
                         colSpan={header.colSpan}
                         scope="col"
+                        aria-sort={
+                          direction === "asc" ? "ascending" : direction === "desc" ? "descending" : undefined
+                        }
                         style={layout.configurable ? { width: size } : undefined}
                       >
                         <span className="data-table-header-content">
-                          {header.isPlaceholder ? null : <table.FlexRender header={header} />}
+                          {sortOption ? (
+                            <button
+                              type="button"
+                              className="data-table-sort-button"
+                              aria-label={`${label} ${nextDirection === "asc" ? "오름차순" : "내림차순"} 정렬`}
+                              onClick={() =>
+                                sorting?.onChange({ columnId: header.column.id, direction: nextDirection })
+                              }
+                            >
+                              <span>{heading}</span>
+                              {direction === "asc" ? (
+                                <ArrowUp aria-hidden="true" />
+                              ) : direction === "desc" ? (
+                                <ArrowDown aria-hidden="true" />
+                              ) : (
+                                <ArrowUpDown aria-hidden="true" />
+                              )}
+                            </button>
+                          ) : (
+                            heading
+                          )}
                         </span>
                         {resizable ? (
                           <div
@@ -275,25 +333,56 @@ export function DataTable<TData extends RowData>({
           <MoveHorizontal /> 좌우로 이동해 추가 열 보기
         </div>
       ) : null}
-      {pageCount > 1 && onPageChange ? (
-        <nav className="data-table-pagination" aria-label={`${caption} 페이지`}>
-          <Button
-            size="small"
-            disabled={currentPage === 0 || loading}
-            onClick={() => onPageChange(currentPage - 1)}
-          >
-            이전
-          </Button>
-          <span aria-live="polite">
-            {currentPage + 1} / {pageCount}
-          </span>
-          <Button
-            size="small"
-            disabled={currentPage >= pageCount - 1 || loading}
-            onClick={() => onPageChange(currentPage + 1)}
-          >
-            다음
-          </Button>
+      {pageSizeControl || (pageCount > 1 && onPageChange) ? (
+        <nav
+          className={
+            pageSizeControl
+              ? "data-table-pagination data-table-pagination-configurable"
+              : "data-table-pagination"
+          }
+          aria-label={`${caption} 페이지`}
+        >
+          {pageSizeControl ? (
+            <label className="data-table-page-size">
+              <span>페이지당 표시 건수</span>
+              <Select
+                value={pageSizeControl.value}
+                onChange={(event) => {
+                  const next = pageSizeControl.options.find(
+                    (size) => String(size) === event.currentTarget.value,
+                  );
+                  if (next !== undefined) pageSizeControl.onChange(next);
+                }}
+              >
+                {pageSizeControl.options.map((size) => (
+                  <option key={size} value={size}>
+                    {size}건
+                  </option>
+                ))}
+              </Select>
+            </label>
+          ) : null}
+          {pageCount > 1 && onPageChange ? (
+            <>
+              <Button
+                size="small"
+                disabled={currentPage === 0 || loading}
+                onClick={() => onPageChange(currentPage - 1)}
+              >
+                이전
+              </Button>
+              <span aria-live="polite">
+                {currentPage + 1} / {pageCount}
+              </span>
+              <Button
+                size="small"
+                disabled={currentPage >= pageCount - 1 || loading}
+                onClick={() => onPageChange(currentPage + 1)}
+              >
+                다음
+              </Button>
+            </>
+          ) : null}
         </nav>
       ) : null}
 

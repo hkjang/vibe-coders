@@ -32,7 +32,12 @@ export function useModelDialogFocus(
       const latestTrigger = Array.from(document.querySelectorAll<HTMLElement>("[data-model-trigger]")).find(
         (candidate) => candidate.dataset.modelTrigger === returnModel,
       );
-      const returnTarget = latestTrigger ?? returnFocusRef.current;
+      const returnTarget =
+        latestTrigger ??
+        (returnFocusRef.current?.isConnected
+          ? returnFocusRef.current
+          : document.getElementById("model-list-title"));
+      returnFocusRef.current = returnTarget;
       if (returnTarget?.isConnected && !returnTarget.matches(":disabled")) returnTarget.focus();
     });
     return () => window.clearTimeout(timeout);
@@ -50,6 +55,8 @@ export function useModelDialogFocus(
 
   const closeModel = useCallback((): void => {
     restoreFocusPendingRef.current = true;
+    if (!returnFocusRef.current?.isConnected)
+      returnFocusRef.current = document.getElementById("model-list-title");
     updateSearch({ model: undefined, model_provider: undefined, source: undefined });
   }, [updateSearch]);
 

@@ -4,6 +4,7 @@ import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 
 import type { ModelCatalogRow } from "@/features/gateway/models/model-catalog";
+import { observedModelSuccessRate } from "@/features/gateway/models/model-catalog-table-state";
 import { ModelCandidateSelection } from "@/features/gateway/models/ModelCandidateSelection";
 import { ModelCatalogueFailure } from "@/features/gateway/models/ModelCatalogueFailure";
 import { formatModelDate } from "@/features/gateway/models/model-date";
@@ -104,6 +105,7 @@ function DetailResourceState({
 function QualityDetails({ row }: { row: ModelCatalogRow }): React.JSX.Element {
   const quality = row.quality;
   if (!quality) return <p className="model-detail-empty">선택 기간의 품질 측정값이 없습니다.</p>;
+  const successRate = observedModelSuccessRate(row);
   return (
     <div className="model-detail-stack-small">
       <dl className="model-detail-grid">
@@ -113,7 +115,7 @@ function QualityDetails({ row }: { row: ModelCatalogRow }): React.JSX.Element {
         </div>
         <div>
           <dt>요청 성공률</dt>
-          <dd>{formatPercent(quality.success_rate)}</dd>
+          <dd>{successRate === undefined ? "요청 표본 없음" : formatPercent(successRate)}</dd>
         </div>
         <div>
           <dt>골든 프롬프트</dt>
