@@ -24,6 +24,7 @@ export default defineConfig({
     "change-set-live.spec.ts",
     "resource-search-live.spec.ts",
     "operations-live.spec.ts",
+    "me-key-rotation-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

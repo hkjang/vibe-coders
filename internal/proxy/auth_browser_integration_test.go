@@ -52,6 +52,7 @@ func browserFixtureConfig(idp *browserOIDCFixture) config.Config {
 		RoleMap: map[string]string{"browser-admin": "admin"},
 	}
 	cfg.Auth.Enabled = true
+	cfg.Auth.SelfServiceKeys = true
 	cfg.Auth.AccessTokenTTL = browserAuthAccessTTL
 	cfg.Auth.RefreshTokenTTL = 10 * time.Minute
 	cfg.Auth.APIKeyPrefix = "vc_sk_"

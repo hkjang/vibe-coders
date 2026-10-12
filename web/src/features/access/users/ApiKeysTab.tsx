@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { keyExpiryISO } from "../key-expiry";
 
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
 import { ApiKeyCreateFields } from "@/features/access/users/ApiKeyCreateFields";
@@ -267,7 +268,7 @@ export function ApiKeysTab({
             ...(values.allowed_models ? { allowed_models: splitList(values.allowed_models) } : {}),
             ...(values.denied_models ? { denied_models: splitList(values.denied_models) } : {}),
             ...(Number.isFinite(budget) && budget > 0 ? { budget_limit_krw: budget } : {}),
-            ...(values.expires_at ? { expires_at: values.expires_at } : {}),
+            ...(values.expires_at ? { expires_at: keyExpiryISO(values.expires_at) } : {}),
           });
         }}
       >

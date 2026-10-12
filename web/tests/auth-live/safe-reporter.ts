@@ -21,6 +21,8 @@ const scenarios = new Set([
   "AUTH-LIVE-016",
   "AUTH-LIVE-017",
   "AUTH-LIVE-018",
+  "AUTH-LIVE-019",
+  "AUTH-LIVE-020",
 ]);
 const sourceFiles = new Set([
   "auth-live.spec.ts",
@@ -29,6 +31,7 @@ const sourceFiles = new Set([
   "change-set-live.spec.ts",
   "resource-search-live.spec.ts",
   "operations-live.spec.ts",
+  "me-key-rotation-live.spec.ts",
 ]);
 const testStatuses = new Set(["passed", "failed", "timedOut", "skipped", "interrupted"]);
 const runStatuses = new Set(["passed", "failed", "timedout", "interrupted"]);

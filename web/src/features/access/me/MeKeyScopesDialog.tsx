@@ -1,4 +1,4 @@
-import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useQueryClient, type QueryKey, type UseQueryResult } from "@tanstack/react-query";
 import { useCallback, useState, useSyncExternalStore, type RefObject } from "react";
 import { z } from "zod";
 
@@ -17,6 +17,7 @@ import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { meKeyErrorMessage } from "./me-key-errors";
 
 const schema = z.object({ scopes: z.array(z.string()) });
 type ScopeForm = z.infer<typeof schema>;
@@ -24,6 +25,8 @@ type ScopeForm = z.infer<typeof schema>;
 interface Props {
   target: ApiKeyPublic;
   catalogQuery: UseQueryResult<MeKeyCatalog>;
+  catalogKey?: QueryKey;
+  writeDisabled?: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (id: string, scopes: readonly string[]) => Promise<unknown>;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -32,6 +35,8 @@ interface Props {
 export function MeKeyScopesDialog({
   target,
   catalogQuery,
+  catalogKey = meKeys.keys,
+  writeDisabled = false,
   onOpenChange,
   onSubmit,
   returnFocusRef,
@@ -48,7 +53,7 @@ export function MeKeyScopesDialog({
   // invalidate-without-refetch disables the button, not only the PATCH boundary.
   const catalogState = useSyncExternalStore(
     useCallback((notify) => queryClient.getQueryCache().subscribe(notify), [queryClient]),
-    useCallback(() => queryClient.getQueryState<MeKeyCatalog>(meKeys.keys), [queryClient]),
+    useCallback(() => queryClient.getQueryState<MeKeyCatalog>(catalogKey), [queryClient, catalogKey]),
   );
   const catalog = confirmedMeScopeCatalog(catalogState);
   const ungrantable = catalog ? ungrantableMeScopes(selected, catalog) : [];
@@ -62,9 +67,10 @@ export function MeKeyScopesDialog({
       title="내 API 키 권한 수정"
       description={`${baseline.name || "이름 없는 키"} 키가 사용할 권한을 선택합니다.`}
       submitLabel="권한 저장"
-      submitDisabled={!catalog || ungrantable.length > 0}
+      submitDisabled={writeDisabled || !catalog || ungrantable.length > 0}
+      errorFormatter={meKeyErrorMessage}
       onSubmit={(values) => {
-        const latest = confirmedMeScopeCatalog(queryClient.getQueryState<MeKeyCatalog>(meKeys.keys));
+        const latest = confirmedMeScopeCatalog(queryClient.getQueryState<MeKeyCatalog>(catalogKey));
         if (!latest || ungrantableMeScopes(values.scopes, latest).length > 0) {
           throw new AppError("내가 부여할 수 있는 권한을 다시 확인한 뒤 저장하세요.", { kind: "contract" });
         }

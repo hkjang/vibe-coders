@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -422,6 +423,13 @@ func migrationStatements() []string {
 		`ALTER TABLE api_keys ADD COLUMN budget_limit_krw REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE api_keys ADD COLUMN expires_at TEXT`,
 		`ALTER TABLE api_keys ADD COLUMN revoked_at TEXT`,
+		`CREATE TABLE IF NOT EXISTS api_key_rotations (
+			old_key_id TEXT PRIMARY KEY,
+			old_key_hash TEXT NOT NULL UNIQUE,
+			new_key_id TEXT NOT NULL UNIQUE,
+			grace_ends_at TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_keys_team_id ON api_keys(team, id) WHERE ` + appRequestBoundedTextPredicate("team") + ` AND ` + appRequestBoundedTextPredicate("id"),
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
@@ -2536,7 +2544,9 @@ func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
 		COALESCE(user_id, ''), COALESCE(service_account_id, ''), COALESCE(role, ''), status,
 		COALESCE(scopes, '[]'), COALESCE(allowed_ips, '[]'), COALESCE(allowed_models, '[]'), COALESCE(denied_models, '[]'),
 		COALESCE(allowed_providers, '[]'), COALESCE(denied_providers, '[]'), COALESCE(budget_limit_krw, 0),
-		COALESCE(expires_at, ''), COALESCE(revoked_at, ''), created_at
+		COALESCE(expires_at, ''), COALESCE(revoked_at, ''), created_at, key_hash,
+		COALESCE((SELECT new_key_id FROM api_key_rotations WHERE old_key_id = api_keys.id), ''),
+		COALESCE((SELECT grace_ends_at FROM api_key_rotations WHERE old_key_id = api_keys.id), '')
 		FROM api_keys
 		ORDER BY created_at DESC`)
 	if err != nil {
@@ -2547,10 +2557,11 @@ func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
 	var result []APIKeyPublic
 	for rows.Next() {
 		var key APIKeyPublic
+		var hash string
 		var scopes, allowedIPs, allowedModels, deniedModels, allowedProviders, deniedProviders string
 		if err := rows.Scan(&key.ID, &key.Name, &key.Owner, &key.Team, &key.UserID, &key.ServiceAccountID, &key.Role, &key.Status,
 			&scopes, &allowedIPs, &allowedModels, &deniedModels, &allowedProviders, &deniedProviders, &key.BudgetLimitKRW,
-			&key.ExpiresAt, &key.RevokedAt, &key.CreatedAt); err != nil {
+			&key.ExpiresAt, &key.RevokedAt, &key.CreatedAt, &hash, &key.ReplacedBy, &key.GraceEndsAt); err != nil {
 			return nil, err
 		}
 		key.Scopes = decodeStringList(scopes)
@@ -2559,6 +2570,13 @@ func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
 		key.DeniedModels = decodeStringList(deniedModels)
 		key.AllowedProviders = decodeStringList(allowedProviders)
 		key.DeniedProviders = decodeStringList(deniedProviders)
+		key.Revision = APIKeyRevision(APIKeyRecord{
+			ID: key.ID, Name: key.Name, KeyHash: hash, Owner: key.Owner, Team: key.Team,
+			UserID: key.UserID, ServiceAccountID: key.ServiceAccountID, Role: key.Role, Status: key.Status,
+			Scopes: key.Scopes, AllowedIPs: key.AllowedIPs, AllowedModels: key.AllowedModels, DeniedModels: key.DeniedModels,
+			AllowedProviders: key.AllowedProviders, DeniedProviders: key.DeniedProviders, BudgetLimitKRW: key.BudgetLimitKRW,
+			ExpiresAt: parseOptionalTime(key.ExpiresAt), RevokedAt: parseOptionalTime(key.RevokedAt), CreatedAt: parseOptionalTime(key.CreatedAt),
+		})
 		result = append(result, key)
 	}
 	if result == nil {
@@ -2630,17 +2648,30 @@ func (s *SQLStore) FindActiveAPIKeyByHash(ctx context.Context, keyHash string) (
 	var key APIKeyRecord
 	var scopes, allowedIPs, allowedModels, deniedModels, allowedProviders, deniedProviders string
 	var createdAt, expiresAt, revokedAt string
+	var rotationDeadline, credentialDeadline sql.NullString
 	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, key_hash, COALESCE(owner, ''), COALESCE(team, ''),
 			COALESCE(user_id, ''), COALESCE(service_account_id, ''), COALESCE(role, ''), status,
 			COALESCE(scopes, '[]'), COALESCE(allowed_ips, '[]'), COALESCE(allowed_models, '[]'), COALESCE(denied_models, '[]'),
 			COALESCE(allowed_providers, '[]'), COALESCE(denied_providers, '[]'), COALESCE(budget_limit_krw, 0),
-			COALESCE(expires_at, ''), COALESCE(revoked_at, ''), created_at
+			COALESCE(expires_at, ''), COALESCE(revoked_at, ''), created_at,
+			(SELECT grace_ends_at FROM api_key_rotations WHERE old_key_id = api_keys.id),
+			(SELECT grace_ends_at FROM api_key_rotations WHERE old_key_hash = api_keys.key_hash)
 		FROM api_keys
-		WHERE key_hash = ? AND status = 'active'`), keyHash).Scan(&key.ID, &key.Name, &key.KeyHash, &key.Owner, &key.Team,
+		WHERE key_hash = ? AND (status = 'active' OR EXISTS (SELECT 1 FROM api_key_rotations WHERE old_key_id = api_keys.id OR old_key_hash = api_keys.key_hash))`), keyHash).Scan(&key.ID, &key.Name, &key.KeyHash, &key.Owner, &key.Team,
 		&key.UserID, &key.ServiceAccountID, &key.Role, &key.Status, &scopes, &allowedIPs, &allowedModels, &deniedModels,
-		&allowedProviders, &deniedProviders, &key.BudgetLimitKRW, &expiresAt, &revokedAt, &createdAt)
+		&allowedProviders, &deniedProviders, &key.BudgetLimitKRW, &expiresAt, &revokedAt, &createdAt, &rotationDeadline, &credentialDeadline)
 	if err == sql.ErrNoRows {
-		return APIKeyRecord{}, false, nil
+		// A retired credential remains known even after deletion or hash editing.
+		// Otherwise open gateway mode could mistake it for an upstream API key.
+		var retiredID string
+		retiredErr := s.db.QueryRowContext(ctx, s.bind(`SELECT old_key_id FROM api_key_rotations WHERE old_key_hash = ?`), keyHash).Scan(&retiredID)
+		if retiredErr == sql.ErrNoRows {
+			return APIKeyRecord{}, false, nil
+		}
+		if retiredErr != nil {
+			return APIKeyRecord{}, false, retiredErr
+		}
+		return APIKeyRecord{ID: retiredID, KeyHash: keyHash, Status: "revoked"}, true, nil
 	}
 	if err != nil {
 		return APIKeyRecord{}, false, err
@@ -2656,6 +2687,21 @@ func (s *SQLStore) FindActiveAPIKeyByHash(ctx context.Context, keyHash string) (
 	key.DeniedProviders = decodeStringList(deniedProviders)
 	key.ExpiresAt = parseOptionalTime(expiresAt)
 	key.RevokedAt = parseOptionalTime(revokedAt)
+	for _, storedDeadline := range []sql.NullString{rotationDeadline, credentialDeadline} {
+		if !storedDeadline.Valid {
+			continue
+		}
+		deadline, parseErr := time.Parse(time.RFC3339Nano, storedDeadline.String)
+		if parseErr != nil {
+			return APIKeyRecord{}, false, errors.New("invalid API key rotation deadline")
+		}
+		// A later administrative metadata update must not prolong an old key's
+		// grace period. Return it as a known credential so normal authentication
+		// rejects expiry rather than treating it as an external upstream key.
+		if key.ExpiresAt.IsZero() || deadline.Before(key.ExpiresAt) {
+			key.ExpiresAt = deadline
+		}
+	}
 	return key, true, nil
 }
 

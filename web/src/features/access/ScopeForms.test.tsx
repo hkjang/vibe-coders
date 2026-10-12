@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,7 @@ import { RolesTab } from "@/features/access/users/RolesTab";
 import { publishLogout } from "@/shared/auth/token-store";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
@@ -64,7 +65,11 @@ const forms = [
   {
     name: "키 발급",
     trigger: "키 발급",
-    render: () => <MeKeysTab />,
+    render: () => (
+      <FeatureAccessContext.Provider value={{ featureId: "me.home", readOnly: false, permitted: true }}>
+        <MeKeysTab />
+      </FeatureAccessContext.Provider>
+    ),
     nameField: "키 이름",
     submit: "발급",
     endpoint: "POST /me/keys",
@@ -85,6 +90,27 @@ function deferred() {
 }
 
 describe.each(forms)("$name 스코프 폼", (fixture) => {
+  if (fixture.endpoint.includes("keys")) {
+    it("현지 만료일을 검증하고 시간대가 있는 ISO 형식으로 전송한다", async () => {
+      const user = userEvent.setup();
+      const api = mockApi({ ...readHandlers, [fixture.endpoint]: () => fixture.result });
+      renderScreen(fixture.render());
+      await user.click(await screen.findByRole("button", { name: fixture.trigger }));
+      const dialog = await screen.findByRole("dialog", { name: fixture.name });
+      await user.type(within(dialog).getByLabelText(fixture.nameField, { exact: false }), "만료 검사 키");
+      const expiry = within(dialog).getByLabelText("만료", { exact: true });
+      fireEvent.change(expiry, { target: { value: "2000-01-01T00:00" } });
+      await user.click(within(dialog).getByRole("button", { name: fixture.submit }));
+      expect(await screen.findByText("현재보다 이후의 올바른 만료 시각을 입력하세요.")).toBeVisible();
+      expect(api.calls.filter((call) => call.key === fixture.endpoint)).toHaveLength(0);
+      fireEvent.change(expiry, { target: { value: "2099-10-13T09:30" } });
+      await user.click(within(dialog).getByRole("button", { name: fixture.submit }));
+      await waitFor(() => expect(api.calls.filter((call) => call.key === fixture.endpoint)).toHaveLength(1));
+      expect(api.calls.find((call) => call.key === fixture.endpoint)?.options.body).toMatchObject({
+        expires_at: new Date(2099, 9, 13, 9, 30).toISOString(),
+      });
+    });
+  }
   it("스코프만 바꿔도 닫기를 보호하고 원복하면 경고 없이 닫는다", async () => {
     const user = userEvent.setup();
     const api = mockApi(readHandlers);
@@ -193,13 +219,20 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     // screen instance. Full login/remount behavior belongs to auth/browser tests.
     act(() => publishLogout());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: fixture.trigger }));
+    await user.click(await screen.findByRole("button", { name: fixture.trigger }));
     const reopened = await screen.findByRole("dialog", { name: fixture.name });
     const name = within(reopened).getByRole("textbox", { name: fixture.nameField });
     const scope = within(reopened).getByRole("checkbox", { name: /models:read/u });
     expect(name).toHaveValue("");
-    expect(name).toBeDisabled();
-    expect(scope).toBeDisabled();
+    if (fixture.name === "키 발급") {
+      // Personal queries and forms now belong to the authenticated owner; a
+      // fresh owner does not wait for a disposed owner's pending mutation.
+      expect(name).toBeEnabled();
+      expect(scope).toBeEnabled();
+    } else {
+      expect(name).toBeDisabled();
+      expect(scope).toBeDisabled();
+    }
     expect(scope).not.toBeChecked();
     await act(async () => first.resolve(fixture.result));
     await waitFor(() => expect(name).toBeEnabled());

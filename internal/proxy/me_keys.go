@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ func (s *Server) handleMyKeys(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		all, err := s.db.ListAPIKeys(r.Context())
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "keys_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "could not load personal keys", "server_error", "keys_failed")
 			return
 		}
 		mine := []store.APIKeyPublic{}
@@ -119,7 +120,7 @@ func (s *Server) handleMyKeyByID(w http.ResponseWriter, r *http.Request) {
 	}
 	existing, found, err := s.db.GetAPIKey(r.Context(), id)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "key_lookup_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "could not load personal key", "server_error", "key_lookup_failed")
 		return
 	}
 	// Ownership: only the caller's own keys; respond 404 (not 403) so others' ids aren't probeable.
@@ -130,22 +131,7 @@ func (s *Server) handleMyKeyByID(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case action == "rotate" && r.Method == http.MethodPost:
-		// Issue a replacement carrying the same name/scopes, then revoke the old key.
-		secret, rec, errResp := s.issueSelfServiceKey(r, me, existing.Name, existing.Scopes, "")
-		if errResp != nil {
-			writeOpenAIError(w, errResp.status, errResp.msg, errResp.typ, errResp.code)
-			return
-		}
-		if err := s.db.RevokeAPIKey(r.Context(), id); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "key_rotate_failed")
-			return
-		}
-		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_rotated", APIKeyID: id, ActorUserID: me.UserID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "self-service → " + rec.ID, CreatedAt: time.Now().UTC()})
-		writeJSON(w, http.StatusOK, map[string]any{
-			"rotated_from": id,
-			"api_key":      map[string]any{"id": rec.ID, "name": rec.Name, "user_id": rec.UserID, "role": rec.Role, "scopes": rec.Scopes, "status": rec.Status},
-			"secret":       secret,
-		})
+		s.rotateSelfServiceKey(w, r, me, existing)
 	case action == "" && r.Method == http.MethodPatch:
 		// Update the key's scopes, capped to the caller's own scopes (no escalation).
 		var payload struct {
@@ -169,12 +155,15 @@ func (s *Server) handleMyKeyByID(w http.ResponseWriter, r *http.Request) {
 			}
 			scopes = normalized
 		}
-		existing.Scopes = scopes
-		if err := s.db.UpsertAPIKey(r.Context(), existing); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "key_update_failed")
+		audit := store.AuthEvent{ID: newID("ae"), EventType: "api_key_scopes_updated", APIKeyID: id, ActorUserID: me.UserID, TeamID: existing.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "self-service scope edit", CreatedAt: time.Now().UTC()}
+		if err := s.db.UpdateAPIKeyScopes(r.Context(), existing, scopes, audit); err != nil {
+			if errors.Is(err, store.ErrAPIKeyConflict) {
+				writeOpenAIError(w, http.StatusConflict, "key changed; reload before reviewing scopes", "invalid_request_error", "key_scopes_conflict")
+				return
+			}
+			writeOpenAIError(w, http.StatusInternalServerError, "could not confirm key scope update", "server_error", "key_update_failed")
 			return
 		}
-		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_scopes_updated", APIKeyID: id, ActorUserID: me.UserID, TeamID: me.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "self-service scope edit", CreatedAt: time.Now().UTC()})
 		writeJSON(w, http.StatusOK, map[string]any{"id": id, "scopes": scopes})
 	case action == "" && r.Method == http.MethodDelete:
 		if err := s.db.RevokeAPIKey(r.Context(), id); err != nil {
@@ -228,6 +217,10 @@ func (s *Server) issueSelfServiceKey(r *http.Request, me meIdentity, name string
 	if name == "" {
 		return "", store.APIKeyRecord{}, &meKeyError{http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name"}
 	}
+	expiry := parseAPITime(expiresAt)
+	if strings.TrimSpace(expiresAt) != "" && (expiry.IsZero() || !expiry.After(time.Now())) {
+		return "", store.APIKeyRecord{}, &meKeyError{http.StatusBadRequest, "expiry must be a future RFC3339 timestamp with a timezone", "invalid_request_error", "invalid_key_expiry"}
+	}
 	scopes := me.Scopes
 	if len(requestedScopes) > 0 {
 		normalized, ok := normalizeScopes(requestedScopes)
@@ -253,7 +246,7 @@ func (s *Server) issueSelfServiceKey(r *http.Request, me meIdentity, name string
 		Role:      me.Role,
 		Status:    "active",
 		Scopes:    scopes,
-		ExpiresAt: parseAPITime(expiresAt),
+		ExpiresAt: expiry,
 	}
 	if err := s.db.UpsertAPIKey(r.Context(), rec); err != nil {
 		return "", store.APIKeyRecord{}, &meKeyError{http.StatusInternalServerError, err.Error(), "server_error", "api_key_create_failed"}

@@ -13,7 +13,14 @@ export function AppProviders({ children }: PropsWithChildren): React.JSX.Element
       <AuthProvider>
         <ThemeProvider>
           {children}
-          <Toaster closeButton richColors position="bottom-right" />
+          <Toaster
+            className="app-toaster"
+            closeButton
+            richColors
+            position="bottom-right"
+            containerAriaLabel="알림"
+            toastOptions={{ closeButtonAriaLabel: "알림 닫기" }}
+          />
         </ThemeProvider>
       </AuthProvider>
     </QueryClientProvider>

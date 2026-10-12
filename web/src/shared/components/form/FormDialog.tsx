@@ -11,6 +11,8 @@ import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider"
 interface FormDialogProps<Input extends FieldValues, Output> {
   children: ReactNode;
   description: string;
+  /** Route-owned, allowlisted messages; never return a raw server error. */
+  errorFormatter?: typeof safeAppErrorMessage;
   form: UseFormReturn<Input, unknown, Output>;
   onOpenChange: (open: boolean) => void;
   /** Resolve to close the dialog; throw (or reject) to keep it open with the error. */
@@ -58,6 +60,7 @@ export function FormDialog<Input extends FieldValues, Output>(
 function GuardedFormDialog<Input extends FieldValues, Output>({
   children,
   description,
+  errorFormatter = safeAppErrorMessage,
   form,
   onOpenChange,
   onSubmit,
@@ -155,7 +158,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
         } catch (cause) {
           if (isCurrent())
             setError({
-              message: safeAppErrorMessage(cause, "저장하지 못했습니다."),
+              message: errorFormatter(cause, "저장하지 못했습니다."),
               requestId: isAppError(cause) ? cause.requestId : undefined,
             });
         }

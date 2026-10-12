@@ -13,6 +13,8 @@ interface MutationFeedbackOptions<Variables, Result> {
   invalidates?: readonly QueryKey[];
   successMessage?: string | ((result: Result, variables: Variables) => string);
   errorMessage?: string;
+  /** Route-owned, allowlisted messages; never return a raw server error. */
+  errorFormatter?: typeof safeAppErrorMessage;
   onSuccess?: (result: Result, variables: Variables) => void;
   /** Optional screen/principal lifetime in addition to the authentication epoch. */
   ownsResult?: () => boolean;
@@ -25,6 +27,7 @@ interface MutationFeedbackOptions<Variables, Result> {
  */
 export function useMutationFeedback<Variables, Result>({
   errorMessage = "작업을 완료하지 못했습니다.",
+  errorFormatter = safeAppErrorMessage,
   invalidates = [],
   mutate,
   onSuccess,
@@ -73,7 +76,7 @@ export function useMutationFeedback<Variables, Result>({
     onError: (error, submission) => {
       if (!isCurrent(submission)) return;
       const requestId = isAppError(error) ? error.requestId : undefined;
-      toast.error(safeAppErrorMessage(error, errorMessage), {
+      toast.error(errorFormatter(error, errorMessage), {
         description: requestId ? `요청 ID: ${requestId}` : undefined,
       });
     },

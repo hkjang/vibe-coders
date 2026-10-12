@@ -413,10 +413,14 @@ func (s *SQLStore) RotateRefreshToken(ctx context.Context, oldID string, replace
 }
 
 func (s *SQLStore) InsertAuditEvent(ctx context.Context, e AuthEvent) error {
+	return s.insertAuditEvent(ctx, s.db, e)
+}
+
+func (s *SQLStore) insertAuditEvent(ctx context.Context, executor adminAuditExecer, e AuthEvent) error {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO audit_events (id, event_type, actor_user_id, api_key_id, team_id, ip, user_agent, detail, created_at)
+	_, err := executor.ExecContext(ctx, s.bind(`INSERT INTO audit_events (id, event_type, actor_user_id, api_key_id, team_id, ip, user_agent, detail, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		e.ID, e.EventType, e.ActorUserID, e.APIKeyID, e.TeamID, e.IP, e.UserAgent, e.Detail, formatTime(e.CreatedAt))
 	return err

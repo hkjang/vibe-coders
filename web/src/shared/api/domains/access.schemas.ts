@@ -324,6 +324,9 @@ export type BudgetProjectionRow = z.output<typeof budgetProjectionSchema>["teams
 
 export const apiKeyPublicSchema = looseObject({
   id: z.string(),
+  revision: text,
+  replaced_by: text,
+  grace_ends_at: text,
   name: text,
   owner: text,
   team: text,
@@ -366,19 +369,20 @@ export const apiKeyCreatedSchema = looseObject({
 // PATCH /me/keys/{id} answers with the stored scopes only, not the whole key.
 export const meKeyScopesSchema = looseObject({ id: text, scopes: stringList });
 
-// POST /me/keys/{id}/rotate issues a replacement and revokes the old id. The
+// POST /me/keys/{id}/rotate retires the old id immediately or after grace. The
 // rotated key carries no `team` field, unlike the create response.
 export const meKeyRotatedSchema = looseObject({
-  rotated_from: text,
+  rotated_from: z.string().min(1),
+  grace_ends_at: z.iso.datetime({ offset: true }),
   api_key: looseObject({
-    id: z.string(),
-    name: text,
-    user_id: text,
-    role: text,
-    scopes: stringList,
-    status: text,
-  }).nullish(),
-  secret: text,
+    id: z.string().min(1),
+    name: z.string(),
+    user_id: z.string(),
+    role: z.string(),
+    scopes: z.array(z.string()),
+    status: z.string(),
+  }),
+  secret: z.string().min(1),
 });
 
 export const apiKeyUpdatedSchema = looseObject({

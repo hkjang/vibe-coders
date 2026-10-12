@@ -40,7 +40,11 @@ export function ApiKeyCreateFields({
           <Input {...control} type="number" min={0} {...createForm.register("budget_limit_krw")} />
         )}
       </FormField>
-      <FormField label="만료" description="비우면 무기한입니다.">
+      <FormField
+        label="만료"
+        description="브라우저의 현지 시각입니다. 비우면 무기한입니다."
+        error={createForm.formState.errors.expires_at?.message}
+      >
         {(control) => <Input {...control} type="datetime-local" {...createForm.register("expires_at")} />}
       </FormField>
       <fieldset>
