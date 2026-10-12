@@ -112,7 +112,7 @@ async function installGateway(context: BrowserContext) {
   const releases = new Map<string, () => void>();
   let canWrite = true;
   let featureReadOnly = false;
-  let operationsDenied = false;
+  let operationsDenied: string | undefined;
   let loginCount = 0;
   let logoutCount = 0;
   let logoutResponseCount = 0;
@@ -177,11 +177,7 @@ async function installGateway(context: BrowserContext) {
           ],
         });
       if (call === "GET /admin/mcp/oauth") return json({ enabled: false, active: false });
-      if (
-        operationsDenied &&
-        request.method() === "GET" &&
-        ["/admin/retention", "/admin/fallback", notificationPath].includes(url.pathname)
-      )
+      if (operationsDenied && request.method() === "GET" && url.pathname === operationsDenied)
         return json({ error: { message: "fixture access denied" } }, 403);
       if (call === "GET /admin/retention")
         return json({
@@ -327,8 +323,8 @@ async function installGateway(context: BrowserContext) {
     featureReadOnly: () => {
       featureReadOnly = true;
     },
-    denyOperations: () => {
-      operationsDenied = true;
+    denyOperations: (path: string) => {
+      operationsDenied = path;
     },
     advance: (kind: Kind) => {
       if (kind === "sso") sso = { ...sso, client_id: "public-client-newer", version: (sso.version ?? 0) + 1 };
@@ -800,19 +796,21 @@ for (const mode of ["feature", "scope"] as const) {
   });
 }
 
-test("운영 재조회가 거부되면 이전 상태와 알림 편집기를 감춘다", async ({ page, api }) => {
-  await open(page, "notification");
-  await expect(page.getByText("public-fixture.ndjson", { exact: true })).toBeVisible();
-  api.denyOperations();
-  await page.getByRole("button", { name: "새로고침", exact: true }).click();
-  await expect(page.getByText("public-fixture.ndjson", { exact: true })).toBeHidden();
-  await expect(draftField(page, "notification")).toBeHidden();
-  await expect(page.getByText("저장된 요청", { exact: true })).toBeHidden();
-  for (const name of ["지금 정리 실행", "DB로 재처리", "테스트 메시지 발송"])
-    await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
-  expect(api.writes).toEqual([]);
-  expect(api.tests).toEqual([]);
-});
+for (const path of ["/admin/retention", "/admin/fallback", notificationPath]) {
+  test(`운영 API ${path} 하나의 조회 거부도 탭 전체를 잠근다`, async ({ page, api }) => {
+    await open(page, "notification");
+    await expect(page.getByText("public-fixture.ndjson", { exact: true })).toBeVisible();
+    api.denyOperations(path);
+    await page.getByRole("button", { name: "새로고침", exact: true }).click();
+    await expect(page.getByText("public-fixture.ndjson", { exact: true })).toBeHidden();
+    await expect(draftField(page, "notification")).toBeHidden();
+    await expect(page.getByText("저장된 요청", { exact: true })).toBeHidden();
+    for (const name of ["지금 정리 실행", "DB로 재처리", "테스트 메시지 발송"])
+      await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
+    expect(api.writes).toEqual([]);
+    expect(api.tests).toEqual([]);
+  });
+}
 
 test("알림 마스킹값·공백은 서버로 전송하지 않고 읽기 전용 권한은 두 폼 쓰기를 막는다", async ({
   page,

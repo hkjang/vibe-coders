@@ -67,13 +67,19 @@ function OwnedOperationsTab({
       mounted.current = false;
     };
   }, []);
-  const ownsResult = () => mounted.current;
   const retention = useRetentionStatus(owner);
   const fallback = useFallbackStats(owner);
   const notifications = useNotificationConfig(owner);
-  const retentionDenied = accessDenied(retention.error);
-  const fallbackDenied = accessDenied(fallback.error);
-  const notificationsDenied = accessDenied(notifications.error);
+  const [revoked, setRevoked] = useState(false);
+  const denied = revoked || [retention.error, fallback.error, notifications.error].some(accessDenied);
+  // These endpoints share one authorization boundary. A successful sibling
+  // refetch must not restore access after another endpoint detected revocation.
+  if (denied && !revoked) setRevoked(true);
+  const deniedRef = useRef(denied);
+  useLayoutEffect(() => {
+    deniedRef.current = denied;
+  }, [denied]);
+  const ownsResult = () => mounted.current && !deniedRef.current;
   const retentionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const fallbackTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [retentionReview, setRetentionReview] = useState<number>();
@@ -82,8 +88,8 @@ function OwnedOperationsTab({
   const [fallbackAttempt, setFallbackAttempt] = useState<number>();
   const retentionSent = retentionAttempt === retention.dataUpdatedAt;
   const fallbackSent = fallbackAttempt === fallback.dataUpdatedAt;
-  const retentionReady = retention.isSuccess && !retention.isFetching;
-  const fallbackReady = fallback.isSuccess && !fallback.isFetching;
+  const retentionReady = !denied && retention.isSuccess && !retention.isFetching;
+  const fallbackReady = !denied && fallback.isSuccess && !fallback.isFetching;
   const retentionCurrent = retentionReady && !retentionSent && retentionReview === retention.dataUpdatedAt;
   const fallbackCurrent = fallbackReady && !fallbackSent && fallbackReview === fallback.dataUpdatedAt;
   const notificationSending = useRef(false);
@@ -134,6 +140,12 @@ function OwnedOperationsTab({
 
   return (
     <div className="settings-tab-stack">
+      {denied ? (
+        <InlineNotice tone="warning">
+          운영 작업 조회 권한이 거부되어 이 탭의 데이터와 실행을 잠갔습니다. 다시 로그인하거나 화면을 다시
+          열어 권한을 확인하세요.
+        </InlineNotice>
+      ) : null}
       <SectionCard
         title="데이터 보존 정책"
         headingLevel={3}
@@ -154,13 +166,13 @@ function OwnedOperationsTab({
         {retention.isError ? (
           <QueryNotice
             error={retention.error}
-            hasPreviousData={!retentionDenied && Boolean(retention.data)}
+            hasPreviousData={!denied && Boolean(retention.data)}
             label="데이터 보존 정책"
             onRetry={() => void retention.refetch()}
           />
         ) : null}
         {retention.isPending ? <p role="status">보존 정책을 불러오는 중입니다.</p> : null}
-        {!retentionDenied && retention.data ? (
+        {!denied && retention.data ? (
           <KeyValueList
             columns={3}
             items={[
@@ -197,13 +209,13 @@ function OwnedOperationsTab({
         {fallback.isError ? (
           <QueryNotice
             error={fallback.error}
-            hasPreviousData={!fallbackDenied && Boolean(fallback.data)}
+            hasPreviousData={!denied && Boolean(fallback.data)}
             label="저장 실패 로그"
             onRetry={() => void fallback.refetch()}
           />
         ) : null}
         {fallback.isPending ? <p role="status">저장 실패 로그 상태를 불러오는 중입니다.</p> : null}
-        {!fallbackDenied && fallback.data ? (
+        {!denied && fallback.data ? (
           <KeyValueList
             columns={3}
             items={[
@@ -215,7 +227,7 @@ function OwnedOperationsTab({
             ]}
           />
         ) : null}
-        {!fallbackDenied && replayFallback.data ? (
+        {!denied && replayFallback.data ? (
           <InlineNotice tone="success" title="재처리 결과">
             적재 {formatNumber(replayFallback.data.imported)}건 · 중복{" "}
             {formatNumber(replayFallback.data.duplicates)}건 · 실패 {formatNumber(replayFallback.data.failed)}
@@ -231,7 +243,7 @@ function OwnedOperationsTab({
         actions={
           <Button
             size="small"
-            disabled={!access.allowed || notificationsDenied || testNotification.isPending}
+            disabled={!access.allowed || denied || testNotification.isPending}
             title={writeNote}
             onClick={() => {
               if (notificationSending.current) return;
@@ -251,13 +263,13 @@ function OwnedOperationsTab({
         {notifications.isError ? (
           <QueryNotice
             error={notifications.error}
-            hasPreviousData={!notificationsDenied && Boolean(notifications.data)}
+            hasPreviousData={!denied && Boolean(notifications.data)}
             label="알림 설정"
             onRetry={() => void notifications.refetch()}
           />
         ) : null}
         {notifications.isPending ? <p role="status">알림 설정을 불러오는 중입니다.</p> : null}
-        {!notificationsDenied && notifications.data ? (
+        {!denied && notifications.data ? (
           <NotificationForm
             config={notifications.data}
             hasAdminWrite={access.allowed}

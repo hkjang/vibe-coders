@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { OperationsTab } from "./OperationsTab";
+import { systemSettingsKeys } from "./use-system-settings";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 
@@ -103,6 +104,53 @@ it.each([401, 403])("서버 %s 응답 시 이전 운영 데이터와 실행을 �
   expect(screen.queryByText("마지막으로 확인된 값을 표시하고 있습니다.")).not.toBeInTheDocument();
 });
 
+it.each(
+  [401, 403].flatMap((status) =>
+    (["retention", "fallback", "notifications"] as const).map((key) => ({ status, key })),
+  ),
+)("$key 하나의 $status 응답도 탭 전체를 잠그며 재조회 성공만으로 풀리지 않는다", async ({ status, key }) => {
+  const path = {
+    retention: "/admin/retention",
+    fallback: "/admin/fallback",
+    notifications: "/admin/notifications/mattermost",
+  }[key];
+  let denied = false;
+  const view = setup({
+    [`GET ${path}`]: () => {
+      if (denied) throw apiFailure("denied", status);
+      return { retention, fallback, notifications: { enabled: false, channel: "ops", events: [] } }[key];
+    },
+  });
+  const user = userEvent.setup();
+  await screen.findByText("/data/fallback.ndjson");
+  await user.click(screen.getByRole("button", { name: "지금 정리 실행" }));
+  const dialog = within(screen.getByRole("dialog"));
+  await user.type(dialog.getByLabelText(/변경 사유/), "운영 확인");
+  await user.type(dialog.getByLabelText(/확인 문구/), "데이터 정리");
+  denied = true;
+  await act(async () => {
+    await view.client.invalidateQueries({ queryKey: systemSettingsKeys[key] });
+  });
+  await waitFor(() => expect(screen.queryByText("/data/fallback.ndjson")).not.toBeInTheDocument());
+  denied = false;
+  await act(async () => {
+    await view.client.invalidateQueries();
+  });
+  expect(screen.queryByText("저장된 요청")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("채널")).not.toBeInTheDocument();
+  expect(dialog.getByRole("button", { name: "정리 실행" })).toBeDisabled();
+  await user.keyboard("{Enter}");
+  await user.keyboard("{Escape}");
+  for (const name of ["지금 정리 실행", "DB로 재처리", "테스트 메시지 발송"])
+    expect(screen.getByRole("button", { name })).toBeDisabled();
+  expect(view.api.calls.every((call) => call.key.startsWith("GET "))).toBe(true);
+  // An authenticated owner change starts with fresh, owned queries.
+  identity.id = "operator-b";
+  view.rerender(view.tree());
+  await screen.findByText("/data/fallback.ndjson");
+  expect(screen.getByRole("button", { name: "지금 정리 실행" })).toBeEnabled();
+});
+
 it("계정 전환 후 이전 작업의 늦은 완료를 알리지 않는다", async () => {
   let finish: (value: typeof replay) => void = () => undefined;
   const view = setup({
@@ -119,6 +167,37 @@ it("계정 전환 후 이전 작업의 늦은 완료를 알리지 않는다", as
   await waitFor(() => expect(view.api.calls.some((call) => call.key === "POST /admin/fallback")).toBe(true));
   identity.id = "operator-b";
   view.rerender(view.tree());
+  await act(async () => finish(replay));
+  expect(notices.success).not.toHaveBeenCalled();
+  expect(notices.error).not.toHaveBeenCalled();
+  expect(screen.queryByText("재처리 결과")).not.toBeInTheDocument();
+});
+
+it("다른 운영 조회의 권한 거부 후 늦게 완료된 작업을 알리지 않는다", async () => {
+  let finish: (value: typeof replay) => void = () => undefined;
+  let denied = false;
+  const view = setup({
+    "POST /admin/fallback": () =>
+      new Promise<typeof replay>((resolve) => {
+        finish = resolve;
+      }),
+    "GET /admin/retention": () => {
+      if (denied) throw apiFailure("denied", 403);
+      return retention;
+    },
+  });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "DB로 재처리" }));
+  const dialog = within(screen.getByRole("dialog"));
+  await user.type(dialog.getByLabelText(/확인 문구/), "로그 재처리");
+  await user.type(dialog.getByLabelText(/변경 사유/), "운영 확인");
+  await user.click(dialog.getByRole("button", { name: "재처리 실행" }));
+  await waitFor(() => expect(view.api.calls.some((call) => call.key === "POST /admin/fallback")).toBe(true));
+  denied = true;
+  await act(async () => {
+    await view.client.invalidateQueries({ queryKey: systemSettingsKeys.retention });
+  });
+  await waitFor(() => expect(screen.queryByText("/data/fallback.ndjson")).not.toBeInTheDocument());
   await act(async () => finish(replay));
   expect(notices.success).not.toHaveBeenCalled();
   expect(notices.error).not.toHaveBeenCalled();
