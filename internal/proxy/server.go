@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.50"
+var AppVersion = "v0.86.51"
 
 type Server struct {
 	cfg      config.Config
@@ -67,6 +67,8 @@ type Server struct {
 	t2sExecConns    sync.Map                                // named exec connections: connID → *sql.DB
 	t2sTwin         atomic.Pointer[sql.DB]                  // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
 	t2sKilled       atomic.Bool                             // runtime kill switch: when set, Text2SQL is disabled regardless of config
+	t2sKillMu       sync.Mutex                              // serializes reviewed emergency changes and remediation writes
+	t2sKillReview   string                                  // opaque, process-local revision; guarded by t2sKillMu
 	t2sFeatures     atomic.Pointer[map[string]bool]         // runtime Text2SQL feature toggles (admin-managed)
 	t2sRuntime      atomic.Pointer[config.Text2SQLConfig]   // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
 	chRuntime       atomic.Pointer[config.ClickHouseConfig] // admin-settings overlay over cfg.ClickHouse (runtime snapshot)

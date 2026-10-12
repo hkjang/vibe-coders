@@ -35,6 +35,7 @@ const allowedScenarios = [
   "AUTH-LIVE-009",
   "AUTH-LIVE-010",
   "AUTH-LIVE-011",
+  "AUTH-LIVE-012",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -173,7 +174,7 @@ test("auth reporter emits only safe ID, status, duration and numeric source line
 test("auth reporter rejects non-allowlisted title IDs and ignores helper or unrelated source locations", async () => {
   const fixtures = [
     "AUTH-LIVE-000",
-    "AUTH-LIVE-012",
+    "AUTH-LIVE-013",
     "AUTH-LIVE-999",
     "AUTH-LIVE-01",
     "AUTH-LIVE-001suffix",
@@ -216,10 +217,10 @@ test("auth reporter does not serialize a global error when no scenario has finis
   assert.deepEqual(await report([], "failed"), { status: "failed", tests: [] });
 });
 
-test("auth reporter allows only the eleven fixed scenarios and numeric lines from three exact spec basenames", async () => {
+test("auth reporter allows only the twelve fixed scenarios and numeric lines from three exact spec basenames", async () => {
   const fixtures = allowedScenarios.map((id, index) => {
     const filename =
-      index < 5 ? "auth-live.spec.ts" : index < 10 ? "access-live.spec.ts" : "recovery-live.spec.ts";
+      index < 5 ? "auth-live.spec.ts" : index === 10 ? "recovery-live.spec.ts" : "access-live.spec.ts";
     const file = index % 2 === 0 ? `/private/${sensitive}/${filename}` : `C:\\private\\${filename}`;
     const fixture = row(id, "passed", [{ title: sensitive, location: { file, line: index + 1, column: 1 } }]);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (${file}:${index + 21}:2)`;

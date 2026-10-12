@@ -287,9 +287,24 @@ export const text2sqlFeaturesSchema = looseObject({
 });
 
 export const text2sqlKillSwitchSchema = looseObject({
-  disabled: flag(),
-  config_enabled: orDefault(z.boolean(), true),
+  // A missing state is not proof that SQL generation is running. GET supplies
+  // config_enabled; legacy POST acknowledges only the actual disabled flag.
+  disabled: z.boolean(),
+  config_enabled: z.boolean().optional(),
+  scope: z.literal("responding_process").optional(),
+  instance_ref: z
+    .string()
+    .regex(/^process_[a-f0-9]{16}$/u)
+    .optional(),
+  review_token: z
+    .string()
+    .regex(/^[a-f0-9]{32}$/u)
+    .optional(),
+  observed_at: z.string().datetime({ offset: true }).optional(),
+  reason: z.string().optional(),
 });
+
+export type Text2SQLEmergencyState = z.infer<typeof text2sqlKillSwitchSchema>;
 
 export const text2sqlRiskQueueSchema = looseObject({
   count: numeric(),
@@ -649,11 +664,13 @@ export const text2sqlEndpoints = {
       "/admin/text2sql/kill-switch",
       text2sqlKillSwitchSchema,
     ),
-    set: operation<WithBody<PostAdminText2SqlKillSwitchData, { disabled: boolean }>, unknown>()(
-      "POST",
-      "/admin/text2sql/kill-switch",
-      text2sqlKillSwitchSchema,
-    ),
+    set: operation<
+      WithBody<
+        PostAdminText2SqlKillSwitchData,
+        { disabled: boolean; reason?: string; expected_review_token?: string }
+      >,
+      unknown
+    >()("POST", "/admin/text2sql/kill-switch", text2sqlKillSwitchSchema),
   },
   riskQueue: operation<
     WithQuery<GetAdminText2SqlRiskQueueData, { window?: string; min_risk?: number; limit?: number }>,

@@ -208,6 +208,33 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	if h.upstream.calls.Load() < 2 || h.upstream.deniedModelCalls.Load() != 0 {
 		t.Fatal("live key authorization did not reach the local model as expected, or a denied call reached it")
 	}
+	audits, err := h.db.ListAdminAudit(t.Context(), 1000)
+	if err != nil {
+		t.Fatal("browser emergency audit verification failed")
+	}
+	changes := map[string]bool{}
+	for _, audit := range audits {
+		if audit.Action != "text2sql.kill_switch" {
+			continue
+		}
+		var after struct {
+			Disabled bool   `json:"disabled"`
+			Reason   string `json:"reason"`
+		}
+		// Existing admin audit stores a token-derived actor reference, not the
+		// auth user ID. Preserve that contract without exposing the credential.
+		if json.Unmarshal([]byte(audit.AfterValue), &after) != nil || !strings.HasPrefix(audit.AdminID, "admin_") || len(audit.AdminID) != 18 {
+			t.Fatal("browser emergency audit actor or payload did not match")
+		}
+		if _, duplicate := changes[after.Reason]; duplicate {
+			t.Fatal("browser emergency change produced duplicate audit")
+		}
+		changes[after.Reason] = after.Disabled
+	}
+	resumed, foundResume := changes["browser-text2sql-reviewed-resume"]
+	if len(changes) != 2 || !changes["browser-text2sql-reviewed-stop"] || !foundResume || resumed {
+		t.Fatal("actual browser emergency stop/resume audit pair missing or unexpected")
+	}
 }
 
 func browserAuthWebDirectory(t *testing.T) string {

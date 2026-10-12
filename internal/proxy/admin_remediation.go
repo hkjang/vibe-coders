@@ -276,7 +276,7 @@ func (s *Server) handleRemediationApply(w http.ResponseWriter, r *http.Request) 
 		before["text2sql_killed"] = s.t2sKilled.Load()
 		after["text2sql_killed"] = disable
 		rollback = map[string]any{"action_type": ternaryStr(disable, "text2sql_resume", "text2sql_kill")}
-		apply = func() error { s.t2sKilled.Store(disable); return nil }
+		apply = func() error { s.setText2SQLKilled(disable); return nil }
 	case "provider_disable", "provider_enable":
 		name := paramStr("provider")
 		if name == "" {

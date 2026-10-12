@@ -9,6 +9,7 @@ import { Text2SqlOverviewTab } from "@/features/text2sql/overview/Text2SqlOvervi
 import { Text2SqlReportTab } from "@/features/text2sql/overview/Text2SqlReportTab";
 import { Text2SqlRiskTab } from "@/features/text2sql/overview/Text2SqlRiskTab";
 import { Text2SqlRuntimeTab } from "@/features/text2sql/overview/Text2SqlRuntimeTab";
+import { Text2SqlEmergencyPanel } from "./Text2SqlEmergencyPanel";
 import { Text2SqlSchemaTab } from "@/features/text2sql/overview/Text2SqlSchemaTab";
 import { useText2SqlQueries, type Text2SqlTabId } from "@/features/text2sql/overview/use-text2sql-queries";
 import { isAppError } from "@/shared/api/error";
@@ -74,14 +75,9 @@ export function Text2SqlPage(): React.JSX.Element {
     [updateSearch],
   );
 
-  const refreshing =
-    queries.overview.isFetching || queries.connections.isFetching || queries.killSwitch.isFetching;
+  const refreshing = queries.overview.isFetching || queries.connections.isFetching;
   const refreshAll = (): void => {
-    void Promise.all([
-      queries.overview.refetch(),
-      queries.connections.refetch(),
-      queries.killSwitch.refetch(),
-    ]);
+    void Promise.all([queries.overview.refetch(), queries.connections.refetch()]);
   };
 
   if (queries.overview.isError && !overview) {
@@ -103,7 +99,6 @@ export function Text2SqlPage(): React.JSX.Element {
     );
   }
 
-  const killed = queries.killSwitch.data?.disabled ?? false;
   const connections = queries.connections.data?.connections ?? [];
 
   return (
@@ -135,12 +130,7 @@ export function Text2SqlPage(): React.JSX.Element {
         }
       />
 
-      {killed ? (
-        <InlineNotice tone="danger" title="Text2SQL이 전체 중지되어 있습니다.">
-          모든 vibe/text2sql-* 요청이 SQL을 생성하지 않고 안전 메시지를 반환합니다. 런타임·연결 탭에서 해제할
-          수 있습니다.
-        </InlineNotice>
-      ) : null}
+      <Text2SqlEmergencyPanel canWrite={canWrite} />
 
       {queries.overview.isError && overview ? (
         <InlineNotice tone="warning" title="현황 갱신에 실패해 마지막 정상 데이터를 표시합니다.">
@@ -179,7 +169,6 @@ export function Text2SqlPage(): React.JSX.Element {
             features={queries.features.data?.features ?? []}
             featuresError={queries.features.error}
             featuresLoading={queries.features.isPending}
-            killSwitchDisabled={killed}
             onRefetchConnections={() => void queries.connections.refetch()}
             onRefetchFeatures={() => void queries.features.refetch()}
             profiles={overview?.db_profiles ?? []}
