@@ -113,3 +113,27 @@ test("한글 조합 중 Escape는 자원 검색창을 닫지 않는다", async (
   await expect(dialog).not.toBeVisible();
   expect(gateway.writes).toEqual([]);
 });
+
+test("높이가 짧은 화면에서도 검색 결과와 재시도에 키보드로 접근한다", async ({ page, gateway }, info) => {
+  await page.setViewportSize({ width: 390, height: 390 });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  let calls = 0;
+  await page.route("**/admin/resource-search", (route) =>
+    route.fulfill({
+      json: result(++calls === 1 ? "unavailable" : "ok"),
+    }),
+  );
+  const dialog = await openSearch(page);
+  await dialog.getByRole("combobox").fill("첫 번째");
+  await expect(dialog.getByRole("status")).toContainText("일부 종류");
+  const bounds = await dialog.boundingBox();
+  expect(Boolean(bounds && bounds.y >= 0 && bounds.y + bounds.height <= 390)).toBe(true);
+  await page.keyboard.press("Tab");
+  const retry = dialog.getByRole("button", { name: "자원 검색 다시 시도" });
+  await expect(retry).toBeFocused();
+  await expect(retry).toBeInViewport();
+  await page.keyboard.press("Enter");
+  await expect(dialog.getByRole("option")).toBeInViewport();
+  await page.screenshot({ path: info.outputPath("resource-search-short.png") });
+  expect(gateway.writes).toEqual([]);
+});

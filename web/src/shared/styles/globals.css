@@ -1104,6 +1104,24 @@ kbd {
   padding: var(--space-6);
   text-align: center;
 }
+/* Keep search recovery and mode controls reachable with a short viewport or
+   an on-screen keyboard. Long content can scroll without escaping the dialog. */
+@media (max-height: 480px) {
+  .command-dialog {
+    top: var(--space-2);
+    max-height: calc(100dvh - var(--space-4));
+    overflow-y: auto;
+  }
+  .command-heading {
+    padding: var(--space-3) var(--space-4);
+  }
+  .command-heading p {
+    display: none;
+  }
+  .command-empty {
+    padding: var(--space-3) var(--space-4);
+  }
+}
 /* Shortcut sheet: the same surface as the palette, so the two read as one feature. */
 .shortcut-body {
   min-height: 0;
