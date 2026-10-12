@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -84,6 +85,13 @@ func (w *RetentionWorker) run() {
 }
 
 func (w *RetentionWorker) RunOnce(ctx context.Context) int64 {
+	deleted, _ := w.runOnceWith(ctx)
+	return deleted
+}
+
+// RunOnceChecked preserves partial deletion counts while exposing any failed
+// stage. The legacy count-only method remains available to existing callers.
+func (w *RetentionWorker) RunOnceChecked(ctx context.Context) (int64, error) {
 	return w.runOnceWith(ctx)
 }
 
@@ -93,12 +101,14 @@ func (w *RetentionWorker) runOnce() {
 	w.runOnceWith(ctx)
 }
 
-func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
+func (w *RetentionWorker) runOnceWith(ctx context.Context) (int64, error) {
 	cfg := w.curConf()
+	var failures []error
 	// Roll up the last few days into analytics_daily BEFORE purging detailed logs,
 	// so long-term aggregates survive retention even though the raw rows are gone.
 	now := time.Now().UTC()
 	if _, err := w.store.RollupRange(ctx, now.AddDate(0, 0, -3), now); err != nil {
+		failures = append(failures, err)
 		slog.Warn("retention rollup failed", "error", err)
 		_ = w.store.InsertSystemError(ctx, "retention", "Retention rollup failed: "+err.Error())
 	}
@@ -107,6 +117,7 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 	if cfg.PromptDays > 0 && (cfg.RequestDays <= 0 || cfg.PromptDays < cfg.RequestDays) {
 		n, err := w.store.PurgeOlderThan(ctx, "prompt_logs", cfg.PromptDays)
 		if err != nil {
+			failures = append(failures, err)
 			slog.Warn("retention purge prompt_logs failed", "error", err)
 		}
 		totalDeleted += n
@@ -114,6 +125,7 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 	if cfg.ResponseDays > 0 && (cfg.RequestDays <= 0 || cfg.ResponseDays < cfg.RequestDays) {
 		n, err := w.store.PurgeOlderThan(ctx, "response_logs", cfg.ResponseDays)
 		if err != nil {
+			failures = append(failures, err)
 			slog.Warn("retention purge response_logs failed", "error", err)
 		}
 		totalDeleted += n
@@ -121,6 +133,7 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 	if cfg.RequestDays > 0 {
 		n, err := w.store.PurgeOlderThan(ctx, "request_logs", cfg.RequestDays)
 		if err != nil {
+			failures = append(failures, err)
 			slog.Warn("retention purge request_logs failed", "error", err)
 		}
 		totalDeleted += n
@@ -132,6 +145,7 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 	if cfg.DomainExampleDays > 0 {
 		n, err := w.store.PurgeOlderThan(ctx, "domain_examples", cfg.DomainExampleDays)
 		if err != nil {
+			failures = append(failures, err)
 			slog.Warn("retention purge domain_examples failed", "error", err)
 		}
 		totalDeleted += n
@@ -139,11 +153,13 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 	if cfg.Text2SQLReplayDays > 0 {
 		n, err := w.store.PurgeText2SQLReplayBundles(ctx, cfg.Text2SQLReplayDays)
 		if err != nil {
+			failures = append(failures, err)
 			slog.Warn("retention purge text2sql_replay_bundles failed", "error", err)
 		}
 		totalDeleted += n
 	}
 	if n, err := w.store.PurgeChatSemanticExpired(ctx); err != nil {
+		failures = append(failures, err)
 		slog.Warn("retention purge chat_semantic_cache failed", "error", err)
 	} else {
 		totalDeleted += n
@@ -153,23 +169,26 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 	// per login — so left alone they outgrow the request logs beside them.
 	const revokedGrace = 24 * time.Hour
 	if n, err := w.store.PurgeExpiredRefreshTokens(ctx, revokedGrace); err != nil {
+		failures = append(failures, err)
 		slog.Warn("retention purge refresh_tokens failed", "error", err)
 	} else {
 		totalDeleted += n
 	}
 	if n, err := w.store.PurgeExpiredAuthSessions(ctx, revokedGrace); err != nil {
+		failures = append(failures, err)
 		slog.Warn("retention purge auth_sessions failed", "error", err)
 	} else {
 		totalDeleted += n
 	}
 	if n, err := w.store.PurgeExpiredText2SQLCache(ctx); err != nil {
+		failures = append(failures, err)
 		slog.Warn("retention purge text2sql_cache failed", "error", err)
 	} else {
 		totalDeleted += n
 	}
 	w.deleted.Add(totalDeleted)
 	w.lastRun.Store(time.Now().UTC().Format(time.RFC3339))
-	return totalDeleted
+	return totalDeleted, errors.Join(failures...)
 }
 
 func (w *RetentionWorker) LastRun() string {

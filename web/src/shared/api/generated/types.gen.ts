@@ -56,6 +56,13 @@ export type AdminModelsResponse = {
     request_id: string;
 };
 
+export type AdminOperationRequest = {
+    /**
+     * Trimmed audit reason. Omission is for legacy compatibility; new console confirmations send this field.
+     */
+    reason?: string;
+};
+
 export type AdminSettingView = {
     category: string;
     description: string;
@@ -312,6 +319,23 @@ export type EmbeddingCacheTop = {
     entries: number;
     hits: number;
     model: string;
+};
+
+export type FallbackReplayResult = {
+    duplicates: number;
+    failed: number;
+    imported: number;
+    path: string;
+    remaining: number;
+    removed: boolean;
+};
+
+export type FallbackStats = {
+    bytes: number;
+    exists: boolean;
+    lines: number;
+    modified_at: string;
+    path: string;
 };
 
 export type GroupedStat = {
@@ -1268,6 +1292,29 @@ export type ResourceSearchResponse = {
         status: 'ok' | 'forbidden' | 'unavailable';
     }>;
     request_id: string;
+};
+
+export type RetentionStatus = {
+    /**
+     * Cumulative deletion count in this worker process, not the count of the last run.
+     */
+    last_deleted: number;
+    last_run_at: string;
+    /**
+     * Retention days; nonpositive values disable this age threshold.
+     */
+    prompt_days: number;
+    prompts: number;
+    /**
+     * Retention days; nonpositive values disable this age threshold.
+     */
+    request_days: number;
+    requests: number;
+    /**
+     * Retention days; nonpositive values disable this age threshold.
+     */
+    response_days: number;
+    responses: number;
 };
 
 export type RoutingBreakerState = {
@@ -4094,26 +4141,60 @@ export type GetAdminFallbackData = {
     url: '/admin/fallback';
 };
 
+export type GetAdminFallbackErrors = {
+    /**
+     * Status or audit unavailable, or an incomplete operation. A failed response does not prove no side effects occurred.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminFallbackError = GetAdminFallbackErrors[keyof GetAdminFallbackErrors];
+
 export type GetAdminFallbackResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: FallbackStats;
 };
 
+export type GetAdminFallbackResponse = GetAdminFallbackResponses[keyof GetAdminFallbackResponses];
+
 export type PostAdminFallbackData = {
-    body?: never;
+    body?: AdminOperationRequest;
     path?: never;
     query?: never;
     url: '/admin/fallback';
 };
 
+export type PostAdminFallbackErrors = {
+    /**
+     * Invalid operation reason
+     */
+    400: AppError;
+    /**
+     * Status or audit unavailable, or an incomplete operation. A failed response does not prove no side effects occurred.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminFallbackError = PostAdminFallbackErrors[keyof PostAdminFallbackErrors];
+
 export type PostAdminFallbackResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: FallbackReplayResult;
 };
+
+export type PostAdminFallbackResponse = PostAdminFallbackResponses[keyof PostAdminFallbackResponses];
 
 export type GetAdminFlowMapData = {
     body?: never;
@@ -8184,26 +8265,60 @@ export type GetAdminRetentionData = {
     url: '/admin/retention';
 };
 
+export type GetAdminRetentionErrors = {
+    /**
+     * Status or audit unavailable, or an incomplete operation. A failed response does not prove no side effects occurred.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRetentionError = GetAdminRetentionErrors[keyof GetAdminRetentionErrors];
+
 export type GetAdminRetentionResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RetentionStatus;
 };
 
+export type GetAdminRetentionResponse = GetAdminRetentionResponses[keyof GetAdminRetentionResponses];
+
 export type PostAdminRetentionData = {
-    body?: never;
+    body?: AdminOperationRequest;
     path?: never;
     query?: never;
     url: '/admin/retention';
 };
 
+export type PostAdminRetentionErrors = {
+    /**
+     * Invalid operation reason
+     */
+    400: AppError;
+    /**
+     * Status or audit unavailable, or an incomplete operation. A failed response does not prove no side effects occurred.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRetentionError = PostAdminRetentionErrors[keyof PostAdminRetentionErrors];
+
 export type PostAdminRetentionResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RetentionStatus;
 };
+
+export type PostAdminRetentionResponse = PostAdminRetentionResponses[keyof PostAdminRetentionResponses];
 
 export type DeleteAdminRolesData = {
     body?: never;

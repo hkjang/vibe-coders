@@ -579,6 +579,7 @@ describe("SystemSettingsPage — 데이터·알림 운영", () => {
     await user.click(screen.getByRole("button", { name: "지금 정리 실행" }));
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText(/변경 사유/), "월간 정리");
+    await user.type(within(dialog).getByLabelText(/확인 문구/), "데이터 정리");
     await user.click(within(dialog).getByRole("button", { name: "정리 실행" }));
 
     await waitFor(() => expect(api.calls.some((call) => call.key === "POST /admin/retention")).toBe(true));

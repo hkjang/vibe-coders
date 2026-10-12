@@ -242,6 +242,18 @@
         ],
         "type": "object"
       },
+      "AdminOperationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Trimmed audit reason. Omission is for legacy compatibility; new console confirmations send this field.",
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "AdminSettingView": {
         "additionalProperties": false,
         "properties": {
@@ -1220,6 +1232,78 @@
           "model",
           "entries",
           "hits"
+        ],
+        "type": "object"
+      },
+      "FallbackReplayResult": {
+        "additionalProperties": false,
+        "properties": {
+          "duplicates": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failed": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "imported": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "remaining": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "removed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "imported",
+          "duplicates",
+          "failed",
+          "remaining",
+          "removed"
+        ],
+        "type": "object"
+      },
+      "FallbackStats": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "lines": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "modified_at": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "exists",
+          "bytes",
+          "lines",
+          "modified_at"
         ],
         "type": "object"
       },
@@ -4378,6 +4462,58 @@
         ],
         "type": "object"
       },
+      "RetentionStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "last_deleted": {
+            "description": "Cumulative deletion count in this worker process, not the count of the last run.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_run_at": {
+            "type": "string"
+          },
+          "prompt_days": {
+            "description": "Retention days; nonpositive values disable this age threshold.",
+            "type": "integer"
+          },
+          "prompts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_days": {
+            "description": "Retention days; nonpositive values disable this age threshold.",
+            "type": "integer"
+          },
+          "requests": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "response_days": {
+            "description": "Retention days; nonpositive values disable this age threshold.",
+            "type": "integer"
+          },
+          "responses": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_days",
+          "prompt_days",
+          "response_days",
+          "requests",
+          "prompts",
+          "responses",
+          "last_run_at",
+          "last_deleted"
+        ],
+        "type": "object"
+      },
       "RoutingBreakerState": {
         "additionalProperties": false,
         "properties": {
@@ -6159,7 +6295,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.58"
+    "version": "v0.86.59"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -9392,7 +9528,34 @@
         "operationId": "get__admin_fallback",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FallbackStats"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Status or audit unavailable, or an incomplete operation. A failed response does not prove no side effects occurred."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -9406,10 +9569,58 @@
         ]
       },
       "post": {
+        "description": "Existing admin write permission required. Empty bodies and empty objects remain supported for the legacy console. Supplied reason must be nonblank after trimming and at most 1024 Unicode characters; whole body limit 8192 bytes. Intent audit must persist before execution. Completion audit has a separate bounded lifetime. Cleanup/replay and audit are not an atomic transaction, and retries are not idempotent. Inspect current state and audit before any deliberate retry after a failed or missing response.",
         "operationId": "post__admin_fallback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminOperationRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FallbackReplayResult"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid operation reason"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Status or audit unavailable, or an incomplete operation. A failed response does not prove no side effects occurred."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -16114,7 +16325,34 @@
         "operationId": "get__admin_retention",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionStatus"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Status or audit unavailable, or an incomplete operation. A failed response does not prove no side effects occurred."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -16128,10 +16366,58 @@
         ]
       },
       "post": {
+        "description": "Existing admin write permission required. Empty bodies and empty objects remain supported for the legacy console. Supplied reason must be nonblank after trimming and at most 1024 Unicode characters; whole body limit 8192 bytes. Intent audit must persist before execution. Completion audit has a separate bounded lifetime. Cleanup/replay and audit are not an atomic transaction, and retries are not idempotent. Inspect current state and audit before any deliberate retry after a failed or missing response.",
         "operationId": "post__admin_retention",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminOperationRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionStatus"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid operation reason"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Status or audit unavailable, or an incomplete operation. A failed response does not prove no side effects occurred."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

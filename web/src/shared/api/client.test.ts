@@ -523,6 +523,15 @@ describe("ApiClient", () => {
 });
 
 function compileTimeOperationContracts(client: ApiClient): void {
+  // Existing body-less callers remain valid; reviewed operations can send a reason.
+  void client.request(endpoints.domains.system.retention.run);
+  void client.request(endpoints.domains.system.retention.run, {});
+  void client.request(endpoints.domains.system.retention.run, { body: { reason: "정기 정리" } });
+  void client.request(endpoints.domains.system.fallback.replay, { body: { reason: "저장 복구" } });
+  // @ts-expect-error Optional does not mean untyped.
+  void client.request(endpoints.domains.system.retention.run, { body: { reason: 123 } });
+  // @ts-expect-error Operational requests only accept their declared fields.
+  void client.request(endpoints.domains.system.fallback.replay, { body: { force: true } });
   void client.request(endpoints.auth.login, {
     body: { email: "admin@example.test", password: "secret" },
   });

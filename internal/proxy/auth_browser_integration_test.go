@@ -112,6 +112,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	logger := store.NewAsyncLogger(db, 32, filepath.Join(scratch, "fallback.ndjson"))
 	seedBrowserChangeSetFixture(t, db)
 	seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
+	seedBrowserOperationsFixture(t, db, filepath.Join(scratch, "fallback.ndjson"))
 	logger.Start()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -123,7 +124,10 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	cfg.Upstream.APIKey = browserFixtureSecret(t)
 	cfg.Auth.JWTSecret = browserFixtureSecret(t)
 	cfg.Secret.GatewaySecret = browserFixtureSecret(t)
-	server, err := NewServer(cfg, db, logger, nil)
+	// Manual browser confirmations exercise the real retention worker. Do not
+	// start its background loop: only deliberate test actions may purge fixtures.
+	retention := store.NewRetentionWorker(db, cfg.Retention)
+	server, err := NewServer(cfg, db, logger, retention)
 	if err != nil {
 		t.Fatal("isolated gateway could not be initialized")
 	}
@@ -238,6 +242,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 		t.Fatal("actual browser emergency stop/resume audit pair missing or unexpected")
 	}
 	verifyBrowserChangeSetFixture(t, h.db)
+	verifyBrowserOperationsFixture(t, h.db)
 }
 
 func browserAuthWebDirectory(t *testing.T) string {

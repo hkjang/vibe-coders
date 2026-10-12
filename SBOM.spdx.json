@@ -2,10 +2,10 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "vibe-coders-v0.86.58-integrated-source-sbom",
-  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.58",
+  "name": "vibe-coders-v0.86.59-integrated-source-sbom",
+  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.59",
   "creationInfo": {
-    "created": "2026-10-12T17:02:17Z",
+    "created": "2026-10-12T19:36:59Z",
     "creators": [
       "Tool: Syft-1.51.0",
       "Tool: scripts/merge-source-sbom.mjs",
@@ -20,8 +20,8 @@
     {
       "name": "vibe-coders",
       "SPDXID": "SPDXRef-Package-vibe-coders",
-      "versionInfo": "0.86.58",
-      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@v0.86.58",
+      "versionInfo": "0.86.59",
+      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@v0.86.59",
       "filesAnalyzed": false,
       "licenseConcluded": "AGPL-3.0-only",
       "licenseDeclared": "AGPL-3.0-only",
@@ -30,7 +30,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/vibe-coders@0.86.58"
+          "referenceLocator": "pkg:golang/vibe-coders@0.86.59"
         }
       ]
     },
@@ -206,8 +206,8 @@
     },
     {
       "name": "golang.org/x/crypto",
-      "SPDXID": "SPDXRef-Package-go-golang.org-x-crypto-f9bcc7ebc6eb816b",
-      "versionInfo": "v0.52.0",
+      "SPDXID": "SPDXRef-Package-go-golang.org-x-crypto-ffc66d1b5ab3af99",
+      "versionInfo": "v0.56.0",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
@@ -217,7 +217,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/golang.org/x/crypto@v0.52.0"
+          "referenceLocator": "pkg:golang/golang.org/x/crypto@v0.56.0"
         }
       ]
     },
@@ -240,8 +240,8 @@
     },
     {
       "name": "golang.org/x/sys",
-      "SPDXID": "SPDXRef-Package-go-golang.org-x-sys-20e8af774d654494",
-      "versionInfo": "v0.45.0",
+      "SPDXID": "SPDXRef-Package-go-golang.org-x-sys-93a90b14b5dd68ac",
+      "versionInfo": "v0.47.0",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
@@ -251,7 +251,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/golang.org/x/sys@v0.45.0"
+          "referenceLocator": "pkg:golang/golang.org/x/sys@v0.47.0"
         }
       ]
     },
@@ -6945,7 +6945,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-go-golang.org-x-crypto-f9bcc7ebc6eb816b"
+      "relatedSpdxElement": "SPDXRef-Package-go-golang.org-x-crypto-ffc66d1b5ab3af99"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
@@ -6955,7 +6955,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-go-golang.org-x-sys-20e8af774d654494"
+      "relatedSpdxElement": "SPDXRef-Package-go-golang.org-x-sys-93a90b14b5dd68ac"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",

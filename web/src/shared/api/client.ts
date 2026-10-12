@@ -20,7 +20,7 @@ interface ApiRequestMetadata {
 }
 
 type ApiEndpointBody<Endpoint extends ApiEndpointBase> =
-  ApiEndpointData<Endpoint> extends { body: infer Body } ? Body : never;
+  ApiEndpointData<Endpoint> extends { body?: infer Body } ? Body : never;
 
 type ApiEndpointQuery<Endpoint extends ApiEndpointBase> =
   ApiEndpointData<Endpoint> extends { query?: infer Query }
@@ -36,14 +36,19 @@ export type ApiRequestOptions<Endpoint extends ApiEndpointBase> = Omit<
   ApiRequestMetadata &
   ([ApiEndpointBody<Endpoint>] extends [never]
     ? { readonly body?: never }
-    : { readonly body: ApiEndpointBody<Endpoint> }) &
+    : ApiEndpointData<Endpoint> extends { body: unknown }
+      ? { readonly body: ApiEndpointBody<Endpoint> }
+      : { readonly body?: ApiEndpointBody<Endpoint> }) &
   ([ApiEndpointQuery<Endpoint>] extends [never]
     ? { readonly query?: never }
     : { readonly query?: ApiEndpointQuery<Endpoint> });
 
-type ApiRequestArguments<Endpoint extends ApiEndpointBase> = [ApiEndpointBody<Endpoint>] extends [never]
-  ? [options?: ApiRequestOptions<Endpoint>]
-  : [options: ApiRequestOptions<Endpoint>];
+type ApiRequestArguments<Endpoint extends ApiEndpointBase> =
+  ApiEndpointData<Endpoint> extends {
+    body: unknown;
+  }
+    ? [options: ApiRequestOptions<Endpoint>]
+    : [options?: ApiRequestOptions<Endpoint>];
 
 interface InternalApiRequestOptions
   extends Omit<RequestInit, "body" | "method" | "signal">, ApiRequestMetadata {

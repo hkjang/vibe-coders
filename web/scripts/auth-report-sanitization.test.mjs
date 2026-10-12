@@ -39,6 +39,9 @@ const allowedScenarios = [
   "AUTH-LIVE-013",
   "AUTH-LIVE-014",
   "AUTH-LIVE-015",
+  "AUTH-LIVE-016",
+  "AUTH-LIVE-017",
+  "AUTH-LIVE-018",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -177,7 +180,7 @@ test("auth reporter emits only safe ID, status, duration and numeric source line
 test("auth reporter rejects non-allowlisted title IDs and ignores helper or unrelated source locations", async () => {
   const fixtures = [
     "AUTH-LIVE-000",
-    "AUTH-LIVE-016",
+    "AUTH-LIVE-019",
     "AUTH-LIVE-999",
     "AUTH-LIVE-01",
     "AUTH-LIVE-001suffix",
@@ -231,7 +234,9 @@ test("auth reporter allows only fixed scenarios and numeric lines from exact spe
             ? "change-set-live.spec.ts"
             : index === 14
               ? "resource-search-live.spec.ts"
-              : "access-live.spec.ts";
+              : index >= 15
+                ? "operations-live.spec.ts"
+                : "access-live.spec.ts";
     const file = index % 2 === 0 ? `/private/${sensitive}/${filename}` : `C:\\private\\${filename}`;
     const fixture = row(id, "passed", [{ title: sensitive, location: { file, line: index + 1, column: 1 } }]);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (${file}:${index + 21}:2)`;
