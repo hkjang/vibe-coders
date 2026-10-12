@@ -53,12 +53,18 @@
 /* Weekday/hour activity heatmap. The scale is relative to the busiest cell, so a quiet
    week is not painted as if it were busy. */
 .overview-heatmap-scroll {
+  /* Keep absolutely positioned screen-reader cells inside this scroll area. */
+  position: relative;
   overflow-x: auto;
+}
+
+.overview-usage-stack .range-picker button {
+  white-space: nowrap;
 }
 
 .overview-heatmap {
   border-collapse: collapse;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 .overview-heatmap th {
@@ -66,6 +72,7 @@
   color: var(--color-muted);
   font-weight: 650;
   text-align: center;
+  white-space: nowrap;
 }
 
 .overview-heat-cell {

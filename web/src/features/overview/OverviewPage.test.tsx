@@ -236,6 +236,7 @@ describe("OverviewPage", () => {
     await user.click(screen.getByRole("button", { name: "전체 새로고침" }));
 
     expect(await screen.findByText("새 상태 갱신에 실패해 마지막 정상 응답을 표시합니다.")).toBeVisible();
+    expect(screen.queryByText(/게이트웨이 상태 확인 요청에 응답했으며/)).not.toBeInTheDocument();
     expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
     expect(screen.queryByText("연결 끊김")).not.toBeInTheDocument();
   });
@@ -256,7 +257,7 @@ describe("OverviewPage", () => {
     }) as typeof apiClient.request);
     renderOverview();
 
-    expect(await screen.findByText(/게이트웨이는 요청을 처리할 수 있으며/)).toHaveTextContent("확인 중");
+    expect(await screen.findByText(/게이트웨이 상태 확인 요청에 응답했으며/)).toHaveTextContent("확인 중");
     expect(screen.getAllByText("확인 중").length).toBeGreaterThan(0);
     expect(screen.queryByText("정상")).not.toBeInTheDocument();
   });

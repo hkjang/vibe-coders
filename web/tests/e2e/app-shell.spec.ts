@@ -426,6 +426,14 @@ async function mockGateway(page: Page, options: MockGatewayOptions = {}): Promis
         return json({ status: "ready" });
       case "/admin/stats":
         return json(stats);
+      case "/admin/timeseries":
+        return json({
+          bucket: url.searchParams.get("bucket") ?? "day",
+          since: "2026-10-01T00:00:00Z",
+          points: [{ date: "2026-10-12", bucket: "2026-10-12", requests: 17, tokens: 250, cost_krw: 150 }],
+        });
+      case "/admin/heatmap":
+        return json({ since: "2026-10-01T00:00:00Z", cells: [{ day: 1, hour: 12, requests: 17 }] });
       case "/admin/ops/status":
         return json(opsStatus);
       case "/admin/ops/risk":
@@ -492,10 +500,133 @@ async function openOverview(page: Page, colorScheme: "dark" | "light" = "light")
   await mockGateway(page);
   await page.goto("overview");
   await expect(page.getByRole("heading", { name: "운영 개요" })).toBeVisible();
-  await expect(page.getByText("게이트웨이는 요청을 처리할 수 있으며, 운영 신호는")).toBeVisible();
+  await expect(page.getByText("게이트웨이 상태 확인 요청에 응답했으며, 운영 신호는")).toBeVisible();
   await expect(page.getByText("12,840")).toBeVisible();
   await expect(page.getByText("₩428,751")).toBeVisible();
 }
+
+test("운영 개요: 추이 기간을 새로고침과 탭 이동 뒤에도 복원한다", async ({ page }) => {
+  await mockGateway(page);
+  const windows: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/admin/timeseries") windows.push(url.searchParams.get("window") ?? "");
+  });
+  await page.goto("overview?tab=usage&trend=30d");
+  const range = page.getByRole("group", { name: "추이 기간" });
+  await expect(range.getByRole("button", { name: "최근 30일" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("img", { name: "최근 30일 요청 수" })).toBeVisible();
+  await range.getByRole("button", { name: "최근 24시간" }).click();
+  await expect(page).toHaveURL(/trend=24h/);
+  await expect(page.getByRole("img", { name: "최근 24시간 요청 수" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("img", { name: "최근 24시간 요청 수" })).toBeVisible();
+  await page.getByRole("tab", { name: "운영 상태", exact: true }).click();
+  await page.getByRole("tab", { name: "사용 현황", exact: true }).click();
+  await expect(range.getByRole("button", { name: "최근 24시간" })).toHaveAttribute("aria-pressed", "true");
+  const before = windows.length;
+  await page.getByRole("button", { name: "전체 새로고침", exact: true }).click();
+  await expect.poll(() => windows.length).toBe(before + 1);
+  expect(windows[0]).toBe("30d");
+  expect(windows.slice(1).every((value) => value === "24h")).toBe(true);
+});
+
+test("운영 개요: 모바일 부분 오류에서 키보드로 독립 재시도한다", async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  await mockGateway(page);
+  let failed = true;
+  await page.route("**/admin/stats", (route) =>
+    route.fulfill({
+      status: failed ? 503 : 200,
+      contentType: "application/json",
+      headers: { "X-Request-ID": "req_overview_partial" },
+      body: JSON.stringify(failed ? { error: { message: "Unavailable" } } : stats),
+    }),
+  );
+  await page.goto("overview?tab=usage");
+  await expect(page.getByRole("img", { name: "최근 7일 요청 수" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "요일과 시간대별 요청 수 (KST)" })).toBeVisible();
+  await expect(page.getByText("요청 ID: req_overview_partial")).toBeVisible();
+  await page.screenshot({ path: info.outputPath("overview-usage-partial-mobile.png"), fullPage: true });
+  await info.attach("layout-geometry", {
+    contentType: "application/json",
+    body: JSON.stringify(
+      await page.evaluate(() => ({
+        viewport: innerWidth,
+        document: document.documentElement.scrollWidth,
+        boxes: [...document.querySelectorAll("body *")]
+          .map((element) => {
+            const box = element.getBoundingClientRect();
+            return {
+              tag: element.tagName,
+              className: element.className,
+              x: box.x,
+              width: box.width,
+              right: box.right,
+              position: getComputedStyle(element).position,
+              overflow: getComputedStyle(element).overflowX,
+            };
+          })
+          .filter((box) => box.right > innerWidth),
+      })),
+    ),
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const activity = page.getByRole("table", { name: "요일과 시간대별 요청 수 (KST)" });
+  await expect(activity).toHaveCSS("font-size", "13px");
+  await expect(activity.getByRole("columnheader", { name: "요일", exact: true })).toHaveCSS(
+    "white-space",
+    "nowrap",
+  );
+  const scroll = page.getByLabel("요일·시간대 활동 표 영역");
+  await scroll.focus();
+  await scroll.press("ArrowRight");
+  await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  expect(await axeViolations(page)).toEqual([]);
+  failed = false;
+  const retry = page.getByRole("button", { name: "누적 사용량 다시 시도" });
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("table", { name: "응답 상태별 요청 수" })).toBeVisible();
+  await expect(page.getByText("요청 ID: req_overview_partial")).toHaveCount(0);
+  expect(await axeViolations(page)).toEqual([]);
+});
+
+test("운영 개요: 일시 오류 뒤에는 이전 활동을 표시하고 권한 거부 뒤에는 숨긴다", async ({ page }) => {
+  await mockGateway(page);
+  let code = 200;
+  await page.route("**/admin/heatmap?*", (route) =>
+    route.fulfill({
+      status: code,
+      contentType: "application/json",
+      headers: { "X-Request-ID": "req_activity_refresh" },
+      body: JSON.stringify(
+        code === 200
+          ? { since: "2026-10-01T00:00:00Z", cells: [{ day: 1, hour: 12, requests: 17 }] }
+          : { error: { message: "Unavailable" } },
+      ),
+    }),
+  );
+  await page.goto("overview?tab=usage");
+  const activity = page.getByRole("table", { name: "요일과 시간대별 요청 수 (KST)" });
+  await expect(activity).toBeVisible();
+  code = 503;
+  await page.getByRole("button", { name: "전체 새로고침", exact: true }).click();
+  await expect(page.getByText("요청 ID: req_activity_refresh")).toBeVisible();
+  await expect(activity).toBeVisible();
+  await expect(
+    page.getByText("마지막 정상 데이터를 표시합니다. 현재 상태와 다를 수 있습니다."),
+  ).toBeVisible();
+  code = 403;
+  await page.getByRole("button", { name: "활동 분포 다시 시도" }).click();
+  await expect(activity).toHaveCount(0);
+  await expect(page.getByRole("img", { name: "최근 7일 요청 수" })).toBeVisible();
+  await expect(page.getByText("마지막 정상 데이터를 표시합니다. 현재 상태와 다를 수 있습니다.")).toHaveCount(
+    0,
+  );
+});
 
 for (const [featureId, path, title] of [
   ["overview", "overview", "운영 개요"],

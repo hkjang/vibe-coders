@@ -1,34 +1,20 @@
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
-import { useQuery } from "@tanstack/react-query";
-import {
-  Activity,
-  CircleDollarSign,
-  DatabaseZap,
-  Gauge,
-  LockKeyhole,
-  RefreshCw,
-  Route,
-  ShieldAlert,
-} from "lucide-react";
+import { useIsFetching, useQuery, useQueryClient, type Query } from "@tanstack/react-query";
+import { Activity, RefreshCw } from "lucide-react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { FirstRunChecklist } from "@/features/overview/FirstRunChecklist";
 import { OverviewCapabilitiesTab } from "@/features/overview/OverviewCapabilitiesTab";
+import { OverviewStatusTab } from "@/features/overview/OverviewStatusTab";
 import { OverviewUsageTab } from "@/features/overview/OverviewUsageTab";
-import { healthStatusLabels, riskLevelLabels } from "@/config/ui-labels";
+import { OverviewTrendPanel } from "@/features/overview/OverviewTrendPanel";
+import { OverviewQueryFeedback } from "@/features/overview/OverviewQueryFeedback";
+import { overviewReadDenied } from "@/features/overview/overview-query-state";
+import { healthStatusLabels } from "@/config/ui-labels";
 import { FeatureReadOnlyBadge, MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
-import {
-  formatBytes,
-  formatInteger,
-  formatKRW,
-  formatMilliseconds,
-  formatPercent,
-  healthRangeLabels,
-  maxUpdatedAt,
-  refreshIntervalMs,
-} from "@/features/health/health-utils";
-import { HealthWidget, TimeRangePicker, UpdatedTime } from "@/features/health/health-ui";
+import { refreshIntervalMs } from "@/features/health/health-utils";
+import { TimeRangePicker, UpdatedTime } from "@/features/health/health-ui";
 import { useHealthRange } from "@/features/health/use-health-range";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
@@ -40,14 +26,18 @@ import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
 import "@/features/overview/overview.css";
 
-function ratio(part: number, total: number): number {
-  return total > 0 ? part / total : 0;
-}
-
 const tabIds = ["status", "usage", "capabilities"] as const;
 type TabId = (typeof tabIds)[number];
 
+const tabQueryFilter = {
+  predicate: (query: Query): boolean =>
+    query.queryKey[0] === "overview" ||
+    (query.queryKey[0] === "admin" && query.queryKey[1] === "capabilities"),
+};
+
 export function OverviewPage(): React.JSX.Element {
+  const queryClient = useQueryClient();
+  const tabFetching = useIsFetching(tabQueryFilter);
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const auth = useAuth();
@@ -67,7 +57,7 @@ export function OverviewPage(): React.JSX.Element {
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
-  const stats = useQuery({
+  const statsQuery = useQuery({
     queryKey: ["admin", "stats"],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.admin.stats, {
@@ -77,7 +67,7 @@ export function OverviewPage(): React.JSX.Element {
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
-  const routing = useQuery({
+  const routingQuery = useQuery({
     queryKey: ["admin", "routing", "health", range],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.admin.routing.health, {
@@ -89,7 +79,7 @@ export function OverviewPage(): React.JSX.Element {
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
-  const operations = useQuery({
+  const operationsQuery = useQuery({
     queryKey: ["admin", "ops", "risk"],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.admin.ops.risk, {
@@ -100,6 +90,22 @@ export function OverviewPage(): React.JSX.Element {
     refetchIntervalInBackground: false,
   });
 
+  const stats = {
+    ...statsQuery,
+    data: overviewReadDenied(statsQuery.error) ? undefined : statsQuery.data,
+    dataUpdatedAt: overviewReadDenied(statsQuery.error) ? 0 : statsQuery.dataUpdatedAt,
+  };
+  const routing = {
+    ...routingQuery,
+    data: overviewReadDenied(routingQuery.error) || !canReadRouting ? undefined : routingQuery.data,
+    dataUpdatedAt: overviewReadDenied(routingQuery.error) || !canReadRouting ? 0 : routingQuery.dataUpdatedAt,
+  };
+  const operations = {
+    ...operationsQuery,
+    data: overviewReadDenied(operationsQuery.error) ? undefined : operationsQuery.data,
+    dataUpdatedAt: overviewReadDenied(operationsQuery.error) ? 0 : operationsQuery.dataUpdatedAt,
+  };
+
   const routingNeedsAttention =
     canReadRouting &&
     (Boolean(routing.data?.degraded.length) ||
@@ -107,8 +113,6 @@ export function OverviewPage(): React.JSX.Element {
       Boolean(routing.data?.breakers.states.some((state) => state.phase !== "closed")));
   const opsStatus = operations.data?.status;
   const opsRisk = operations.data?.risk;
-  const fallbackUnavailable =
-    opsStatus?.partial_failures?.some((failure) => failure.component === "fallback") ?? false;
   const operationsNeedAttention =
     Boolean(opsRisk?.factors.length) ||
     Boolean(opsStatus?.partial_failures?.length) ||
@@ -142,20 +146,19 @@ export function OverviewPage(): React.JSX.Element {
         : overallState === "degraded"
           ? "warning"
           : "danger";
-  const updatedAt = maxUpdatedAt(
-    health.dataUpdatedAt,
-    stats.dataUpdatedAt,
-    canReadRouting ? routing.dataUpdatedAt : 0,
-    operations.dataUpdatedAt,
-  );
   const refreshing =
-    health.isFetching || stats.isFetching || (canReadRouting && routing.isFetching) || operations.isFetching;
+    health.isFetching ||
+    stats.isFetching ||
+    (canReadRouting && routing.isFetching) ||
+    operations.isFetching ||
+    tabFetching > 0;
 
   const refreshAll = (): void => {
     void Promise.all([
       health.refetch(),
       stats.refetch(),
       operations.refetch(),
+      queryClient.refetchQueries({ ...tabQueryFilter, type: "active" }),
       ...(canReadRouting ? [routing.refetch()] : []),
     ]);
   };
@@ -186,7 +189,9 @@ export function OverviewPage(): React.JSX.Element {
         <TimeRangePicker value={range} onChange={setRange} />
         <div className="status-meta">
           <span>백엔드 {auth.backendVersion}</span>
-          {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} /> : null}
+          {health.dataUpdatedAt > 0 ? (
+            <UpdatedTime timestamp={health.dataUpdatedAt} label="게이트웨이 응답" />
+          ) : null}
         </div>
       </div>
 
@@ -197,9 +202,9 @@ export function OverviewPage(): React.JSX.Element {
         <div>
           <h2 id="gateway-health-title">게이트웨이 상태</h2>
           {health.isPending ? <p>게이트웨이 연결을 확인하는 중입니다.</p> : null}
-          {health.data ? (
+          {health.data && !health.isError ? (
             <p>
-              게이트웨이는 요청을 처리할 수 있으며, 운영 신호는 <strong>{overallStatus}</strong> 상태입니다.
+              게이트웨이 상태 확인 요청에 응답했으며, 운영 신호는 <strong>{overallStatus}</strong> 상태입니다.
             </p>
           ) : null}
           {health.isError ? (
@@ -227,219 +232,34 @@ export function OverviewPage(): React.JSX.Element {
 
       <TabPanel id={tab} panelIdPrefix="overview">
         {tab === "status" ? <FirstRunChecklist stats={stats.data} status={opsStatus} /> : null}
-        {tab === "usage" ? <OverviewUsageTab stats={stats.data} /> : null}
+        {tab === "usage" ? (
+          <div className="overview-usage-stack">
+            <OverviewTrendPanel />
+            <OverviewQueryFeedback
+              label="누적 사용량"
+              error={stats.error}
+              fetching={stats.isFetching}
+              updatedAt={stats.dataUpdatedAt}
+              retry={() => void stats.refetch()}
+            />
+            {stats.isPending ? (
+              <p role="status">누적 사용량을 불러오는 중입니다.</p>
+            ) : stats.data && !overviewReadDenied(stats.error) ? (
+              <OverviewUsageTab stats={stats.data} />
+            ) : null}
+          </div>
+        ) : null}
         {tab === "capabilities" ? <OverviewCapabilitiesTab /> : null}
         {tab === "status" ? (
-          <section className="health-grid" aria-label="운영 영역 요약">
-            <HealthWidget
-              title="보존 트래픽과 비용"
-              description="저장된 요청 로그의 전체 보존 기간 집계"
-              icon={CircleDollarSign}
-              loading={stats.isPending}
-              error={stats.error}
-              onRetry={() => void stats.refetch()}
-              updatedAt={stats.dataUpdatedAt || undefined}
-              status={stats.data ? "보존 데이터" : undefined}
-            >
-              {stats.data ? (
-                <>
-                  <div className="metric-value">
-                    <strong>{formatKRW(stats.data.total_cost_krw)}</strong>
-                    <span>누적 비용</span>
-                  </div>
-                  <dl className="metric-pairs">
-                    <div>
-                      <dt>성공률</dt>
-                      <dd>
-                        {formatPercent(
-                          ratio(
-                            stats.data.by_status.find((item) => item.class === "2xx")?.requests ?? 0,
-                            stats.data.total_requests,
-                          ),
-                        )}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>전체 요청</dt>
-                      <dd>{formatInteger(stats.data.total_requests)}</dd>
-                    </div>
-                    <div>
-                      <dt>평균 지연</dt>
-                      <dd>{formatMilliseconds(stats.data.average_latency_ms)}</dd>
-                    </div>
-                    <div>
-                      <dt>전체 토큰</dt>
-                      <dd>{formatInteger(stats.data.total_tokens)}</dd>
-                    </div>
-                  </dl>
-                </>
-              ) : null}
-            </HealthWidget>
-
-            {stats.isPending || stats.data ? (
-              <HealthWidget
-                title="프로세스 런타임"
-                description="현재 게이트웨이 프로세스 시작 이후 로컬 지표"
-                icon={Gauge}
-                loading={stats.isPending}
-                updatedAt={stats.dataUpdatedAt || undefined}
-                status={stats.data ? "재시작 후" : undefined}
-              >
-                {stats.data ? (
-                  <>
-                    <div className="metric-value">
-                      <strong>{formatMilliseconds(stats.data.latency_quantiles.p95)}</strong>
-                      <span>P95 지연</span>
-                    </div>
-                    <dl className="metric-pairs">
-                      <div>
-                        <dt>캐시 적중률</dt>
-                        <dd>
-                          {formatPercent(
-                            ratio(stats.data.cache_hits, stats.data.cache_hits + stats.data.cache_misses),
-                          )}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>장애 전환</dt>
-                        <dd>{formatInteger(stats.data.failover_total)}</dd>
-                      </div>
-                      <div>
-                        <dt>첫 응답 P95</dt>
-                        <dd>{formatMilliseconds(stats.data.first_chunk_quantiles.p95)}</dd>
-                      </div>
-                    </dl>
-                  </>
-                ) : null}
-              </HealthWidget>
-            ) : null}
-
-            <HealthWidget
-              title="라우팅"
-              description={`${healthRangeLabels[range]} 선택 기간의 공급자와 회로 차단기`}
-              icon={Route}
-              loading={canReadRouting && routing.isPending}
-              error={canReadRouting ? routing.error : undefined}
-              onRetry={canReadRouting ? () => void routing.refetch() : undefined}
-              updatedAt={canReadRouting ? routing.dataUpdatedAt || undefined : undefined}
-              status={
-                canReadRouting
-                  ? routing.data
-                    ? routingNeedsAttention
-                      ? healthStatusLabels.degraded
-                      : healthStatusLabels.healthy
-                    : undefined
-                  : "권한 필요"
-              }
-              statusTone={canReadRouting ? (routingNeedsAttention ? "warning" : "success") : "muted"}
-            >
-              {!canReadRouting ? (
-                <div className="health-empty health-permission" role="status">
-                  <LockKeyhole aria-hidden="true" />
-                  <strong>라우팅 신호는 제한되어 있습니다.</strong>
-                  <span>관리자에게 routing:read 권한을 요청하세요.</span>
-                </div>
-              ) : routing.data ? (
-                <dl className="metric-pairs">
-                  <div>
-                    <dt>공급자</dt>
-                    <dd>{formatInteger(routing.data.providers.length)}</dd>
-                  </div>
-                  <div>
-                    <dt>저하 공급자</dt>
-                    <dd>{formatInteger(routing.data.degraded.length)}</dd>
-                  </div>
-                  <div>
-                    <dt>경고</dt>
-                    <dd>{formatInteger(routing.data.alerts.length)}</dd>
-                  </div>
-                  <div>
-                    <dt>열린 회로 차단기</dt>
-                    <dd>
-                      {formatInteger(
-                        routing.data.breakers.states.filter((state) => state.phase === "open").length,
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-              ) : null}
-            </HealthWidget>
-
-            <HealthWidget
-              title="운영 위험"
-              description="현재 설정과 운영 신호를 기준으로 산출한 위험도"
-              icon={ShieldAlert}
-              loading={operations.isPending}
-              error={operations.error}
-              onRetry={() => void operations.refetch()}
-              updatedAt={operations.dataUpdatedAt || undefined}
-              status={opsRisk ? riskLevelLabels[opsRisk.tier] : undefined}
-              statusTone={
-                opsRisk?.tier === "critical" || opsRisk?.tier === "high"
-                  ? "danger"
-                  : opsRisk?.tier === "medium"
-                    ? "warning"
-                    : "success"
-              }
-            >
-              {opsRisk ? (
-                <>
-                  <div className="metric-value">
-                    <strong>{opsRisk.score}</strong>
-                    <span>/ 100 위험 점수</span>
-                  </div>
-                  <p className="metric-note">
-                    {opsRisk.factors.length
-                      ? `확인이 필요한 요인 ${formatInteger(opsRisk.factors.length)}개`
-                      : "현재 탐지된 위험 요인이 없습니다."}
-                  </p>
-                </>
-              ) : null}
-            </HealthWidget>
-
-            {operations.isPending || operations.data ? (
-              <HealthWidget
-                title="운영 기반"
-                description="로깅, 대체 응답 파일과 저장 공간의 현재 현황"
-                icon={DatabaseZap}
-                loading={operations.isPending}
-                updatedAt={operations.dataUpdatedAt || undefined}
-                status={
-                  opsStatus
-                    ? operationsNeedAttention
-                      ? healthStatusLabels.attention
-                      : healthStatusLabels.normal
-                    : undefined
-                }
-                statusTone={operationsNeedAttention ? "warning" : "success"}
-              >
-                {opsStatus ? (
-                  <dl className="metric-pairs">
-                    <div>
-                      <dt>로그 대기열</dt>
-                      <dd>{formatInteger(opsStatus.logging.queue_depth)}</dd>
-                    </div>
-                    <div>
-                      <dt>누락 로그</dt>
-                      <dd>{formatInteger(opsStatus.logging.dropped)}</dd>
-                    </div>
-                    <div>
-                      <dt>대체 응답 파일 크기</dt>
-                      <dd>{fallbackUnavailable ? "확인 실패" : formatBytes(opsStatus.fallback.bytes)}</dd>
-                    </div>
-                    <div>
-                      <dt>디스크 사용</dt>
-                      <dd>
-                        {opsStatus.disk.available
-                          ? formatPercent(opsStatus.disk.used_percent / 100)
-                          : "확인 실패"}
-                      </dd>
-                    </div>
-                  </dl>
-                ) : null}
-              </HealthWidget>
-            ) : null}
-          </section>
+          <OverviewStatusTab
+            stats={stats}
+            routing={routing}
+            operations={operations}
+            range={range}
+            canReadRouting={canReadRouting}
+            routingNeedsAttention={routingNeedsAttention}
+            operationsNeedAttention={operationsNeedAttention}
+          />
         ) : null}
       </TabPanel>
     </div>
