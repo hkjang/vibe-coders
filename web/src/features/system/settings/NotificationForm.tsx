@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -39,6 +39,7 @@ function fromConfig(config: NotificationConfig) {
 interface NotificationFormProps {
   config: NotificationConfig;
   hasAdminWrite: boolean;
+  queryKey?: QueryKey;
 }
 
 export function NotificationForm(props: NotificationFormProps): React.JSX.Element {
@@ -52,7 +53,11 @@ export function NotificationForm(props: NotificationFormProps): React.JSX.Elemen
   );
 }
 
-function NotificationEditor({ config, hasAdminWrite }: NotificationFormProps): React.JSX.Element {
+function NotificationEditor({
+  config,
+  hasAdminWrite,
+  queryKey = systemSettingsKeys.notifications,
+}: NotificationFormProps): React.JSX.Element {
   const client = useQueryClient();
   const [error, setError] = useState<string>();
   const editor = useInlineSettingsDraft({ config, fromConfig, onDiscard: () => setError(undefined) });
@@ -72,6 +77,7 @@ function NotificationEditor({ config, hasAdminWrite }: NotificationFormProps): R
       () =>
         apiClient.request(endpoints.domains.system.notifications.save, {
           routeId,
+          retryUnauthorized: false,
           body: {
             enabled: draft.enabled,
             channel: draft.channel,
@@ -83,10 +89,10 @@ function NotificationEditor({ config, hasAdminWrite }: NotificationFormProps): R
       (result) => {
         // Cancel pre-commit reads before publishing this accepted snapshot.
         // Cancellation is synchronous; do not introduce an auth-sensitive await.
-        void client.cancelQueries({ queryKey: systemSettingsKeys.notifications, exact: true });
+        void client.cancelQueries({ queryKey, exact: true });
         // Defense in depth: never retain a raw webhook returned by an older server.
         const latest = { ...result, webhook_url: result.webhook_url ? "********" : "" };
-        client.setQueryData(systemSettingsKeys.notifications, latest);
+        client.setQueryData(queryKey, latest);
         editor.rebase(latest);
         setError(undefined);
         toast.success("알림 설정을 저장했습니다.");

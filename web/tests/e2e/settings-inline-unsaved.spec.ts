@@ -25,7 +25,7 @@ const user = {
   features: { "system.settings": true },
 };
 
-function bootstrap(authenticated: boolean, canWrite: boolean): UiBootstrapResponse {
+function bootstrap(authenticated: boolean, canWrite: boolean, featureReadOnly = false): UiBootstrapResponse {
   const scopes = canWrite ? user.scopes : ["admin:read"];
   return {
     backend_version: "v0.86.6",
@@ -60,7 +60,7 @@ function bootstrap(authenticated: boolean, canWrite: boolean): UiBootstrapRespon
         status: "preview",
         risk_level: "critical",
         required_permission: "admin:read",
-        read_only: false,
+        read_only: featureReadOnly,
         enabled_roles: ["admin"],
         rollout_percent: 100,
         fallback_enabled: true,
@@ -111,6 +111,8 @@ async function installGateway(context: BrowserContext) {
   const gates = new Map<string, Promise<void>>();
   const releases = new Map<string, () => void>();
   let canWrite = true;
+  let featureReadOnly = false;
+  let operationsDenied = false;
   let loginCount = 0;
   let logoutCount = 0;
   let logoutResponseCount = 0;
@@ -150,7 +152,7 @@ async function installGateway(context: BrowserContext) {
         user: { ...user, scopes: canWrite ? user.scopes : ["admin:read"] },
       });
     }
-    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(authenticated, canWrite));
+    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(authenticated, canWrite, featureReadOnly));
     if (call === "GET /health") return json({ status: "ok" });
     if (call === "GET /ready") return json({ status: "ready" });
     if (url.pathname.startsWith("/admin/") || url.pathname.startsWith("/auth/")) {
@@ -175,6 +177,12 @@ async function installGateway(context: BrowserContext) {
           ],
         });
       if (call === "GET /admin/mcp/oauth") return json({ enabled: false, active: false });
+      if (
+        operationsDenied &&
+        request.method() === "GET" &&
+        ["/admin/retention", "/admin/fallback", notificationPath].includes(url.pathname)
+      )
+        return json({ error: { message: "fixture access denied" } }, 403);
       if (call === "GET /admin/retention")
         return json({
           request_days: 30,
@@ -315,6 +323,12 @@ async function installGateway(context: BrowserContext) {
     queue: (kind: Kind, ...next: Outcome[]) => outcomes[kind].push(...next),
     readOnly: () => {
       canWrite = false;
+    },
+    featureReadOnly: () => {
+      featureReadOnly = true;
+    },
+    denyOperations: () => {
+      operationsDenied = true;
     },
     advance: (kind: Kind) => {
       if (kind === "sso") sso = { ...sso, client_id: "public-client-newer", version: (sso.version ?? 0) + 1 };
@@ -759,6 +773,45 @@ test("SSO 저장된 500 재적재 실패는 비밀 입력을 지우고 재저장
   await expect(saveButton(page, "sso")).toBeEnabled();
   expect(api.writes).toHaveLength(1);
   await noStoredDraft(page);
+});
+
+for (const mode of ["feature", "scope"] as const) {
+  test(`운영 확인 중 ${mode} 읽기 전용 전환은 사유를 보존하고 실행을 잠근다`, async ({ page, api }) => {
+    await open(page, "notification");
+    await page.getByRole("button", { name: "지금 정리 실행", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "지금 정리 실행", exact: true });
+    await dialog.getByLabel(/변경 사유/u).fill("운영 확인 초안");
+    await dialog.getByLabel(/확인 문구/u).fill("데이터 정리");
+    await expect(dialog.getByRole("button", { name: "정리 실행", exact: true })).toBeEnabled();
+    if (mode === "feature") api.featureReadOnly();
+    else api.readOnly();
+    const response = page.waitForResponse((item) => new URL(item.url()).pathname === "/admin/ui-bootstrap");
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await (await response).finished();
+    await expect(dialog.getByLabel(/변경 사유/u)).toHaveValue("운영 확인 초안");
+    await expect(dialog.getByLabel(/확인 문구/u)).toHaveValue("데이터 정리");
+    await expect(dialog.getByRole("button", { name: "정리 실행", exact: true })).toBeDisabled();
+    await page.keyboard.press("Enter");
+    expect(api.writes).toEqual([]);
+    expect(api.tests).toEqual([]);
+    await page.keyboard.press("Escape");
+    for (const name of ["지금 정리 실행", "DB로 재처리", "테스트 메시지 발송", "알림 설정 저장"])
+      await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
+  });
+}
+
+test("운영 재조회가 거부되면 이전 상태와 알림 편집기를 감춘다", async ({ page, api }) => {
+  await open(page, "notification");
+  await expect(page.getByText("public-fixture.ndjson", { exact: true })).toBeVisible();
+  api.denyOperations();
+  await page.getByRole("button", { name: "새로고침", exact: true }).click();
+  await expect(page.getByText("public-fixture.ndjson", { exact: true })).toBeHidden();
+  await expect(draftField(page, "notification")).toBeHidden();
+  await expect(page.getByText("저장된 요청", { exact: true })).toBeHidden();
+  for (const name of ["지금 정리 실행", "DB로 재처리", "테스트 메시지 발송"])
+    await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
+  expect(api.writes).toEqual([]);
+  expect(api.tests).toEqual([]);
 });
 
 test("알림 마스킹값·공백은 서버로 전송하지 않고 읽기 전용 권한은 두 폼 쓰기를 막는다", async ({

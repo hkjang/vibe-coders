@@ -114,23 +114,26 @@ export function useAuthEvents(limit: number) {
   });
 }
 
-export function useRetentionStatus() {
+export function useRetentionStatus(owner: string) {
   return useQuery({
-    queryKey: systemSettingsKeys.retention,
+    queryKey: [...systemSettingsKeys.retention, owner],
+    gcTime: 0,
     queryFn: ({ signal }) => apiClient.request(system.retention.status, { signal, routeId }),
   });
 }
 
-export function useFallbackStats() {
+export function useFallbackStats(owner: string) {
   return useQuery({
-    queryKey: systemSettingsKeys.fallback,
+    queryKey: [...systemSettingsKeys.fallback, owner],
+    gcTime: 0,
     queryFn: ({ signal }) => apiClient.request(system.fallback.status, { signal, routeId }),
   });
 }
 
-export function useNotificationConfig() {
+export function useNotificationConfig(owner: string) {
   return useQuery({
-    queryKey: systemSettingsKeys.notifications,
+    queryKey: [...systemSettingsKeys.notifications, owner],
+    gcTime: 0,
     queryFn: ({ signal }) => apiClient.request(system.notifications.config, { signal, routeId }),
   });
 }

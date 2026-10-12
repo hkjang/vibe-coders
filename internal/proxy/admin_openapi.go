@@ -633,6 +633,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "get /admin/retention", "post /admin/retention", "get /admin/fallback", "post /admin/fallback":
+		enrichAdminOperationOpenAPI(route, strings.ToLower(method), op, responses)
 	case "post /admin/resource-search":
 		enrichResourceSearchOpenAPI(op, responses)
 	case "get /health":
@@ -1106,6 +1108,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range resourceSearchOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range adminOperationOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas

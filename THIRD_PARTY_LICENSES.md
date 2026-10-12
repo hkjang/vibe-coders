@@ -1,6 +1,6 @@
 # Third-party licenses
 
-이 문서는 Vibe Coders v0.86.58의 Go 실행 바이너리와 pnpm 잠금 그래프를 기준으로 생성한 통합 의존성 목록입니다.
+이 문서는 Vibe Coders v0.86.59의 Go 실행 바이너리와 pnpm 잠금 그래프를 기준으로 생성한 통합 의존성 목록입니다.
 React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포함하며, 전체 라이선스 원문과 저작권 표시는 각 배포 패키지의 `LICENSE*` 파일을 따릅니다.
 
 ## Go gateway dependencies
@@ -17,9 +17,9 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `github.com/jackc/puddle/v2` | v2.2.2 | MIT |
 | `github.com/remyoudompheng/bigfft` | v0.0.0-20230129092748-24d4a6f8daec | BSD-3-Clause |
 | `github.com/sijms/go-ora/v2` | v2.9.0 | MIT |
-| `golang.org/x/crypto` | v0.52.0 | BSD-3-Clause |
+| `golang.org/x/crypto` | v0.56.0 | BSD-3-Clause |
 | `golang.org/x/sync` | v0.22.0 | BSD-3-Clause |
-| `golang.org/x/sys` | v0.45.0 | BSD-3-Clause |
+| `golang.org/x/sys` | v0.47.0 | BSD-3-Clause |
 | `golang.org/x/text` | v0.41.0 | BSD-3-Clause |
 | `modernc.org/libc` | v1.55.3 | BSD-3-Clause |
 | `modernc.org/mathutil` | v1.6.0 | BSD-3-Clause |
@@ -423,4 +423,4 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 - 최종 Distroless 이미지의 운영체제 구성요소는 릴리스 이미지 digest를 대상으로 별도 Syft 스캔해야 합니다.
 - `seed.sql`, `.gitframe/`, `output/`은 릴리스 및 커밋 범위에서 제외됩니다.
 
-재생성: `scripts/generate-source-sbom.sh v0.86.58`
+재생성: `scripts/generate-source-sbom.sh v0.86.59`

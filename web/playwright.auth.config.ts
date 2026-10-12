@@ -23,6 +23,7 @@ export default defineConfig({
     "recovery-live.spec.ts",
     "change-set-live.spec.ts",
     "resource-search-live.spec.ts",
+    "operations-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

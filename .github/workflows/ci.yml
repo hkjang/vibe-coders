@@ -308,7 +308,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.58
+      SOURCE_SBOM_VERSION: v0.86.59
       GO_VERSION: 1.26.9
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0
@@ -393,6 +393,13 @@ jobs:
         env:
           SYFT_BIN: ${{ steps.syft.outputs.cmd }}
         run: bash scripts/generate-source-sbom.sh "$SOURCE_SBOM_VERSION"
+
+      - name: Integrated Go and frontend module high vulnerability gate
+        # Module inventory also covers vulnerable code not currently imported by
+        # the executable. Do not silently reintroduce it through a later import.
+        run: |
+          GRYPE_CHECK_FOR_APP_UPDATE=false GRYPE_DB_REQUIRE_UPDATE_CHECK=true \
+            grype sbom:SBOM.spdx.json --fail-on high --output table
 
       - name: Verify canonical SBOM and license files are current
         run: |

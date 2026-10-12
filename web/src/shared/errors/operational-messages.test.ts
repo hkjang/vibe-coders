@@ -5,6 +5,12 @@ import { operationalMessage, safeAppErrorMessage } from "@/shared/errors/operati
 
 describe("operationalMessage", () => {
   it.each([
+    ["invalid_operation_reason", "사유는 1~1,024자입니다."],
+    ["operation_audit_unavailable", "감사 저장 실패: 실행 안 됨."],
+    ["operation_result_unconfirmed", "실행 여부 불명: 감사·상태 확인 후 재실행하세요."],
+    ["retention_run_incomplete", "실패 또는 부분 완료: 감사·상태를 확인하세요."],
+    ["fallback_replay_failed", "실패 또는 부분 완료: 감사·상태를 확인하세요."],
+    ["retention_status_unavailable", "건수 조회 실패: 정리 결과 확인 필요."],
     ["provider_degraded", "공급자 상태 점수가 임계값보다 낮습니다."],
     ["timeouts_detected", "선택 기간에 시간 초과 신호가 감지되었습니다."],
     ["rate_limit_detected", "선택 기간에 HTTP 429 응답이 감지되었습니다."],
