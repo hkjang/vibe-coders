@@ -21,6 +21,7 @@ import {
 } from "@/features/observability/traces/trace-utils";
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { uiLabels } from "@/config/ui-labels";
+import { MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
 import { isAppError } from "@/shared/api/error";
 import type { AppRequestSummary } from "@/shared/api/schemas";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
@@ -264,7 +265,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
     <div className="page-stack trace-page">
       <header className="page-header">
         <div>
-          <p className="eyebrow">관측 · {uiLabels.previewReadOnly}</p>
+          <MigrationEyebrow fallbackStatus="preview_read_only" prefix="관측" />
           <h1 ref={pageHeadingRef} tabIndex={-1}>
             추적 탐색기
           </h1>

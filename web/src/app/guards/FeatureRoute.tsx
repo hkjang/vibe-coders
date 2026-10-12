@@ -33,6 +33,7 @@ export function FeatureRoute({ feature, children }: FeatureRouteProps): React.JS
         featureId: runtimeFeature.featureId,
         readOnly: effective.readOnly,
         permitted: effective.permitted,
+        status: effective.status,
       }}
     >
       {children ?? <FeatureUnavailable />}

@@ -18,6 +18,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import "@/features/gateway/gateway.css";
 import { useBalancerState, useHealthActions } from "@/features/gateway/health/use-health-actions";
 import { healthStatusLabels, uiLabels } from "@/config/ui-labels";
+import { MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
 import {
   formatInteger,
   formatMilliseconds,
@@ -179,7 +180,7 @@ export function GatewayHealthPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">{runtimeReadonly ? uiLabels.previewReadOnly : "미리보기"}</div>
+          <MigrationEyebrow />
           <h1>게이트웨이 상태</h1>
           <p>게이트웨이 연결, 요청 준비 상태와 공급자 라우팅 상태를 안전하게 조회합니다.</p>
         </div>

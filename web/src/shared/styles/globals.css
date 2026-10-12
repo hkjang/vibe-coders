@@ -483,6 +483,7 @@ kbd {
 }
 .page-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
@@ -493,8 +494,14 @@ kbd {
 }
 .page-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  max-width: 100%;
+}
+.page-actions > * {
+  flex-shrink: 0;
+  max-width: 100%;
 }
 .eyebrow {
   margin-bottom: var(--space-1);
@@ -1220,7 +1227,7 @@ kbd {
   }
   .page-actions {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
   }
   .status-meta {
     justify-items: start;

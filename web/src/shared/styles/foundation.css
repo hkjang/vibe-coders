@@ -1251,6 +1251,18 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+@media (max-width: 47.9375rem) {
+  .section-card-header {
+    flex-direction: column;
+  }
+  .section-card-actions {
+    max-width: 100%;
+  }
+  .section-card-actions > * {
+    flex-shrink: 0;
+    max-width: 100%;
+  }
+}
 .section-card-body {
   display: grid;
   gap: var(--space-3);

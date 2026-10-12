@@ -15,7 +15,6 @@ import { useText2SqlQueries, type Text2SqlTabId } from "@/features/text2sql/over
 import { isAppError } from "@/shared/api/error";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { ErrorState } from "@/shared/components/state/PageStates";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Select } from "@/shared/components/ui/Select";
@@ -85,7 +84,7 @@ export function Text2SqlPage(): React.JSX.Element {
       <div className="page-stack">
         <PageHeader
           title="Text2SQL"
-          status="legacy"
+          readOnly={!canWrite}
           description="자연어 질문을 읽기 전용 SQL로 변환하는 파이프라인을 운영합니다."
           legacyHref="/admin#/text2sql"
         />
@@ -105,12 +104,11 @@ export function Text2SqlPage(): React.JSX.Element {
     <div className="page-stack">
       <PageHeader
         title="Text2SQL"
-        status="legacy"
+        readOnly={!canWrite}
         description="사용자는 vibe/text2sql-* 가상 모델을 호출하고, 게이트웨이가 SQL을 생성·검증하고 선택적으로 실행합니다."
         legacyHref="/admin#/text2sql"
         actions={
           <>
-            {canWrite ? null : <Badge tone="info">읽기 전용</Badge>}
             <label className="t2s-inline-field">
               <span>조회 기간</span>
               <Select

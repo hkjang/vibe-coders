@@ -1,7 +1,11 @@
+import type { MigrationStatus } from "@/config/migration-registry";
+
 export interface FeatureAccess {
   featureId: string;
   permitted: boolean;
   readOnly: boolean;
+  /** Resolved by the route guard; presentation only, never a permission grant. */
+  status?: MigrationStatus;
 }
 
 export const skillMutationOwners = ["agents.skills"] as const;

@@ -6,8 +6,8 @@ import { NavLink } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featurePath, resolveFeature } from "@/config/migration-registry";
 import { navigationGroups } from "@/config/navigation";
-import { migrationStatusLabels, uiLabels } from "@/config/ui-labels";
-import { Badge } from "@/shared/components/ui/Badge";
+import { uiLabels } from "@/config/ui-labels";
+import { MigrationStatusBadge } from "@/shared/components/page/MigrationStatus";
 import { Button } from "@/shared/components/ui/Button";
 import { usePreferences } from "@/shared/stores/preferences";
 
@@ -101,9 +101,7 @@ export function Sidebar({ mobileTriggerRef }: SidebarProps): React.JSX.Element {
                         </span>
                         <span className="nav-copy">{feature.title}</span>
                         {effective.status !== "stable" ? (
-                          <Badge tone={effective.status === "legacy" ? "warning" : "info"}>
-                            {migrationStatusLabels[effective.status]}
-                          </Badge>
+                          <MigrationStatusBadge status={effective.status} />
                         ) : null}
                       </NavLink>
                     </li>

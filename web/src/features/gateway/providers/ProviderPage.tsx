@@ -26,9 +26,8 @@ import { useProviderCatalogQueries } from "@/features/gateway/providers/use-prov
 import { useProviderDialogFocus } from "@/features/gateway/providers/use-provider-dialog-focus";
 import { isHealthRange, type HealthRange } from "@/features/health/health-utils";
 import { TimeRangePicker } from "@/features/health/health-ui";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { uiLabels } from "@/config/ui-labels";
+import { FeatureReadOnlyBadge, MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { isProviderRef } from "@/shared/api/provider-ref";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
@@ -214,12 +213,12 @@ export function ProviderPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">{canWrite ? "미리보기" : uiLabels.previewReadOnly}</div>
+          <MigrationEyebrow />
           <h1>공급자</h1>
           <p>AI 공급자 연결과 SLO를 등록·수정하고 선택 기간의 운영 상태를 확인합니다.</p>
         </div>
         <div className="page-actions">
-          {canWrite ? null : <Badge tone="info">{uiLabels.readOnly}</Badge>}
+          <FeatureReadOnlyBadge readOnly={!canWrite} />
           {showLegacyAdmin ? (
             <LegacyLink className="button button-secondary button-default" href="/admin#/settings">
               기존 화면에서 열기 <ExternalLink aria-hidden="true" />
