@@ -16,7 +16,8 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { FirstRunChecklist } from "@/features/overview/FirstRunChecklist";
 import { OverviewCapabilitiesTab } from "@/features/overview/OverviewCapabilitiesTab";
 import { OverviewUsageTab } from "@/features/overview/OverviewUsageTab";
-import { healthStatusLabels, riskLevelLabels, uiLabels } from "@/config/ui-labels";
+import { healthStatusLabels, riskLevelLabels } from "@/config/ui-labels";
+import { FeatureReadOnlyBadge, MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
 import {
   formatBytes,
   formatInteger,
@@ -163,11 +164,12 @@ export function OverviewPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">{uiLabels.previewReadOnly}</div>
+          <MigrationEyebrow fallbackStatus="preview_read_only" />
           <h1>운영 개요</h1>
           <p>게이트웨이 상태, 트래픽, 비용과 위험 신호를 한 화면에서 확인합니다.</p>
         </div>
         <div className="page-actions">
+          <FeatureReadOnlyBadge readOnly />
           <Badge tone={overallTone}>{overallStatus}</Badge>
           {showLegacyAdmin ? (
             <LegacyLink className="button button-secondary button-default" href="/admin#/dashboard">

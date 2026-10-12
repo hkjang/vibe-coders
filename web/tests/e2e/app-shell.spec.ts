@@ -497,6 +497,40 @@ async function openOverview(page: Page, colorScheme: "dark" | "light" = "light")
   await expect(page.getByText("₩428,751")).toBeVisible();
 }
 
+for (const [featureId, path, title] of [
+  ["overview", "overview", "운영 개요"],
+  ["gateway.health", "gateway/health", "게이트웨이 상태"],
+  ["gateway.providers", "gateway/providers", "공급자"],
+  ["gateway.models", "gateway/models", "모델"],
+  ["system.health", "system/health", "시스템 상태"],
+] as const) {
+  test(`${title} 사용자 정의 제목도 실제 전환 상태를 새로고침 없이 반영한다`, async ({ page }) => {
+    const payload = structuredClone(bootstrap);
+    const feature = payload.migration_registry.find((item) => item.feature_id === featureId);
+    if (!feature) throw new Error("Missing fixture feature");
+    feature.status = "stable";
+    feature.read_only = true;
+    await mockGateway(page, { bootstrapPayload: payload });
+    await page.goto(path);
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(page.getByRole("status", { name: "화면 전환 상태", exact: true })).toHaveText("정식");
+    feature.status = "preview_read_only";
+    const response = page.waitForResponse((item) => new URL(item.url()).pathname === "/admin/ui-bootstrap");
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await (await response).finished();
+    await expect(page.getByRole("status", { name: "화면 전환 상태", exact: true })).toHaveText(
+      "읽기 전용 미리보기",
+    );
+    await expect(page.locator(`.app-sidebar a[href="/app/${path}"]`).first()).toContainText(
+      "읽기 전용 미리보기",
+    );
+    await page.reload();
+    await expect(page.getByRole("status", { name: "화면 전환 상태", exact: true })).toHaveText(
+      "읽기 전용 미리보기",
+    );
+  });
+}
+
 test("opens the command palette on a deep link without CSP or external asset errors", async ({ page }) => {
   const policyErrors: string[] = [];
   const assetRequests: string[] = [];

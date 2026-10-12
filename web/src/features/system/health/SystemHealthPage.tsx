@@ -14,6 +14,7 @@ import {
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { healthStatusLabels, riskLevelLabels, uiLabels } from "@/config/ui-labels";
+import { MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
 import {
   formatBytes,
   formatInteger,
@@ -177,7 +178,7 @@ export function SystemHealthPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">{uiLabels.previewReadOnly}</div>
+          <MigrationEyebrow fallbackStatus="preview_read_only" />
           <h1>시스템 상태</h1>
           <p>로깅, 저장 공간, 보안 설정과 운영 위험의 현재 현황을 확인합니다.</p>
         </div>

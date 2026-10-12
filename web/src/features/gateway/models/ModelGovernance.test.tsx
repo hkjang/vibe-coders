@@ -93,7 +93,8 @@ describe("ModelPage governance", () => {
       if (!(header instanceof HTMLElement)) throw new Error("missing model page header");
       expect(within(header).getByText("미리보기", { exact: true })).toBeVisible();
       expect(within(header).getByText("카탈로그 조회 전용", { exact: true })).toBeVisible();
-      expect(within(header).queryByText("읽기 전용", { exact: true })).not.toBeInTheDocument();
+      if (readOnly) expect(within(header).getByText("읽기 전용", { exact: true })).toBeVisible();
+      else expect(within(header).queryByText("읽기 전용", { exact: true })).not.toBeInTheDocument();
       expect(within(header).queryByText("읽기 전용 미리보기", { exact: true })).not.toBeInTheDocument();
       const add = screen.getByRole("button", { name: "계약 추가" });
       if (readOnly) expect(add).toBeDisabled();
