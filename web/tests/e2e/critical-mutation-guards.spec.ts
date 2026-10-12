@@ -10,6 +10,8 @@ const test = base.extend<{
     disabled: (value: boolean) => void;
     denyNext: () => void;
     refreshes: () => number;
+    traffic: (value: number | undefined) => void;
+    readUnavailable: (value: boolean) => void;
   };
 }>({
   critical: async ({ context, baseURL, gateway }, run) => {
@@ -19,11 +21,31 @@ const test = base.extend<{
     let denied = false;
     let refreshes = 0;
     const writes: unknown[] = [];
+    let inflight: number | undefined = 3;
+    let unavailable = false;
     await context.route(new URL("/admin/kill-switch", baseURL).href, async (route) => {
       const request = route.request();
       expect(request.headers().authorization).toBe("Bearer public-editor-access");
       if (request.method() === "GET") {
-        await route.fulfill({ json: { disabled: stopped } });
+        if (unavailable) {
+          await route.fulfill({ status: 503, json: { error: { code: "kill_switch_state_unavailable" } } });
+          return;
+        }
+        await route.fulfill({
+          json: {
+            disabled: stopped,
+            ...(inflight === undefined
+              ? {}
+              : {
+                  traffic: {
+                    scope: "responding_process",
+                    instance_ref: "process_0123456789abcdef",
+                    observed_at: "2026-10-12T02:00:00Z",
+                    proxy_inflight: inflight,
+                  },
+                }),
+          },
+        });
         return;
       }
       expect(request.method()).toBe("POST");
@@ -61,6 +83,12 @@ const test = base.extend<{
         denied = true;
       },
       refreshes: () => refreshes,
+      traffic: (value) => {
+        inflight = value;
+      },
+      readUnavailable: (value) => {
+        unavailable = value;
+      },
     });
   },
 });
@@ -80,7 +108,7 @@ async function runtime(page: Page) {
 }
 const entry = (page: Page, action: "kill" | "policy") =>
   page.getByRole("button", {
-    name: action === "kill" ? "모든 /v1 호출 즉시 차단" : `${policy.name} 사용`,
+    name: action === "kill" ? "새 요청 긴급 차단" : `${policy.name} 사용`,
     exact: true,
   });
 const dialog = (page: Page, action: "kill" | "policy") =>
@@ -89,7 +117,60 @@ const dialog = (page: Page, action: "kill" | "policy") =>
     exact: true,
   });
 const confirm = (page: Page, action: "kill" | "policy") =>
-  dialog(page, action).getByRole("button", { name: action === "kill" ? "즉시 차단" : "사용", exact: true });
+  dialog(page, action).getByRole("button", { name: action === "kill" ? "긴급 차단" : "사용", exact: true });
+
+async function confirmTarget(page: Page) {
+  const review = dialog(page, "kill");
+  await review.getByRole("textbox", { name: "변경 사유", exact: true }).fill(reason);
+  await expect(confirm(page, "kill")).toBeDisabled();
+  await review.getByRole("textbox", { name: "확인 문구", exact: true }).fill("게이트웨이 전체 정지");
+}
+
+for (const stopped of [false, true]) {
+  test(`${stopped ? "정지" : "운영"} 상태 재조회 실패는 과거 상태로 구분하고 복구만으로 변경하지 않는다`, async ({
+    page,
+    critical,
+  }) => {
+    critical.disabled(stopped);
+    await login(page);
+    const status = stopped ? "정지 중" : "정상 운영";
+    const action = page.getByRole("button", {
+      name: stopped ? "정상 운영 재개" : "새 요청 긴급 차단",
+      exact: true,
+    });
+    await expect(page.getByText(status, { exact: true })).toBeVisible();
+    critical.readUnavailable(true);
+    await page.getByRole("button", { name: "긴급 정지 상태 다시 확인", exact: true }).click();
+    await expect(page.getByText(`마지막 확인: ${status}`, { exact: true })).toBeVisible();
+    await expect(page.getByText(status, { exact: true })).toBeHidden();
+    await expect(page.getByText("게이트웨이가 정지 상태입니다.", { exact: true })).toBeHidden();
+    await expect(action).toBeDisabled();
+    await expect(page.getByRole("button", { name: "긴급 정지 상태 다시 확인", exact: true })).toBeEnabled({
+      timeout: 10000,
+    });
+    critical.readUnavailable(false);
+    await page.getByRole("button", { name: "긴급 정지 상태 다시 확인", exact: true }).click();
+    await expect(action).toBeEnabled();
+    await expect(page.getByText(status, { exact: true })).toBeVisible();
+    expect(critical.writes).toEqual([]);
+  });
+}
+
+test("현재 트래픽은 응답한 서버 범위로 표시하고 누락을 0으로 바꾸지 않는다", async ({ page, critical }) => {
+  await login(page);
+  const observation = page.getByRole("region", { name: "응답한 서버의 현재 트래픽" });
+  await expect(observation).toContainText("3건");
+  await expect(observation).toContainText("전체 서버 합계가 아니며");
+  await expect(observation).toContainText("process_0123456789abcdef");
+  critical.traffic(0);
+  await page.getByRole("button", { name: "긴급 정지 상태 다시 확인", exact: true }).click();
+  await expect(observation).toContainText("0건");
+  critical.traffic(undefined);
+  await page.getByRole("button", { name: "긴급 정지 상태 다시 확인", exact: true }).click();
+  await expect(observation).toBeHidden();
+  await expect(page.getByText("요청 수 관측값이 없습니다.", { exact: true })).toBeVisible();
+  expect(critical.writes).toEqual([]);
+});
 
 for (const mode of ["flag", "status"] as const) {
   test(`${mode} 읽기 전용은 긴급 정지와 정책 사용 진입을 막고 조회를 유지한다`, async ({
@@ -117,8 +198,7 @@ for (const action of ["kill", "policy"] as const) {
     }) => {
       await login(page);
       await entry(page, action).click();
-      if (action === "kill")
-        await dialog(page, action).getByRole("textbox", { name: "변경 사유", exact: true }).fill(reason);
+      if (action === "kill") await confirmTarget(page);
       await expect(confirm(page, action)).toBeEnabled();
       if (restriction === "feature") gateway.readonly("flag");
       else gateway.writable(false);
@@ -161,11 +241,14 @@ for (const action of ["kill", "policy"] as const) {
       gateway.reply(1, { status: 401, body: { error: { message: "public unauthorized" } }, commit: false });
     await login(page);
     await entry(page, action).click();
-    if (action === "kill")
-      await dialog(page, action).getByRole("textbox", { name: "변경 사유", exact: true }).fill(reason);
+    if (action === "kill") await confirmTarget(page);
     await confirm(page, action).click();
     await expect(dialog(page, action).getByRole("alert")).toBeVisible();
-    await expect(confirm(page, action)).toBeEnabled();
+    if (action === "kill") {
+      await expect(confirm(page, action)).toBeDisabled();
+      await dialog(page, action).getByRole("button", { name: "현재 상태만 다시 조회", exact: true }).click();
+      await expect(confirm(page, action)).toBeDisabled();
+    } else await expect(confirm(page, action)).toBeEnabled();
     expect(critical.refreshes()).toBe(0);
     expect(critical.writes).toHaveLength(action === "kill" ? 1 : 0);
     expect(gateway.saves).toHaveLength(action === "policy" ? 1 : 0);
@@ -186,7 +269,7 @@ test("390px 다크 확인창의 사유·한글 잠금·키보드·초점·axe를
   await page.setViewportSize({ width: 390, height: 844 });
   await entry(page, "kill").focus();
   await page.keyboard.press("Enter");
-  await dialog(page, "kill").getByRole("textbox", { name: "변경 사유", exact: true }).fill(reason);
+  await confirmTarget(page);
   gateway.readonly("flag");
   await runtime(page);
   await expect(confirm(page, "kill")).toBeDisabled();

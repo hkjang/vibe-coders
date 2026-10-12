@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.49"
+var AppVersion = "v0.86.50"
 
 type Server struct {
 	cfg      config.Config
@@ -1462,6 +1462,10 @@ func (w *statusResponseWriter) Flush() {
 }
 
 func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
+	if s.metrics != nil {
+		s.metrics.proxyInflight.Add(1)
+		defer s.metrics.proxyInflight.Add(-1)
+	}
 	sw := &statusResponseWriter{ResponseWriter: w}
 	rc := &requestPipeline{s: s, w: sw, r: r}
 
@@ -2133,6 +2137,10 @@ func (s *Server) auditAdminWithInsertContext(auditCtx context.Context, r *http.R
 	}); err != nil {
 		slog.Warn("write admin audit failed", "action", action, "error", err)
 	}
+	s.runAdminPostChange(r, action, before, after, provider)
+}
+
+func (s *Server) runAdminPostChange(r *http.Request, action, before, after, provider string) {
 	if err := s.maybeRunPostChangeRedTeam(r, action, before, after, provider); err != nil {
 		// The admin mutation has already succeeded. Surface the regression trigger failure
 		// operationally without turning a successful configuration write into an HTTP error.

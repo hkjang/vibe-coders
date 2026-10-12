@@ -2966,10 +2966,14 @@ func (s *SQLStore) DeleteProvider(ctx context.Context, name string) (bool, error
 }
 
 func (s *SQLStore) InsertAdminAudit(ctx context.Context, log AdminAuditLog) error {
+	return s.insertAdminAudit(ctx, s.db, log)
+}
+
+func (s *SQLStore) insertAdminAudit(ctx context.Context, executor adminAuditExecer, log AdminAuditLog) error {
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO admin_audit_logs (id, admin_id, action, before_value, after_value, created_at)
+	_, err := executor.ExecContext(ctx, s.bind(`INSERT INTO admin_audit_logs (id, admin_id, action, before_value, after_value, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`), log.ID, log.AdminID, log.Action, log.BeforeValue, log.AfterValue, formatTime(log.CreatedAt))
 	return err
 }

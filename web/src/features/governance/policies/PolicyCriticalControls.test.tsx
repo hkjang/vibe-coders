@@ -16,7 +16,7 @@ import { PoliciesPage } from "./PoliciesPage";
 const runtime = vi.hoisted(() => ({
   writable: true,
   readOnly: false,
-  callbacks: new Map<string, (reason: string) => unknown>(),
+  callbacks: new Map<string, (reason: string, target?: string) => unknown>(),
 }));
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
@@ -47,7 +47,7 @@ vi.mock("@/shared/components/ui/ConfirmDialog", async (importActual) => {
 const name = "PUBLIC control policy";
 const reason = "PUBLIC operator reason";
 const definitions = {
-  stop: { trigger: "모든 /v1 호출 즉시 차단", title: "게이트웨이를 긴급 정지할까요?", confirm: "즉시 차단" },
+  stop: { trigger: "새 요청 긴급 차단", title: "게이트웨이를 긴급 정지할까요?", confirm: "긴급 차단" },
   resume: { trigger: "정상 운영 재개", title: "정상 운영을 재개할까요?", confirm: "운영 재개" },
   activate: { trigger: `${name} 사용`, title: "정책을 사용할까요?", confirm: "사용" },
   deactivate: { trigger: `${name} 중지`, title: "정책을 중지할까요?", confirm: "중지" },
@@ -161,6 +161,10 @@ async function open(action: Action) {
   if (action === "stop" || action === "resume") {
     expect(within(dialog).getByRole("button", { name: selected.confirm })).toBeDisabled();
     await user.type(within(dialog).getByLabelText(/변경 사유/), `  ${reason}  `);
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "확인 문구" }),
+      action === "stop" ? "게이트웨이 전체 정지" : "게이트웨이 운영 재개",
+    );
   }
   const callback = runtime.callbacks.get(selected.title);
   if (!callback) throw new Error("Real confirmation callback required");
@@ -209,7 +213,9 @@ for (const mode of ["feature", "scope"] as const) {
       expect(opened.confirm).toBeDisabled();
       expect(opened.dialog).toHaveTextContent("직접 확인하기 전에는 전송하지 않습니다.");
       await act(async () => {
-        await expect(opened.callback(reason)).rejects.toMatchObject({ kind: "permission" });
+        await expect(
+          opened.callback(reason, action === "stop" ? "게이트웨이 전체 정지" : "게이트웨이 운영 재개"),
+        ).rejects.toMatchObject({ kind: "permission" });
       });
       expect(current.attempts).toEqual([]);
       await current.changeAccess(mode, true);
@@ -236,27 +242,44 @@ for (const retirement of ["epoch", "unmount"] as const) {
         else current.unmount();
       });
       await act(async () => {
-        await expect(opened.callback(reason)).rejects.toMatchObject({ kind: "aborted" });
+        await expect(opened.callback(reason, "게이트웨이 운영 재개")).rejects.toMatchObject({
+          kind: "aborted",
+        });
       });
       expect(current.attempts).toEqual([]);
     },
   );
 }
 
-it.each(["resume", "deactivate"] as const)("preserves ordinary500 manual retry for %s", async (action) => {
-  const current = await setup(action);
-  const opened = await open(action);
-  current.setFailure(true);
-  await opened.user.click(opened.confirm);
-  await within(opened.dialog).findByRole("alert");
-  expect(current.attempts).toHaveLength(1);
-  expect(opened.confirm).toBeEnabled();
-  current.setFailure(false);
-  expect(current.attempts).toHaveLength(1);
-  await opened.user.click(opened.confirm);
-  await waitFor(() => expect(opened.dialog).not.toBeInTheDocument());
-  expect(current.attempts).toHaveLength(2);
-});
+it.each(["resume", "deactivate"] as const)(
+  "requires new emergency review while preserving policy retry after 500 for %s",
+  async (action) => {
+    const current = await setup(action);
+    const opened = await open(action);
+    current.setFailure(true);
+    await opened.user.click(opened.confirm);
+    await within(opened.dialog).findByRole("alert");
+    expect(current.attempts).toHaveLength(1);
+    if (action === "resume") expect(opened.confirm).toBeDisabled();
+    else expect(opened.confirm).toBeEnabled();
+    current.setFailure(false);
+    expect(current.attempts).toHaveLength(1);
+    if (action === "resume") {
+      await opened.user.click(within(opened.dialog).getByRole("button", { name: "현재 상태만 다시 조회" }));
+      await waitFor(() =>
+        expect(within(opened.dialog).getByRole("button", { name: "현재 상태만 다시 조회" })).toBeEnabled(),
+      );
+      expect(current.attempts).toHaveLength(1);
+      expect(opened.confirm).toBeDisabled();
+      await opened.user.click(within(opened.dialog).getByRole("button", { name: "취소" }));
+      const renewed = await open(action);
+      await renewed.user.click(renewed.confirm);
+      await waitFor(() => expect(renewed.dialog).not.toBeInTheDocument());
+    } else await opened.user.click(opened.confirm);
+    await waitFor(() => expect(opened.dialog).not.toBeInTheDocument());
+    expect(current.attempts).toHaveLength(2);
+  },
+);
 
 it("does not broaden the parent canWrite restriction into untouched quick-create siblings", async () => {
   const current = await setup("stop");

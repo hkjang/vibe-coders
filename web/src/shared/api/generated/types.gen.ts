@@ -393,6 +393,35 @@ export type KeycloakLogoutResponse = {
     status: 'logged_out';
 };
 
+export type KillSwitchChangeRequest = {
+    disabled?: boolean | null;
+    reason?: string | null;
+} | null;
+
+export type KillSwitchState = {
+    disabled: boolean;
+    reason?: string;
+    traffic?: KillSwitchTrafficObservation;
+    updated_at?: string;
+    updated_by?: string;
+};
+
+/**
+ * Optional GET observation. Absence means unavailable, not zero. A responding-process snapshot, not cluster-wide traffic or confirmation of flag propagation. Counts common OpenAI proxy handlers (including local checks, streaming and cleanup), not separately registered workflow/app/receipt/skill routes, MCP or admin requests.
+ */
+export type KillSwitchTrafficObservation = {
+    /**
+     * Opaque process reference; may change between load-balanced responses or restarts. Not a hostname.
+     */
+    instance_ref: string;
+    observed_at: string;
+    /**
+     * Active common proxy handlers observed in this process. Does not estimate how many requests the stop will cancel; admitted work is not cancelled.
+     */
+    proxy_inflight: number;
+    scope: 'responding_process';
+};
+
 export type LanguageGroupedStat = {
     average_confidence: number;
     language: string;
@@ -4216,26 +4245,68 @@ export type GetAdminKillSwitchData = {
     url: '/admin/kill-switch';
 };
 
+export type GetAdminKillSwitchErrors = {
+    /**
+     * Admin read permission required for GET; admin write required for POST
+     */
+    401: AppError;
+    /**
+     * kill_switch_state_unavailable: database read failed, was cancelled, or contained an unrecognized flag
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminKillSwitchError = GetAdminKillSwitchErrors[keyof GetAdminKillSwitchErrors];
+
 export type GetAdminKillSwitchResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: KillSwitchState;
 };
 
+export type GetAdminKillSwitchResponse = GetAdminKillSwitchResponses[keyof GetAdminKillSwitchResponses];
+
 export type PostAdminKillSwitchData = {
-    body?: never;
+    body: KillSwitchChangeRequest;
     path?: never;
     query?: never;
     url: '/admin/kill-switch';
 };
 
+export type PostAdminKillSwitchErrors = {
+    /**
+     * invalid_body: JSON cannot be decoded
+     */
+    400: AppError;
+    /**
+     * Admin read permission required for GET; admin write required for POST
+     */
+    401: AppError;
+    /**
+     * kill_switch_save_failed: flag/audit transaction could not be confirmed; verify state before a new explicit change
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminKillSwitchError = PostAdminKillSwitchErrors[keyof PostAdminKillSwitchErrors];
+
 export type PostAdminKillSwitchResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: KillSwitchState;
 };
+
+export type PostAdminKillSwitchResponse = PostAdminKillSwitchResponses[keyof PostAdminKillSwitchResponses];
 
 export type GetAdminKnowledgeData = {
     body?: never;

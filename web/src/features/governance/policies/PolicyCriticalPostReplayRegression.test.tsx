@@ -62,9 +62,9 @@ const policy = {
 };
 const actions = {
   kill: {
-    trigger: "모든 /v1 호출 즉시 차단",
+    trigger: "새 요청 긴급 차단",
     title: "게이트웨이를 긴급 정지할까요?",
-    confirm: "즉시 차단",
+    confirm: "긴급 차단",
     path: "/admin/kill-switch",
     body: { disabled: true, reason },
   },
@@ -182,13 +182,18 @@ async function setup(action: Action, mode: Mode) {
   );
   await screen.findByRole("button", { name: actions.policy.trigger });
   await waitFor(() => {
-    expect(client.getQueryState(["governance", "kill-switch"])?.status).toBe("success");
+    expect(
+      client.getQueryCache().find({ queryKey: ["governance", "kill-switch"], exact: false })?.state.status,
+    ).toBe("success");
     expect(client.isFetching()).toBe(0);
   });
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: actions[action].trigger }));
   const dialog = await screen.findByRole("dialog", { name: actions[action].title });
-  if (action === "kill") await user.type(within(dialog).getByLabelText(/변경 사유/u), reason);
+  if (action === "kill") {
+    await user.type(within(dialog).getByLabelText(/변경 사유/u), reason);
+    await user.type(within(dialog).getByRole("textbox", { name: "확인 문구" }), "게이트웨이 전체 정지");
+  }
   await user.click(within(dialog).getByRole("button", { name: actions[action].confirm }));
   // Wait for the actual mutation to settle in either result. Do not assume the
   // desired rejection, a new UI control, or an exact arbitrary time budget.

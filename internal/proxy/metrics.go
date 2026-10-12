@@ -9,6 +9,7 @@ import (
 )
 
 type Metrics struct {
+	proxyInflight      atomic.Int64 // Common OpenAI proxy handlers currently executing in this process.
 	requests           atomic.Uint64
 	streams            atomic.Uint64
 	upstreamError      atomic.Uint64
@@ -153,6 +154,9 @@ func (m *Metrics) ObserveLLMEvaluations(evaluations []store.LLMEvaluation) {
 
 func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint64) string {
 	lines := []string{
+		"# HELP proxy_inflight_requests Common OpenAI proxy handlers currently executing in this process, including streaming and local checks; not a cluster-wide count.",
+		"# TYPE proxy_inflight_requests gauge",
+		fmt.Sprintf("proxy_inflight_requests %d", m.proxyInflight.Load()),
 		"# HELP proxy_requests_total Total proxied API requests.",
 		"# TYPE proxy_requests_total counter",
 		fmt.Sprintf("proxy_requests_total %d", m.requests.Load()),

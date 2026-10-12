@@ -31,6 +31,10 @@ func (s *SQLStore) SaveRuntimeFlagBatch(ctx context.Context, updates []RuntimeFl
 // failure rolls back every update and returns no success snapshot. The validator
 // must not mutate the snapshot or perform external side effects.
 func (s *SQLStore) SaveRuntimeFlagBatchValidated(ctx context.Context, updates []RuntimeFlag, snapshotKeys []string, validate func(map[string]RuntimeFlag) error) (map[string]RuntimeFlag, error) {
+	return s.saveRuntimeFlagBatch(ctx, updates, snapshotKeys, validate, nil)
+}
+
+func (s *SQLStore) saveRuntimeFlagBatch(ctx context.Context, updates []RuntimeFlag, snapshotKeys []string, validate func(map[string]RuntimeFlag) error, audit *AdminAuditLog) (map[string]RuntimeFlag, error) {
 	allowed := make(map[string]bool, len(snapshotKeys))
 	for _, key := range snapshotKeys {
 		allowed[key] = true
@@ -65,6 +69,11 @@ func (s *SQLStore) SaveRuntimeFlagBatchValidated(ctx context.Context, updates []
 			VALUES (?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value,
 			updated_at = excluded.updated_at, updated_by = excluded.updated_by, note = excluded.note`),
 			flag.Key, flag.Value, formatTime(flag.UpdatedAt), flag.UpdatedBy, flag.Note); err != nil {
+			return nil, err
+		}
+	}
+	if audit != nil {
+		if err := s.insertAdminAudit(ctx, tx, *audit); err != nil {
 			return nil, err
 		}
 	}

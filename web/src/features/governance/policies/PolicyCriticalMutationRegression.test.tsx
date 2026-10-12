@@ -20,7 +20,7 @@ const runtime = vi.hoisted(() => ({
   readOnly: false,
   status: "preview" as "preview" | "preview_read_only",
   fetch: vi.fn<typeof globalThis.fetch>(),
-  confirmations: new Map<string, (reason: string) => Promise<unknown> | unknown>(),
+  confirmations: new Map<string, (reason: string, target?: string) => Promise<unknown> | unknown>(),
 }));
 
 // Auth is a synthetic observed bootstrap; FeatureRoute, context, page, API client,
@@ -68,9 +68,9 @@ const reason = "PUBLIC critical baseline reason";
 const policyName = "PUBLIC inactive policy";
 const definitions = {
   kill: {
-    trigger: "모든 /v1 호출 즉시 차단",
+    trigger: "새 요청 긴급 차단",
     title: "게이트웨이를 긴급 정지할까요?",
-    confirm: "즉시 차단",
+    confirm: "긴급 차단",
     path: "/admin/kill-switch",
   },
   policy: {
@@ -168,7 +168,9 @@ async function setup() {
   const view = render(tree());
   await screen.findByRole("button", { name: definitions.policy.trigger });
   await waitFor(() => {
-    expect(client.getQueryState(["governance", "kill-switch"])?.status).toBe("success");
+    expect(
+      client.getQueryCache().find({ queryKey: ["governance", "kill-switch"], exact: false })?.state.status,
+    ).toBe("success");
     expect(client.isFetching()).toBe(0);
   });
   expect(unexpected).toEqual([]);
@@ -189,7 +191,10 @@ async function open(action: Action) {
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: definition.trigger }));
   const dialog = await screen.findByRole("dialog", { name: definition.title });
-  if (action === "kill") await user.type(within(dialog).getByLabelText(/변경 사유/u), reason);
+  if (action === "kill") {
+    await user.type(within(dialog).getByLabelText(/변경 사유/u), reason);
+    await user.type(within(dialog).getByRole("textbox", { name: "확인 문구" }), "게이트웨이 전체 정지");
+  }
   const callback = runtime.confirmations.get(definition.title);
   expect(callback).toBeTypeOf("function");
   if (!callback) throw new Error("Existing confirmation callback is required");
@@ -201,10 +206,10 @@ async function open(action: Action) {
   };
 }
 
-async function invoke(callback: (reason: string) => unknown) {
+async function invoke(callback: (reason: string, target?: string) => unknown) {
   await act(async () => {
     try {
-      await callback(reason);
+      await callback(reason, "게이트웨이 전체 정지");
     } catch {
       // A product permission/retirement rejection is allowed; transport count decides safety.
     }
