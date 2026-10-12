@@ -16,9 +16,12 @@ import {
   type WorkflowFormOutput,
 } from "@/features/agents/workflows/workflow-form";
 import { WorkflowStepsEditor } from "@/features/agents/workflows/WorkflowStepsEditor";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import "@/features/agents/agents.css";
 
 interface WorkflowFormDialogProps {
+  canWrite: boolean;
+  writeDisabledReason: string;
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: WorkflowFormOutput) => Promise<unknown>;
   open: boolean;
@@ -27,6 +30,8 @@ interface WorkflowFormDialogProps {
 }
 
 export function WorkflowFormDialog({
+  canWrite,
+  writeDisabledReason,
   onOpenChange,
   onSubmit,
   open,
@@ -56,68 +61,72 @@ export function WorkflowFormDialog({
       open={open}
       returnFocusRef={returnFocusRef}
       submitLabel={workflow ? "수정 저장" : "워크플로 만들기"}
+      submitDisabled={!canWrite}
       title={workflow ? "워크플로 수정" : "새 워크플로"}
     >
-      <FormField label="이름" required error={errors.name?.message}>
-        {(control) => <Input {...control} {...form.register("name")} />}
-      </FormField>
-      <FormField label="설명" error={errors.description?.message}>
-        {(control) => <Textarea {...control} rows={2} {...form.register("description")} />}
-      </FormField>
-      <FormField
-        label="허용 팀"
-        description="쉼표로 구분합니다. 비워 두면 모든 팀이 실행할 수 있습니다."
-        error={errors.allowed_teams?.message}
-      >
-        {(control) => <Input {...control} {...form.register("allowed_teams")} />}
-      </FormField>
-      {jsonMode ? (
-        <FormField
-          label="단계 정의 (JSON 배열)"
-          description="각 단계는 name과 type을 가집니다. type: chat, text2sql, mcp_tool, skill, condition, approval, transform"
-          required
-          error={errors.steps?.message}
-        >
-          {(control) => <Textarea {...control} rows={12} className="mono" {...form.register("steps")} />}
+      {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
+      <fieldset className="form-grid form-dialog-fields" disabled={!canWrite}>
+        <FormField label="이름" required error={errors.name?.message}>
+          {(control) => <Input {...control} {...form.register("name")} />}
         </FormField>
-      ) : (
-        // A group rather than a form field: the editor is a set of controls, and a label
-        // pointing at a container would name nothing a screen reader can act on.
-        <section className="workflow-steps-group" aria-labelledby="workflow-steps-title">
-          <h3 id="workflow-steps-title">단계</h3>
-          <p className="workflow-steps-help">
-            위에서 아래 순서로 실행됩니다. 단계 종류에 따라 필요한 항목만 표시됩니다.
-          </p>
-          <WorkflowStepsEditor
-            value={steps}
-            onChange={(json) => form.setValue("steps", json, { shouldValidate: true, shouldDirty: true })}
-          />
-          {errors.steps?.message ? (
-            <p className="field-error" role="alert">
-              {errors.steps.message}
-            </p>
-          ) : null}
-        </section>
-      )}
-      <div className="workflow-step-tools">
-        <Button size="small" variant="ghost" onClick={() => setJsonMode((current) => !current)}>
-          {jsonMode ? "단계 편집기로 돌아가기" : "JSON으로 편집"}
-        </Button>
-        <Button
-          size="small"
-          variant="ghost"
-          onClick={() =>
-            form.setValue("steps", workflowStepsExample, { shouldValidate: true, shouldDirty: true })
-          }
+        <FormField label="설명" error={errors.description?.message}>
+          {(control) => <Textarea {...control} rows={2} {...form.register("description")} />}
+        </FormField>
+        <FormField
+          label="허용 팀"
+          description="쉼표로 구분합니다. 비워 두면 모든 팀이 실행할 수 있습니다."
+          error={errors.allowed_teams?.message}
         >
-          안전한 예시 채우기
-        </Button>
-      </div>
-      <FormField label="사용 여부" error={errors.enabled?.message}>
-        {(control) => (
-          <Checkbox {...control} label="이 워크플로를 사용합니다." {...form.register("enabled")} />
+          {(control) => <Input {...control} {...form.register("allowed_teams")} />}
+        </FormField>
+        {jsonMode ? (
+          <FormField
+            label="단계 정의 (JSON 배열)"
+            description="각 단계는 name과 type을 가집니다. type: chat, text2sql, mcp_tool, skill, condition, approval, transform"
+            required
+            error={errors.steps?.message}
+          >
+            {(control) => <Textarea {...control} rows={12} className="mono" {...form.register("steps")} />}
+          </FormField>
+        ) : (
+          // A group rather than a form field: the editor is a set of controls, and a label
+          // pointing at a container would name nothing a screen reader can act on.
+          <section className="workflow-steps-group" aria-labelledby="workflow-steps-title">
+            <h3 id="workflow-steps-title">단계</h3>
+            <p className="workflow-steps-help">
+              위에서 아래 순서로 실행됩니다. 단계 종류에 따라 필요한 항목만 표시됩니다.
+            </p>
+            <WorkflowStepsEditor
+              value={steps}
+              onChange={(json) => form.setValue("steps", json, { shouldValidate: true, shouldDirty: true })}
+            />
+            {errors.steps?.message ? (
+              <p className="field-error" role="alert">
+                {errors.steps.message}
+              </p>
+            ) : null}
+          </section>
         )}
-      </FormField>
+        <div className="workflow-step-tools">
+          <Button size="small" variant="ghost" onClick={() => setJsonMode((current) => !current)}>
+            {jsonMode ? "단계 편집기로 돌아가기" : "JSON으로 편집"}
+          </Button>
+          <Button
+            size="small"
+            variant="ghost"
+            onClick={() =>
+              form.setValue("steps", workflowStepsExample, { shouldValidate: true, shouldDirty: true })
+            }
+          >
+            안전한 예시 채우기
+          </Button>
+        </div>
+        <FormField label="사용 여부" error={errors.enabled?.message}>
+          {(control) => (
+            <Checkbox {...control} label="이 워크플로를 사용합니다." {...form.register("enabled")} />
+          )}
+        </FormField>
+      </fieldset>
     </FormDialog>
   );
 }

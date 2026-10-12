@@ -14,6 +14,8 @@ interface MutationFeedbackOptions<Variables, Result> {
   successMessage?: string | ((result: Result, variables: Variables) => string);
   errorMessage?: string;
   onSuccess?: (result: Result, variables: Variables) => void;
+  /** Optional screen/principal lifetime in addition to the authentication epoch. */
+  ownsResult?: () => boolean;
 }
 
 /**
@@ -26,16 +28,20 @@ export function useMutationFeedback<Variables, Result>({
   invalidates = [],
   mutate,
   onSuccess,
+  ownsResult,
   successMessage,
 }: MutationFeedbackOptions<Variables, Result>): UseMutationResult<Result, Error, Variables> {
   const queryClient = useQueryClient();
   const sessionEpoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   type Submission = { variables: Variables; epoch: number };
   type PublicMutation = UseMutationResult<Result, Error, Variables>;
-  const isCurrent = (submission: Submission): boolean => submission.epoch === tokenStore.getSessionEpoch();
+  const isCurrent = (submission: Submission): boolean =>
+    submission.epoch === tokenStore.getSessionEpoch() && (ownsResult?.() ?? true);
   const assertCurrent = (submission: Submission): void => {
     if (!isCurrent(submission)) {
-      throw new AppError("인증 세션이 변경되어 이전 작업을 취소했습니다.", { kind: "aborted" });
+      throw new AppError("화면 또는 인증 세션이 변경되었습니다.", {
+        kind: "aborted",
+      });
     }
   };
   const mutation = useMutation<Result, Error, Submission>({
