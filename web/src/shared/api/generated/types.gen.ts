@@ -1819,6 +1819,25 @@ export type StatusResponse = {
     status: string;
 };
 
+export type Text2SqlEmergencyChangeRequest = {
+    disabled?: boolean | null;
+    expected_review_token?: string | null;
+    reason?: string | null;
+} | null;
+
+export type Text2SqlEmergencyState = {
+    config_enabled: boolean;
+    disabled: boolean;
+    instance_ref: string;
+    observed_at: string;
+    /**
+     * Trimmed reason echoed only in the change acknowledgment, not stored in process memory for GET
+     */
+    reason?: string;
+    review_token: string;
+    scope: 'responding_process';
+};
+
 export type TrackingAllowRequest = {
     /**
      * An http(s) origin such as https://cdn.example
@@ -10138,26 +10157,68 @@ export type GetAdminText2SqlKillSwitchData = {
     url: '/admin/text2sql/kill-switch';
 };
 
+export type GetAdminText2SqlKillSwitchErrors = {
+    /**
+     * text2sql_review_unavailable: no safe review token could be prepared; no change applied
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminText2SqlKillSwitchError = GetAdminText2SqlKillSwitchErrors[keyof GetAdminText2SqlKillSwitchErrors];
+
 export type GetAdminText2SqlKillSwitchResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: Text2SqlEmergencyState;
 };
 
+export type GetAdminText2SqlKillSwitchResponse = GetAdminText2SqlKillSwitchResponses[keyof GetAdminText2SqlKillSwitchResponses];
+
 export type PostAdminText2SqlKillSwitchData = {
-    body?: never;
+    body: Text2SqlEmergencyChangeRequest;
     path?: never;
     query?: never;
     url: '/admin/text2sql/kill-switch';
 };
 
+export type PostAdminText2SqlKillSwitchErrors = {
+    /**
+     * invalid_body or text2sql_review_required: reviewed changes require an explicit state, nonempty reason and 32-character review token
+     */
+    400: AppError;
+    /**
+     * text2sql_review_conflict: reviewed process or state revision changed
+     */
+    409: AppError;
+    /**
+     * text2sql_kill_audit_failed: audit acknowledgment failed; flag not applied; read and review again, never blindly replay
+     */
+    500: AppError;
+    /**
+     * text2sql_review_unavailable: no safe review token could be prepared; no change applied
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminText2SqlKillSwitchError = PostAdminText2SqlKillSwitchErrors[keyof PostAdminText2SqlKillSwitchErrors];
+
 export type PostAdminText2SqlKillSwitchResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: Text2SqlEmergencyState;
 };
+
+export type PostAdminText2SqlKillSwitchResponse = PostAdminText2SqlKillSwitchResponses[keyof PostAdminText2SqlKillSwitchResponses];
 
 export type GetAdminText2SqlMinersData = {
     body?: never;

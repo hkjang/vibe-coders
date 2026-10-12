@@ -704,6 +704,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichCostGuardOpenAPIOperation(method, op, responses)
 	case "get /admin/kill-switch", "post /admin/kill-switch":
 		enrichKillSwitchOpenAPIOperation(method, op, responses)
+	case "get /admin/text2sql/kill-switch", "post /admin/text2sql/kill-switch":
+		enrichText2SQLEmergencyOpenAPI(method, op, responses)
 	case "get /admin/requests/{id}/note", "post /admin/requests/{id}/note", "put /admin/requests/{id}/note", "patch /admin/requests/{id}/note", "delete /admin/requests/{id}/note":
 		enrichRequestNoteOpenAPIOperation(method, op, responses)
 	case "get /admin/skills/fitness", "post /admin/skills/fitness":
@@ -1016,6 +1018,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range killSwitchOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range text2SQLEmergencyOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range requestNoteOpenAPISchemas() {

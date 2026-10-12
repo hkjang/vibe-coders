@@ -19,6 +19,73 @@ import {
 } from "./access-fixture";
 import { admin, currentRole, login, reader, sessionIsEmpty, signIn, signOut, test } from "./live-fixture";
 
+test("AUTH-LIVE-012 실제 Text2SQL 중지·재개와 읽기 전용 서버 거부", async ({ page }) => {
+  const path = "/admin/text2sql/kill-switch";
+  const entry = (resume: boolean) =>
+    page.getByRole("button", { name: `Text2SQL 처리 ${resume ? "재개" : "중지"} 검토`, exact: true });
+  await login(page, admin, "/app/text2sql");
+  let writes = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === path) writes++;
+  });
+  for (const resume of [false, true]) {
+    const label = `Text2SQL 처리 ${resume ? "재개" : "중지"}`;
+    await expect(entry(resume)).toBeEnabled();
+    await entry(resume).click();
+    const dialog = page.getByRole("dialog", { name: label, exact: true });
+    const confirm = dialog.getByRole("button", { name: resume ? "재개" : "중지", exact: true });
+    await expect(confirm).toBeDisabled();
+    await dialog.getByRole("textbox", { name: "확인 문구", exact: true }).fill(label);
+    await expect(confirm).toBeDisabled();
+    await dialog
+      .getByRole("textbox", { name: "변경 사유", exact: true })
+      .fill(resume ? "browser-text2sql-reviewed-resume" : "browser-text2sql-reviewed-stop");
+    const pending = page.waitForResponse(
+      (response) => response.request().method() === "POST" && new URL(response.url()).pathname === path,
+    );
+    await confirm.click();
+    const response = await pending;
+    expect(response.status()).toBe(200);
+    const state: { disabled?: boolean; scope?: string } = await response.json();
+    expect(state.disabled === !resume && state.scope === "responding_process").toBe(true);
+    await expect(dialog).toBeHidden();
+    await expect(entry(!resume)).toBeEnabled();
+    expect(writes).toBe(resume ? 2 : 1);
+  }
+  await page.reload();
+  await expect(entry(false)).toBeEnabled();
+  await signOut(page);
+  await signIn(page, reader);
+  await expect(entry(false)).toBeDisabled();
+  // Both calls reach the real authenticated server. No route response is
+  // fabricated; only status and public control booleans leave browser memory.
+  const denied = await page.evaluate(async (endpoint) => {
+    const headers = {
+      Authorization: `Bearer ${sessionStorage.getItem("vibe.app.auth.access") ?? ""}`,
+      "Content-Type": "application/json",
+    };
+    const state = await fetch(endpoint, { headers, cache: "no-store" });
+    const before: { disabled?: boolean; review_token?: string } = await state.json();
+    const write = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        disabled: true,
+        reason: "browser-readonly-denied",
+        expected_review_token: before.review_token,
+      }),
+    });
+    const current = await fetch(endpoint, { headers, cache: "no-store" });
+    const after: { disabled?: boolean } = await current.json();
+    return {
+      read: state.status,
+      write: write.status,
+      unchanged: before.disabled === false && after.disabled === false,
+    };
+  }, path);
+  expect(denied).toEqual({ read: 200, write: 401, unchanged: true });
+});
+
 // Every request below reaches the actual Go Routes and temporary SQLite DB.
 // Delays hold an already-committed real response, never a fabricated success.
 test("AUTH-LIVE-006 실제 발급 비밀값 일회 표시와 공개 목록", async ({ page }) => {

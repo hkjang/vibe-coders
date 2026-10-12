@@ -10,7 +10,6 @@ export const text2sqlQueryKeys = {
   overview: (window: string) => ["text2sql", "overview", window] as const,
   connections: () => ["text2sql", "connections"] as const,
   features: () => ["text2sql", "features"] as const,
-  killSwitch: () => ["text2sql", "kill-switch"] as const,
   glossary: () => ["text2sql", "glossary"] as const,
   registry: (schema: string) => ["text2sql", "registry", schema] as const,
   riskQueue: (window: string, minRisk: number) => ["text2sql", "risk-queue", window, minRisk] as const,
@@ -27,7 +26,6 @@ export const text2sqlInvalidations = {
     ["text2sql", "overview"],
   ],
   features: [["text2sql", "features"]],
-  killSwitch: [["text2sql", "kill-switch"]],
   glossary: [["text2sql", "glossary"]],
   registry: [["text2sql", "registry"]],
   reports: [
@@ -50,7 +48,6 @@ export interface Text2SqlQueries {
   connections: UseQueryResult<unknown>;
   features: UseQueryResult<unknown>;
   glossary: UseQueryResult<unknown>;
-  killSwitch: UseQueryResult<unknown>;
   miners: UseQueryResult<unknown>;
   overview: UseQueryResult<unknown>;
   registry: UseQueryResult<unknown>;
@@ -59,7 +56,7 @@ export interface Text2SqlQueries {
 }
 
 /**
- * Loads the Text2SQL console data. The overview, connection list and kill switch
+ * Loads the Text2SQL console data. The overview and connection list
  * back the page shell, so they always load; every other panel is fetched only
  * while its tab is open. The healthcheck is deliberately absent: it probes the
  * execute database, so it stays behind an explicit button.
@@ -82,15 +79,6 @@ export function useText2SqlQueries({ minRisk, registrySchema, tab, window }: Tex
     queryKey: text2sqlQueryKeys.connections(),
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.text2sql.connections.list, {
-        signal,
-        routeId: text2sqlRouteId,
-      }),
-    ...shared,
-  });
-  const killSwitch = useQuery({
-    queryKey: text2sqlQueryKeys.killSwitch(),
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.text2sql.killSwitch.read, {
         signal,
         routeId: text2sqlRouteId,
       }),
@@ -176,7 +164,6 @@ export function useText2SqlQueries({ minRisk, registrySchema, tab, window }: Tex
     connections,
     features,
     glossary,
-    killSwitch,
     miners,
     overview,
     registry,

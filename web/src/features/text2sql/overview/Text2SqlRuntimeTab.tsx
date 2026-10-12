@@ -87,7 +87,6 @@ interface Text2SqlRuntimeTabProps {
   features: readonly Text2SQLFeatureRow[];
   featuresError: unknown;
   featuresLoading: boolean;
-  killSwitchDisabled: boolean;
   onRefetchConnections: () => void;
   onRefetchFeatures: () => void;
   profiles: readonly Text2SQLProfileRow[];
@@ -102,7 +101,6 @@ export function Text2SqlRuntimeTab({
   features,
   featuresError,
   featuresLoading,
-  killSwitchDisabled,
   onRefetchConnections,
   onRefetchFeatures,
   profiles,
@@ -112,13 +110,11 @@ export function Text2SqlRuntimeTab({
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const [profileToDelete, setProfileToDelete] = useState("");
   const [connectionToDelete, setConnectionToDelete] = useState<Text2SQLConnectionRow | undefined>();
-  const [killConfirmOpen, setKillConfirmOpen] = useState(false);
   const [health, setHealth] = useState<{ id: string; result: Text2SQLHealthcheck } | undefined>();
   const [healthError, setHealthError] = useState<string | undefined>();
   const [healthPending, setHealthPending] = useState("");
   const profileTriggerRef = useRef<HTMLButtonElement>(null);
   const connectionTriggerRef = useRef<HTMLButtonElement>(null);
-  const killTriggerRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
   const connectionRowTriggerRef = useRef<HTMLElement | null>(null);
 
@@ -185,16 +181,6 @@ export function Text2SqlRuntimeTab({
     invalidates: text2sqlInvalidations.features,
     successMessage: (_result, variables) =>
       `${variables.name} 기능을 ${variables.enabled ? "켰습니다" : "껐습니다"}.`,
-  });
-  const setKillSwitch = useMutationFeedback({
-    mutate: (disabled: boolean) =>
-      apiClient.request(endpoints.domains.text2sql.killSwitch.set, {
-        body: { disabled },
-        routeId: text2sqlRouteId,
-      }),
-    invalidates: text2sqlInvalidations.killSwitch,
-    successMessage: (_result, disabled) =>
-      disabled ? "Text2SQL을 전체 중지했습니다." : "Text2SQL 중지를 해제했습니다.",
   });
 
   const runHealthcheck = async (connectionId: string): Promise<void> => {
@@ -421,7 +407,7 @@ export function Text2SqlRuntimeTab({
 
       <SectionCard
         title="기능 토글 (런타임 온오프)"
-        description="Text2SQL 파이프라인의 선택 기능과 전체 중지 스위치입니다."
+        description="Text2SQL 파이프라인의 선택 기능입니다. 긴급 중지와 재개는 화면 상단에서 별도로 검토합니다."
       >
         {featuresError ? (
           <PanelFailure
@@ -432,23 +418,6 @@ export function Text2SqlRuntimeTab({
           />
         ) : null}
         <ul className="t2s-toggle-list">
-          <li>
-            <div>
-              <strong>kill_switch</strong>
-              <p>Text2SQL 전체 즉시 중지 (장애·비용·보안 대응)</p>
-            </div>
-            <Switch
-              ref={killTriggerRef}
-              checked={killSwitchDisabled}
-              disabled={!canWrite || setKillSwitch.isPending}
-              title={writeDisabledTitle(canWrite)}
-              label={killSwitchDisabled ? "중지됨" : "정상"}
-              onCheckedChange={(next) => {
-                if (next) setKillConfirmOpen(true);
-                else setKillSwitch.mutate(false);
-              }}
-            />
-          </li>
           {featuresLoading && features.length === 0 ? (
             <li>
               <div role="status">기능 목록을 불러오는 중입니다.</div>
@@ -604,19 +573,6 @@ export function Text2SqlRuntimeTab({
         onConfirm={async () => {
           if (connectionToDelete) await removeConnection.mutateAsync(connectionToDelete.id);
           setConnectionToDelete(undefined);
-        }}
-      />
-
-      <ConfirmDialog
-        open={killConfirmOpen}
-        onOpenChange={setKillConfirmOpen}
-        returnFocusRef={killTriggerRef}
-        tone="danger"
-        title="Text2SQL 전체 중지"
-        description="모든 vibe/text2sql-* 요청이 SQL을 생성하지 않고 안전 메시지를 반환합니다."
-        confirmLabel="중지"
-        onConfirm={async () => {
-          await setKillSwitch.mutateAsync(true);
         }}
       />
     </div>

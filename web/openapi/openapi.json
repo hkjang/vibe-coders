@@ -5442,6 +5442,67 @@
         ],
         "type": "object"
       },
+      "Text2SQLEmergencyChangeRequest": {
+        "nullable": true,
+        "properties": {
+          "disabled": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "expected_review_token": {
+            "maxLength": 32,
+            "minLength": 32,
+            "nullable": true,
+            "type": "string"
+          },
+          "reason": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Text2SQLEmergencyState": {
+        "properties": {
+          "config_enabled": {
+            "type": "boolean"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "instance_ref": {
+            "pattern": "^process_[a-f0-9]{16}$",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Trimmed reason echoed only in the change acknowledgment, not stored in process memory for GET",
+            "type": "string"
+          },
+          "review_token": {
+            "pattern": "^[a-f0-9]{32}$",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "responding_process"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "disabled",
+          "config_enabled",
+          "scope",
+          "instance_ref",
+          "review_token",
+          "observed_at"
+        ],
+        "type": "object"
+      },
       "TrackingAllowRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5982,7 +6043,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.50"
+    "version": "v0.86.51"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -18966,10 +19027,38 @@
     },
     "/admin/text2sql/kill-switch": {
       "get": {
+        "description": "No-store, responding-process Text2SQL admission control. Not cluster-wide or durable: restart clears the state. Already executing SQL and other processes are not cancelled. Disabled Text2SQL configuration remains disabled after resume. The opaque review_token is valid only for this process and state revision; every accepted legacy, reviewed or remediation write invalidates it, including no-ops and A-B-A changes. Configuration itself is not revision-guarded by this token.",
         "operationId": "get__admin_text2sql_kill_switch",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Text2SQLEmergencyState"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "text2sql_review_unavailable: no safe review token could be prepared; no change applied"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -18983,10 +19072,78 @@
         ]
       },
       "post": {
+        "description": "No-store, responding-process Text2SQL admission control. Not cluster-wide or durable: restart clears the state. Already executing SQL and other processes are not cancelled. Disabled Text2SQL configuration remains disabled after resume. The opaque review_token is valid only for this process and state revision; every accepted legacy, reviewed or remediation write invalidates it, including no-ops and A-B-A changes. Configuration itself is not revision-guarded by this token. Supply expected_review_token with an explicit disabled boolean and nonblank reason for a reviewed change. Stale/cross-process review returns409 without applying or auditing a change. The admin audit is confirmed before the in-memory store; an audit acknowledgment failure returns500 and does not apply the flag, but can leave an audit record. This is not a durable flag/audit transaction; a process crash can occur between audit and memory application. Do not automatically replay any uncertain response. Legacy omitted/null disabled remains false; omitted/null expected_review_token preserves unguarded legacy behavior.",
         "operationId": "post__admin_text2sql_kill_switch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Text2SQLEmergencyChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Text2SQLEmergencyState"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body or text2sql_review_required: reviewed changes require an explicit state, nonempty reason and 32-character review token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "text2sql_review_conflict: reviewed process or state revision changed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "text2sql_kill_audit_failed: audit acknowledgment failed; flag not applied; read and review again, never blindly replay"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "text2sql_review_unavailable: no safe review token could be prepared; no change applied"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
