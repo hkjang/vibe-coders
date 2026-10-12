@@ -36,7 +36,7 @@ export function McpPage(): React.JSX.Element {
   return (
     <div className="page-stack">
       <PageHeader
-        status="legacy"
+        readOnly={!canWrite}
         title="MCP 운영"
         description="MCP 업스트림 연결, 노출 도구, 서버 정책과 최근 MCP 호출을 한 화면에서 관리합니다."
         legacyHref="/admin#/mcp"

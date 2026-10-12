@@ -35,8 +35,8 @@ export function PoliciesPage(): React.JSX.Element {
     <div className="page-stack">
       <PageHeader
         title="정책 및 거버넌스"
-        status="legacy"
-        description="긴급 정지, AI 정책 엔진, 승인 큐와 알림 규칙, 모델 일몰과 정책 추천을 관리합니다."
+        readOnly={!canWrite}
+        description="긴급 정지·정책·승인·알림·모델 일몰·정책 추천을 관리합니다."
         legacyHref="/admin#/safety"
         actions={
           <Button
@@ -50,7 +50,7 @@ export function PoliciesPage(): React.JSX.Element {
 
       {!canWrite ? (
         <InlineNotice tone="info" title="읽기 전용으로 열려 있습니다.">
-          긴급 정지, 정책 저장, 승인 처리에는 admin:write 권한이 필요합니다. 조회는 그대로 사용할 수 있습니다.
+          긴급 정지·정책 저장·승인은 admin:write 권한이 필요합니다. 조회는 가능합니다.
         </InlineNotice>
       ) : null}
 
@@ -62,31 +62,24 @@ export function PoliciesPage(): React.JSX.Element {
         panelIdPrefix="governance-policies"
       />
 
-      {tab === "safety" ? (
-        <TabPanel id="safety" panelIdPrefix="governance-policies">
+      <TabPanel key={tab} id={tab} panelIdPrefix="governance-policies">
+        {tab === "safety" ? (
           <div className="page-stack">
             <KillSwitchSection canWrite={canWrite} />
             <PolicyEngineSection canWrite={canWrite} />
             <GovernanceEventsSection canWrite={canWrite} />
             <AlertRulesSection canWrite={canWrite} />
             <CostGuardSection canWrite={canWrite} />
-            <InlineNotice tone="info" title="비용 예측기는 이 화면에 없습니다.">
-              모델별 예상 비용 계산은 비용(FinOps) 도메인 화면에서 다룹니다. 급하면 기존
-              화면(/admin#/safety)에서도 실행할 수 있습니다.
+            <InlineNotice tone="info" title="비용 예측">
+              모델별 비용 예측은 비용(FinOps) 화면이나 기존 화면(/admin#/safety)에서 실행합니다.
             </InlineNotice>
           </div>
-        </TabPanel>
-      ) : null}
-      {tab === "sunset" ? (
-        <TabPanel id="sunset" panelIdPrefix="governance-policies">
+        ) : tab === "sunset" ? (
           <ModelSunsetTab canWrite={canWrite} />
-        </TabPanel>
-      ) : null}
-      {tab === "advisor" ? (
-        <TabPanel id="advisor" panelIdPrefix="governance-policies">
+        ) : (
           <PolicyAdvisorTab canWrite={canWrite} />
-        </TabPanel>
-      ) : null}
+        )}
+      </TabPanel>
     </div>
   );
 }

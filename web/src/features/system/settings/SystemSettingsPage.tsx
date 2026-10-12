@@ -13,7 +13,6 @@ import { SystemErrorsTab } from "@/features/system/settings/SystemErrorsTab";
 import { TrackingTab } from "@/features/system/settings/TrackingTab";
 import "@/features/system/settings/system-settings.css";
 import { PageHeader } from "@/shared/components/page/PageHeader";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
@@ -79,11 +78,11 @@ export function SystemSettingsPage(): React.JSX.Element {
       <PageHeader
         title="시스템 설정"
         status="preview"
+        readOnly={!hasAdminWrite}
         description="게이트웨이 런타임 설정, 신규 콘솔 전환 상태, 변경 이력과 운영 작업을 한 곳에서 관리합니다."
         legacyHref="/admin#/settings"
         actions={
           <>
-            {hasAdminWrite ? null : <Badge tone="info">읽기 전용</Badge>}
             <Button
               variant="primary"
               onClick={() => void queryClient.invalidateQueries({ queryKey: ["system"] })}

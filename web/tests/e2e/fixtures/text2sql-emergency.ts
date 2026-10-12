@@ -1,5 +1,6 @@
 import { expect, test as base } from "@playwright/test";
 import type { UiBootstrapResponse } from "../../../src/shared/api/generated";
+import type { MigrationStatus } from "../../../src/config/migration-registry";
 
 export const account = {
   id: "public-sql-operator",
@@ -14,6 +15,8 @@ export const test = base.extend<{
   emergency: {
     writes: unknown[];
     readonly: (value: boolean) => void;
+    migrationStatus: (value: MigrationStatus) => void;
+    failOverview: (value: boolean) => void;
     failRead: (value: boolean) => void;
     denyWrite: () => void;
     refreshes: () => number;
@@ -24,6 +27,8 @@ export const test = base.extend<{
     const origin = new URL(baseURL).origin;
     let authenticated = false;
     let readOnly = false;
+    let migrationStatus: MigrationStatus = "preview";
+    let overviewUnavailable = false;
     let unavailable = false;
     let denied = false;
     let disabled = false;
@@ -69,7 +74,7 @@ export const test = base.extend<{
           title: "자연어 SQL 운영",
           app_path: "/app/text2sql",
           legacy_path: "/admin#/text2sql",
-          status: "preview",
+          status: migrationStatus,
           risk_level: "high",
           required_permission: "admin:read",
           read_only: readOnly,
@@ -131,6 +136,8 @@ export const test = base.extend<{
           revision++;
           return reply({ ...state(), reason });
         }
+        if (call === "GET /admin/text2sql" && overviewUnavailable)
+          return reply({ error: { code: "state_unavailable" } }, 503);
         if (call === "GET /admin/text2sql")
           return reply({
             enabled: true,
@@ -155,6 +162,12 @@ export const test = base.extend<{
       writes,
       readonly: (value) => {
         readOnly = value;
+      },
+      migrationStatus: (value) => {
+        migrationStatus = value;
+      },
+      failOverview: (value) => {
+        overviewUnavailable = value;
       },
       failRead: (value) => {
         unavailable = value;

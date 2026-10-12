@@ -41,7 +41,6 @@ export function SecurityOverviewPage(): React.JSX.Element {
     <div className="page-stack">
       <PageHeader
         title="보안"
-        status="legacy"
         readOnly
         description="정책 위반, 비밀정보 탐지, 인증 이벤트와 데이터 전송 원장을 한곳에서 확인합니다."
         legacyHref="/admin#/security"
