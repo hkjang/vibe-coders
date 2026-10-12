@@ -1,4 +1,4 @@
-import { useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { z } from "zod";
 
 import { csvToList, listToCsv } from "@/features/mcp/mcp-utils";
@@ -26,6 +26,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 
 const routeId = "mcp.overview";
 
@@ -180,41 +181,66 @@ export function UpstreamFormDialog({
   returnFocusRef,
   upstream,
 }: UpstreamFormDialogProps): React.JSX.Element {
+  const current = useRef(false);
+  useLayoutEffect(() => {
+    current.current = open;
+    return () => {
+      current.current = false;
+    };
+  }, [open]);
+  const ownsResult = () => current.current;
+  const access = useFeatureMutationAccess([routeId], canWrite, "mcp:admin 권한이 필요합니다.");
   const form = useZodForm(upstreamFormSchema, valuesFrom(upstream));
   const [gate, setGate] = useState<ReadonlyArray<OnboardingCheck>>([]);
   const [checklist, setChecklist] = useState<ReadonlyArray<OnboardingCheck>>([]);
 
   const save = useMutationFeedback({
-    mutate: (variables: { body: McpUpstreamBody; force?: "1" }) =>
-      apiClient.request(endpoints.domains.mcp.saveUpstream, {
+    ownsResult,
+    mutate: (variables: { body: McpUpstreamBody; force?: "1" }) => {
+      access.assertCurrent();
+      return apiClient.request(endpoints.domains.mcp.saveUpstream, {
         body: variables.body,
         ...(variables.force ? { query: { force: variables.force } } : {}),
         routeId,
-      }),
+        retryUnauthorized: false,
+      });
+    },
     invalidates: [["mcp"]],
     successMessage: "업스트림을 등록했습니다.",
     errorMessage: "업스트림을 등록하지 못했습니다.",
   });
 
   const update = useMutationFeedback({
-    mutate: (variables: { body: McpUpstreamPatchBody; id: string }) =>
-      apiClient.request(withPathParams(endpoints.domains.mcp.patchUpstream, { id: variables.id }), {
+    ownsResult,
+    mutate: (variables: { body: McpUpstreamPatchBody; id: string }) => {
+      access.assertCurrent();
+      return apiClient.request(withPathParams(endpoints.domains.mcp.patchUpstream, { id: variables.id }), {
         body: variables.body,
         routeId,
-      }),
+        retryUnauthorized: false,
+      });
+    },
     invalidates: [["mcp"]],
     successMessage: "업스트림을 수정했습니다.",
     errorMessage: "업스트림을 수정하지 못했습니다.",
   });
 
   const check = useMutationFeedback({
-    mutate: (body: McpUpstreamBody) =>
-      apiClient.request(endpoints.domains.mcp.onboardingCheck, { body, routeId }),
+    ownsResult,
+    mutate: (body: McpUpstreamBody) => {
+      access.assertCurrent();
+      return apiClient.request(endpoints.domains.mcp.onboardingCheck, {
+        body,
+        routeId,
+        retryUnauthorized: false,
+      });
+    },
     errorMessage: "온보딩 점검을 실행하지 못했습니다.",
     onSuccess: (result) => setChecklist(result.checks),
   });
 
   const submit = async (values: UpstreamFormValues): Promise<void> => {
+    access.assertCurrent();
     setGate([]);
     if (upstream) {
       await update.mutateAsync({ body: toPatchBody(values, upstream), id: upstream.id });
@@ -248,7 +274,13 @@ export function UpstreamFormDialog({
           : "게이트웨이가 도구를 모아 노출할 MCP 서버 정보를 입력합니다."
       }
       submitLabel={upstream ? "저장" : "등록"}
+      submitDisabled={!access.allowed}
     >
+      {access.reason ? (
+        <InlineNotice tone="info" title="현재 변경할 수 없습니다.">
+          {access.reason}
+        </InlineNotice>
+      ) : null}
       <FormField
         label="업스트림 ID (슬러그)"
         error={errors.id?.message}

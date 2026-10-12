@@ -6,8 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { McpPage } from "@/features/mcp/overview/McpPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
-const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "mcp:admin"] }));
+const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "observability:read", "mcp:admin"] }));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
@@ -119,11 +120,16 @@ const baseHandlers = {
 };
 
 function renderPage(route = "/mcp") {
-  return renderScreen(<McpPage />, { route, path: "/mcp/*" });
+  return renderScreen(
+    <FeatureAccessHarness featureId="mcp.overview">
+      <McpPage />
+    </FeatureAccessHarness>,
+    { route, path: "/mcp/*" },
+  );
 }
 
 beforeEach(() => {
-  authRuntime.scopes = ["admin:read", "mcp:admin"];
+  authRuntime.scopes = ["admin:read", "observability:read", "mcp:admin"];
   toastSpy.success.mockClear();
   toastSpy.error.mockClear();
 });
@@ -170,7 +176,7 @@ describe("McpPage", () => {
   });
 
   it("mcp:admin 권한이 없으면 쓰기 작업을 비활성화한다", async () => {
-    authRuntime.scopes = ["admin:read"];
+    authRuntime.scopes = ["admin:read", "observability:read"];
     mockApi(baseHandlers);
     renderPage("/mcp?tab=upstreams");
 

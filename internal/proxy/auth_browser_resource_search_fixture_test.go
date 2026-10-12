@@ -29,6 +29,9 @@ func seedBrowserResourceSearchFixture(t *testing.T, db *store.SQLStore, upstream
 	if _, err := db.UpsertSkill(ctx, store.Skill{Name: "검색검증 스킬", Instructions: "Synthetic isolated fixture instruction."}, "browser-fixture"); err != nil {
 		t.Fatal("synthetic resource search skill could not be prepared")
 	}
+	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{ID: "browser-search-mcp", Name: "검색검증 MCP 서버", URL: upstream, Enabled: false}); err != nil {
+		t.Fatal("synthetic resource search MCP server could not be prepared")
+	}
 }
 
 func TestResourceSearchRequiresSameSessionAsAdminLists(t *testing.T) {

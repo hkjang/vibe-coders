@@ -14,6 +14,7 @@ import (
 var resourceSearchFeatures = map[string]string{
 	"provider": "gateway.providers", "workflow": "agents.workflows",
 	"app": "agents.apps", "skill": "agents.skills",
+	"mcp_upstream": "mcp.overview",
 }
 
 type resourceSearchItem struct {
@@ -69,7 +70,7 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	input.Query = strings.TrimSpace(input.Query)
-	if !utf8.ValidString(input.Query) || utf8.RuneCountInString(input.Query) < 2 || utf8.RuneCountInString(input.Query) > 128 || !s.safeResourceSearchText(input.Query) || len(input.Kinds) < 1 || len(input.Kinds) > 4 {
+	if !utf8.ValidString(input.Query) || utf8.RuneCountInString(input.Query) < 2 || utf8.RuneCountInString(input.Query) > 128 || !s.safeResourceSearchText(input.Query) || len(input.Kinds) < 1 || len(input.Kinds) > len(resourceSearchFeatures) {
 		writeOpenAIError(w, 400, "invalid search request", "invalid_request_error", "invalid_search")
 		return
 	}
@@ -96,7 +97,10 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 	providerRef := s.providerRefSnapshot()
 	for _, kind := range input.Kinds {
 		group := resourceSearchGroup{Kind: kind, Items: []resourceSearchItem{}, Status: "forbidden"}
-		if allowed[resourceSearchFeatures[kind]] {
+		// MCP lists require observability:read as well as the console feature's
+		// admin:read permission. Search must not bypass that existing API boundary.
+		canRead := kind != "mcp_upstream" || hasScope(user.Scopes, "observability:read")
+		if allowed[resourceSearchFeatures[kind]] && canRead {
 			rows, more, err := s.db.SearchResourceMetadata(ctx, kind, input.Query, 10)
 			group.Status = "ok"
 			if err != nil {
@@ -105,6 +109,9 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 				group.Limited = more
 				for _, row := range rows {
 					if kind == "provider" && !s.modelsProviderLabelSafeForConfig(row.Title) {
+						continue
+					}
+					if kind == "mcp_upstream" && (!s.modelsProviderLabelSafeForConfig(row.Title) || row.Title == providerNameOmitted || row.ID != slugify(row.ID)) {
 						continue
 					}
 					// Omit, rather than truncate or partially reveal, unsafe names/IDs.

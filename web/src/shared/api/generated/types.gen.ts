@@ -1252,7 +1252,7 @@ export type RequestNoteWriteRequest = {
 } | null;
 
 export type ResourceSearchRequest = {
-    kinds: Array<'provider' | 'workflow' | 'app' | 'skill'>;
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream'>;
     query: string;
 };
 
@@ -1260,10 +1260,10 @@ export type ResourceSearchResponse = {
     groups: Array<{
         items: Array<{
             id: string;
-            kind: 'provider' | 'workflow' | 'app' | 'skill';
+            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream';
             title: string;
         }>;
-        kind: 'provider' | 'workflow' | 'app' | 'skill';
+        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream';
         limited: boolean;
         status: 'ok' | 'forbidden' | 'unavailable';
     }>;
