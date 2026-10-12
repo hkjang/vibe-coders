@@ -11,6 +11,7 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     { title: "검색검증 워크플로", path: "/app/agents/workflows", parameter: "workflow" },
     { title: "검색검증 업무 앱", path: "/app/agents/apps", parameter: "app" },
     { title: "검색검증 스킬", path: "/app/agents/skills", parameter: "skill" },
+    { title: "검색검증 MCP 서버", path: "/app/mcp", parameter: "upstream" },
   ];
   for (const target of targets) {
     await page.keyboard.press("Control+k");
@@ -25,7 +26,7 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     expect(actual.request().method()).toBe("POST");
     expect(new URL(actual.url()).search).toBe("");
     expect(await actual.headerValue("cache-control")).toBe("no-store");
-    await expect(palette.getByRole("option")).toHaveCount(4);
+    await expect(palette.getByRole("option")).toHaveCount(targets.length);
     await palette.getByRole("option", { name: new RegExp(target.title) }).click();
     await expect(page.getByRole("dialog", { name: target.title, exact: true })).toBeVisible();
     const destination = new URL(page.url());

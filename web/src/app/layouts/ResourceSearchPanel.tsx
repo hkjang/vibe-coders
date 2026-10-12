@@ -10,7 +10,7 @@ import type { ResourceKind } from "@/shared/api/resource-search";
 import { tokenStore } from "@/shared/auth/token-store";
 import { Button } from "@/shared/components/ui/Button";
 import { containsPotentialSecret } from "@/shared/security/secrets";
-import { resourceSearchPath, resourceSearchTargets } from "./resource-search-items";
+import { resourceSearchPath, resourceSearchReadScope, resourceSearchTargets } from "./resource-search-items";
 
 interface Props {
   go: (path: string) => void;
@@ -23,6 +23,7 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
   const allowed = (Object.keys(resourceSearchTargets) as ResourceKind[]).filter((kind) => {
     const feature = auth.features.find((item) => item.featureId === resourceSearchTargets[kind].featureId);
     if (!feature || !auth.user?.scopes.includes("admin:read")) return false;
+    if (!auth.user.scopes.includes(resourceSearchReadScope(kind))) return false;
     const effective = resolveFeature(feature, auth.user, auth.backendVersion, {
       legacyFallback: auth.legacyFallback,
     });
@@ -119,7 +120,8 @@ function ResourceSearchContent({
   return (
     <>
       <p className="command-footer">
-        공급자·워크플로·업무 앱·스킬의 이름을 검색합니다. 종류별 최대 10개이며 업무 본문은 검색하지 않습니다.
+        공급자·워크플로·업무 앱·스킬·MCP 서버의 이름을 검색합니다. 종류별 최대 10개이며 업무 본문은 검색하지
+        않습니다.
       </p>
       <label className="command-search">
         <span className="sr-only">자원 이름 검색</span>

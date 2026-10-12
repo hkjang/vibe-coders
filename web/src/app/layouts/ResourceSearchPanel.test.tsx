@@ -101,6 +101,44 @@ describe("permission-scoped resource search", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it("requires MCP list permission and opens the stored server detail tab", async () => {
+    runtime.scopes = ["admin:read", "observability:read"];
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+      request_id: "safe-request-id",
+      groups: [
+        {
+          kind: "mcp_upstream",
+          status: "ok",
+          limited: false,
+          items: [{ kind: "mcp_upstream", id: "search-server", title: "정산 서버" }],
+        },
+      ],
+    });
+    const view = setup();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "정산" } });
+    expect(await screen.findByRole("option", { name: /정산 서버/ })).toBeVisible();
+    expect(request).toHaveBeenCalledWith(
+      endpoints.admin.resourceSearch,
+      expect.objectContaining({
+        body: { query: "정산", kinds: ["provider", "workflow", "app", "skill", "mcp_upstream"] },
+      }),
+    );
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    expect(view.go).toHaveBeenCalledWith("/mcp?upstream=search-server&tab=upstreams");
+    runtime.scopes = ["admin:read", "mcp:admin"];
+    view.rerender(view.tree());
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "정산" } });
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request).toHaveBeenLastCalledWith(
+      endpoints.admin.resourceSearch,
+      expect.objectContaining({
+        body: { query: "정산", kinds: ["provider", "workflow", "app", "skill"] },
+      }),
+    );
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+  });
+
   it("retires old responses and clears the draft when the principal changes", async () => {
     let resolve: (value: typeof response) => void = () => undefined;
     const request = vi.spyOn(apiClient, "request").mockImplementation(
@@ -164,5 +202,9 @@ describe("permission-scoped resource search", () => {
     expect(resourceSearchPath("skill", "스킬", [])).toContain("tab=catalog");
     expect(resourceSearchPath("provider", "raw-provider", [])).toBeUndefined();
     expect(resourceSearchPath("app", `vc_sk_${"x".repeat(43)}`, [])).toBeUndefined();
+    expect(resourceSearchPath("mcp_upstream", "search-server", [])).toBe(
+      "/mcp?upstream=search-server&tab=upstreams",
+    );
+    expect(resourceSearchPath("mcp_upstream", "server/path", [])).toBeUndefined();
   });
 });
