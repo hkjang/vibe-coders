@@ -8,6 +8,7 @@ import { SystemSettingsPage } from "@/features/system/settings/SystemSettingsPag
 import { AppError } from "@/shared/api/error";
 import { apiFailure, mockApi as createMockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const mockApi = (handlers: Parameters<typeof createMockApi>[0]) =>
   createMockApi({
@@ -136,7 +137,12 @@ const effectiveSettings = {
 };
 
 function renderPage(route = "/system/settings") {
-  return renderScreen(<SystemSettingsPage />, { route, path: "/system/settings" });
+  return renderScreen(
+    <FeatureAccessHarness featureId="system.settings">
+      <SystemSettingsPage />
+    </FeatureAccessHarness>,
+    { route, path: "/system/settings" },
+  );
 }
 
 afterEach(() => {
@@ -705,6 +711,7 @@ describe("SystemSettingsPage — 변경 세트", () => {
     expect(api.bodies("POST /admin/change-sets/cset_1/apply")).toHaveLength(0);
 
     await user.type(within(confirm).getByLabelText(/변경 사유/), "승인 완료");
+    await user.type(within(confirm).getByLabelText(/확인 문구/), "cset_1");
     await user.click(within(confirm).getByRole("button", { name: "적용" }));
 
     await waitFor(() =>
@@ -727,11 +734,12 @@ describe("SystemSettingsPage — 변경 세트", () => {
 
     const sheet = await openDetail(user);
     expect(within(sheet).getByRole("button", { name: "적용" })).toBeDisabled();
-    await user.click(within(sheet).getByRole("button", { name: "롤백" }));
+    await user.click(within(sheet).getByRole("button", { name: "되돌리기" }));
 
     const confirm = await screen.findByRole("dialog", { name: "적용 전 값으로 되돌릴까요?" });
     await user.type(within(confirm).getByLabelText(/변경 사유/), "성능 저하");
-    await user.click(within(confirm).getByRole("button", { name: "롤백" }));
+    await user.type(within(confirm).getByLabelText(/확인 문구/), "cset_1");
+    await user.click(within(confirm).getByRole("button", { name: "되돌리기" }));
 
     await waitFor(() =>
       expect(api.bodies("POST /admin/change-sets/cset_1/rollback")).toEqual([{ note: "성능 저하" }]),
@@ -752,6 +760,7 @@ describe("SystemSettingsPage — 변경 세트", () => {
 
     const confirm = await screen.findByRole("dialog", { name: "변경 세트를 삭제할까요?" });
     await user.type(within(confirm).getByLabelText(/변경 사유/), "중복 등록");
+    await user.type(within(confirm).getByLabelText(/확인 문구/), "cset_1");
     await user.click(within(confirm).getByRole("button", { name: "삭제" }));
 
     await waitFor(() =>
@@ -766,7 +775,7 @@ describe("SystemSettingsPage — 변경 세트", () => {
     renderPage("/system/settings?tab=changesets");
 
     const sheet = await openDetail(user);
-    for (const label of ["검토 제출", "승인", "적용", "롤백", "삭제"]) {
+    for (const label of ["검토 제출", "승인", "적용", "되돌리기", "삭제"]) {
       expect(within(sheet).getByRole("button", { name: label })).toBeDisabled();
     }
   });

@@ -657,7 +657,9 @@ func TestRoutingBreakerResetAllUsesRawKeysWithoutLeakingLegacyName(t *testing.T)
 	if err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: store.RequestLog{
 		ID: "unsafe-health", TraceID: "unsafe-health", Endpoint: "/v1/chat/completions",
 		Model: "m", Provider: unsafeName, StatusCode: 504, LatencyMS: 9_000, Error: "timeout",
-		CreatedAt: now,
+		// This test checks redaction, not the live window's upper boundary. Keep
+		// the sample inside that window if the host wall clock steps backwards.
+		CreatedAt: now.Add(-time.Minute),
 	}}); err != nil {
 		t.Fatal(err)
 	}

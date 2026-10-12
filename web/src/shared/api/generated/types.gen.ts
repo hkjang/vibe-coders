@@ -2960,7 +2960,9 @@ export type PostAdminChangeSetsResponses = {
 };
 
 export type DeleteAdminChangeSetsIdData = {
-    body?: never;
+    body?: {
+        note?: string | null;
+    } | null;
     path: {
         id: string;
     };
@@ -2968,12 +2970,25 @@ export type DeleteAdminChangeSetsIdData = {
     url: '/admin/change-sets/{id}';
 };
 
+export type DeleteAdminChangeSetsIdErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminChangeSetsIdError = DeleteAdminChangeSetsIdErrors[keyof DeleteAdminChangeSetsIdErrors];
+
 export type DeleteAdminChangeSetsIdResponses = {
     /**
-     * OK
+     * Deleted
      */
-    200: unknown;
+    200: {
+        status: 'deleted';
+    };
 };
+
+export type DeleteAdminChangeSetsIdResponse = DeleteAdminChangeSetsIdResponses[keyof DeleteAdminChangeSetsIdResponses];
 
 export type GetAdminChangeSetsIdData = {
     body?: never;

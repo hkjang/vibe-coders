@@ -110,6 +110,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 		}
 	}
 	logger := store.NewAsyncLogger(db, 32, filepath.Join(scratch, "fallback.ndjson"))
+	seedBrowserChangeSetFixture(t, db)
 	logger.Start()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -235,6 +236,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	if len(changes) != 2 || !changes["browser-text2sql-reviewed-stop"] || !foundResume || resumed {
 		t.Fatal("actual browser emergency stop/resume audit pair missing or unexpected")
 	}
+	verifyBrowserChangeSetFixture(t, h.db)
 }
 
 func browserAuthWebDirectory(t *testing.T) string {

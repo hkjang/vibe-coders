@@ -45,10 +45,11 @@ export function useSettingHistory(key: string, enabled: boolean) {
   });
 }
 
-export function useChangeSets() {
+export function useChangeSets(owner: string) {
   const refetchInterval = useRefreshInterval();
   return useQuery({
-    queryKey: systemSettingsKeys.changeSets,
+    queryKey: [...systemSettingsKeys.changeSets, owner],
+    gcTime: 0,
     queryFn: ({ signal }) => apiClient.request(system.changeSets.list, { signal, routeId }),
     refetchInterval,
     refetchIntervalInBackground: false,

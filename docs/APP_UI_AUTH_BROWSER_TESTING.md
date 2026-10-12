@@ -8,6 +8,7 @@
 - 테스트용 OIDC 공급자: `internal/proxy/oidc_browser_fixture_test.go`
 - 테스트용 모델 응답기와 키 저장·권한 검사: `internal/proxy/access_browser_fixture_test.go`
 - 복구용 내장 청크 선택·독립 API 세션 검사: `internal/proxy/auth_browser_recovery_fixture_test.go`
+- 변경 세트 저장값·설정 이력·감사 검사: `internal/proxy/change_set_browser_fixture_test.go`
 - 브라우저 설정과 시나리오: `web/playwright.auth.config.ts`, `web/tests/auth-live/auth-live.spec.ts`, `web/tests/auth-live/access-live.spec.ts`, `web/tests/auth-live/recovery-live.spec.ts`
 - 안전 보고서: `web/tests/auth-live/safe-reporter.ts`
 - 보고서 누출 방지 회귀: `web/scripts/auth-report-sanitization.test.mjs`
@@ -32,9 +33,15 @@ React 화면은 Vite 개발 서버가 아니라 Go 바이너리에 포함된 정
 | `AUTH-LIVE-010` | 실제 권한 저장 완료 200 응답을 지연한 동안 같은 계정 전환, 이전 초안·알림 격리와 새 계정의 읽기 전용 권한 유지 |
 | `AUTH-LIVE-011` | 내장 공급자 청크 한 건의 실패 후 한글 오류·키보드 초점, 같은 Go의 공급자 조회와 임시 API 키 대화 호출·폐기, 실제 재시도 복구, 기존 관리자 자체 로그인 후 실제 만료·복수 401·갱신 1회·공급자 목록과 로그인 유지 |
 | `AUTH-LIVE-012` | 실제 Text2SQL 중지·재개 확인창→Go POST→새로고침 상태 복원, DB 감사 2건과 기존 토큰 기반 행위자 참조, 읽기 전용 UI 잠금·실제 POST 401·상태 불변 |
+| `AUTH-LIVE-013` | 실제 변경 세트 생성·미리보기·제출·승인·적용·되돌리기·삭제, 적용 전 값 복원, 설정 이력 3건과 변경 감사 6종 각각 1건·사유 확인 |
+| `AUTH-LIVE-014` | 읽기 전용 변경 세트의 생성·수명 주기 작업 비활성화, 실제 GET 200·적용 POST 401과 승인 상태 불변 |
 
 다음 세부 조건도 증명 범위를 해석할 때 중요하다.
 
+- 013·014는 `web/tests/auth-live/change-set-live.spec.ts`에서 실행한다. 관리 응답을 합성하지 않으며,
+  Go 하네스가 브라우저 종료 후 실제 SQLite 저장값·변경 이력·감사 행위자·사유를 검사한다.
+  감사 기록이 생성됐다는 검증은 감사와 설정 저장의 원자성이나 여러 서버의 동시 반영을 보장하지 않는다.
+  초안 생성 보호는 현재 화면의 재전송 방지이며 서버 멱등성이나 늦게 완료되는 요청의 취소가 아니다.
 - 012는 실제 관리 API·SQLite 감사를 검증하며 응답을 합성하지 않는다. 하네스의 Text2SQL 기능 설정은 꺼져 있고 실제 SQL을 실행하지 않는다. 중지 해제만으로 기능이 활성화되는 것도 아니다. 실행 중 요청의 완료·새 요청의 안전 응답은 별도 Go HTTP 검사이며, 이 브라우저 시나리오와 같은 실행의 증거로 합치지 않는다. 상태는 프로세스 메모리에 있고 감사와 내구성 있는 원자적 트랜잭션을 이루지 않는다.
 
 - access token TTL은 하네스에서 **8초**이다. 003·005·011은 브라우저 메모리 안에서 실제 토큰의 유효기간을 확인하고, 단조 시계 기준 **TTL+5초** 상한 안에서 기존 토큰의 `no-store /auth/me` 응답이 서버 시각상 만료와 401을 함께 확인할 때까지 기다린다. 고정 타이머나 브라우저 시계 변경으로 만료를 가정하지 않는다. 비정상 상태·메타데이터·조회 실패는 즉시 실패시키며 원문 토큰과 시각 값은 보고서에 넣지 않는다.
@@ -61,7 +68,7 @@ React 화면은 Vite 개발 서버가 아니라 Go 바이너리에 포함된 정
 
 `TestProviderConnectionBrowserIntegration`은 같은 격리 인증 하네스를 사용하지만,
 `web/playwright.provider-connection.config.ts`와 `web/tests/provider-connection-live`에서
-독립 실행한다. `AUTH-LIVE-001`~`012` 개수에 합산하지 않는다.
+독립 실행한다. `AUTH-LIVE-001`~`014` 개수에 합산하지 않는다.
 
 `PROVIDER-LIVE-001`은 새 공급자의 주소·키를 입력해 연결을 확인한 뒤 **저장 전에는 공급자가
 없음**을 실제 API와 로컬 응답기의 DB 검사로 확인한다. 명시적으로 저장한 다음 수정 창의 빈 키가
@@ -154,7 +161,7 @@ docker run --rm --init --ipc=host --platform linux/amd64 --network none \
 
 보고서의 컨테이너 내부 경로는 `/workspace/web/test-results/auth-live-summary.json`이며, 위 명령으로 실행하면 호스트의 **`$AUTH_REPORTS/auth-live-summary.json`**에 생성된다. checkout의 기존 `web/test-results` 파일을 덮어쓰지 않는다. 직접 실행과 CI의 경로는 `web/test-results/auth-live-summary.json`이다. 전체 상태와 각 시나리오의 다음 항목만 기록한다.
 
-- 고정 허용 목록 `AUTH-LIVE-001`~`AUTH-LIVE-012` 식별자 또는 `UNKNOWN`
+- 고정 허용 목록 `AUTH-LIVE-001`~`AUTH-LIVE-014` 식별자 또는 `UNKNOWN`
 - 테스트 상태와 소요 시간
 - 진단에 필요한 경우 허용된 세 테스트 소스 파일의 숫자 행 번호만 (`lastSourceLine`, `failureSourceLine`)
 
