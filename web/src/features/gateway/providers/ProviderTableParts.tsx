@@ -19,6 +19,13 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { healthStatusLabels } from "@/config/ui-labels";
 import type { useProviderCatalogQueries } from "@/features/gateway/providers/use-provider-catalog";
 import { defaultCredentialPrefixes } from "@/shared/security/secrets";
+import { providerCatalogPageSizes, type ProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
+import {
+  providerCatalogSortFromColumn,
+  providerCatalogSortLabel,
+  providerCatalogSortState,
+  providerTableSortColumns,
+} from "./provider-table-state";
 
 export function ProviderSummary({
   rows,
@@ -233,6 +240,10 @@ interface ProviderTableProps {
   onRowClick: (row: ProviderCatalogRow) => void;
   pageCount: number;
   pageIndex: number;
+  pageSize: number;
+  onPageSizeChange: (size: number) => void;
+  sort?: ProviderCatalogSort;
+  onSortChange: (sort: ProviderCatalogSort | undefined) => void;
   providerUnavailable: boolean;
   rememberTrigger: (trigger: HTMLElement, provider: string) => void;
   /** Per-row administration controls; omitted when the operator may only read. */
@@ -251,6 +262,10 @@ export function ProviderTable({
   onRowClick,
   pageCount,
   pageIndex,
+  pageSize,
+  onPageSizeChange,
+  sort,
+  onSortChange,
   providerUnavailable,
   rememberTrigger,
   renderActions,
@@ -265,11 +280,31 @@ export function ProviderTable({
     <section className="provider-list-section" aria-labelledby="provider-list-title">
       <header>
         <div>
-          <h2 id="provider-list-title">공급자 목록</h2>
-          <p>{formatInteger(filteredRowCount)}개 결과 · 우선순위가 낮은 공급자부터 표시합니다.</p>
+          <h2 id="provider-list-title" tabIndex={-1}>
+            공급자 목록
+          </h2>
+          {!loading && !providerUnavailable ? (
+            <p>
+              {formatInteger(filteredRowCount)}개 결과 · 수신 {formatInteger(allRowCount)}개 중{" "}
+              {formatInteger(filteredRowCount === 0 ? 0 : pageIndex * pageSize + 1)}–
+              {formatInteger(Math.min((pageIndex + 1) * pageSize, filteredRowCount))}번째 결과 표시
+            </p>
+          ) : null}
         </div>
         {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} /> : null}
       </header>
+      <div className="provider-catalog-sort-summary">
+        <span role="status">정렬: {providerCatalogSortLabel(sort)}</span>
+        {sort ? (
+          <Button size="small" variant="ghost" onClick={() => onSortChange(undefined)}>
+            기본 순서
+          </Button>
+        ) : null}
+      </div>
+      <p className="provider-enrichment-note">
+        현재 받은 공급자 연결 설정 목록 안에서 정렬합니다. 화면 정렬은 라우팅 우선순위 설정을 변경하지
+        않습니다.
+      </p>
       {providerUnavailable ? (
         <div className="provider-list-unavailable">
           <ServerCog aria-hidden="true" />
@@ -294,6 +329,13 @@ export function ProviderTable({
           onRowClick={onRowClick}
           pageCount={pageCount}
           pageIndex={pageIndex}
+          sorting={{
+            columns: providerTableSortColumns,
+            value: providerCatalogSortState(sort),
+            onChange: ({ columnId, direction }) =>
+              onSortChange(providerCatalogSortFromColumn(columnId, direction)),
+          }}
+          pageSizeControl={{ value: pageSize, options: providerCatalogPageSizes, onChange: onPageSizeChange }}
           tableId="gateway.providers"
         />
       )}

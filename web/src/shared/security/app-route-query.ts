@@ -11,13 +11,14 @@ import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
 import { domainDecisionRequestIDError } from "@/shared/utils/domain-decision-filters";
 import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
+import { readProviderCatalogPageSize, readProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   // Screens declare their own query keys next to their route registration; this
   // map covers the routes no feature module owns: the login screen and the two
   // compatibility redirects that forward to the gateway catalog screens.
   "/login": new Set(["return_to"]),
-  "/providers": new Set(["page", "provider", "q", "range", "status"]),
+  "/providers": new Set(["page", "provider", "q", "range", "status", "sort", "page_size"]),
   "/models": new Set([
     "model",
     "model_provider",
@@ -94,6 +95,19 @@ export function sanitizeAppRouteSearch(
   const rejectedValues = new Map<string, boolean>();
   const route = routerPath(pathname);
   const invalidOperationalKeys = new Set<string>();
+  if (route === "/providers" || route === "/gateway/providers" || route.startsWith("/gateway/providers/")) {
+    const exactCatalogueRoute = route === "/providers" || route === "/gateway/providers";
+    if (
+      parameters.has("sort") &&
+      (!exactCatalogueRoute || !readProviderCatalogSort(parameters.getAll("sort")))
+    )
+      invalidOperationalKeys.add("sort");
+    if (
+      parameters.has("page_size") &&
+      (!exactCatalogueRoute || !readProviderCatalogPageSize(parameters.getAll("page_size")))
+    )
+      invalidOperationalKeys.add("page_size");
+  }
   if (route === "/models" || route === "/gateway/models" || route.startsWith("/gateway/models/")) {
     const exactCatalogueRoute = route === "/models" || route === "/gateway/models";
     if (parameters.has("sort") && (!exactCatalogueRoute || !readModelCatalogSort(parameters.getAll("sort"))))

@@ -37,7 +37,7 @@ interface DataTableBaseProps<TData extends RowData> {
   pageIndex?: number;
   /** Controlled header UI only. Callers sort the full response before slicing pages. */
   sorting?: {
-    columns: readonly { id: string; initialDirection?: "asc" | "desc" }[];
+    columns: readonly { id: string; initialDirection?: "asc" | "desc"; sortLabel?: string }[];
     value?: DataTableSort;
     onChange: (sort: DataTableSort) => void;
   };
@@ -198,7 +198,7 @@ export function DataTable<TData extends RowData>({
                             <button
                               type="button"
                               className="data-table-sort-button"
-                              aria-label={`${label} ${nextDirection === "asc" ? "오름차순" : "내림차순"} 정렬`}
+                              aria-label={`${sortOption.sortLabel ?? label} ${nextDirection === "asc" ? "오름차순" : "내림차순"} 정렬`}
                               onClick={() =>
                                 sorting?.onChange({ columnId: header.column.id, direction: nextDirection })
                               }

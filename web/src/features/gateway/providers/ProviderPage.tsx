@@ -33,14 +33,17 @@ import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { isProviderRef } from "@/shared/api/provider-ref";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
+import { readProviderCatalogPageSize, readProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
+import { sortProviderCatalogRows } from "./provider-table-state";
 
-const pageSize = 10;
 const defaultRange: HealthRange = "24h";
 
 export function ProviderPage(): React.JSX.Element {
   const auth = useAuth();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const sort = readProviderCatalogSort(searchParams.getAll("sort"));
+  const pageSize = readProviderCatalogPageSize(searchParams.getAll("page_size")) ?? 10;
   const requestedRange = searchParams.get("range");
   const requestedStatus = searchParams.get("status");
   const requestedPage = searchParams.get("page");
@@ -151,7 +154,8 @@ export function ProviderPage(): React.JSX.Element {
   );
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const page = Math.min(currentPage, pageCount);
-  const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
+  const sortedRows = useMemo(() => sortProviderCatalogRows(filteredRows, sort), [filteredRows, sort]);
+  const pageRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
   const selectedRow = allRows.find((row) => row.identity === selectedRef);
   const refreshing = providers.isFetching || slo.isFetching || (canReadRouting && routing.isFetching);
 
@@ -344,7 +348,13 @@ export function ProviderPage(): React.JSX.Element {
         filteredRowCount={filteredRows.length}
         loading={providers.isPending}
         onPageChange={(pageIndex) =>
-          updateSearch({ page: pageIndex === 0 ? undefined : String(pageIndex + 1) })
+          updateSearch({ page: pageIndex === 0 ? undefined : String(pageIndex + 1) }, false)
+        }
+        sort={sort}
+        onSortChange={(value) => updateSearch({ sort: value, page: undefined }, false)}
+        pageSize={pageSize}
+        onPageSizeChange={(value) =>
+          updateSearch({ page_size: value === 10 ? undefined : String(value), page: undefined }, false)
         }
         onRowClick={openProvider}
         pageCount={pageCount}
