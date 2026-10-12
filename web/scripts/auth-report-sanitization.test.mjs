@@ -38,6 +38,7 @@ const allowedScenarios = [
   "AUTH-LIVE-012",
   "AUTH-LIVE-013",
   "AUTH-LIVE-014",
+  "AUTH-LIVE-015",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -176,7 +177,7 @@ test("auth reporter emits only safe ID, status, duration and numeric source line
 test("auth reporter rejects non-allowlisted title IDs and ignores helper or unrelated source locations", async () => {
   const fixtures = [
     "AUTH-LIVE-000",
-    "AUTH-LIVE-015",
+    "AUTH-LIVE-016",
     "AUTH-LIVE-999",
     "AUTH-LIVE-01",
     "AUTH-LIVE-001suffix",
@@ -219,10 +220,18 @@ test("auth reporter does not serialize a global error when no scenario has finis
   assert.deepEqual(await report([], "failed"), { status: "failed", tests: [] });
 });
 
-test("auth reporter allows only the twelve fixed scenarios and numeric lines from three exact spec basenames", async () => {
+test("auth reporter allows only fixed scenarios and numeric lines from exact spec basenames", async () => {
   const fixtures = allowedScenarios.map((id, index) => {
     const filename =
-      index < 5 ? "auth-live.spec.ts" : index === 10 ? "recovery-live.spec.ts" : "access-live.spec.ts";
+      index < 5
+        ? "auth-live.spec.ts"
+        : index === 10
+          ? "recovery-live.spec.ts"
+          : index >= 11 && index <= 13
+            ? "change-set-live.spec.ts"
+            : index === 14
+              ? "resource-search-live.spec.ts"
+              : "access-live.spec.ts";
     const file = index % 2 === 0 ? `/private/${sensitive}/${filename}` : `C:\\private\\${filename}`;
     const fixture = row(id, "passed", [{ title: sensitive, location: { file, line: index + 1, column: 1 } }]);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (${file}:${index + 21}:2)`;
@@ -243,6 +252,10 @@ test("auth reporter allows only the twelve fixed scenarios and numeric lines fro
 test("auth reporter rejects prefixed, suffixed, malformed and unrelated source filenames in steps and stacks", async () => {
   const filenames = [
     "not-auth-live.spec.ts",
+    "not-resource-search-live.spec.ts",
+    "resource-search-live.spec.ts.bak",
+    "resource-search-live.spec.ts/",
+    `resource-search-live.spec.ts?credential=${markers[0]}`,
     "prefix-access-live.spec.ts",
     "auth-live.spec.ts.bak",
     "access-live.spec.tsx",

@@ -3,7 +3,17 @@ import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Search, X } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { useNavigate } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -22,6 +32,8 @@ interface CommandPaletteProps {
   /** Opens the shortcut sheet, offered here so the palette can teach the rest. */
   onShowShortcuts?: () => void;
 }
+
+const ResourceSearchPanel = lazy(() => import("./ResourceSearchPanel"));
 
 const kindLabels: Record<CommandItem["kind"], string> = {
   action: "명령",
@@ -46,8 +58,12 @@ export function CommandPalette({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
+  const [resourceMode, setResourceMode] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const composing = useRef(false);
+  const setComposing = useCallback((value: boolean) => {
+    composing.current = value;
+  }, []);
   const [navigating, setNavigating] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
@@ -65,6 +81,7 @@ export function CommandPalette({
       setActiveIndex(0);
       if (!nextOpen) {
         setQuery("");
+        setResourceMode(false);
       }
       onOpenChange(nextOpen);
     },
@@ -275,7 +292,9 @@ export function CommandPalette({
             <div>
               <Dialog.Title>명령 팔레트</Dialog.Title>
               <Dialog.Description id="command-description">
-                메뉴와 명령을 검색하고, 요청·추적·세션 ID를 붙여넣어 바로 찾아갑니다.
+                {resourceMode
+                  ? "권한이 있는 자원의 이름을 검색하고 해당 상세 화면을 엽니다."
+                  : "메뉴와 명령을 검색하고, 요청·추적·세션 ID를 붙여넣어 바로 찾아갑니다."}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -284,82 +303,98 @@ export function CommandPalette({
               </Button>
             </Dialog.Close>
           </div>
-          <label className="command-search">
-            <span className="sr-only">메뉴 검색</span>
-            <Search aria-hidden="true" />
-            <input
-              ref={searchRef}
-              aria-label="메뉴 검색"
-              role="combobox"
-              aria-autocomplete="list"
-              aria-controls={listboxId}
-              aria-expanded={open && items.length > 0}
-              aria-activedescendant={activeOptionId}
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setActiveIndex(0);
-              }}
-              onKeyDown={handleSearchKeyDown}
-              onCompositionStart={() => {
-                composing.current = true;
-              }}
-              onCompositionEnd={() => {
-                composing.current = false;
-              }}
-              placeholder="메뉴·명령 검색, 또는 요청·추적·세션 ID 붙여넣기"
-              autoComplete="off"
-              autoFocus
-            />
-            <kbd>Esc</kbd>
-          </label>
-          <p className="sr-only" role="status" aria-atomic="true">
-            {commandPaletteLabels.results(items.length)}
-          </p>
-          <div
-            id={listboxId}
-            className="command-results"
-            role="listbox"
-            aria-label="검색 결과"
-            hidden={!items.length}
-          >
-            {items.map((item, index) => (
-              <button
-                id={`${listboxId}-${item.id.replaceAll(/[.:/]/g, "-")}`}
-                className="command-result"
-                key={item.id}
-                role="option"
-                tabIndex={-1}
-                aria-selected={index === selectedIndex}
-                onPointerMove={() => setActiveIndex(index)}
-                onClick={item.run}
-              >
-                <span>
-                  <strong>{item.title}</strong>
-                  {item.hint ? <small>{item.hint}</small> : null}
-                </span>
-                <Badge tone={item.kind === "action" || item.kind === "jump" ? "muted" : "info"}>
-                  {kindLabels[item.kind]}
-                </Badge>
-              </button>
-            ))}
+          <div className="command-footer" aria-label="검색 범위">
+            <Button variant="ghost" aria-pressed={!resourceMode} onClick={() => setResourceMode(false)}>
+              메뉴·명령
+            </Button>
+            <Button variant="ghost" aria-pressed={resourceMode} onClick={() => setResourceMode(true)}>
+              자원 검색
+            </Button>
           </div>
-          {!items.length ? (
-            <div className="command-empty">
-              <p>{commandPaletteLabels.empty}</p>
-              <p>{commandPaletteLabels.emptyHint}</p>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setQuery("");
-                  setActiveIndex(0);
-                  searchRef.current?.focus();
-                }}
+          {resourceMode ? (
+            <Suspense fallback={<p role="status">자원 검색을 준비하고 있습니다…</p>}>
+              <ResourceSearchPanel go={go} onComposingChange={setComposing} />
+            </Suspense>
+          ) : (
+            <>
+              <label className="command-search">
+                <span className="sr-only">메뉴 검색</span>
+                <Search aria-hidden="true" />
+                <input
+                  ref={searchRef}
+                  aria-label="메뉴 검색"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-controls={listboxId}
+                  aria-expanded={open && items.length > 0}
+                  aria-activedescendant={activeOptionId}
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setActiveIndex(0);
+                  }}
+                  onKeyDown={handleSearchKeyDown}
+                  onCompositionStart={() => {
+                    composing.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    composing.current = false;
+                  }}
+                  placeholder="메뉴·명령 검색, 또는 요청·추적·세션 ID 붙여넣기"
+                  autoComplete="off"
+                  autoFocus
+                />
+                <kbd>Esc</kbd>
+              </label>
+              <p className="sr-only" role="status" aria-atomic="true">
+                {commandPaletteLabels.results(items.length)}
+              </p>
+              <div
+                id={listboxId}
+                className="command-results"
+                role="listbox"
+                aria-label="검색 결과"
+                hidden={!items.length}
               >
-                {commandPaletteLabels.clear}
-              </Button>
-            </div>
-          ) : null}
+                {items.map((item, index) => (
+                  <button
+                    id={`${listboxId}-${item.id.replaceAll(/[.:/]/g, "-")}`}
+                    className="command-result"
+                    key={item.id}
+                    role="option"
+                    tabIndex={-1}
+                    aria-selected={index === selectedIndex}
+                    onPointerMove={() => setActiveIndex(index)}
+                    onClick={item.run}
+                  >
+                    <span>
+                      <strong>{item.title}</strong>
+                      {item.hint ? <small>{item.hint}</small> : null}
+                    </span>
+                    <Badge tone={item.kind === "action" || item.kind === "jump" ? "muted" : "info"}>
+                      {kindLabels[item.kind]}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+              {!items.length ? (
+                <div className="command-empty">
+                  <p>{commandPaletteLabels.empty}</p>
+                  <p>{commandPaletteLabels.emptyHint}</p>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setQuery("");
+                      setActiveIndex(0);
+                      searchRef.current?.focus();
+                    }}
+                  >
+                    {commandPaletteLabels.clear}
+                  </Button>
+                </div>
+              ) : null}
+            </>
+          )}
           <div className="command-footer">
             <span>{commandPaletteLabels.keyboardHint}</span>
             {showLegacyAdmin ? (

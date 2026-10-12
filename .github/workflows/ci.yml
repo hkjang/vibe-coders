@@ -246,6 +246,8 @@ jobs:
         run: go test -p 2 -race ./internal/store ./internal/proxy -run '^Test(RuntimeFlag|KillState|KillSwitch|ProxyInflight|ReadonlyAdminToken|Text2SQLEmergency)' -count=1 -timeout=5m
       - name: Verify PostgreSQL bounded provider impact and permission projections
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestProviderImpact' -count=1 -timeout=5m
+      - name: Verify PostgreSQL bounded resource metadata search and permissions
+        run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestResourceSearch' -count=1 -timeout=5m
       - name: Verify PostgreSQL provider redaction and masked editing
         run: go test -race ./internal/proxy -run '^TestProviderApp|^TestProviderProjectionOpenAPI' -count=1 -timeout=5m
       - name: Verify PostgreSQL admin and personal API key scope contracts
@@ -306,7 +308,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.56
+      SOURCE_SBOM_VERSION: v0.86.57
       GO_VERSION: 1.26.9
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

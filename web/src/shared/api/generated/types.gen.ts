@@ -1251,6 +1251,25 @@ export type RequestNoteWriteRequest = {
     tags?: Array<string> | null;
 } | null;
 
+export type ResourceSearchRequest = {
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill'>;
+    query: string;
+};
+
+export type ResourceSearchResponse = {
+    groups: Array<{
+        items: Array<{
+            id: string;
+            kind: 'provider' | 'workflow' | 'app' | 'skill';
+            title: string;
+        }>;
+        kind: 'provider' | 'workflow' | 'app' | 'skill';
+        limited: boolean;
+        status: 'ok' | 'forbidden' | 'unavailable';
+    }>;
+    request_id: string;
+};
+
 export type RoutingBreakerState = {
     failures: number;
     last_failure_at?: string;
@@ -8112,6 +8131,51 @@ export type GetAdminRequestsIdTraceResponses = {
      */
     200: unknown;
 };
+
+export type PostAdminResourceSearchData = {
+    body: ResourceSearchRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/resource-search';
+};
+
+export type PostAdminResourceSearchErrors = {
+    /**
+     * Search rejected or unavailable; generic message never echoes query or storage error.
+     */
+    400: AppError;
+    /**
+     * Search rejected or unavailable; generic message never echoes query or storage error.
+     */
+    401: AppError;
+    /**
+     * Search rejected or unavailable; generic message never echoes query or storage error.
+     */
+    403: AppError;
+    /**
+     * Search rejected or unavailable; generic message never echoes query or storage error.
+     */
+    405: AppError;
+    /**
+     * Search rejected or unavailable; generic message never echoes query or storage error.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminResourceSearchError = PostAdminResourceSearchErrors[keyof PostAdminResourceSearchErrors];
+
+export type PostAdminResourceSearchResponses = {
+    /**
+     * OK
+     */
+    200: ResourceSearchResponse;
+};
+
+export type PostAdminResourceSearchResponse = PostAdminResourceSearchResponses[keyof PostAdminResourceSearchResponses];
 
 export type GetAdminRetentionData = {
     body?: never;

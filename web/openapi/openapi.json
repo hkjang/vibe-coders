@@ -4262,6 +4262,119 @@
         },
         "type": "object"
       },
+      "ResourceSearchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kinds": {
+            "items": {
+              "enum": [
+                "provider",
+                "workflow",
+                "app",
+                "skill"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "query": {
+            "maxLength": 128,
+            "minLength": 2,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "kinds"
+        ],
+        "type": "object"
+      },
+      "ResourceSearchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "groups": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "items": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "maxLength": 512,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "provider",
+                          "workflow",
+                          "app",
+                          "skill"
+                        ],
+                        "type": "string"
+                      },
+                      "title": {
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "id",
+                      "title"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                "kind": {
+                  "enum": [
+                    "provider",
+                    "workflow",
+                    "app",
+                    "skill"
+                  ],
+                  "type": "string"
+                },
+                "limited": {
+                  "type": "boolean"
+                },
+                "status": {
+                  "enum": [
+                    "ok",
+                    "forbidden",
+                    "unavailable"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "items",
+                "limited",
+                "status"
+              ],
+              "type": "object"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "groups",
+          "request_id"
+        ],
+        "type": "object"
+      },
       "RoutingBreakerState": {
         "additionalProperties": false,
         "properties": {
@@ -6043,7 +6156,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.56"
+    "version": "v0.86.57"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -15891,6 +16004,103 @@
           }
         ],
         "summary": "Unified request waterfall (root + MCP/tool + Text2SQL spans)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/resource-search": {
+      "post": {
+        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication, admin:read and available non-legacy feature access per kind (same sources as existing admin lists). No admin:write required. Query is trimmed, 2–128 Unicode characters, literal name substring (ASCII case-insensitive; non-ASCII case behavior follows database collation). Four supported configuration kinds only; no model/upstream calls or business execution. At most ten metadata rows per kind ordered by stored title then ID. Unsafe or oversized IDs/titles are omitted for every role. Definitions, instructions, credentials, URLs and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
+        "operationId": "post__admin_resource_search",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceSearchResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Search rejected or unavailable; generic message never echoes query or storage error."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Search rejected or unavailable; generic message never echoes query or storage error."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Search rejected or unavailable; generic message never echoes query or storage error."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Search rejected or unavailable; generic message never echoes query or storage error."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Search rejected or unavailable; generic message never echoes query or storage error."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Search permission-scoped navigation metadata",
         "tags": [
           "admin"
         ]

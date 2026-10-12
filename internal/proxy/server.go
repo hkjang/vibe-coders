@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.56"
+var AppVersion = "v0.86.57"
 
 type Server struct {
 	cfg      config.Config
@@ -299,6 +299,7 @@ func (s *Server) Routes() http.Handler {
 	})
 	mux.HandleFunc("/admin/sso/keycloak/test", s.handleKeycloakTest)
 	mux.HandleFunc("/admin/ui-bootstrap", s.handleAdminUIBootstrap)
+	mux.HandleFunc("/admin/resource-search", s.handleAdminResourceSearch)
 	mux.HandleFunc("/admin/ui-telemetry/events", s.handleAppUITelemetryEvent)
 	mux.HandleFunc("/admin/ui-telemetry/summary", s.handleAppUITelemetrySummary)
 	mux.HandleFunc("/admin", s.handleAdminUI)

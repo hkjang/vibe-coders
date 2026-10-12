@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resourceSearchEndpoint } from "@/shared/api/resource-search";
 
 import type {
   AppRequestsResponse,
@@ -173,6 +174,7 @@ export const endpoints = {
     uiBootstrapSchema,
   ),
   admin: {
+    resourceSearch: resourceSearchEndpoint,
     stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),
     // The dashboard's two chart sources: totals over time and the weekday/hour heatmap.
     timeseries: operation<WithQuery<GetAdminTimeseriesData, TimeseriesQuery>, unknown>()(
