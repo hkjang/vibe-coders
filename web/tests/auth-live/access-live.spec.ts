@@ -3,6 +3,7 @@ import { expect } from "@playwright/test";
 import {
   accessPath,
   closeSecret,
+  confirmKeyEdit,
   editScopes,
   issueKey,
   keyRow,
@@ -286,6 +287,7 @@ test("AUTH-LIVE-010 실제 권한 저장 완료의 늦은 응답과 이전 계�
   try {
     const dialog = await editScopes(page, name);
     await dialog.getByRole("checkbox", { name: /chat:completion/ }).check();
+    await confirmKeyEdit(dialog, "browser-reviewed-scopes-late");
     await dialog.getByRole("button", { name: "권한 저장", exact: true }).click();
     await expect.poll(() => ready).toBe(true);
     await expect(dialog.getByRole("checkbox", { name: /chat:completion/ })).toBeDisabled();

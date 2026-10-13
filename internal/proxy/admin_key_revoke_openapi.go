@@ -20,8 +20,9 @@ func enrichAdminKeyRevokeOpenAPI(method string, op, responses map[string]any) {
 }
 func adminKeyRevokeOpenAPISchemas() map[string]any {
 	return map[string]any{
-		"AdminKeyCatalog": map[string]any{"type": "object", "required": []string{"api_keys", "revoke_review_supported"}, "properties": map[string]any{
-			"api_keys": map[string]any{"type": "array", "items": schemaRef("MeKeyPublic")}, "revoke_review_supported": map[string]any{"type": "boolean"},
+		"AdminKeyCatalog": map[string]any{"type": "object", "required": []string{"api_keys", "revoke_review_supported", "edit_review_supported"}, "properties": map[string]any{
+			"edit_review_supported": map[string]any{"type": "boolean"},
+			"api_keys":              map[string]any{"type": "array", "items": schemaRef("MeKeyPublic")}, "revoke_review_supported": map[string]any{"type": "boolean"},
 		}},
 		"AdminKeyRevokeRequest": map[string]any{"oneOf": []any{
 			map[string]any{"type": "object", "nullable": true, "additionalProperties": false, "maxProperties": 0, "description": "Legacy empty object or JSON null; the whole body may also be omitted."},

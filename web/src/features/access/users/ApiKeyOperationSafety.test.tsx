@@ -26,7 +26,12 @@ const row = apiKeyPublicSchema.parse({
 });
 const operations = [
   { trigger: "키 발급", title: "API 키 발급", submit: "발급", endpoint: "POST /admin/api-keys" },
-  { trigger: "수정", title: "API 키 수정", submit: "저장", endpoint: "PATCH /admin/api-keys/key_review" },
+  {
+    trigger: "수정",
+    title: "API 키 수정",
+    submit: "검토한 변경 저장",
+    endpoint: "PATCH /admin/api-keys/key_review",
+  },
   {
     trigger: "권한 수정",
     title: "API 키 권한 수정",
@@ -74,7 +79,11 @@ describe.each(["permission", "readonly", "allowed"] as const)("관리자 키 실
     async (operation) => {
       const user = userEvent.setup();
       const api = mockApi({
-        "GET /admin/api-keys": () => ({ api_keys: [row], revoke_review_supported: true }),
+        "GET /admin/api-keys": () => ({
+          api_keys: [row],
+          revoke_review_supported: true,
+          edit_review_supported: true,
+        }),
         "GET /admin/roles": () => ({ roles: [], all_scopes: ["models:read", "chat:completion"] }),
         "POST /admin/api-keys": () => ({ api_key: { id: "key_created" }, secret: "synthetic-test-secret" }),
         "PATCH /admin/api-keys/key_review": () => ({}),
@@ -111,6 +120,13 @@ describe.each(["permission", "readonly", "allowed"] as const)("관리자 키 실
       if (operation.trigger === "폐기") {
         await user.type(within(dialog).getByLabelText("확인 문구", { exact: false }), row.id);
         await user.type(within(dialog).getByLabelText("변경 사유", { exact: false }), "운영 키 정리");
+      }
+      if (operation.trigger === "수정" || operation.trigger === "권한 수정") {
+        if (operation.trigger === "수정")
+          await user.type(within(dialog).getByRole("textbox", { name: "이름" }), " 변경");
+        else await user.click(within(dialog).getByRole("checkbox", { name: /models:read/ }));
+        await user.type(within(dialog).getByRole("textbox", { name: "변경 사유" }), "운영 키 정리");
+        await user.click(within(dialog).getByRole("checkbox", { name: /변경 내용과 영향을 확인했습니다/ }));
       }
       const submit = within(dialog).getByRole("button", { name: operation.submit });
       await waitFor(() => expect(submit).toBeEnabled());

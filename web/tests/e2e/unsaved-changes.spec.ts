@@ -245,6 +245,9 @@ async function openForm(page: Page, dirty = true): Promise<Locator> {
   await page.getByRole("button", { name: "공급자 추가", exact: true }).click();
   const form = page.getByRole("dialog", { name: "공급자 추가", exact: true });
   await expect(form).toBeVisible();
+  // Visible content can precede the modal's focus setup. Keyboard dismissal
+  // starts only once the dialog owns focus, including an untouched form.
+  await expect.poll(() => form.evaluate((element) => element.contains(document.activeElement))).toBe(true);
   if (dirty) {
     await form.getByLabel(/^이름/u).fill(draftName);
     await form.getByLabel(/^기본 URL/u).fill(providerUrl);
@@ -255,7 +258,7 @@ async function openForm(page: Page, dirty = true): Promise<Locator> {
 async function closeForm(page: Page, form: Locator, method: "Escape" | "취소" | "외부 클릭") {
   if (method === "Escape") await page.keyboard.press("Escape");
   else if (method === "취소") await form.getByRole("button", { name: "취소", exact: true }).click();
-  else await page.mouse.click(8, 8);
+  else await page.locator(".dialog-overlay").click({ position: { x: 8, y: 8 } });
 }
 
 const guard = (page: Page) => page.getByRole("alertdialog", { name: guardTitle });

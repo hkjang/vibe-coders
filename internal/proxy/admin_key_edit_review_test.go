@@ -1,0 +1,138 @@
+package proxy
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"vibe-coders/internal/store"
+)
+
+func TestAdminKeyEditReviewRejectsStaleBrowserSnapshot(t *testing.T) {
+	f := newAPIKeyScopeContractFixture(t)
+	key := store.APIKeyRecord{ID: "edit-review-stale", Name: "원래 이름", KeyHash: "public-edit-fixture", Role: "developer", Status: "active"}
+	if f.db.UpsertAPIKey(t.Context(), key) != nil {
+		t.Fatal("fixture unavailable")
+	}
+	key = f.key(t, key.ID)
+	revision, err := f.db.APIKeyRevision(t.Context(), key)
+	if err != nil {
+		t.Fatal("review unavailable")
+	}
+	key.Name = "다른 관리자의 변경"
+	if f.db.UpsertAPIKey(t.Context(), key) != nil {
+		t.Fatal("concurrent edit unavailable")
+	}
+	body, _ := json.Marshal(map[string]any{"name": "오래된 초안", "review": map[string]string{"reason": "변경 검토", "expected_revision": revision}})
+	f.request(t, http.MethodPatch, "/admin/api-keys/"+key.ID, f.adminToken, string(body), http.StatusConflict)
+	if f.key(t, key.ID).Name != key.Name {
+		t.Fatal("stale browser review overwrote a newer edit")
+	}
+}
+
+func TestAdminKeyEditReviewRecordsReasonAndAdvertisesCapability(t *testing.T) {
+	f := newAPIKeyScopeContractFixture(t)
+	key := store.APIKeyRecord{ID: "edit-review-valid", Name: "검토 전", KeyHash: "public-valid-edit-fixture", Role: "developer", Status: "active"}
+	if f.db.UpsertAPIKey(t.Context(), key) != nil {
+		t.Fatal("fixture unavailable")
+	}
+	key = f.key(t, key.ID)
+	revision, err := f.db.APIKeyRevision(t.Context(), key)
+	if err != nil {
+		t.Fatal("review unavailable")
+	}
+	body, _ := json.Marshal(map[string]any{"name": "검토 후", "review": map[string]string{"reason": "업무 이름 정리", "expected_revision": revision}})
+	f.request(t, http.MethodPatch, "/admin/api-keys/"+key.ID, f.adminToken, string(body), http.StatusOK)
+	audits, err := f.db.ListAdminAudit(t.Context(), 20)
+	if err != nil || len(audits) != 1 || !strings.Contains(audits[0].AfterValue, "업무 이름 정리") || strings.Contains(audits[0].AfterValue, revision) {
+		t.Fatal("review reason must be audited without its opaque revision")
+	}
+	var catalog struct {
+		EditReviewSupported bool `json:"edit_review_supported"`
+	}
+	raw := f.request(t, http.MethodGet, "/admin/api-keys", f.adminToken, "", http.StatusOK)
+	if json.Unmarshal(raw, &catalog) != nil || !catalog.EditReviewSupported {
+		t.Fatal("edit review capability missing")
+	}
+}
+
+func TestAdminKeyEditReviewRejectsMalformedReview(t *testing.T) {
+	for _, body := range []string{
+		`{"name":"x","review":{"reason":"확인"}}`,
+		`{"name":"x","review":{"reason":null,"expected_revision":"` + strings.Repeat("a", 64) + `"}}`,
+		`{"name":"x","review":{"reason":"확인","expected_revision":null}}`,
+		`{"name":"x","review":{"reason":" ","expected_revision":"` + strings.Repeat("a", 64) + `"}}`,
+		`{"name":"x","review":{"reason":"확인","reason":"중복","expected_revision":"` + strings.Repeat("a", 64) + `"}}`,
+	} {
+		f := newAPIKeyScopeContractFixture(t)
+		key := store.APIKeyRecord{ID: "edit-review-invalid", Name: "보존할 이름", KeyHash: "public-invalid-edit-fixture", Role: "developer", Status: "active"}
+		if f.db.UpsertAPIKey(t.Context(), key) != nil {
+			t.Fatal("fixture unavailable")
+		}
+		f.request(t, http.MethodPatch, "/admin/api-keys/"+key.ID, f.adminToken, body, http.StatusBadRequest)
+		if f.key(t, key.ID).Name != key.Name {
+			t.Fatal("invalid review changed metadata")
+		}
+	}
+}
+
+func TestAdminKeyEditReviewParserCompatibility(t *testing.T) {
+	review := `"review":{"reason":"검토 사유","expected_revision":"` + strings.Repeat("a", 64) + `"}`
+	for _, tc := range []struct {
+		name  string
+		body  string
+		valid bool
+	}{
+		{"legacy null", `null`, true},
+		{"legacy empty", `{}`, true},
+		{"legacy omitted fields", `{"name":"이름"}`, true},
+		{"legacy null scopes", `{"scopes":null}`, true},
+		{"legacy empty scopes", `{"scopes":[]}`, true},
+		{"legacy unknown field", `{"name":"이름","extra":true}`, true},
+		{"legacy trailing value", `{"name":"이름"} {}`, true},
+		{"paired review", `{"name":"이름",` + review + `}`, true},
+		{"review preserves null semantics", `{"name":null,"scopes":null,` + review + `}`, true},
+		{"review explicit empty scopes", `{"scopes":[],` + review + `}`, true},
+		{"review trailing value", `{"name":"이름",` + review + `} {}`, false},
+		{"review unknown field", `{"name":"이름","extra":true,` + review + `}`, false},
+		{"review duplicate editable field", `{"name":"a","name":"b",` + review + `}`, false},
+		{"review mixed case field", `{"Name":"a",` + review + `}`, false},
+		{"review mixed case marker", `{"Review":{"reason":"확인","expected_revision":"` + strings.Repeat("a", 64) + `"}}`, false},
+		{"review null", `{"name":"이름","review":null}`, false},
+		{"review empty", `{"name":"이름","review":{}}`, false},
+		{"review oversized reason", `{"name":"이름","review":{"reason":"` + strings.Repeat("가", 1025) + `","expected_revision":"` + strings.Repeat("a", 64) + `"}}`, false},
+		{"review oversized object", `{"name":"` + strings.Repeat("a", 8192) + `",` + review + `}`, false},
+		{"review oversized whitespace", strings.Repeat(" ", 8192) + `{` + review + `}`, false},
+		{"review oversized trailing whitespace", `{` + review + `}` + strings.Repeat(" ", 8192), false},
+		{"review invalid UTF-8", `{"name":"` + string([]byte{255}) + `",` + review + `}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(tc.body))
+			_, err := readAdminKeyPatchRequest(httptest.NewRecorder(), request)
+			if (err == nil) != tc.valid {
+				t.Fatal("PATCH compatibility or review validation mismatch")
+			}
+		})
+	}
+}
+
+func TestAdminKeyEditReviewDoesNotAuditNoOp(t *testing.T) {
+	f := newAPIKeyScopeContractFixture(t)
+	key := store.APIKeyRecord{ID: "edit-review-noop", Name: "같은 이름", KeyHash: "public-noop-fixture", Role: "developer", Status: "active"}
+	if f.db.UpsertAPIKey(t.Context(), key) != nil {
+		t.Fatal("fixture unavailable")
+	}
+	key = f.key(t, key.ID)
+	revision, err := f.db.APIKeyRevision(t.Context(), key)
+	if err != nil {
+		t.Fatal("review unavailable")
+	}
+	body, _ := json.Marshal(map[string]any{"name": key.Name, "review": map[string]string{"reason": "변경 없는 요청", "expected_revision": revision}})
+	f.request(t, http.MethodPatch, "/admin/api-keys/"+key.ID, f.adminToken, string(body), http.StatusBadRequest)
+	audits, err := f.db.ListAdminAudit(t.Context(), 20)
+	if err != nil || len(audits) != 0 {
+		t.Fatal("no-op reviewed request must not create a change audit")
+	}
+}

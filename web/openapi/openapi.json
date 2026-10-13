@@ -9,13 +9,38 @@
             },
             "type": "array"
           },
+          "edit_review_supported": {
+            "type": "boolean"
+          },
           "revoke_review_supported": {
             "type": "boolean"
           }
         },
         "required": [
           "api_keys",
-          "revoke_review_supported"
+          "revoke_review_supported",
+          "edit_review_supported"
+        ],
+        "type": "object"
+      },
+      "AdminKeyEditReview": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "description": "Exact catalog snapshot revision.",
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Trimmed nonblank audit reason.",
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "expected_revision"
         ],
         "type": "object"
       },
@@ -50,6 +75,87 @@
             "type": "object"
           }
         ]
+      },
+      "AdminKeyUpdateRequest": {
+        "additionalProperties": false,
+        "nullable": true,
+        "properties": {
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "owner": {
+            "nullable": true,
+            "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/AdminKeyEditReview"
+          },
+          "role": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "disabled",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "team": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AdminKeyUpdateResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "owner",
+          "team",
+          "role",
+          "scopes",
+          "status"
+        ],
+        "type": "object"
       },
       "AdminModel": {
         "additionalProperties": false,
@@ -7212,6 +7318,7 @@
         ]
       },
       "patch": {
+        "description": "Partially updates key metadata or explicit scopes. Omitted or null fields keep their existing values; scopes=[] clears grants. Optional review requires both reason and expected_revision. Reviewed requests reject stale snapshots, duplicate/unknown fields, no-op updates and accepted bodies over 8192 bytes. Legacy field semantics are preserved without review. Current role/scope/team authority is enforced; the authorized row snapshot and edit/audit commit atomically. Catalog edit_review_supported identifies support on the responding server; upgrade all pods before reviewed writes. This is snapshot comparison, not an ever-increasing revision counter.",
         "operationId": "patch__admin_api_keys_id",
         "parameters": [
           {
@@ -7223,9 +7330,106 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminKeyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminKeyUpdateResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid edit or review"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Insufficient role, scope or team authority"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Key not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Key changed since review or authorization"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Update not confirmed; inspect current key and audit"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review authority unavailable"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

@@ -221,6 +221,7 @@ export interface CreateApiKeyBody {
   expires_at?: string;
 }
 export interface UpdateApiKeyBody {
+  review?: { reason: string; expected_revision: string };
   status?: "active" | "disabled";
   name?: string;
   owner?: string;

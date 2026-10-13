@@ -2,6 +2,19 @@
   display: grid;
   gap: var(--space-4);
 }
+.dialog-content:has(.access-key-edit-review) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dialog-content:has(.access-key-edit-review) > .dialog-header,
+.dialog-content:has(.access-key-edit-review) > .dialog-footer {
+  flex-shrink: 0;
+}
+.dialog-content:has(.access-key-edit-review) > .dialog-body {
+  min-height: 0;
+  overflow: auto;
+}
 .access-key-actions {
   flex-wrap: nowrap;
   width: max-content;
