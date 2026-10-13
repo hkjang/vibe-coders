@@ -216,7 +216,17 @@ async function installGateway(context: BrowserContext, origin: string) {
           ? json({ error: { message: "public policy read unavailable" } }, 503)
           : json({ policies: result });
       }
+      if (call === "GET /admin/policies/canary-status")
+        return json({
+          policies: rows.filter(object).map((row) => ({
+            policy_id: row.id,
+            name: row.name,
+            rollout_percent: row.rollout_percent,
+            suggested_next: 50,
+          })),
+        });
       const empty: Record<string, unknown> = {
+        "GET /admin/policy-advisor/suggestions": { suggestions: [] },
         "GET /admin/kill-switch": { disabled: false },
         "GET /admin/incidents": { incidents: [] },
         "GET /admin/policies/regression/cases": { cases: [] },

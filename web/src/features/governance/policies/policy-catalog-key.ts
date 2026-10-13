@@ -4,6 +4,8 @@ import { fingerprint } from "./policy-editor-security";
 
 /** All policy readers and write completions share only their current principal/session. */
 export const policyCatalogKey = (session: string) => ["governance", "policies", session] as const;
+export const policyAdviceKey = (session: string, window: string) =>
+  ["governance", "advisor", window, session] as const;
 
 export function policyCatalogCurrent(client: QueryClient, key: QueryKey, baseline: Policy): boolean {
   const state = client.getQueryState(key);

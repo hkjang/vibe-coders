@@ -364,6 +364,18 @@ describe("app route query security", () => {
     expect(JSON.stringify(state)).not.toContain("private-value");
   });
 
+  it("preserves only the boolean policy tab focus instruction", () => {
+    expect(locationStateWithSensitiveRejections({ policyTabFocus: true, raw: "private-value" }, [])).toEqual({
+      policyTabFocus: true,
+    });
+  });
+  it.each([false, "private-value", { raw: "private-value" }, [true]])(
+    "rejects non-true policy focus state %j",
+    (value) => {
+      expect(locationStateWithSensitiveRejections({ policyTabFocus: value }, [])).toBeNull();
+    },
+  );
+
   it("preserves rejection markers only as an exact true boolean", () => {
     expect(
       locationStateWithSensitiveRejections(

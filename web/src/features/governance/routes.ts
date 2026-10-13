@@ -17,6 +17,10 @@ export const governanceFeatureModules = defineFeatureModules([
     load: () => import("./policies/PoliciesPage").then((module) => module.PoliciesPage),
     subroutes: [
       {
+        path: "advisor",
+        load: () => import("./policies/PolicyAdvisorPage").then((module) => module.PolicyAdvisorPage),
+      },
+      {
         path: "detail",
         load: () => import("./policies/PolicySearchPage").then((module) => module.PolicySearchPage),
       },
