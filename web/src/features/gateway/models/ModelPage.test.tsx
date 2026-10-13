@@ -19,11 +19,16 @@ import type {
 } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 
-const authRuntime = vi.hoisted(() => ({ legacyFallback: true, scopes: ["admin:read"] }));
+const authRuntime = vi.hoisted(() => ({
+  legacyFallback: true,
+  scopes: ["admin:read"],
+  prefixes: ["vc_sk_", "vc_sa_"],
+}));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     authenticationMode: "session",
+    credentialPrefixes: authRuntime.prefixes,
     legacyFallback: authRuntime.legacyFallback,
     mode: "authenticated",
     user: {
@@ -258,6 +263,7 @@ describe("ModelPage", () => {
   beforeEach(() => {
     authRuntime.legacyFallback = true;
     authRuntime.scopes = ["admin:read"];
+    authRuntime.prefixes = ["vc_sk_", "vc_sa_"];
     usePreferences.setState({ refreshInterval: 0 });
     vi.restoreAllMocks();
   });
@@ -757,6 +763,21 @@ describe("ModelPage", () => {
     expect(input).toHaveFocus();
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByTestId("location")).not.toHaveTextContent("private");
+  });
+
+  it("사용자 지정 접두사 검색을 깊은 링크와 후속 상세 링크에 남기지 않는다", async () => {
+    authRuntime.prefixes = ["corp_"];
+    const candidate = "corp_" + "a".repeat(32);
+    mockApi();
+    renderPage(`/gateway/models?q=${candidate}`);
+    const input = screen.getByRole("textbox", { name: "모델 검색" });
+    expect(input).toHaveValue("");
+    expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent(candidate));
+    await screen.findByRole("link", { name: "gpt-5" });
+    for (const link of screen.getAllByRole("link"))
+      expect(link.getAttribute("href")).not.toContain(candidate);
+    expect(input).toHaveFocus();
   });
 
   it("scrubs a secret-like legacy model_provider and renders a generic not-found state", async () => {

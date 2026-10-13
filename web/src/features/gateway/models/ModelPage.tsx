@@ -69,7 +69,7 @@ function ModelPageContent(): React.JSX.Element {
   const invalidPageSize = searchParams.has("page_size") && !parsedPageSize;
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isModelStatusFilter(requestedStatus) ? requestedStatus : "all";
-  const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
+  const unsafeStoredQuery = containsPotentialSecret(requestedQuery, auth.credentialPrefixes);
   const query = unsafeStoredQuery ? "" : requestedQuery;
   const providerFilter = isProviderRef(requestedProviderFilter) ? requestedProviderFilter : "";
   const providerFilterInvalid = requestedProviderFilter !== "" && !isProviderRef(requestedProviderFilter);
@@ -94,9 +94,10 @@ function ModelPageContent(): React.JSX.Element {
         if (value === undefined || value === "") next.delete(key);
         else next.set(key, value);
       }
+      if (containsPotentialSecret(next.get("q") ?? "", auth.credentialPrefixes)) next.delete("q");
       setSearchParams(next, { replace });
     },
-    [searchParams, setSearchParams],
+    [searchParams, setSearchParams, auth.credentialPrefixes],
   );
 
   useEffect(() => {
@@ -229,12 +230,13 @@ function ModelPageContent(): React.JSX.Element {
   const detailSearch = useCallback(
     (row: ModelCatalogRow): string => {
       const next = new URLSearchParams(searchParams);
+      if (containsPotentialSecret(next.get("q") ?? "", auth.credentialPrefixes)) next.delete("q");
       next.set("model", row.model.id);
       next.set("model_provider", row.model.provider_ref);
       next.set("source", row.model.source);
       return `?${next.toString()}`;
     },
-    [searchParams],
+    [searchParams, auth.credentialPrefixes],
   );
   const refreshAll = (): void => {
     void Promise.all([models.refetch(), quality.refetch(), pricing.refetch(), tags.refetch()]);

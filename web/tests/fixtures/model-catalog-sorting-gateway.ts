@@ -229,6 +229,9 @@ async function install(context: BrowserContext) {
     reads,
     writes,
     unexpected,
+    prefixes(values: string[]) {
+      currentBootstrap.authentication.credential_prefixes = values;
+    },
     owner(id: string) {
       if (currentBootstrap.user) currentBootstrap.user.id = id;
     },
