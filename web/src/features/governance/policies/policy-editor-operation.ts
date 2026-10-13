@@ -8,8 +8,8 @@ import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
 import type { PolicyEditorAccess } from "./policy-editor-access";
 import { fingerprint } from "./policy-editor-security";
 import { acknowledged } from "./policy-editor-state";
+import { policyCatalogCurrent } from "./policy-catalog-key";
 
-export const editorQueryKey = ["governance", "policies"] as const;
 export interface PolicyReview {
   body: PolicyBody;
   prefixKey: string;
@@ -29,6 +29,7 @@ export function usePolicyEditorOperation({
   isReview: (review: PolicyReview) => boolean;
 }) {
   const client = useQueryClient();
+  const editorQueryKey = access.catalogKey;
   const [saved, setSaved] = useState(false);
   const [unconfirmed, setUnconfirmed] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
@@ -52,18 +53,7 @@ export function usePolicyEditorOperation({
     if (!mounted.current || controller.signal.aborted || flight.current !== controller)
       throw new AppError("이전 편집 요청입니다.", { kind: "aborted" });
   };
-  const sourceCurrent = () => {
-    const query = client.getQueryState(editorQueryKey);
-    const data = client.getQueryData<{ policies?: Policy[] | null }>(editorQueryKey);
-    const rows = data?.policies?.filter((row) => row.id === baseline.id);
-    return (
-      query?.status === "success" &&
-      !query.isInvalidated &&
-      query.fetchStatus === "idle" &&
-      rows?.length === 1 &&
-      fingerprint(rows[0]) === fingerprint(baseline)
-    );
-  };
+  const sourceCurrent = () => policyCatalogCurrent(client, editorQueryKey, baseline);
   const get = (controller: AbortController) =>
     apiClient.request(endpoints.domains.governance.policies.list, {
       signal: controller.signal,

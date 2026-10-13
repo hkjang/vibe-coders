@@ -35,7 +35,11 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
 
 export const sensitiveQueryRejectionStateKey = "appSensitiveQueryKeys";
 const preservedRejectionKeys = new Set(["q"]);
-const preservedBooleanStateKeys = ["providerDetailRejected", "providerSearchRejected"] as const;
+const preservedBooleanStateKeys = [
+  "providerDetailRejected",
+  "providerSearchRejected",
+  "policyTabFocus",
+] as const;
 
 export interface SanitizedAppRouteSearch {
   rejectedKeys: readonly string[];

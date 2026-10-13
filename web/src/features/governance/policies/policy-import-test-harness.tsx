@@ -178,6 +178,14 @@ export async function setupImport() {
     exports,
     response,
     view,
+    catalogKey() {
+      const query = view.client
+        .getQueryCache()
+        .findAll({ queryKey: ["governance", "policies"] })
+        .find((item) => item.getObserversCount() > 0);
+      if (!query) throw new Error("current policy observer missing");
+      return query.queryKey;
+    },
     user,
     dialog,
     update(change: Partial<typeof runtime>) {

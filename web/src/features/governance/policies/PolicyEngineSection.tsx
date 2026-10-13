@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, Plus, Trash2 } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { z } from "zod";
 
 import {
@@ -11,7 +11,8 @@ import {
 import { PolicyEditorDialog } from "./PolicyEditorDialog";
 import { PolicyImportEntry } from "./PolicyImportEntry";
 import { usePolicyEditorAccess } from "./policy-editor-access";
-import { editorJson, editorText, fingerprint } from "./policy-editor-security";
+import { editorJson, editorText } from "./policy-editor-security";
+import { policyCatalogCurrent } from "./policy-catalog-key";
 import { policyProblem } from "./policy-editor-state";
 import {
   actionLabels,
@@ -20,6 +21,7 @@ import {
   policyDecisionOptions,
 } from "@/features/governance/policies/policy-labels";
 import { apiClient } from "@/shared/api/client";
+import { AppError } from "@/shared/api/error";
 import type { Policy, PolicyRegressionRun } from "@/shared/api/domains/governance";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
@@ -35,7 +37,6 @@ import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
-import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { formatNumber } from "@/shared/utils/format";
 
 const routeId = "governance.policies";
@@ -119,23 +120,24 @@ function actionsFrom(values: PolicyFormValues): Record<string, unknown> {
 }
 
 export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.JSX.Element {
+  const access = usePolicyEditorAccess(canWrite);
+  return <PolicyEngineContent key={access.sessionKey} canWrite={canWrite} />;
+}
+
+function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const queryClient = useQueryClient();
-  const toggleAccess = useFeatureMutationAccess(
-    [routeId],
-    canWrite,
-    "정책 사용·중지 변경에는 admin:write 권한이 필요합니다.",
-  );
   const editorAccess = usePolicyEditorAccess(canWrite);
+  const toggleAccess = editorAccess.write;
+  const ownsResult = () => {
+    try {
+      editorAccess.assertRead();
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const [editing, setEditing] = useState<{ baseline: Policy; owner: string }>();
   const editorSelection = useRef<typeof editing>(undefined);
-  const [editorOwner, setEditorOwner] = useState(editorAccess.sessionKey);
-  if (editorOwner !== editorAccess.sessionKey) {
-    setEditorOwner(editorAccess.sessionKey);
-    setEditing(undefined);
-  }
-  useLayoutEffect(() => {
-    if (editorSelection.current?.owner !== editorAccess.sessionKey) editorSelection.current = undefined;
-  }, [editorAccess.sessionKey]);
   const editorTrigger = useRef<HTMLButtonElement | null>(null);
   const editorTargetId = useRef<string | undefined>(undefined);
   const [policyFormOpen, setPolicyFormOpen] = useState(false);
@@ -148,15 +150,22 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
   const rowTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const policies = useQuery({
-    queryKey: ["governance", "policies"],
+    queryKey: editorAccess.catalogKey,
+    enabled: editorAccess.read,
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.governance.policies.list, { signal, routeId }),
+    gcTime: 0,
+    retry: false,
   });
   const regressionCases = useQuery({
-    queryKey: ["governance", "regression-cases"],
+    queryKey: ["governance", "regression-cases", editorAccess.sessionKey],
+    enabled: editorAccess.read,
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.governance.regression.list, { signal, routeId }),
+    gcTime: 0,
+    retry: false,
   });
+  const policyCurrent = (row: Policy) => policyCatalogCurrent(queryClient, editorAccess.catalogKey, row);
 
   const policyForm = useZodForm<PolicyFormInput, PolicyFormValues>(policyFormSchema, {
     name: "",
@@ -177,6 +186,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
   });
 
   const savePolicy = useMutationFeedback({
+    ownsResult,
     mutate: (values: PolicyFormValues) =>
       apiClient.request(endpoints.domains.governance.policies.save, {
         body: {
@@ -203,8 +213,12 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
   });
 
   const togglePolicy = useMutationFeedback({
+    ownsResult,
     mutate: (variables: { policy: Policy; enabled: boolean }) => {
+      editorAccess.assertRead();
       toggleAccess.assertCurrent();
+      if (!policyCurrent(variables.policy))
+        throw new AppError("최신 정책 목록을 확인한 뒤 다시 검토하세요.", { kind: "permission" });
       return apiClient.request(endpoints.domains.governance.policies.save, {
         body: {
           id: variables.policy.id,
@@ -233,6 +247,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
   });
 
   const saveCase = useMutationFeedback({
+    ownsResult,
     mutate: (values: RegressionFormValues) =>
       apiClient.request(endpoints.domains.governance.regression.save, {
         body: {
@@ -251,6 +266,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
   });
 
   const removeCase = useMutationFeedback({
+    ownsResult,
     mutate: (id: string) =>
       apiClient.request(endpoints.domains.governance.regression.remove, { query: { id }, routeId }),
     invalidates: [["governance", "regression-cases"]],
@@ -259,6 +275,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
   });
 
   const runRegression = useMutationFeedback({
+    ownsResult,
     mutate: () => apiClient.request(endpoints.domains.governance.regression.run, { routeId }),
     successMessage: (result) =>
       `회귀 실행 완료 — 통과 ${formatNumber(Number(result.passed ?? 0))} / 실패 ${formatNumber(Number(result.failed ?? 0))}`,
@@ -266,8 +283,12 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
     onSuccess: (result) => setRunResult(result),
   });
 
-  const policyRows = policies.data?.policies ?? [];
-  const caseRows = regressionCases.data?.cases ?? [];
+  const policyRows =
+    !editorAccess.read || !policies.isSuccess || policies.isFetching ? [] : (policies.data.policies ?? []);
+  const caseRows =
+    !editorAccess.read || !regressionCases.isSuccess || regressionCases.isFetching
+      ? []
+      : (regressionCases.data.cases ?? []);
 
   const policyColumns: ReadonlyArray<GovernanceColumn<Policy>> = [
     {
@@ -346,21 +367,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
                 editorAccess.assertRead();
                 editorAccess.write.assertCurrent();
                 if (editorSelection.current) return;
-                const query = queryClient.getQueryState(["governance", "policies"]);
-                const data = queryClient.getQueryData<{ policies?: Policy[] | null }>([
-                  "governance",
-                  "policies",
-                ]);
-                const currentRows = data?.policies?.filter((item) => item.id === row.id);
-                if (
-                  query?.status !== "success" ||
-                  query.fetchStatus !== "idle" ||
-                  query.isInvalidated ||
-                  policyProblem(row) ||
-                  currentRows?.length !== 1 ||
-                  fingerprint(currentRows[0]) !== fingerprint(row)
-                )
-                  return;
+                if (policyProblem(row) || !policyCurrent(row)) return;
                 editorTrigger.current = event.currentTarget;
                 editorTargetId.current = row.id;
                 const selected = { baseline: structuredClone(row), owner: editorAccess.sessionKey };
@@ -375,12 +382,14 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
           </Button>
           <Button
             size="small"
-            disabled={!toggleAccess.allowed}
+            disabled={!toggleAccess.allowed || policies.isFetching || !policyCurrent(row)}
             title={toggleAccess.reason}
             aria-label={`${editorText(row.name || row.id, editorAccess.prefixes)} ${row.enabled ? "중지" : "사용"}`}
             onClick={(event) => {
               try {
+                editorAccess.assertRead();
                 toggleAccess.assertCurrent();
+                if (!policyCurrent(row)) return;
               } catch {
                 return;
               }
@@ -463,12 +472,18 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
         {policies.isError ? (
           <PanelFailure
             error={policies.error}
-            hasData={Boolean(policies.data)}
+            hasData={false}
             label="AI 정책"
             onRetry={() => void policies.refetch()}
           />
         ) : null}
-        {!policies.isPending && !policies.isError && policyRows.length === 0 ? (
+        {!editorAccess.read ? (
+          <InlineNotice tone="warning" title="정책 조회 권한이 없습니다.">
+            security:read 권한을 확인하세요.
+          </InlineNotice>
+        ) : policies.isError ? null : !policies.isPending &&
+          !policies.isFetching &&
+          policyRows.length === 0 ? (
           <EmptyState
             title="등록된 AI 정책이 없습니다."
             description="정책을 추가하면 위험한 요청을 차단하거나 승인 절차로 보낼 수 있습니다."
@@ -478,9 +493,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
             caption="AI 정책 목록"
             columns={policyColumns}
             rows={policyRows}
-            loading={policies.isPending}
-            error={policies.isError && !policies.data ? "정책을 불러오지 못했습니다." : undefined}
-            onRetry={() => void policies.refetch()}
+            loading={policies.isPending || policies.isFetching}
           />
         )}
       </SectionCard>
@@ -512,12 +525,12 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
         {regressionCases.isError ? (
           <PanelFailure
             error={regressionCases.error}
-            hasData={Boolean(regressionCases.data)}
+            hasData={false}
             label="회귀 시나리오"
             onRetry={() => void regressionCases.refetch()}
           />
         ) : null}
-        {runResult ? (
+        {runResult && editorAccess.read ? (
           <InlineNotice
             tone={Number(runResult.failed ?? 0) > 0 ? "warning" : "success"}
             title={`회귀 결과 — 통과 ${formatNumber(Number(runResult.passed ?? 0))} / 실패 ${formatNumber(Number(runResult.failed ?? 0))}`}
@@ -536,7 +549,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
           caption="정책 회귀 시나리오"
           columns={caseColumns}
           rows={caseRows}
-          loading={regressionCases.isPending}
+          loading={regressionCases.isPending || regressionCases.isFetching}
           emptyMessage="저장된 회귀 시나리오가 없습니다. 시나리오를 추가하면 정책 변경이 판단을 뒤집는지 확인할 수 있습니다."
         />
       </SectionCard>
@@ -659,7 +672,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
             : "이 정책의 규칙이 즉시 적용됩니다."
         }
         confirmLabel={pendingToggle?.enabled ? "중지" : "사용"}
-        confirmDisabled={!toggleAccess.allowed}
+        confirmDisabled={!toggleAccess.allowed || !pendingToggle || !policyCurrent(pendingToggle)}
         tone={pendingToggle?.enabled ? "danger" : "primary"}
         onConfirm={async () => {
           toggleAccess.assertCurrent();
@@ -671,9 +684,11 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
           }
         }}
       >
-        {!toggleAccess.allowed ? (
+        {!toggleAccess.allowed || (pendingToggle && !policyCurrent(pendingToggle)) ? (
           <InlineNotice tone="warning" title="정책 사용·중지 변경이 잠겼습니다.">
-            {toggleAccess.reason} 권한이 복구되어도 직접 확인하기 전에는 전송하지 않습니다.
+            {toggleAccess.reason ??
+              "최신 목록의 정책 정보가 달라졌거나 조회를 확인할 수 없습니다. 닫은 뒤 다시 검토하세요."}
+            권한이 복구되어도 직접 확인하기 전에는 전송하지 않습니다.
           </InlineNotice>
         ) : null}
       </ConfirmDialog>

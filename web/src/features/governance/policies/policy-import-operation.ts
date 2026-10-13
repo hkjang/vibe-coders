@@ -112,9 +112,9 @@ export function usePolicyImportOperation(access: PolicyImportAccess, close: () =
     current(task);
     // Retire an already admitted list observer request before fetching this
     // completion's list; invalidate(refetchType:none) alone does not cancel it.
-    await cache.cancelQueries({ queryKey: ["governance", "policies"], exact: true });
+    await cache.cancelQueries({ queryKey: access.catalogKey, exact: true });
     current(task);
-    await cache.invalidateQueries({ queryKey: ["governance", "policies"], refetchType: "none" });
+    await cache.invalidateQueries({ queryKey: access.catalogKey, refetchType: "none" });
     current(task);
     const fresh = await apiClient.request(endpoints.domains.governance.policies.list, {
       signal: task.controller.signal,
@@ -123,7 +123,7 @@ export function usePolicyImportOperation(access: PolicyImportAccess, close: () =
     current(task);
     // Only the existing parsed list response enters its existing cache. The raw
     // export baseline (including exact-number metadata) never enters QueryCache.
-    cache.setQueryData(["governance", "policies"], fresh);
+    cache.setQueryData(access.catalogKey, fresh);
   };
   const selectFile = (file: File) => {
     if (flight.current || completed.current || reconciliation.current) return;
