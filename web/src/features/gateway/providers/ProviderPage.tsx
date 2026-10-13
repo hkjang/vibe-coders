@@ -35,10 +35,19 @@ import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/
 import { readProviderCatalogPageSize, readProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
 import { sortProviderCatalogRows } from "./provider-table-state";
 import { ProviderExportControl } from "./ProviderExportControl";
+import { ProviderReadBoundary } from "./ProviderReadBoundary";
 
 const defaultRange: HealthRange = "24h";
 
 export function ProviderPage(): React.JSX.Element {
+  return (
+    <ProviderReadBoundary>
+      <ProviderPageContent />
+    </ProviderReadBoundary>
+  );
+}
+
+function ProviderPageContent(): React.JSX.Element {
   const auth = useAuth();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();

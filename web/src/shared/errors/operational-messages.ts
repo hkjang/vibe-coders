@@ -6,6 +6,7 @@ const permissionMessage = "이 작업을 수행할 권한이 없습니다.";
 const temporarilyUnavailable = (subject: string): string => `${subject}를 일시적으로 확인할 수 없습니다.`;
 
 const operationalMessages = {
+  provider_write_in_progress: "공급자 변경을 처리 중입니다. 완료 후 다시 확인하세요.",
   invalid_operation_reason: "사유는 1~1,024자입니다.",
   operation_audit_unavailable: "감사 저장 실패: 실행 안 됨.",
   operation_result_unconfirmed: "실행 여부 불명: 감사·상태 확인 후 재실행하세요.",
