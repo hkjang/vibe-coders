@@ -61,6 +61,9 @@ async function installGateway(page: Page) {
   let roleNames = ["developer", "viewer", "ops_admin", "custom_reviewer"];
   let roleReads = 0;
   let roleStatus = 200;
+  let writeStatus = 200;
+  let writeHold: Promise<void> | undefined;
+  let releaseWrite = () => undefined;
   const roleHolds = new Map<number, { promise: Promise<void>; release: () => void }>();
   await page.route("**/*", async (route) => {
     const request = route.request();
@@ -98,6 +101,12 @@ async function installGateway(page: Page) {
     }
     if (key === "POST /admin/users" || key === "PATCH /admin/users/usr_role_labels") {
       writes.push({ method: request.method(), path: url.pathname, body: request.postDataJSON() });
+      await writeHold;
+      if (writeStatus !== 200)
+        return route.fulfill({
+          status: writeStatus,
+          json: { error: { message: "private stale write failure" } },
+        });
       return json({ user });
     }
     unexpected.push(key);
@@ -106,6 +115,21 @@ async function installGateway(page: Page) {
   return {
     writes,
     unexpected,
+    holdWrite: (status: number) => {
+      writeStatus = status;
+      writeHold = new Promise<void>((resolve) => {
+        releaseWrite = () => {
+          resolve();
+          return undefined;
+        };
+      });
+    },
+    releaseWrite: () => releaseWrite(),
+    revokeWrite: (kind: string) => {
+      if (kind === "readonly") {
+        for (const feature of bootstrap.migration_registry) feature.read_only = true;
+      } else user.scopes = ["admin:read"];
+    },
     roleReads: () => roleReads,
     roles: (value: string[]) => {
       roleNames = value;
@@ -272,3 +296,41 @@ test("계정 변경은 저장 전 역할 조회를 취소하고 이전 계정의
   expect(gateway.writes).toHaveLength(0);
   expect(gateway.unexpected).toEqual([]);
 });
+
+for (const kind of ["readonly", "scope"]) {
+  for (const status of [200, 503]) {
+    test(`계정 저장 전송 후 ${kind} 변경이면 ${status} 완료로 창을 닫거나 알리지 않는다`, async ({
+      page,
+    }) => {
+      const gateway = await installGateway(page);
+      gateway.holdWrite(status);
+      await page.goto("/app/access/users");
+      await page.getByRole("button", { name: "역할·상태 변경", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "사용자 변경" });
+      const role = dialog.getByRole("combobox", { name: "역할", exact: true });
+      await role.selectOption("custom_reviewer");
+      await dialog.getByRole("button", { name: "저장", exact: true }).click();
+      await expect.poll(() => gateway.writes.length).toBe(1);
+      gateway.revokeWrite(kind);
+      const refreshed = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+      );
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await (await refreshed).finished();
+      await expect(
+        dialog.getByText(kind === "readonly" ? /이 화면은 읽기 전용/ : /변경 권한/).first(),
+      ).toBeVisible();
+      const finished = page.waitForResponse((response) => response.request().method() === "PATCH");
+      gateway.releaseWrite();
+      await (await finished).finished();
+      await expect(role).toBeEnabled();
+      await expect(dialog).toBeVisible();
+      await expect(role).toHaveValue("custom_reviewer");
+      await expect(dialog.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
+      await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+      await expect(page.getByText("private stale write failure")).toHaveCount(0);
+      expect(gateway.writes).toHaveLength(1);
+      expect(gateway.unexpected).toEqual([]);
+    });
+  }
+}

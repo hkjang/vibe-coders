@@ -2,6 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef, useReducer } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import { UserAccountDialog } from "./UserAccountDialog";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
@@ -26,6 +27,7 @@ vi.mock("@/app/auth/AuthProvider", async () => {
 });
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 beforeEach(() => {
+  vi.clearAllMocks();
   runtime.id = "usr_admin";
   runtime.readOnly = false;
   runtime.role = "super_admin";
@@ -192,6 +194,45 @@ describe("서버 역할 목록 기반 사용자 편집", () => {
     async ({ roles }) => {
       setup(true, { "GET /admin/roles": () => catalog(roles) });
       await screen.findByText("역할 목록을 불러오지 못했습니다.");
+      expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+    },
+  );
+  it.each([
+    { change: "readonly", outcome: "success" },
+    { change: "scope", outcome: "success" },
+    { change: "readonly", outcome: "failure" },
+    { change: "scope", outcome: "failure" },
+  ])(
+    "요청 전송 후 $change 변경이면 $outcome 결과로 알림·갱신·닫기를 실행하지 않는다",
+    async ({ change, outcome }) => {
+      const user = userEvent.setup();
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const { api, refresh, close, view } = setup(true, {
+        "PATCH /admin/users/usr_custom": async () => {
+          await pending;
+          if (outcome === "failure") throw apiFailure("private stale failure", 503);
+          return { user: account };
+        },
+      });
+      const invalidate = vi.spyOn(view.client, "invalidateQueries");
+      await screen.findByRole("option", { name: "custom_reviewer" });
+      await user.click(screen.getByRole("button", { name: "저장" }));
+      await waitFor(() => expect(api.bodies("PATCH /admin/users/usr_custom")).toHaveLength(1));
+      if (change === "readonly") runtime.readOnly = true;
+      else runtime.writeScope = false;
+      refresh();
+      await act(async () => {
+        finish();
+        await pending;
+      });
+      await waitFor(() => expect(view.client.isMutating()).toBe(0));
+      expect(invalidate).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
       expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
     },
   );

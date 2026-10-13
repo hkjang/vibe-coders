@@ -127,7 +127,15 @@ export function UserAccountDialog({
   const known = names?.includes(selected) === true;
   const save = useMutationFeedback<Values, unknown>({
     gcTime: 0,
-    ownsResult: owner.isCurrent,
+    ownsResult: () => {
+      if (!owner.isCurrent()) return false;
+      try {
+        write.assertCurrent();
+        return true;
+      } catch {
+        return false;
+      }
+    },
     mutate: async (values) => {
       write.assertCurrent();
       assertFeatureRead(owner);
