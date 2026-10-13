@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,52 @@ import (
 
 	"vibe-coders/internal/store"
 )
+
+type countedKeyPatchBody struct {
+	io.Reader
+	read int
+}
+
+func (body *countedKeyPatchBody) Read(value []byte) (int, error) {
+	n, err := body.Reader.Read(value)
+	body.read += n
+	return n, err
+}
+
+func (*countedKeyPatchBody) Close() error { return nil }
+
+func TestAdminKeyEditParserBoundsInputBeforeDecode(t *testing.T) {
+	review := `"review":{"reason":"검토","expected_revision":"` + strings.Repeat("a", 64) + `"}`
+	for _, parts := range [][2]string{
+		{`{` + review + `,"name":"`, `"}`},
+		{`{"name":"`, `",` + review + `}`},
+		{`{"extension":"`, `",` + review + `}`},
+		{`{"name":"`, `"}`},
+	} {
+		body := &countedKeyPatchBody{Reader: io.MultiReader(strings.NewReader(parts[0]), strings.NewReader(strings.Repeat("x", 1<<20)), strings.NewReader(parts[1]))}
+		r := httptest.NewRequest(http.MethodPatch, "/", nil)
+		r.Body = body
+		_, err := readAdminKeyPatchRequest(httptest.NewRecorder(), r)
+		if err == nil || body.read > 8193 {
+			t.Fatal("PATCH decoder must stop reading before buffering an oversized JSON value")
+		}
+	}
+}
+
+func TestAdminKeyEditParserExactByteBoundary(t *testing.T) {
+	review := `"review":{"reason":"검토","expected_revision":"` + strings.Repeat("a", 64) + `"}`
+	for _, suffix := range []string{`"}`, `",` + review + `}`} {
+		for _, size := range []int{8192, 8193} {
+			prefix := `{"name":"`
+			body := prefix + strings.Repeat("x", size-len(prefix)-len(suffix)) + suffix
+			r := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(body))
+			_, err := readAdminKeyPatchRequest(httptest.NewRecorder(), r)
+			if (err == nil) != (size == 8192) {
+				t.Fatal("PATCH byte boundary mismatch")
+			}
+		}
+	}
+}
 
 func TestAdminKeyEditReviewRejectsStaleBrowserSnapshot(t *testing.T) {
 	f := newAPIKeyScopeContractFixture(t)

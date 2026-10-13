@@ -26,13 +26,20 @@ type adminKeyPatchRequest struct {
 
 var errAdminKeyEditReview = errors.New("invalid key edit review")
 
-// Preserve the legacy decoder contract for unreviewed PATCH calls. Reviewed
-// calls additionally require an exact, bounded object without ambiguous fields.
+// Preserve legacy field/first-value semantics, with an 8 KiB decoding bound for
+// all PATCH calls. The review marker may occur last, so even legacy decoding
+// must be bounded before allocating the first JSON value. Reviewed calls also
+// reject ambiguous fields and require the entire bounded body to be consumed.
 func readAdminKeyPatchRequest(w http.ResponseWriter, r *http.Request) (adminKeyPatchRequest, error) {
 	var input adminKeyPatchRequest
-	decoder := json.NewDecoder(r.Body)
+	body := http.MaxBytesReader(w, r.Body, 8192)
+	decoder := json.NewDecoder(body)
 	var raw json.RawMessage
 	if err := decoder.Decode(&raw); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return input, errAdminKeyEditReview
+		}
 		return input, err
 	}
 	if err := json.Unmarshal(raw, &input); err != nil {
@@ -52,7 +59,7 @@ func readAdminKeyPatchRequest(w http.ResponseWriter, r *http.Request) (adminKeyP
 	if decoder.InputOffset() > 8192 || !utf8.Valid(raw) {
 		return input, errAdminKeyEditReview
 	}
-	tail, err := io.ReadAll(io.LimitReader(io.MultiReader(decoder.Buffered(), r.Body), 8193-decoder.InputOffset()))
+	tail, err := io.ReadAll(io.LimitReader(io.MultiReader(decoder.Buffered(), body), 8193-decoder.InputOffset()))
 	if err != nil || decoder.InputOffset()+int64(len(tail)) > 8192 || len(bytes.TrimSpace(tail)) != 0 {
 		return input, errAdminKeyEditReview
 	}

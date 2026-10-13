@@ -1104,7 +1104,7 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 		// promoted to a named, active managed user — no plaintext needed.
 		payload, err := readAdminKeyPatchRequest(w, r)
 		if errors.Is(err, errAdminKeyEditReview) {
-			writeOpenAIError(w, http.StatusBadRequest, "invalid key review or reason", "invalid_request_error", "invalid_key_update")
+			writeOpenAIError(w, http.StatusBadRequest, "invalid key edit, review or body size", "invalid_request_error", "invalid_key_update")
 			return
 		}
 		if err != nil {
