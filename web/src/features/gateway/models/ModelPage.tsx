@@ -27,6 +27,7 @@ import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
 import { sortModelCatalogRows } from "./model-catalog-table-state";
+import { ModelReadBoundary } from "./ModelReadBoundary";
 
 const defaultRange: HealthRange = "24h";
 
@@ -44,6 +45,14 @@ function positivePage(value: string | null): number {
 }
 
 export function ModelPage(): React.JSX.Element {
+  return (
+    <ModelReadBoundary>
+      <ModelPageContent />
+    </ModelReadBoundary>
+  );
+}
+
+function ModelPageContent(): React.JSX.Element {
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedRange = searchParams.get("range");

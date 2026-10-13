@@ -119,8 +119,10 @@ for (const change of ["owner", "scope", "filter"] as const) {
       else providerGateway.scopes([]);
       await refreshIdentity(page);
     }
-    providerGateway.releaseProviderRead(2);
+    // Observe the abort before releasing the held response. Otherwise response
+    // completion can race the browser's requestfailed event after navigation.
     await cancelled;
+    providerGateway.releaseProviderRead(2);
     await expect(page.getByRole("button", { name: "내보낼 목록 조회 중" })).toHaveCount(0);
     if (change !== "scope") {
       // A new completed read is a deterministic completion barrier, not a sleep.
