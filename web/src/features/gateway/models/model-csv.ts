@@ -3,7 +3,7 @@ import { endpoints } from "@/shared/api/endpoints";
 import { AppError, isAppError } from "@/shared/api/error";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { toCsv } from "@/shared/utils/csv";
-import type { ModelCatalogSort } from "@/shared/utils/model-catalog-query";
+import type { ModelCatalogSortOrder } from "@/shared/utils/model-catalog-query";
 import type { HealthRange } from "@/features/health/health-utils";
 import {
   buildModelRows,
@@ -24,7 +24,7 @@ export interface ModelExportFilters {
   provider: string;
   status: ModelStatusFilter;
   range: HealthRange;
-  sort?: ModelCatalogSort;
+  sort?: ModelCatalogSortOrder;
 }
 
 /** Independent fresh reads; never turn a failed request into a cached export. */

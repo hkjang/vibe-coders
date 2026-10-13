@@ -18,11 +18,13 @@ import { Button } from "@/shared/components/ui/Button";
 import { providerDisplayLabel } from "@/shared/api/provider-ref";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
+import { DataTableSortControls } from "@/shared/data-table/DataTableSortControls";
 import { operationalMessage } from "@/shared/errors/operational-messages";
 import {
   modelCatalogPageSizes,
   type ModelCatalogPageSize,
-  type ModelCatalogSort,
+  modelCatalogSortList,
+  type ModelCatalogSortOrder,
 } from "@/shared/utils/model-catalog-query";
 
 const modelLockedColumnIds = ["model", "provider"] as const;
@@ -146,8 +148,8 @@ interface ModelTableProps {
   pageIndex: number;
   pageSize: ModelCatalogPageSize;
   onPageSizeChange: (size: number) => void;
-  sort?: ModelCatalogSort;
-  onSortChange: (sort: ModelCatalogSort | undefined) => void;
+  sort?: ModelCatalogSortOrder;
+  onSortChange: (sort: ModelCatalogSortOrder | undefined) => void;
   rememberTrigger: (trigger: HTMLElement, modelKey: string) => void;
   rows: readonly ModelCatalogRow[];
   updatedAt: number;
@@ -196,6 +198,21 @@ export function ModelTable({
       </header>
       <div className="model-catalog-sort-summary">
         <span role="status">정렬: {modelCatalogSortLabel(sort)}</span>
+        <DataTableSortControls
+          columns={modelTableSortColumns}
+          value={modelCatalogSortList(sort).flatMap((criterion) => {
+            const value = modelCatalogSortState(criterion);
+            return value ? [value] : [];
+          })}
+          onChange={(criteria) =>
+            onSortChange(
+              criteria.flatMap(({ columnId, direction }) => {
+                const criterion = modelCatalogSortFromColumn(columnId, direction);
+                return criterion ? [criterion] : [];
+              }),
+            )
+          }
+        />
         <Button size="small" variant="secondary" disabled={!sort} onClick={() => onSortChange(undefined)}>
           기본 순서
         </Button>
@@ -203,7 +220,8 @@ export function ModelTable({
       <p>
         현재 받은 모델 목록 안에서 정렬합니다. 일부 공급자의 누락·마지막 정상 자료가 포함될 수 있습니다.
         선택한 정렬 기준값이 없는 항목은 마지막에 표시합니다. 품질·성공률은 선택한 기간의 모델 ID별 집계이며
-        공급자별 성능을 뜻하지 않습니다.
+        공급자별 성능을 뜻하지 않습니다. 다중 정렬에서는 같은 값끼리 다음 기준을 비교합니다. 머리글 정렬은
+        해당 열 하나로 바뀝니다.
       </p>
       {modelUnavailable ? (
         <div className="model-list-unavailable">
@@ -232,7 +250,7 @@ export function ModelTable({
           pageSizeControl={{ value: pageSize, options: modelCatalogPageSizes, onChange: onPageSizeChange }}
           sorting={{
             columns: modelTableSortColumns,
-            value: modelCatalogSortState(sort),
+            value: modelCatalogSortState(modelCatalogSortList(sort)[0]),
             onChange: ({ columnId, direction }) => {
               const next = modelCatalogSortFromColumn(columnId, direction);
               if (next) onSortChange(next);

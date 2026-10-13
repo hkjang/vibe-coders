@@ -1,5 +1,10 @@
 import type { ModelCatalogRow } from "./model-catalog";
-import type { ModelCatalogSort, ModelCatalogSortKey } from "@/shared/utils/model-catalog-query";
+import {
+  modelCatalogSortList,
+  type ModelCatalogSort,
+  type ModelCatalogSortKey,
+  type ModelCatalogSortOrder,
+} from "@/shared/utils/model-catalog-query";
 
 export function defaultModelCatalogOrder(left: ModelCatalogRow, right: ModelCatalogRow): number {
   return (
@@ -36,10 +41,15 @@ export function modelCatalogSortFromColumn(columnId: string, direction: "asc" | 
   return key ? (`${key}_${direction}` as ModelCatalogSort) : undefined;
 }
 
-export function modelCatalogSortLabel(sort?: ModelCatalogSort): string {
-  if (!sort) return "기본 순서 (공급자·모델·출처)";
-  const key = sort.slice(0, sort.lastIndexOf("_")) as ModelCatalogSortKey;
-  return `${sortColumns[key].label} ${sort.endsWith("_asc") ? "오름차순" : "내림차순"}`;
+export function modelCatalogSortLabel(sort?: ModelCatalogSortOrder): string {
+  const criteria = modelCatalogSortList(sort);
+  if (criteria.length === 0) return "기본 순서 (공급자·모델·출처)";
+  return criteria
+    .map((criterion) => {
+      const key = criterion.slice(0, criterion.lastIndexOf("_")) as ModelCatalogSortKey;
+      return `${sortColumns[key].label} ${criterion.endsWith("_asc") ? "오름차순" : "내림차순"}`;
+    })
+    .join(" → ");
 }
 
 export function observedModelSuccessRate(row: ModelCatalogRow): number | undefined {
@@ -66,26 +76,33 @@ function sortValue(row: ModelCatalogRow, key: ModelCatalogSortKey): number | str
 /** The caller supplies the existing default order, before local page slicing. */
 export function sortModelCatalogRows(
   rows: readonly ModelCatalogRow[],
-  sort?: ModelCatalogSort,
+  sort?: ModelCatalogSortOrder,
 ): readonly ModelCatalogRow[] {
-  if (!sort) return rows;
-  const key = sort.slice(0, sort.lastIndexOf("_")) as ModelCatalogSortKey;
-  const direction = sort.endsWith("_asc") ? 1 : -1;
+  const criteria = modelCatalogSortList(sort).map((criterion) => ({
+    key: criterion.slice(0, criterion.lastIndexOf("_")) as ModelCatalogSortKey,
+    direction: criterion.endsWith("_asc") ? 1 : -1,
+  }));
+  if (criteria.length === 0) return rows;
   return rows
-    .map((row, index) => ({ row, index, value: sortValue(row, key) }))
+    .map((row, index) => ({ row, index, values: criteria.map(({ key }) => sortValue(row, key)) }))
     .sort((left, right) => {
-      const leftKnown =
-        left.value !== undefined && (typeof left.value !== "number" || Number.isFinite(left.value));
-      const rightKnown =
-        right.value !== undefined && (typeof right.value !== "number" || Number.isFinite(right.value));
-      if (leftKnown !== rightKnown) return leftKnown ? -1 : 1;
-      let compared = 0;
-      if (typeof left.value === "number" && typeof right.value === "number" && leftKnown && rightKnown)
-        compared = left.value - right.value;
-      else if (typeof left.value === "string" && typeof right.value === "string")
-        compared = left.value.localeCompare(right.value);
-      // Descending changes the primary value only: unknowns and equal ties never reverse.
-      return compared * direction || left.index - right.index;
+      for (const [index, { direction }] of criteria.entries()) {
+        const leftValue = left.values[index];
+        const rightValue = right.values[index];
+        const leftKnown =
+          leftValue !== undefined && (typeof leftValue !== "number" || Number.isFinite(leftValue));
+        const rightKnown =
+          rightValue !== undefined && (typeof rightValue !== "number" || Number.isFinite(rightValue));
+        if (leftKnown !== rightKnown) return leftKnown ? -1 : 1;
+        let compared = 0;
+        if (typeof leftValue === "number" && typeof rightValue === "number" && leftKnown && rightKnown)
+          compared = leftValue - rightValue;
+        else if (typeof leftValue === "string" && typeof rightValue === "string")
+          compared = leftValue.localeCompare(rightValue);
+        if (compared) return compared * direction;
+      }
+      // All equal (including unknowns): retain the deterministic default order.
+      return left.index - right.index;
     })
     .map(({ row }) => row);
 }

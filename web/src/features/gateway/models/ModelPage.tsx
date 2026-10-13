@@ -25,7 +25,11 @@ import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-r
 import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { containsPotentialSecret } from "@/shared/security/secrets";
-import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
+import {
+  readModelCatalogPageSize,
+  readModelCatalogSorting,
+  modelCatalogSortQuery,
+} from "@/shared/utils/model-catalog-query";
 import { defaultModelCatalogOrder, sortModelCatalogRows } from "./model-catalog-table-state";
 import { ModelExportControl } from "./ModelExportControl";
 import { ModelReadBoundary } from "./ModelReadBoundary";
@@ -63,7 +67,11 @@ function ModelPageContent(): React.JSX.Element {
   const requestedModelProvider = searchParams.get("model_provider")?.trim() ?? "";
   const requestedSource = searchParams.get("source");
   const requestedQuery = searchParams.get("q") ?? "";
-  const sort = readModelCatalogSort(searchParams.getAll("sort"));
+  const sortValue = searchParams.getAll("sort").join("\u0000");
+  const sort = useMemo(
+    () => readModelCatalogSorting(sortValue ? sortValue.split("\u0000") : []),
+    [sortValue],
+  );
   const parsedPageSize = readModelCatalogPageSize(searchParams.getAll("page_size"));
   const pageSize = parsedPageSize ?? 10;
   const invalidSort = searchParams.has("sort") && !sort;
@@ -353,7 +361,9 @@ function ModelPageContent(): React.JSX.Element {
                   updateSearch({ page_size: next === 10 ? undefined : String(next), page: undefined }, false);
               }}
               sort={sort}
-              onSortChange={(next) => updateSearch({ sort: next, page: undefined }, false)}
+              onSortChange={(next) =>
+                updateSearch({ sort: modelCatalogSortQuery(next), page: undefined }, false)
+              }
               rememberTrigger={rememberTrigger}
               rows={pageRows}
               updatedAt={updatedAt}

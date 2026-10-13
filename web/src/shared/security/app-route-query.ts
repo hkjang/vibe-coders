@@ -10,7 +10,7 @@ import { isOpaqueAppRequestCursor, isValidRequestQueryField } from "@/shared/uti
 import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
 import { domainDecisionRequestIDError } from "@/shared/utils/domain-decision-filters";
-import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
+import { readModelCatalogPageSize, readModelCatalogSorting } from "@/shared/utils/model-catalog-query";
 import { readProviderCatalogPageSize, readProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
@@ -120,7 +120,10 @@ export function sanitizeAppRouteSearch(
   }
   if (route === "/models" || route === "/gateway/models" || route.startsWith("/gateway/models/")) {
     const exactCatalogueRoute = route === "/models" || route === "/gateway/models";
-    if (parameters.has("sort") && (!exactCatalogueRoute || !readModelCatalogSort(parameters.getAll("sort"))))
+    if (
+      parameters.has("sort") &&
+      (!exactCatalogueRoute || !readModelCatalogSorting(parameters.getAll("sort")))
+    )
       invalidOperationalKeys.add("sort");
     if (
       parameters.has("page_size") &&
