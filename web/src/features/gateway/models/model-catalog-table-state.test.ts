@@ -12,6 +12,8 @@ import {
   modelCatalogSortValues,
   readModelCatalogPageSize,
   readModelCatalogSort,
+  readModelCatalogSorting,
+  modelCatalogSortQuery,
 } from "@/shared/utils/model-catalog-query";
 
 function row(id: string, overrides: Partial<ModelCatalogRow> = {}): ModelCatalogRow {
@@ -58,6 +60,58 @@ function price(input: number, output = input): NonNullable<ModelCatalogRow["pric
 const ids = (rows: readonly ModelCatalogRow[]) => rows.map((entry) => entry.model.id);
 
 describe("model catalogue local table state", () => {
+  it("여러 기준의 우선순위와 동률을 페이지 구분 전에 적용한다", () => {
+    const rows = [
+      row("b", { quality: quality(1, 1, 90), price: price(2) }),
+      row("a", { quality: quality(1, 1, 90), price: price(1) }),
+      row("c", { quality: quality(1, 1, 80), price: price(0) }),
+      row("d", { quality: quality(1, 1, 90) }),
+      row("e", { price: price(0) }),
+    ];
+    expect(ids(sortModelCatalogRows(rows, ["quality_desc", "input_price_asc"]))).toEqual([
+      "a",
+      "b",
+      "d",
+      "c",
+      "e",
+    ]);
+    expect(ids(sortModelCatalogRows(rows, ["input_price_asc", "quality_desc"]))).toEqual([
+      "c",
+      "e",
+      "a",
+      "b",
+      "d",
+    ]);
+    expect(ids(rows)).toEqual(["b", "a", "c", "d", "e"]);
+    const ties = [row("z"), row("a")];
+    expect(ids(sortModelCatalogRows(ties, ["quality_desc", "input_price_asc"]))).toEqual(["z", "a"]);
+    expect(ids(sortModelCatalogRows(ties, ["quality_desc", "model_asc"]))).toEqual(["a", "z"]);
+  });
+  it("다중 정렬 주소는 유일한 열과 정확한 단일 값만 허용한다", () => {
+    expect(readModelCatalogSorting(["quality_desc,input_price_asc"])).toEqual([
+      "quality_desc",
+      "input_price_asc",
+    ]);
+    expect(modelCatalogSortQuery(["quality_desc", "input_price_asc"])).toBe("quality_desc,input_price_asc");
+    expect(modelCatalogSortQuery([])).toBeUndefined();
+    for (const values of [
+      [],
+      [""],
+      ["quality_desc", "input_price_asc"],
+      ["quality_desc,quality_asc"],
+      ["quality_desc,"],
+      ["quality_desc, input_price_asc"],
+      ["unknown_asc"],
+      ["QUALITY_DESC"],
+      ["model_asc,".repeat(100)],
+    ])
+      expect(readModelCatalogSorting(values)).toBeUndefined();
+    expect(
+      readModelCatalogSorting([
+        "model_asc,provider_desc,quality_desc,success_desc,input_price_asc,output_price_asc",
+      ]),
+    ).toHaveLength(6);
+  });
   it("leaves the original compound default order and array untouched", () => {
     const rows = [row("z"), row("a")];
     expect(sortModelCatalogRows(rows)).toBe(rows);
