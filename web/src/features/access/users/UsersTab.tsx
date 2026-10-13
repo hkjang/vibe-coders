@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
+import { managedRoleLabel, roleLabel } from "@/config/ui-labels";
 import { formatSignedRatio, statusLabel, statusTone } from "@/features/access/access-format";
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
 import { UserDetailSheet } from "@/features/access/users/UserDetailSheet";
@@ -92,7 +93,11 @@ function accountColumns(
     column.accessor((row) => row.role, {
       id: "role",
       header: "역할",
-      cell: ({ getValue }) => <Badge tone="info">{getValue() || "—"}</Badge>,
+      cell: ({ getValue }) => (
+        <Badge tone="info" title={getValue()}>
+          {managedRoleLabel(getValue())}
+        </Badge>
+      ),
     }),
     column.accessor((row) => row.status, {
       id: "status",
@@ -246,6 +251,26 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
     status: "active",
     team_id: "",
   });
+  const { reset: resetEditForm } = editForm;
+  // Stable cell renderers keep the opener connected while the dialog changes.
+  const accountTableColumns = useMemo(
+    () =>
+      accountColumns(
+        teamNames ?? {},
+        (user, trigger) => {
+          rememberDialogTrigger(trigger);
+          resetEditForm({
+            role: user.role || "developer",
+            status: user.status === "disabled" ? "disabled" : "active",
+            team_id: user.team_id,
+          });
+          setEditing(user);
+        },
+        canWrite,
+        writeDeniedReason,
+      ),
+    [teamNames, rememberDialogTrigger, resetEditForm, canWrite, writeDeniedReason],
+  );
 
   const createUser = useMutationFeedback({
     mutate: (body: CreateUserBody) => apiClient.request(access.users.create, { body, routeId }),
@@ -311,20 +336,7 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
         {!canWrite ? <InlineNotice tone="info">{writeDeniedReason}</InlineNotice> : null}
         <DataTable
           caption="로그인 계정 목록"
-          columns={accountColumns(
-            teamNames ?? {},
-            (user, trigger) => {
-              rememberDialogTrigger(trigger);
-              editForm.reset({
-                role: user.role || "developer",
-                status: user.status === "disabled" ? "disabled" : "active",
-                team_id: user.team_id,
-              });
-              setEditing(user);
-            },
-            canWrite,
-            writeDeniedReason,
-          )}
+          columns={accountTableColumns}
           data={accountRows}
           getRowId={(row) => row.id}
           emptyMessage="등록된 로그인 계정이 없습니다. '사용자 등록'으로 첫 계정을 만드세요."
@@ -474,7 +486,7 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
             <Select {...control} {...createForm.register("role")}>
               {assignableRoles.map((role) => (
                 <option key={role} value={role}>
-                  {role}
+                  {roleLabel(role)}
                 </option>
               ))}
             </Select>
@@ -508,7 +520,7 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
             <Select {...control} {...editForm.register("role")}>
               {assignableRoles.map((role) => (
                 <option key={role} value={role}>
-                  {role}
+                  {roleLabel(role)}
                 </option>
               ))}
             </Select>
