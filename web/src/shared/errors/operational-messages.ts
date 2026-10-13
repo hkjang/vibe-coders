@@ -6,6 +6,11 @@ const permissionMessage = "이 작업을 수행할 권한이 없습니다.";
 const temporarilyUnavailable = (subject: string): string => `${subject}를 일시적으로 확인할 수 없습니다.`;
 
 const operationalMessages = {
+  role_write_in_progress: "역할 변경을 처리 중입니다. 완료 후 다시 확인하세요.",
+  role_catalog_unconfirmed: "최신 역할 목록을 확인한 뒤 다시 시도하세요.",
+  role_already_exists: "이미 등록된 역할 이름입니다. 목록의 수정 기능을 이용하세요.",
+  role_changed: "역할이 변경되었거나 없어졌습니다. 편집창을 다시 열어 확인하세요.",
+  role_scope_unavailable: "목록에 없는 권한은 선택을 해제한 뒤 다시 확인하세요.",
   provider_write_in_progress: "공급자 변경을 처리 중입니다. 완료 후 다시 확인하세요.",
   model_write_in_progress: "모델 변경을 처리 중입니다. 완료 후 다시 확인하세요.",
   invalid_operation_reason: "사유는 1~1,024자입니다.",

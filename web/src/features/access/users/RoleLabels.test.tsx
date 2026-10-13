@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { RolesTab } from "@/features/access/users/RolesTab";
+import { RolesTab as RolesTabScreen } from "@/features/access/users/RolesTab";
 import { UsersTab as UsersTabScreen } from "@/features/access/users/UsersTab";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { mockApi } from "@/test/api";
@@ -28,6 +28,14 @@ function UsersTab() {
   return (
     <FeatureAccessContext.Provider value={{ featureId: "access.users", permitted: true, readOnly: false }}>
       <UsersTabScreen canWrite writeDeniedReason="" />
+    </FeatureAccessContext.Provider>
+  );
+}
+
+function RolesTab({ canWrite, writeDeniedReason }: { canWrite: boolean; writeDeniedReason: string }) {
+  return (
+    <FeatureAccessContext.Provider value={{ featureId: "access.users", permitted: true, readOnly: false }}>
+      <RolesTabScreen canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
     </FeatureAccessContext.Provider>
   );
 }

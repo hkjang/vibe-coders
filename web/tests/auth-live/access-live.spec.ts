@@ -42,13 +42,28 @@ test("AUTH-LIVE-027 실제 사용자 정의 역할 등록·계정 부여·유지
   await page.getByRole("button", { name: "역할 추가", exact: true }).click();
   const roleDialog = page.getByRole("dialog", { name: "역할 추가", exact: true });
   await roleDialog.getByRole("textbox", { name: "역할 이름", exact: true }).fill(role);
-  await roleDialog.getByRole("checkbox", { name: "models:read", exact: true }).check();
+  await roleDialog.getByRole("checkbox", { name: "모델 조회 (models:read)", exact: true }).check();
   const roleSaved = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/roles",
   );
   await roleDialog.getByRole("button", { name: "저장", exact: true }).click();
   expect((await roleSaved).status()).toBe(201);
+  await expect(roleDialog).toBeHidden();
+  let duplicateRoleWrites = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/admin/roles")
+      duplicateRoleWrites++;
+  });
+  await page.getByRole("button", { name: "역할 추가", exact: true }).click();
+  await roleDialog.getByRole("textbox", { name: "역할 이름", exact: true }).fill(role);
+  await roleDialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(
+    roleDialog.getByText("이미 등록된 역할 이름입니다. 목록의 수정 기능을 이용하세요."),
+  ).toBeVisible();
+  expect(duplicateRoleWrites).toBe(0);
+  await roleDialog.getByRole("button", { name: "취소", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "변경 버리기", exact: true }).click();
   await expect(roleDialog).toBeHidden();
   // Compare the newly persisted custom role through the real roles API before
   // assigning it. Displayed grants are not a substitute for auth/me below.

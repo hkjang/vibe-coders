@@ -87,6 +87,9 @@ it("503 응답 전 background true와 응답 뒤 조회 실패를 수렴 근거�
   });
   await waitFor(() => expect(write).toHaveBeenCalledOnce());
   await act(async () => {
+    // Force the intended background read independently of wall-clock freshness.
+    // A cached result is not evidence that this scenario's second read occurred.
+    await client.invalidateQueries({ queryKey: key, refetchType: "none" });
     await client.fetchQuery({ queryKey: key, queryFn: async () => applied(true), staleTime: 0 });
   });
   expect(client.getQueryState(key)?.dataUpdateCount).toBe(2);

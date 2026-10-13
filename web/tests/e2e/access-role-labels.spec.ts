@@ -62,6 +62,8 @@ async function installGateway(page: Page) {
   let roleReads = 0;
   let roleStatus = 200;
   let invalidCatalog = false;
+  const descriptions = new Map<string, string>();
+  const roleScopes = new Map<string, string[]>();
   let writeStatus = 200;
   let writeHold: Promise<void> | undefined;
   let releaseWrite = () => undefined;
@@ -86,19 +88,20 @@ async function installGateway(page: Page) {
       roleReads++;
       const roles = roleNames.map((role) => ({
         role,
-        is_system: role !== "custom_reviewer",
-        rank: role === "custom_reviewer" ? 0 : 2,
+        is_system: ["developer", "viewer", "ops_admin"].includes(role),
+        rank: ["developer", "viewer", "ops_admin"].includes(role) ? 2 : 0,
         ...(invalidCatalog
           ? {}
           : {
               scopes:
-                role === "developer"
+                roleScopes.get(role) ??
+                (role === "developer"
                   ? ["models:read", "chat:completion"]
                   : role === "custom_reviewer"
                     ? ["future:review"]
-                    : ["models:read"],
+                    : ["models:read"]),
             }),
-        description: "",
+        description: descriptions.get(role) ?? "",
         default_home: "",
       }));
       await roleHolds.get(roleReads)?.promise;
@@ -119,11 +122,33 @@ async function installGateway(page: Page) {
         });
       return json({ user });
     }
+    if (key === "POST /admin/roles" || key === "DELETE /admin/roles") {
+      const body =
+        request.method() === "POST"
+          ? (request.postDataJSON() as { role: string; scopes: string[]; description?: string })
+          : undefined;
+      writes.push({ method: request.method(), path: url.pathname, body });
+      await writeHold;
+      if (writeStatus !== 200)
+        return route.fulfill({
+          status: writeStatus,
+          json: { error: { message: "private stale role failure" } },
+        });
+      if (body) {
+        roleNames = [...new Set([...roleNames, body.role])];
+        roleScopes.set(body.role, body.scopes);
+        descriptions.set(body.role, body.description ?? "");
+        return json({ role: body });
+      }
+      roleNames = roleNames.filter((role) => role !== url.searchParams.get("role"));
+      return json({ deleted: true });
+    }
     unexpected.push(key);
     return route.fulfill({ status: 500, json: { error: "unexpected fixture request" } });
   });
   return {
     writes,
+    describeRole: (role: string, description: string) => descriptions.set(role, description),
     unexpected,
     invalidCatalog: (value: boolean) => {
       invalidCatalog = value;
@@ -441,5 +466,95 @@ test("권한 비교의 대기 중 조회를 계정 변경 시 취소하고 늦�
   await expect(page.getByRole("dialog", { name: "역할별 권한 비교" })).toBeHidden();
   gateway.release(2);
   expect(gateway.writes).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("역할 추가는 기존 이름의 덮어쓰기를 막고 새 이름과 한글 권한만 저장한다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  await page.goto("/app/access/users?tab=roles");
+  const trigger = page.getByRole("button", { name: "역할 추가", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "역할 추가", exact: true });
+  const name = dialog.getByRole("textbox", { name: "역할 이름", exact: true });
+  await name.fill("custom_reviewer");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog.getByText("이미 등록된 역할 이름입니다. 목록의 수정 기능을 이용하세요.")).toBeVisible();
+  expect(gateway.writes).toHaveLength(0);
+  await name.fill("new_reviewer");
+  await dialog.getByRole("checkbox", { name: "모델 조회 (models:read)", exact: true }).check();
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(gateway.writes).toEqual([
+    { method: "POST", path: "/admin/roles", body: { role: "new_reviewer", scopes: ["models:read"] } },
+  ]);
+  await expect(trigger).toBeFocused();
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("역할 수정은 최신 서버 변경을 감지하고 이전 초안을 보존한다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  await page.goto("/app/access/users?tab=roles");
+  const row = page
+    .getByRole("table", { name: "역할 목록", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "custom_reviewer" });
+  await row.getByRole("button", { name: "수정", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "역할 수정", exact: true });
+  await dialog.getByRole("textbox", { name: "설명", exact: true }).fill("보존할 초안");
+  gateway.describeRole("custom_reviewer", "다른 관리자의 변경");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(
+    dialog.getByText("역할이 변경되었거나 없어졌습니다. 편집창을 다시 열어 확인하세요."),
+  ).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: "설명", exact: true })).toHaveValue("보존할 초안");
+  expect(gateway.writes).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("역할 삭제도 확인 이후의 변경을 다시 조회해 전송하지 않는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  await page.goto("/app/access/users?tab=roles");
+  const row = page
+    .getByRole("table", { name: "역할 목록", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "custom_reviewer" });
+  await row.getByRole("button", { name: "삭제", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "역할 삭제", exact: true });
+  gateway.describeRole("custom_reviewer", "확인 이후의 변경");
+  await dialog.getByRole("button", { name: "삭제", exact: true }).click();
+  await expect(
+    dialog.getByText("역할이 변경되었거나 없어졌습니다. 편집창을 다시 열어 확인하세요."),
+  ).toBeVisible();
+  expect(gateway.writes).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("역할 저장 전송 후 읽기 전용 전환은 늦은 완료 알림·닫기·중복 저장을 막는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  gateway.holdWrite(200);
+  await page.goto("/app/access/users?tab=roles");
+  await page.getByRole("button", { name: "역할 추가", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "역할 추가", exact: true });
+  await dialog.getByRole("textbox", { name: "역할 이름", exact: true }).fill("delayed_role");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect.poll(() => gateway.writes.length).toBe(1);
+  gateway.revokeWrite("readonly");
+  const refreshed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await (await refreshed).finished();
+  await expect(dialog.getByText(/이 화면은 읽기 전용/)).toBeVisible();
+  const finished = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/roles",
+  );
+  gateway.releaseWrite();
+  await (await finished).finished();
+  await expect(dialog.getByRole("textbox", { name: "역할 이름", exact: true })).toBeEnabled();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+  expect(gateway.writes).toHaveLength(1);
   expect(gateway.unexpected).toEqual([]);
 });

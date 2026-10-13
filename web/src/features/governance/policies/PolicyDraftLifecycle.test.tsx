@@ -198,10 +198,18 @@ describe("응답·중복·후속 조회의 별도 수명", () => {
     c.response.apply = () => a.promise;
     await c.user.click(c.button());
     await c.user.click(c.confirm());
+    const bSuggestions = deferred<{ suggestions: typeof c.response.rows }>();
+    c.response.suggestions = () => bSuggestions.promise;
     c.update({ principal: "usr_public_b" });
     c.response.apply = () => b.promise;
-    await c.user.click(await screen.findByRole("button", { name: /초안 생성$/u }));
+    // A rendered action is not proof that B's owned source read has finished.
+    // Hold that read explicitly and wait for the real enablement boundary.
+    await act(async () => bSuggestions.resolve({ suggestions: c.response.rows }));
+    await waitFor(() => expect(c.button()).toBeEnabled());
+    await c.user.click(c.button());
+    await screen.findByRole("dialog");
     await c.user.click(c.confirm());
+    await waitFor(() => expect(c.api.bodies(applyPath)).toHaveLength(2));
     await act(async () => a.resolve(acknowledgement));
     expect(within(c.dialog()).getByRole("button", { name: "생성 중" })).toHaveAttribute(
       "aria-disabled",
