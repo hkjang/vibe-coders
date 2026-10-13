@@ -20,22 +20,36 @@
         "type": "object"
       },
       "AdminKeyRevokeRequest": {
-        "additionalProperties": false,
-        "nullable": true,
-        "properties": {
-          "expected_revision": {
-            "description": "Exact reviewed catalog revision; must be paired with reason.",
-            "pattern": "^[a-f0-9]{64}$",
-            "type": "string"
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "Legacy empty object or JSON null; the whole body may also be omitted.",
+            "maxProperties": 0,
+            "nullable": true,
+            "type": "object"
           },
-          "reason": {
-            "description": "Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.",
-            "maxLength": 1024,
-            "minLength": 1,
-            "type": "string"
+          {
+            "additionalProperties": false,
+            "properties": {
+              "expected_revision": {
+                "description": "Exact reviewed catalog revision; must be paired with reason.",
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "reason": {
+                "description": "Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.",
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "expected_revision"
+            ],
+            "type": "object"
           }
-        },
-        "type": "object"
+        ]
       },
       "AdminModel": {
         "additionalProperties": false,
@@ -7019,6 +7033,20 @@
         "description": "Revokes a key, or deletes only its registration row with hard=1 (super_admin only with authentication enabled). Existing request history, audit and rotation lineage are retained. Omitted body, JSON null or {} preserves legacy calls. Any supplied review requires both a nonblank reason and the exact revision from GET /admin/api-keys. The authorized snapshot is compared at write time; key change, admin audit and lifecycle audit commit atomically. Stale reviews conflict. Lost responses must be reconciled using current keys and audit, not automatically retried. Revoke review support is advertised by the responding catalog server; mixed-version deployments must upgrade all pods before using the reviewed operation.",
         "operationId": "delete__admin_api_keys_id",
         "parameters": [
+          {
+            "description": "1 deletes only the key registration row; otherwise revoke. Requires super_admin when authentication is enabled. Request, audit and rotation history are retained.",
+            "in": "query",
+            "name": "hard",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "enum": [
+                0,
+                1
+              ],
+              "type": "integer"
+            }
+          },
           {
             "in": "path",
             "name": "id",

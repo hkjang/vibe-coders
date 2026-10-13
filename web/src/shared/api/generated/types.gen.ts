@@ -10,15 +10,17 @@ export type AdminKeyCatalog = {
 };
 
 export type AdminKeyRevokeRequest = {
+    [key: string]: never;
+} | null | {
     /**
      * Exact reviewed catalog revision; must be paired with reason.
      */
-    expected_revision?: string;
+    expected_revision: string;
     /**
      * Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.
      */
-    reason?: string;
-} | null;
+    reason: string;
+};
 
 export type AdminModel = {
     created: number | null;
@@ -2502,7 +2504,12 @@ export type DeleteAdminApiKeysIdData = {
     path: {
         id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * 1 deletes only the key registration row; otherwise revoke. Requires super_admin when authentication is enabled. Request, audit and rotation history are retained.
+         */
+        hard?: 0 | 1;
+    };
     url: '/admin/api-keys/{id}';
 };
 
