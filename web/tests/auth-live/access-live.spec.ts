@@ -50,6 +50,26 @@ test("AUTH-LIVE-027 실제 사용자 정의 역할 등록·계정 부여·유지
   await roleDialog.getByRole("button", { name: "저장", exact: true }).click();
   expect((await roleSaved).status()).toBe(201);
   await expect(roleDialog).toBeHidden();
+  // Compare the newly persisted custom role through the real roles API before
+  // assigning it. Displayed grants are not a substitute for auth/me below.
+  await page.getByRole("button", { name: "권한 비교", exact: true }).click();
+  const matrix = page.getByRole("dialog", { name: "역할별 권한 비교", exact: true });
+  await matrix.getByRole("combobox", { name: "비교 역할 1", exact: true }).selectOption(role);
+  await matrix.getByRole("combobox", { name: "비교 역할 2", exact: true }).selectOption("developer");
+  await expect(
+    matrix
+      .getByRole("row", { name: /models:read/ })
+      .getByRole("cell")
+      .first(),
+  ).toHaveText("부여됨");
+  await expect(
+    matrix
+      .getByRole("row", { name: /admin:write/ })
+      .getByRole("cell")
+      .first(),
+  ).toHaveText("미부여");
+  await matrix.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(matrix).toBeHidden();
   await page.getByRole("tab", { name: "사용자", exact: true }).click();
   await page.getByRole("button", { name: "사용자 등록", exact: true }).click();
   const create = page.getByRole("dialog", { name: "사용자 등록", exact: true });

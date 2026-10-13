@@ -415,6 +415,22 @@ export const adminRolesSchema = looseObject({
   all_scopes: stringList,
 });
 
+const matrixIdentifier = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine(
+    (value) =>
+      value.trim() === value && ![...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
+  );
+// Missing scopes are not evidence of no grants. Keep the legacy adapter above.
+export const roleMatrixSchema = z.object({
+  roles: z
+    .array(z.object({ role: matrixIdentifier, scopes: z.array(matrixIdentifier).nullable() }))
+    .refine((roles) => new Set(roles.map((row) => row.role)).size === roles.length),
+  all_scopes: z.array(matrixIdentifier),
+});
+
 export const roleSavedSchema = looseObject({ role: roleSchema.nullish() });
 
 export const roleDeletedSchema = looseObject({ role: text, deleted: orDefault(z.boolean(), false) });
