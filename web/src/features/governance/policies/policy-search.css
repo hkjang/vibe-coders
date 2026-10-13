@@ -1,0 +1,14 @@
+.policy-search-summary {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.policy-search-summary dt {
+  color: var(--color-muted);
+}
+
+.policy-search-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

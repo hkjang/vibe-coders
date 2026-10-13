@@ -15,11 +15,18 @@ export const governanceFeatureModules = defineFeatureModules([
   {
     featureId: "governance.policies",
     load: () => import("./policies/PoliciesPage").then((module) => module.PoliciesPage),
+    subroutes: [
+      {
+        path: "detail",
+        load: () => import("./policies/PolicySearchPage").then((module) => module.PolicySearchPage),
+      },
+    ],
     queryKeys: [
       "advisor_window",
       "approval_status",
       "canary_days",
       "decision",
+      "policy",
       "secret_action",
       "tab",
       "window",
