@@ -50,19 +50,21 @@ function useAccessQuery<Result>(
   });
 }
 
-export function useUsersQuery(enabled = true) {
+export function useUsersQuery(enabled = true, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.users,
     (signal) => apiClient.request(access.users.list, { signal, routeId }),
     enabled,
+    owner,
   );
 }
 
-export function useUserBenchmarkQuery(window: string, enabled: boolean) {
+export function useUserBenchmarkQuery(window: string, enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     [...accessKeys.usersBenchmark, window],
     (signal) => apiClient.request(access.users.benchmark, { query: { window, limit: 50 }, signal, routeId }),
     enabled,
+    owner,
   );
 }
 

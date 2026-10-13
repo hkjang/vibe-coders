@@ -7,6 +7,13 @@ import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { LoadingState } from "@/shared/components/state/PageStates";
+import { Button } from "@/shared/components/ui/Button";
+import { UpdatedAt } from "@/features/access/access-ui";
+import {
+  assertFeatureRead,
+  featureOwnedKey,
+  type FeatureReadOwner,
+} from "@/shared/hooks/use-feature-read-owner";
 import { Badge } from "@/shared/components/ui/Badge";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -35,6 +42,7 @@ const reportWindows = [
 ] as const;
 
 interface UserDetailSheetProps {
+  owner: FeatureReadOwner;
   apiKeyId: string;
   onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -83,31 +91,44 @@ function BreakdownTable<Row extends BreakdownRow>({
 }
 
 export function UserDetailSheet({
+  owner,
   apiKeyId,
   onClose,
   returnFocusRef,
 }: UserDetailSheetProps): React.JSX.Element {
   const detail = useQuery({
-    queryKey: ["access", "users", "detail", apiKeyId],
-    enabled: apiKeyId !== "",
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(access.users.detail, { id: apiKeyId }), {
+    queryKey: featureOwnedKey(["access", "users", "detail", apiKeyId], owner),
+    enabled: apiKeyId !== "" && owner.readable && !owner.denied,
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(withPathParams(access.users.detail, { id: apiKeyId }), {
         query: { limit: 100 },
         signal,
         routeId,
-      }),
+      });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
   });
 
   const [reportWindow, setReportWindow] = useState("7d");
   const report = useQuery({
-    queryKey: ["access", "users", "report", apiKeyId, reportWindow],
-    enabled: apiKeyId !== "",
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(access.users.report, { id: apiKeyId }), {
+    queryKey: featureOwnedKey(["access", "users", "report", apiKeyId, reportWindow], owner),
+    enabled: apiKeyId !== "" && owner.readable && !owner.denied,
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(withPathParams(access.users.report, { id: apiKeyId }), {
         query: { window: reportWindow },
         signal,
         routeId,
-      }),
+      });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
   });
 
   const data = detail.data;
@@ -131,8 +152,13 @@ export function UserDetailSheet({
           {isAppError(detail.error) && detail.error.requestId ? (
             <span className="request-id"> 요청 ID: {detail.error.requestId}</span>
           ) : null}
+          {data ? " 마지막으로 확인된 값을 표시합니다." : null}
         </InlineNotice>
       ) : null}
+      <Button disabled={detail.isFetching} onClick={() => void detail.refetch()}>
+        다시 조회
+      </Button>
+      <UpdatedAt at={detail.dataUpdatedAt} />
       {data ? (
         <div className="access-stack">
           <KeyValueList
@@ -169,8 +195,14 @@ export function UserDetailSheet({
                 {isAppError(report.error) && report.error.requestId ? (
                   <span className="request-id"> 요청 ID: {report.error.requestId}</span>
                 ) : null}
+                {report.data ? " 마지막으로 확인된 값을 표시합니다." : null}
               </InlineNotice>
-            ) : report.data ? (
+            ) : null}
+            {report.isPending ? <LoadingState label="활동 리포트를 불러오는 중입니다." /> : null}
+            <Button disabled={report.isFetching} onClick={() => void report.refetch()}>
+              리포트 다시 조회
+            </Button>
+            {report.data ? (
               <div className="access-stack">
                 <StatGrid label="활동 리포트 지표">
                   <StatCard label="요청" value={formatNumber(report.data.requests)} />
@@ -207,6 +239,7 @@ export function UserDetailSheet({
                 )}
               </div>
             ) : null}
+            <UpdatedAt at={report.dataUpdatedAt} />
           </SectionCard>
           <SectionCard title="모델별 사용" headingLevel={3}>
             <BreakdownTable

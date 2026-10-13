@@ -30,6 +30,32 @@ import {
   test,
 } from "./live-fixture";
 
+test("AUTH-LIVE-029 실제 사용자 상세·외부 키 등록·읽기 전용 계정 전환", async ({ page }) => {
+  await login(page, admin, "/app/access/users");
+  const row = page
+    .getByRole("table", { name: "프록시 키 사용량", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "브라우저 외부 사용자 키" });
+  await row.getByRole("button", { name: "브라우저 외부 사용자 키 상세 열기", exact: true }).click();
+  const detail = page.getByRole("dialog", { name: "브라우저 외부 사용자 키", exact: true });
+  await expect(detail.getByText("key_browser_external_user", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(detail).toBeHidden();
+  await row.getByRole("button", { name: "관리 키로 등록", exact: true }).click();
+  const confirm = page.getByRole("dialog", { name: "관리 키로 등록", exact: true });
+  const response = page.waitForResponse((value) =>
+    matches(value, "PATCH", "/admin/api-keys/key_browser_external_user"),
+  );
+  await confirm.getByRole("button", { name: "등록", exact: true }).click();
+  expect((await response).status()).toBe(200);
+  await expect(confirm).toBeHidden();
+  await expect(row.getByRole("button", { name: "관리 키로 등록", exact: true })).toHaveCount(0);
+  await signOut(page);
+  await login(page, reader, "/app/access/users");
+  await expect(page.getByRole("button", { name: "사용자 등록", exact: true })).toBeDisabled();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
 test("AUTH-LIVE-028 실제 팀 생성·중복 방지·이름 수정과 팀 관리자 범위", async ({ page }) => {
   const superAdmin = {
     email: required("VIBE_AUTH_SUPER_EMAIL"),

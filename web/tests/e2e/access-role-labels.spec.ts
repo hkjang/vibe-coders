@@ -235,6 +235,191 @@ async function installGateway(page: Page) {
   };
 }
 
+async function installUserUsage(page: Page) {
+  let status = 200;
+  let promoted = false;
+  let reads = 0;
+  const writes: unknown[] = [];
+  let held: Promise<void> | undefined;
+  let release = () => {};
+  await page.route("**/admin/users", async (route) => {
+    reads++;
+    return status === 200
+      ? route.fulfill({
+          json: {
+            auth_users: [
+              {
+                id: "usr_owned",
+                email: "owned@example.invalid",
+                name: "조회 소유 계정",
+                role: "developer",
+                status: "active",
+              },
+            ],
+            users: [
+              {
+                api_key_id: "key_external",
+                name: "조회 소유 키",
+                owner: "소유 팀",
+                team: "team_a",
+                status: promoted ? "active" : "external",
+              },
+            ],
+            team_names: {},
+          },
+        })
+      : route.fulfill({
+          status,
+          json: { error: { code: "server_error", message: "private fixture failure" } },
+        });
+  });
+  await page.route("**/admin/api-keys/key_external", async (route) => {
+    writes.push(route.request().postDataJSON());
+    await held;
+    promoted = true;
+    return route.fulfill({ json: { id: "key_external", status: "active" } });
+  });
+  return {
+    reads: () => reads,
+    writes,
+    status: (value: number) => {
+      status = value;
+    },
+    hold: () => {
+      held = new Promise<void>((done) => {
+        release = done;
+      });
+    },
+    release: () => release(),
+  };
+}
+
+test("사용자 목록 장애는 0건으로 표시하지 않고 목록만 다시 조회한다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  const fixture = await installUserUsage(page);
+  fixture.status(500);
+  await page.goto("/app/access/users");
+  await expect(page.getByText("사용자 목록을(를) 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByRole("table", { name: "로그인 계정 목록", exact: true })).toHaveCount(0);
+  fixture.status(200);
+  await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await expect(page.getByText("owned@example.invalid", { exact: true })).toBeVisible();
+  expect(fixture.writes).toEqual([]);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("사용자 활용지수 권한 오류는 이전 목록을 숨기고 명시적으로 조회를 재개한다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  const fixture = await installUserUsage(page);
+  let reject = false;
+  await page.route("**/admin/benchmark/users?*", (route) =>
+    reject
+      ? route.fulfill({
+          status: 403,
+          json: { error: { code: "permission_denied", message: "private fixture failure" } },
+        })
+      : route.fulfill({ json: { users: [] } }),
+  );
+  await page.goto("/app/access/users");
+  await expect(page.getByText("owned@example.invalid", { exact: true })).toBeVisible();
+  reject = true;
+  await page.getByRole("combobox", { name: "기간", exact: true }).selectOption("7d");
+  await expect(page.getByText("사용자 조회 권한을 다시 확인하세요.")).toBeVisible();
+  await expect(page.getByText("owned@example.invalid", { exact: true })).toHaveCount(0);
+  reject = false;
+  await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await expect(page.getByText("owned@example.invalid", { exact: true })).toBeVisible();
+  expect(fixture.writes).toEqual([]);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("계정 전환은 보류 중인 사용자 상세와 목록을 폐기한다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  await installUserUsage(page);
+  let release = () => {};
+  const held = new Promise<void>((done) => {
+    release = done;
+  });
+  await page.route("**/admin/users/key_external?*", async (route) => {
+    await held;
+    await route.fulfill({ json: { api_key: { name: "이전 상세 원문" } } }).catch(() => {});
+  });
+  await page.route("**/admin/users/key_external/report?*", (route) => route.fulfill({ json: {} }));
+  await page.goto("/app/access/users");
+  await page.getByRole("button", { name: "조회 소유 키 상세 열기" }).click();
+  await expect(page.getByRole("dialog", { name: "사용자 상세", exact: true })).toBeVisible();
+  gateway.owner("usr_new_owner");
+  const refreshed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await (await refreshed).finished();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  release();
+  await expect(page.getByText("이전 상세 원문", { exact: true })).toHaveCount(0);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+for (const kind of ["readonly", "scope"]) {
+  test(`관리 키 등록 뒤 ${kind} 회수는 늦은 성공을 현재 작업 완료로 알리지 않는다`, async ({ page }) => {
+    const gateway = await installGateway(page);
+    const fixture = await installUserUsage(page);
+    fixture.hold();
+    await page.goto("/app/access/users");
+    await page.getByRole("button", { name: "관리 키로 등록", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "관리 키로 등록", exact: true });
+    await dialog.getByRole("button", { name: "등록", exact: true }).click();
+    await expect.poll(() => fixture.writes.length).toBe(1);
+    gateway.revokeWrite(kind);
+    const refreshed = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+    );
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await (await refreshed).finished();
+    const reads = fixture.reads();
+    fixture.release();
+    await expect(dialog.getByRole("button", { name: "등록", exact: true })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "취소", exact: true })).toBeEnabled();
+    await expect(dialog).toBeVisible();
+    await expect(page.getByText("외부 키를 관리 키로 등록했습니다.", { exact: true })).toHaveCount(0);
+    expect(fixture.reads()).toBe(reads);
+    expect(gateway.unexpected).toEqual([]);
+  });
+}
+
+test("모바일 사용자 키 등록은 키보드 취소 초점과 접근성·실제 입력값을 유지한다", async ({
+  page,
+}, testInfo) => {
+  const gateway = await installGateway(page);
+  const fixture = await installUserUsage(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  await page.goto("/app/access/users");
+  const trigger = page.getByRole("button", { name: "관리 키로 등록", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "관리 키로 등록", exact: true });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  expect(
+    await page.evaluate(async () =>
+      (
+        await (
+          window as unknown as { axe: { run(root: Document): Promise<{ violations: { id: string }[] }> } }
+        ).axe.run(document)
+      ).violations.map((v) => v.id),
+    ),
+  ).toEqual([]);
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("user-key-registration-mobile.png") });
+  await dialog.getByRole("button", { name: "등록", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(fixture.writes).toEqual([{ status: "active", name: "조회 소유 키", team: "team_a" }]);
+  expect(gateway.unexpected).toEqual([]);
+});
+
 test("팀 생성·이름 수정은 모바일 변경 비교·중복 방지·초점과 접근성을 유지한다", async ({
   page,
 }, testInfo) => {
