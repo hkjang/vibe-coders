@@ -3,11 +3,20 @@ import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { UsersPage } from "@/features/access/users/UsersPage";
+import { UsersPage as UsersPageScreen } from "@/features/access/users/UsersPage";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
 const authRuntime = vi.hoisted(() => ({ role: "admin", scopes: ["admin:read", "admin:write"] }));
+
+function UsersPage() {
+  return (
+    <FeatureAccessContext.Provider value={{ featureId: "access.users", readOnly: false, permitted: true }}>
+      <UsersPageScreen />
+    </FeatureAccessContext.Provider>
+  );
+}
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");

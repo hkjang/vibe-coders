@@ -110,17 +110,17 @@ export function useBudgetProjectionQuery(enabled: boolean) {
   );
 }
 
-export function useApiKeysQuery(enabled: boolean) {
+export function useApiKeysQuery(enabled: boolean, owner?: string) {
   return useAccessQuery(
-    accessKeys.apiKeys,
+    owner ? [...accessKeys.apiKeys, owner] : accessKeys.apiKeys,
     (signal) => apiClient.request(access.apiKeys.list, { signal, routeId }),
     enabled,
   );
 }
 
-export function useRolesQuery(enabled: boolean) {
+export function useRolesQuery(enabled: boolean, owner?: string) {
   return useAccessQuery(
-    accessKeys.roles,
+    owner ? [...accessKeys.roles, owner] : accessKeys.roles,
     (signal) => apiClient.request(access.roles.list, { signal, routeId }),
     enabled,
   );

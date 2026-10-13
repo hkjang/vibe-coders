@@ -1,4 +1,6 @@
-import { statusLabel, statusTone } from "@/features/access/access-format";
+import { keyDeadline, keyLifecycle } from "../key-lifecycle";
+import { roleLabel } from "@/config/ui-labels";
+import type { KeyRowAction } from "./use-key-row-focus";
 import { ScopeBadges } from "@/features/access/access-ui";
 import type { ApiKeyPublic } from "@/shared/api/domains/access.schemas";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -13,6 +15,9 @@ export function apiKeyColumns(
   canWrite: boolean,
   writeDeniedReason: string,
   rememberScopeTrigger: (node: HTMLButtonElement | null, id: string) => void,
+  revokeAttempts: ReadonlySet<string> = new Set(),
+  now: number = Date.now(),
+  rememberRowTrigger?: (node: HTMLButtonElement | null, id: string, action: KeyRowAction) => void,
 ): ReadonlyArray<DataTableColumn<ApiKeyPublic>> {
   const column = createDataTableColumnHelper<ApiKeyPublic>();
   return column.columns([
@@ -33,12 +38,12 @@ export function apiKeyColumns(
     column.accessor((row) => row.role, {
       id: "role",
       header: "역할",
-      cell: ({ getValue }) => (getValue() ? <Badge tone="info">{getValue()}</Badge> : "—"),
+      cell: ({ getValue }) => (getValue() ? <Badge tone="info">{roleLabel(getValue())}</Badge> : "—"),
     }),
-    column.accessor((row) => row.status, {
+    column.accessor((row) => keyLifecycle(row, now).label, {
       id: "status",
       header: "상태",
-      cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{statusLabel(getValue())}</Badge>,
+      cell: ({ row, getValue }) => <Badge tone={keyLifecycle(row.original, now).tone}>{getValue()}</Badge>,
     }),
     column.accessor((row) => row.scopes.join(" "), {
       id: "scopes",
@@ -60,17 +65,23 @@ export function apiKeyColumns(
           <span className="mono truncate">{row.original.allowed_ips.join(", ")}</span>
         ),
     }),
-    column.accessor((row) => row.expires_at, {
+    column.accessor((row) => keyDeadline(row), {
       id: "expires_at",
-      header: "만료",
-      cell: ({ getValue }) => (getValue() ? formatDateTime(getValue()) : "무기한"),
+      header: "만료·유예 종료",
+      cell: ({ getValue }) =>
+        Number.isNaN(getValue())
+          ? "시각 확인 필요"
+          : Number.isFinite(getValue())
+            ? formatDateTime(new Date(getValue()).toISOString())
+            : "무기한",
     }),
     column.display({
       id: "actions",
       header: "작업",
       cell: ({ row }) => (
-        <div className="table-actions">
+        <div className="table-actions access-key-actions">
           <Button
+            ref={(node) => rememberRowTrigger?.(node, row.original.id, "edit")}
             size="small"
             disabled={!canWrite}
             title={canWrite ? undefined : writeDeniedReason}
@@ -88,9 +99,10 @@ export function apiKeyColumns(
             권한 수정
           </Button>
           <Button
+            ref={(node) => rememberRowTrigger?.(node, row.original.id, "revoke")}
             size="small"
             variant="danger"
-            disabled={!canWrite || row.original.status === "revoked"}
+            disabled={!canWrite || row.original.status === "revoked" || revokeAttempts.has(row.original.id)}
             title={canWrite ? undefined : writeDeniedReason}
             onClick={(event) => onRevoke(row.original, event.currentTarget)}
           >

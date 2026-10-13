@@ -54,7 +54,11 @@ const forms = [
   {
     name: "API 키 발급",
     trigger: "키 발급",
-    render: () => <ApiKeysTab canWrite isSuperAdmin writeDeniedReason="" />,
+    render: () => (
+      <FeatureAccessContext.Provider value={{ featureId: "access.users", readOnly: false, permitted: true }}>
+        <ApiKeysTab canWrite isSuperAdmin writeDeniedReason="" />
+      </FeatureAccessContext.Provider>
+    ),
     nameField: "이름",
     submit: "발급",
     endpoint: "POST /admin/api-keys",
@@ -224,8 +228,8 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     const name = within(reopened).getByRole("textbox", { name: fixture.nameField });
     const scope = within(reopened).getByRole("checkbox", { name: /models:read/u });
     expect(name).toHaveValue("");
-    if (fixture.name === "키 발급") {
-      // Personal queries and forms now belong to the authenticated owner; a
+    if (fixture.name === "키 발급" || fixture.name === "API 키 발급") {
+      // Personal/admin key queries and forms belong to the authenticated owner; a
       // fresh owner does not wait for a disposed owner's pending mutation.
       expect(name).toBeEnabled();
       expect(scope).toBeEnabled();

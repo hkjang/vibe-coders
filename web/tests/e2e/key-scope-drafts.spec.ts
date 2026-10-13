@@ -317,6 +317,71 @@ async function login(page: Page) {
   await signIn(page);
 }
 
+for (const width of [390, 1440]) {
+  test(`관리자 키 검토 폐기 ${width}px 한글 상태·키보드·대비·취소 포커스를 확인한다`, async ({
+    page,
+    gateway,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ colorScheme: width === 390 ? "dark" : "light", reducedMotion: "reduce" });
+    await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+    await page.route("**/admin/api-keys", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({
+        json: {
+          revoke_review_supported: true,
+          api_keys: [
+            { ...alpha, revision: "a".repeat(64) },
+            { ...beta, expires_at: "2020-01-01T00:00:00Z" },
+          ],
+        },
+      });
+    });
+    await login(page);
+    const row = page.getByRole("row", { name: new RegExp(alpha.name) });
+    await expect(row.getByText("개발자", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("row", { name: new RegExp(beta.name) }).getByText("만료", { exact: true }),
+    ).toBeVisible();
+    const trigger = row.getByRole("button", { name: "폐기", exact: true });
+    for (const button of await row.getByRole("button").all()) {
+      const lines = await button.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return range.getClientRects().length;
+      });
+      expect(lines).toBe(1);
+    }
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "API 키 폐기", exact: true });
+    const confirm = dialog.getByRole("button", { name: "폐기", exact: true });
+    await expect(confirm).toBeDisabled();
+    await dialog.getByRole("textbox", { name: "확인 문구", exact: true }).fill(alpha.id);
+    await expect(confirm).toBeDisabled();
+    await dialog.getByRole("textbox", { name: "변경 사유", exact: true }).fill("공개 테스트 키 검토");
+    await expect(confirm).toBeEnabled();
+    await expect(dialog.getByRole("checkbox", { name: /완전 삭제/ })).toHaveCount(0);
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("Tab");
+      await expect
+        .poll(() => dialog.evaluate((element) => element.contains(document.activeElement)))
+        .toBe(true);
+    }
+    expect(await axeViolations(page)).toEqual([]);
+    const layout = await dialog.evaluate((element) => ({
+      width: element.clientWidth,
+      content: element.scrollWidth,
+    }));
+    expect(layout.content).toBeLessThanOrEqual(layout.width);
+    await page.screenshot({ path: testInfo.outputPath(`admin-key-review-${width}.png`) });
+    await dialog.getByRole("button", { name: "취소", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+    expect(gateway.saves).toEqual([]);
+  });
+}
+
 async function openForm(page: Page, keyName = alpha.name) {
   await scopeTrigger(page, keyName).click();
   const form = page.getByRole("dialog", { name: "API 키 권한 수정", exact: true });

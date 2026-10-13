@@ -1087,12 +1087,16 @@ test("저장된 콘솔 설정의 반영 지연은 탭 왕복 뒤에도 남고 �
   );
   await page.getByRole("tab", { name: "콘솔 전환", exact: true }).click();
   await expect(page).toHaveURL(/tab=console/u);
+  await expect(page.getByRole("tab", { name: "콘솔 전환", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   await expect(pendingNotice).toBeVisible();
   await expect(guard(page)).toBeHidden();
   expect(api.writes).toHaveLength(1);
   api.reloadApplied();
   const previousReads = api.readCount();
-  await page.getByRole("button", { name: "새로고침", exact: true }).click();
+  await page.locator(".page-header").getByRole("button", { name: "새로고침", exact: true }).click();
   await expect.poll(api.readCount).toBeGreaterThan(previousReads);
   await expect(pendingNotice).toBeHidden();
   expect(api.writes).toHaveLength(1);

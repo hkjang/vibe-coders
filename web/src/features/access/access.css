@@ -2,6 +2,13 @@
   display: grid;
   gap: var(--space-4);
 }
+.access-key-actions {
+  flex-wrap: nowrap;
+  width: max-content;
+}
+.access-key-actions .button {
+  white-space: nowrap;
+}
 .access-cards {
   display: grid;
   gap: var(--space-4);

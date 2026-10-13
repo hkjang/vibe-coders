@@ -39,6 +39,7 @@ type browserAuthHarness struct {
 	db               *store.SQLStore
 	adminPassword    string
 	readonlyPassword string
+	superPassword    string
 	childScratch     string
 	providerChunk    string
 }
@@ -83,13 +84,14 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	if err := db.Migrate(t.Context()); err != nil {
 		t.Fatal("isolated authentication schema could not be prepared")
 	}
-	h := &browserAuthHarness{gateway: gateway, idp: idp, upstream: upstream, db: db, adminPassword: browserFixtureSecret(t), readonlyPassword: browserFixtureSecret(t), childScratch: childScratch}
+	h := &browserAuthHarness{gateway: gateway, idp: idp, upstream: upstream, db: db, adminPassword: browserFixtureSecret(t), readonlyPassword: browserFixtureSecret(t), superPassword: browserFixtureSecret(t), childScratch: childScratch}
 	if err := db.UpsertAuthTeam(t.Context(), store.AuthTeam{ID: "browser-team", Name: "browser-team"}); err != nil {
 		t.Fatal("synthetic authentication team could not be created")
 	}
 	for _, account := range []struct{ id, email, password, role string }{
 		{"browser-local-admin", "admin-browser@example.invalid", h.adminPassword, "admin"},
 		{"browser-local-readonly", "readonly-browser@example.invalid", h.readonlyPassword, "readonly_admin"},
+		{"browser-local-super", "super-browser@example.invalid", h.superPassword, "super_admin"},
 	} {
 		hash, err := bcrypt.GenerateFromPassword([]byte(account.password), bcrypt.DefaultCost)
 		if err != nil {
@@ -244,6 +246,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	}
 	verifyBrowserChangeSetFixture(t, h.db)
 	verifyBrowserOperationsFixture(t, h.db)
+	verifyBrowserAdminKeyRevocations(t, h.db)
 }
 
 func browserAuthWebDirectory(t *testing.T) string {
@@ -289,6 +292,7 @@ func (h *browserAuthHarness) childEnvironment() []string {
 		"VIBE_AUTH_IDP_ORIGIN="+h.idp.server.URL,
 		"VIBE_AUTH_ADMIN_EMAIL=admin-browser@example.invalid", "VIBE_AUTH_ADMIN_PASSWORD="+h.adminPassword,
 		"VIBE_AUTH_READONLY_EMAIL=readonly-browser@example.invalid", "VIBE_AUTH_READONLY_PASSWORD="+h.readonlyPassword,
+		"VIBE_AUTH_SUPER_EMAIL=super-browser@example.invalid", "VIBE_AUTH_SUPER_PASSWORD="+h.superPassword,
 		"VIBE_AUTH_SSO_EMAIL="+h.idp.email, "VIBE_AUTH_SSO_PASSWORD="+h.idp.password,
 		"VIBE_AUTH_TEAM_ID=browser-team", "VIBE_AUTH_ACCESS_TTL_SECONDS="+strconv.Itoa(int(browserAuthAccessTTL.Seconds())),
 		"VIBE_AUTH_PROVIDER_CHUNK="+h.providerChunk,

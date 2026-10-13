@@ -9,7 +9,12 @@ export const createKeySchema = z.object({
   allowed_ips: z.string(),
   allowed_models: z.string(),
   denied_models: z.string(),
-  budget_limit_krw: z.string(),
+  budget_limit_krw: z
+    .string()
+    .refine(
+      (value) => value.trim() === "" || (Number.isFinite(Number(value)) && Number(value) >= 0),
+      "0 이상의 올바른 금액을 입력하세요.",
+    ),
   expires_at: keyExpirySchema,
   scopes: z.array(z.string()),
 });
