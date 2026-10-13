@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { RolesTab } from "@/features/access/users/RolesTab";
-import { UsersTab } from "@/features/access/users/UsersTab";
+import { UsersTab as UsersTabScreen } from "@/features/access/users/UsersTab";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
@@ -23,10 +24,35 @@ const account = {
   created_at: "2026-10-01T00:00:00Z",
 };
 
+function UsersTab() {
+  return (
+    <FeatureAccessContext.Provider value={{ featureId: "access.users", permitted: true, readOnly: false }}>
+      <UsersTabScreen canWrite writeDeniedReason="" />
+    </FeatureAccessContext.Provider>
+  );
+}
+
 function usersApi() {
   return mockApi({
     "GET /admin/users": () => ({ auth_users: [account], users: [], team_names: {} }),
     "GET /admin/benchmark/users": () => ({ users: [] }),
+    "GET /admin/roles": () => ({
+      roles: [
+        "super_admin",
+        "admin",
+        "ops_admin",
+        "ai_admin",
+        "security_admin",
+        "billing_admin",
+        "team_admin",
+        "team_manager",
+        "developer",
+        "service_account",
+        "viewer",
+        "readonly_admin",
+      ].map((role) => ({ role })),
+      all_scopes: [],
+    }),
     "POST /admin/users": () => ({ user: account }),
     "PATCH /admin/users/usr_role_label": () => ({ user: account }),
   });
@@ -36,12 +62,12 @@ describe("사용자·역할 한글 표시", () => {
   it("등록 선택지를 한글로 표시하고 기존 역할 코드를 전송한다", async () => {
     const user = userEvent.setup();
     const api = usersApi();
-    renderScreen(<UsersTab canWrite writeDeniedReason="" />);
+    renderScreen(<UsersTab />);
     expect(await screen.findByText("운영 관리자")).toHaveAttribute("title", "ops_admin");
     await user.click(screen.getByRole("button", { name: "사용자 등록" }));
     const dialog = within(await screen.findByRole("dialog", { name: "사용자 등록" }));
     const role = dialog.getByRole("combobox", { name: "역할" });
-    expect(within(role).getAllByRole("option")).toHaveLength(12);
+    await waitFor(() => expect(within(role).getAllByRole("option")).toHaveLength(12));
     expect(
       within(role)
         .getAllByRole("option")
@@ -59,7 +85,7 @@ describe("사용자·역할 한글 표시", () => {
   it("수정 시 현재 한글 역할을 복원하고 변경한 코드만 기존 API로 보낸다", async () => {
     const user = userEvent.setup();
     const api = usersApi();
-    renderScreen(<UsersTab canWrite writeDeniedReason="" />);
+    renderScreen(<UsersTab />);
     const trigger = await screen.findByRole("button", { name: "역할·상태 변경" });
     await user.click(trigger);
     await screen.findByRole("dialog", { name: "사용자 변경" });
@@ -69,7 +95,7 @@ describe("사용자·역할 한글 표시", () => {
     const dialog = within(await screen.findByRole("dialog", { name: "사용자 변경" }));
     const role = dialog.getByRole("combobox", { name: "역할" });
     expect(role).toHaveValue("ops_admin");
-    expect(within(role).getByRole("option", { name: "운영 관리자" })).toHaveProperty("selected", true);
+    expect(await within(role).findByRole("option", { name: "운영 관리자" })).toHaveProperty("selected", true);
     await user.selectOptions(role, "조회자");
     await user.click(dialog.getByRole("button", { name: "저장" }));
     await waitFor(() =>

@@ -58,6 +58,10 @@ async function installGateway(page: Page) {
   };
   const writes: { method: string; path: string; body: unknown }[] = [];
   const unexpected: string[] = [];
+  let roleNames = ["developer", "viewer", "ops_admin", "custom_reviewer"];
+  let roleReads = 0;
+  let roleStatus = 200;
+  const roleHolds = new Map<number, { promise: Promise<void>; release: () => void }>();
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -74,21 +78,24 @@ async function installGateway(page: Page) {
         team_names: {},
       });
     if (key === "GET /admin/benchmark/users") return json({ users: [] });
-    if (key === "GET /admin/roles")
+    if (key === "GET /admin/roles") {
+      roleReads++;
+      const roles = roleNames.map((role) => ({
+        role,
+        is_system: role !== "custom_reviewer",
+        rank: role === "custom_reviewer" ? 0 : 2,
+        scopes: [],
+        description: "",
+        default_home: "",
+      }));
+      await roleHolds.get(roleReads)?.promise;
+      if (roleStatus !== 200)
+        return route.fulfill({ status: roleStatus, json: { error: { message: "private fixture failure" } } });
       return json({
-        roles: [
-          { role: "ops_admin", is_system: true, rank: 70, scopes: [], description: "", default_home: "" },
-          {
-            role: "custom_reviewer",
-            is_system: false,
-            rank: 0,
-            scopes: [],
-            description: "검토 담당",
-            default_home: "",
-          },
-        ],
+        roles,
         all_scopes: [],
       });
+    }
     if (key === "POST /admin/users" || key === "PATCH /admin/users/usr_role_labels") {
       writes.push({ method: request.method(), path: url.pathname, body: request.postDataJSON() });
       return json({ user });
@@ -96,7 +103,31 @@ async function installGateway(page: Page) {
     unexpected.push(key);
     return route.fulfill({ status: 500, json: { error: "unexpected fixture request" } });
   });
-  return { writes, unexpected };
+  return {
+    writes,
+    unexpected,
+    roleReads: () => roleReads,
+    roles: (value: string[]) => {
+      roleNames = value;
+    },
+    roleStatus: (value: number) => {
+      roleStatus = value;
+    },
+    owner: (id: string) => {
+      user.id = id;
+    },
+    hold: (number: number) => {
+      let release = () => undefined;
+      const promise = new Promise<void>((done) => {
+        release = () => {
+          done();
+          return undefined;
+        };
+      });
+      roleHolds.set(number, { promise, release });
+    },
+    release: (number: number) => roleHolds.get(number)?.release(),
+  };
 }
 
 test("한글 역할 선택·키보드 취소·기존 코드 전송과 역할 식별자를 보존한다", async ({ page }) => {
@@ -166,5 +197,78 @@ test("좁은 화면에서도 등록 역할 선택지를 한글로 읽고 선택�
     }),
   ).toEqual([]);
   expect(gateway.writes).toEqual([]);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("사용자 정의 역할을 저장 전 재조회하고 삭제된 역할의 자동 대체를 막는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  await page.goto("/app/access/users");
+  await page.getByRole("button", { name: "역할·상태 변경", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "사용자 변경" });
+  const role = dialog.getByRole("combobox", { name: "역할", exact: true });
+  await role.selectOption("custom_reviewer");
+  gateway.roles(["developer", "viewer"]);
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(
+    dialog.getByText("선택한 역할이 목록에 없습니다. 다른 역할을 명시적으로 선택하세요."),
+  ).toBeVisible();
+  expect(gateway.writes).toHaveLength(0);
+  expect(gateway.roleReads()).toBe(2);
+  await expect(role).toHaveValue("custom_reviewer");
+  await role.selectOption("viewer");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect.poll(() => gateway.writes.length).toBe(1);
+  expect(gateway.roleReads()).toBe(3);
+  expect(gateway.writes[0]?.body).toEqual({ role: "viewer", status: "active", team_id: "" });
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("역할 목록 실패 후 초안을 보존하며 수동 재조회로 사용자 정의 역할 등록을 복구한다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  gateway.roleStatus(503);
+  await page.goto("/app/access/users");
+  await page.getByRole("button", { name: "사용자 등록", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "사용자 등록" });
+  await expect(dialog.getByText("역할 목록을 불러오지 못했습니다.")).toBeVisible();
+  await dialog.getByRole("textbox", { name: "이메일", exact: true }).fill("catalog@example.invalid");
+  await dialog.getByLabel("비밀번호", { exact: false }).fill("synthetic-password");
+  await expect(dialog.getByRole("button", { name: "등록", exact: true })).toBeDisabled();
+  gateway.roleStatus(200);
+  await dialog.getByRole("button", { name: "역할 목록 다시 조회" }).click();
+  await dialog.getByRole("combobox", { name: "역할", exact: true }).selectOption("custom_reviewer");
+  await dialog.getByRole("button", { name: "등록", exact: true }).click();
+  await expect.poll(() => gateway.writes.length).toBe(1);
+  expect(gateway.writes[0]?.body).toEqual({
+    email: "catalog@example.invalid",
+    password: "synthetic-password",
+    role: "custom_reviewer",
+  });
+  expect(gateway.roleReads()).toBe(3);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("계정 변경은 저장 전 역할 조회를 취소하고 이전 계정의 초안과 쓰기를 폐기한다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  gateway.hold(2);
+  await page.goto("/app/access/users");
+  await page.getByRole("button", { name: "역할·상태 변경", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "사용자 변경" });
+  await dialog.getByRole("combobox", { name: "역할", exact: true }).selectOption("custom_reviewer");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect.poll(() => gateway.roleReads()).toBe(2);
+  const canceled = page.waitForEvent(
+    "requestfailed",
+    (request) => new URL(request.url()).pathname === "/admin/roles",
+  );
+  gateway.owner("usr_next_operator");
+  const refreshed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await (await refreshed).finished();
+  await canceled;
+  await expect(dialog).toBeHidden();
+  gateway.release(2);
+  expect(gateway.writes).toHaveLength(0);
   expect(gateway.unexpected).toEqual([]);
 });
