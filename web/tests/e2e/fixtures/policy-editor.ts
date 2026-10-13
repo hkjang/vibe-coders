@@ -57,12 +57,15 @@ async function installGateway(context: BrowserContext, origin: string) {
   const finished: number[] = [];
   const unexpected: string[] = [];
   const otherWrites: string[] = [];
+  let regressionEnabled = false;
+  let cases: Record<string, unknown>[] = [];
+  const operations: Array<{ call: string; body?: unknown; id?: string }> = [];
   const sessions = new Set<string>();
   const holds = new Map<string, Hold>();
   const replies = new Map<number, Reply>();
   const failedReads = new Set<number>();
   let failReadsAfterSave = false;
-  function hold(kind: "read" | "save", sequence: number) {
+  function hold(kind: "read" | "save" | "run", sequence: number) {
     let release!: () => void;
     const promise = new Promise<void>((resolve) => {
       release = resolve;
@@ -127,12 +130,28 @@ async function installGateway(context: BrowserContext, origin: string) {
     // Count before authentication. The transport does not enforce readonly,
     // current revision, active/disabled state or duplicate guards for the UI.
     let save = 0;
+    const regressionWrite =
+      regressionEnabled &&
+      [
+        "POST /admin/policies/regression/cases",
+        "DELETE /admin/policies/regression/cases",
+        "POST /admin/policies/regression/run",
+      ].includes(call);
+    if (regressionWrite)
+      operations.push({
+        call,
+        ...(request.method() === "POST" && request.postData()
+          ? { body: request.postDataJSON() as unknown }
+          : {}),
+        ...(request.method() === "DELETE" ? { id: url.searchParams.get("id") ?? "" } : {}),
+      });
     if (call === "POST /admin/policies") {
       const body: unknown = request.postDataJSON();
       if (!object(body)) throw new Error("Expected object policy body");
       saves.push(body);
       save = saves.length;
-    } else if (url.pathname.startsWith("/admin/") && request.method() !== "GET") otherWrites.push(call);
+    } else if (!regressionWrite && url.pathname.startsWith("/admin/") && request.method() !== "GET")
+      otherWrites.push(call);
     const json = (body: unknown, responseStatus = 200, requestId = "req-public-policy-editor") =>
       route.fulfill({
         status: responseStatus,
@@ -169,13 +188,14 @@ async function installGateway(context: BrowserContext, origin: string) {
         await holds.get(`save:${save}`)?.promise;
         const decodedAt = `2026-02-01T00:00:${String(save).padStart(2, "0")}Z`;
         const { rules: submittedRules, ...submittedPolicy } = structuredClone(body);
+        submittedPolicy.id ??= `public-created-policy-${save}`;
         const decodedRules = Array.isArray(submittedRules)
           ? submittedRules.map((rule: unknown, index: number) => {
               if (!object(rule)) throw new Error("Expected rule object");
               return {
                 ...structuredClone(rule),
                 id: rule.id ?? `public-new-rule-${save}-${index}`,
-                policy_id: body.id,
+                policy_id: submittedPolicy.id,
                 created_at: decodedAt,
                 updated_at: "0001-01-01T00:00:00Z",
               };
@@ -190,7 +210,7 @@ async function installGateway(context: BrowserContext, origin: string) {
         };
         // The actual endpoint ACK is its decoded submission, not a storage
         // reload. Keep its metadata distinct from the subsequent list result.
-        const previous = rows.find((row) => object(row) && row.id === body.id);
+        const previous = rows.find((row) => object(row) && row.id === submittedPolicy.id);
         const updated = {
           ...decoded,
           created_at: object(previous) ? previous.created_at : decodedAt,
@@ -205,6 +225,21 @@ async function installGateway(context: BrowserContext, origin: string) {
         await json(reply.body, reply.status ?? 201, reply.requestId);
         finished.push(save);
         return;
+      }
+      if (regressionWrite) {
+        if (call === "POST /admin/policies/regression/run") {
+          await holds.get(`run:${operations.filter((row) => row.call === call).length}`)?.promise;
+          return json({ passed: 1, failed: 0, results: [] });
+        }
+        if (request.method() === "POST") {
+          const body: unknown = request.postDataJSON();
+          if (!object(body)) throw new Error("Expected case object");
+          const id = `public-case-${operations.length}`;
+          cases.push({ ...body, id });
+          return json({ id, ok: true });
+        }
+        cases = cases.filter((row) => row.id !== url.searchParams.get("id"));
+        return json({ ok: true });
       }
       if (call === "GET /admin/policies") {
         reads += 1;
@@ -229,7 +264,7 @@ async function installGateway(context: BrowserContext, origin: string) {
         "GET /admin/policy-advisor/suggestions": { suggestions: [] },
         "GET /admin/kill-switch": { disabled: false },
         "GET /admin/incidents": { incidents: [] },
-        "GET /admin/policies/regression/cases": { cases: [] },
+        "GET /admin/policies/regression/cases": { cases },
         "GET /admin/policies/decisions": { policy_decisions: [] },
         "GET /admin/approvals": { approvals: [] },
         "GET /admin/security/secrets": { secret_events: [] },
@@ -249,6 +284,13 @@ async function installGateway(context: BrowserContext, origin: string) {
     finished,
     unexpected,
     otherWrites,
+    operations,
+    regression: (next: Record<string, unknown>[]) => {
+      regressionEnabled = true;
+      cases = structuredClone(next);
+    },
+    holdRun: (sequence: number) => hold("run", sequence),
+    releaseRun: (sequence: number) => holds.get(`run:${sequence}`)?.release(),
     reads: () => reads,
     policies: (next: unknown[]) => {
       rows = structuredClone(next);

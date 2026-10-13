@@ -281,13 +281,14 @@ it.each(["resume", "deactivate"] as const)(
   },
 );
 
-it("does not broaden the parent canWrite restriction into untouched quick-create siblings", async () => {
+it("guards policy and regression creation without changing unrelated alert controls", async () => {
   const current = await setup("stop");
   await current.changeAccess("feature", false);
   expect(screen.getByRole("button", { name: definitions.stop.trigger })).toBeDisabled();
   expect(screen.getByRole("button", { name: definitions.activate.trigger })).toBeDisabled();
-  // These pre-existing callers are intentionally outside this two-action milestone.
-  for (const label of ["정책 추가", "시나리오 추가", "규칙 추가"])
-    expect(screen.getByRole("button", { name: label })).toBeEnabled();
+  for (const label of ["정책 추가", "시나리오 추가"])
+    expect(screen.getByRole("button", { name: label })).toBeDisabled();
+  // Alert rules are a separate operation boundary, not changed by policy guards.
+  expect(screen.getByRole("button", { name: "규칙 추가" })).toBeEnabled();
   expect(current.attempts).toEqual([]);
 });
