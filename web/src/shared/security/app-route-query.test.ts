@@ -15,6 +15,16 @@ function encoded(value: string, passes: number): string {
 }
 
 describe("app route query security", () => {
+  it("preserves policy selection on its independent detail route but removes credentials", () => {
+    expect(
+      sanitizeAppRouteSearch("/app/governance/policies/detail", "?policy=policy-one&tab=safety&token=private")
+        .search,
+    ).toBe("?policy=policy-one&tab=safety");
+    expect(
+      sanitizeAppRouteSearch("/app/governance/policies/detail", `?policy=corp_${"x".repeat(43)}`, ["corp_"])
+        .search,
+    ).toBe("");
+  });
   const initialURL = window.location.href;
   const cursor = `djE6dGVzdA.${"c".repeat(43)}`;
   const selectedRef = `req_${"a".repeat(22)}.${"b".repeat(21)}`;

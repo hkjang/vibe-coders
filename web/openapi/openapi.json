@@ -4795,11 +4795,12 @@
                 "workflow",
                 "app",
                 "skill",
-                "mcp_upstream"
+                "mcp_upstream",
+                "policy"
               ],
               "type": "string"
             },
-            "maxItems": 5,
+            "maxItems": 6,
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
@@ -4838,7 +4839,8 @@
                           "workflow",
                           "app",
                           "skill",
-                          "mcp_upstream"
+                          "mcp_upstream",
+                          "policy"
                         ],
                         "type": "string"
                       },
@@ -4864,7 +4866,8 @@
                     "workflow",
                     "app",
                     "skill",
-                    "mcp_upstream"
+                    "mcp_upstream",
+                    "policy"
                   ],
                   "type": "string"
                 },
@@ -4888,7 +4891,7 @@
               ],
               "type": "object"
             },
-            "maxItems": 5,
+            "maxItems": 6,
             "type": "array"
           },
           "request_id": {
@@ -16907,7 +16910,7 @@
     },
     "/admin/resource-search": {
       "post": {
-        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication, admin:read and available non-legacy feature access per kind (same sources as existing admin lists). MCP upstream search additionally requires observability:read (the existing MCP list permission), exposes only canonical slug IDs and safe display names, and never fetches discovery data. No admin:write required. Query is trimmed, 2–128 Unicode characters, literal name substring (ASCII case-insensitive; non-ASCII case behavior follows database collation). Five supported configuration kinds: provider, workflow, app, skill and mcp_upstream; no model/upstream calls or business execution. At most ten metadata rows per kind ordered by stored title then ID. Unsafe or oversized IDs/titles are omitted for every role. Definitions, instructions, credentials, URLs and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
+        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies; all other kinds require admin:read. MCP upstream search additionally requires observability:read, exposes only canonical slug IDs and safe display names, and never fetches discovery data. A security-only reader must request the policy kind; other groups remain forbidden. No admin:write required. Query is trimmed, 2–128 Unicode characters, literal name substring (ASCII case-insensitive; non-ASCII case behavior follows database collation). Six supported configuration kinds: provider, workflow, app, skill, mcp_upstream and policy; no model/upstream calls or business execution. At most ten metadata rows per kind ordered by stored title then ID. Unsafe or oversized IDs/titles are omitted for every role. Definitions, policy conditions/actions, instructions, credentials, URLs and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
         "operationId": "post__admin_resource_search",
         "requestBody": {
           "content": {

@@ -102,6 +102,38 @@ describe("permission-scoped resource search", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it("lets security-only readers search policy names without acquiring administrator search access", async () => {
+    runtime.scopes = ["security:read"];
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+      request_id: "policy-search-request",
+      groups: [
+        {
+          kind: "policy",
+          status: "ok",
+          limited: false,
+          items: [{ kind: "policy", id: "policy-one", title: "정산 안전 정책" }],
+        },
+      ],
+    });
+    const view = setup();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "정산" } });
+    expect(await screen.findByRole("option", { name: /정산 안전 정책/ })).toBeVisible();
+    expect(request).toHaveBeenCalledWith(
+      endpoints.admin.resourceSearch,
+      expect.objectContaining({
+        body: { query: "정산", kinds: ["policy"] },
+      }),
+    );
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    expect(view.go).toHaveBeenCalledWith("/governance/policies/detail?policy=policy-one&tab=safety");
+    runtime.scopes = ["admin:read"];
+    view.rerender(view.tree());
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "정산" } });
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+  });
+
   it("requires MCP list permission and opens the stored server detail tab", async () => {
     runtime.scopes = ["admin:read", "observability:read"];
     const request = vi.spyOn(apiClient, "request").mockResolvedValue({

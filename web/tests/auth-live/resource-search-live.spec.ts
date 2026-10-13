@@ -21,6 +21,7 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     { title: "검색검증 업무 앱", path: "/app/agents/apps", parameter: "app" },
     { title: "검색검증 스킬", path: "/app/agents/skills", parameter: "skill" },
     { title: "검색검증 MCP 서버", path: "/app/mcp", parameter: "upstream" },
+    { title: "검색검증 정책", path: "/app/governance/policies/detail", parameter: "policy" },
   ];
   for (const target of targets) {
     await page.keyboard.press("Control+k");
@@ -63,13 +64,21 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     expect(await actual.headerValue("cache-control")).toBe("no-store");
     await expect(palette.getByRole("option")).toHaveCount(targets.length);
     await palette.getByRole("option", { name: new RegExp(target.title) }).click();
-    await expect(page.getByRole("dialog", { name: target.title, exact: true })).toBeVisible();
+    const panel = page.getByRole("dialog", {
+      name: target.parameter === "policy" ? "정책 상세" : target.title,
+      exact: true,
+    });
+    await expect(panel).toBeVisible();
+    if (target.parameter === "policy")
+      await expect(panel.getByRole("heading", { name: target.title })).toBeVisible();
     const destination = new URL(page.url());
     expect(destination.pathname).toBe(target.path);
     expect(Boolean(destination.searchParams.get(target.parameter))).toBe(true);
     expect(destination.searchParams.has("q")).toBe(false);
     await page.reload();
-    await expect(page.getByRole("dialog", { name: target.title, exact: true })).toBeVisible();
+    await expect(panel).toBeVisible();
+    if (target.parameter === "policy")
+      await expect(panel.getByRole("heading", { name: target.title })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
   }
