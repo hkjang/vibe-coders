@@ -122,6 +122,66 @@ async function setup() {
 }
 
 describe("알림 규칙의 현재 소유권과 변경 권한", () => {
+  it.each(["추가", "수정", "삭제"])(
+    "조회 권한 회수 시 열린 %s 창을 폐기하고 복구 후 자동 재개하지 않는다",
+    async (action) => {
+      const c = await setup();
+      c.response.rows = [
+        { ...rule, note: "공개 서버 메모", webhook_url: "https://public.invalid/server-hook" },
+      ];
+      await c.refetch();
+      await screen.findByText("공개 서버 메모");
+      await c.user.click(
+        screen.getByRole("button", {
+          name: action === "추가" ? "규칙 추가" : `공개 알림 알림 규칙 ${action}`,
+        }),
+      );
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      c.update({ scopes: ["admin:write"] });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByText("공개 알림")).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue("공개 서버 메모")).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue("https://public.invalid/server-hook")).not.toBeInTheDocument();
+      c.update({ scopes: ["security:read", "admin:write"] });
+      await screen.findByRole("button", { name: "공개 알림 알림 규칙 수정" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(c.api.calls.filter((call) => !call.key.startsWith("GET "))).toEqual([]);
+    },
+  );
+  it("조회 권한이 복구되어도 회수 이전 콜백은 다시 사용할 수 없다", async () => {
+    const c = await setup();
+    const callback = captured.toggle;
+    c.update({ scopes: ["admin:write"] });
+    c.update({ scopes: ["security:read", "admin:write"] });
+    await screen.findByRole("button", { name: "공개 알림 알림 규칙 수정" });
+    await act(async () => callback?.(false));
+    expect(c.api.bodies(patchPath)).toEqual([]);
+  });
+  it.each(["수정", "삭제"])("측정값만 갱신되면 열린 %s 검토를 유지한다", async (action) => {
+    const c = await setup();
+    await c.user.click(screen.getByRole("button", { name: `공개 알림 알림 규칙 ${action}` }));
+    const dialog = screen.getByRole("dialog");
+    if (action === "수정")
+      await c.user.type(within(dialog).getByRole("textbox", { name: "메모" }), "보존할 초안");
+    c.response.rows = [{ ...rule, last_value: 25, last_fired_at: "2026-10-14T00:00:00Z" }];
+    await c.refetch();
+    const submit = within(dialog).getByRole("button", { name: action === "수정" ? "저장" : "삭제" });
+    await waitFor(() => expect(submit).toBeEnabled());
+    if (action === "수정")
+      expect(within(dialog).getByRole("textbox", { name: "메모" })).toHaveValue("보존할 초안");
+    await c.user.click(submit);
+    await waitFor(() => expect(c.api.bodies(action === "수정" ? patchPath : deletePath)).toHaveLength(1));
+    if (action === "수정")
+      expect(c.api.bodies(patchPath)[0]).toEqual({ threshold: 1, webhook_url: "", note: "보존할 초안" });
+  });
+  it("측정값 갱신 전 사용 상태 콜백도 설정이 같으면 실행할 수 있다", async () => {
+    const c = await setup();
+    const callback = captured.toggle;
+    c.response.rows = [{ ...rule, last_value: 8, last_fired_at: "2026-10-14T00:00:00Z" }];
+    await c.refetch();
+    await act(async () => callback?.(false));
+    expect(c.api.bodies(patchPath)).toEqual([{ enabled: false }]);
+  });
   it.each(["readonly", "scope", "principal", "unmount"])(
     "%s 이후 이전 사용 상태 콜백은 전송하지 않는다",
     async (boundary) => {

@@ -73,6 +73,36 @@ test("알림 삭제는 변경된 원본을 거절하고 취소 시 현재 버튼
   await dialog.getByRole("button", { name: "취소", exact: true }).click();
   await expect(page.getByRole("button", { name: "공개 알림 알림 규칙 삭제" })).toBeFocused();
 });
+for (const action of ["수정", "삭제"]) {
+  test(`알림 측정값 갱신은 열린 ${action} 검토와 초안을 무효화하지 않는다`, async ({ page, gateway }) => {
+    await login(page, gateway);
+    await page.getByRole("button", { name: `공개 알림 알림 규칙 ${action}` }).click();
+    const dialog = page.getByRole("dialog");
+    if (action === "수정")
+      await dialog.getByRole("textbox", { name: "메모", exact: true }).fill("보존할 공개 초안");
+    gateway.alerts([{ ...sample, last_value: 25, last_fired_at: "2026-10-14T00:00:00Z" }]);
+    await page
+      .getByRole("button", { name: "새로고침", exact: true, includeHidden: true })
+      .evaluate((node) => (node as HTMLButtonElement).click());
+    // Observe the new table row, not the still-enabled button before refetch settles.
+    await expect(page.getByRole("cell", { name: "1 / 25", exact: true, includeHidden: true })).toHaveCount(1);
+    if (action === "수정")
+      await expect(dialog.getByRole("textbox", { name: "메모", exact: true })).toHaveValue(
+        "보존할 공개 초안",
+      );
+    const submit = dialog.getByRole("button", { name: action === "수정" ? "저장" : "삭제", exact: true });
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+    expect(gateway.alertOperations).toHaveLength(1);
+    if (action === "수정")
+      expect(gateway.alertOperations[0]?.body).toEqual({
+        threshold: 1,
+        webhook_url: "",
+        note: "보존할 공개 초안",
+      });
+  });
+}
 test("알림 조회 실패 시 이전 규칙·발화 이력을 숨기고 재조회로 복구한다", async ({ page, gateway }) => {
   await login(page, gateway);
   gateway.failAlertRead(true);
@@ -83,6 +113,27 @@ test("알림 조회 실패 시 이전 규칙·발화 이력을 숨기고 재조�
   await page.getByRole("button", { name: "새로고침", exact: true }).click();
   await expect(page.getByRole("button", { name: "공개 알림 알림 규칙 수정" })).toBeVisible();
 });
+for (const action of ["추가", "수정", "삭제"]) {
+  test(`알림 조회 권한 회수는 열린 ${action} 창을 폐기한다`, async ({ page, gateway }) => {
+    await login(page, gateway);
+    await page
+      .getByRole("button", {
+        name: action === "추가" ? "규칙 추가" : `공개 알림 알림 규칙 ${action}`,
+        exact: true,
+      })
+      .click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    gateway.readable(false);
+    await bootstrap(page);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "공개 알림 알림 규칙 수정" })).toHaveCount(0);
+    gateway.readable(true);
+    await bootstrap(page);
+    await expect(page.getByRole("button", { name: "공개 알림 알림 규칙 수정" })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(gateway.alertOperations).toEqual([]);
+  });
+}
 test("이전 계정의 알림 변경 완료는 새 계정에 성공 알림을 표시하지 않는다", async ({ page, gateway }) => {
   gateway.holdAlertWrite(1);
   await login(page, gateway);

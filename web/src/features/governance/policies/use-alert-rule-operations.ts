@@ -7,6 +7,7 @@ import { endpoints } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { catalogRecordCurrent } from "./policy-catalog-key";
+import { alertRuleConfiguration } from "./alert-rule-configuration";
 import { usePolicyEditorAccess } from "./policy-editor-access";
 import { usePolicyWriteGuard } from "./use-policy-write-guard";
 
@@ -29,7 +30,7 @@ export function useAlertRuleOperations(canWrite: boolean) {
       return apiClient.request(endpoints.domains.governance.alerts.list, { signal, routeId });
     },
   });
-  const current = (row: AlertRule) => catalogRecordCurrent(client, key, "rules", row);
+  const current = (row: AlertRule) => catalogRecordCurrent(client, key, "rules", row, alertRuleConfiguration);
   const ownsResult = () => {
     try {
       access.assertRead();

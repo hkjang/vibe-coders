@@ -38,6 +38,10 @@ import { alertEventColumns } from "./alert-event-columns";
 
 export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const access = usePolicyEditorAccess(canWrite);
+  if (!access.read)
+    return (
+      <InlineNotice title="알림 규칙 조회 권한이 없습니다.">security:read 권한을 확인하세요.</InlineNotice>
+    );
   return <AlertRulesContent key={access.sessionKey} canWrite={canWrite} />;
 }
 
