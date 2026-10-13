@@ -1,6 +1,14 @@
 import type { ModelCatalogRow } from "./model-catalog";
 import type { ModelCatalogSort, ModelCatalogSortKey } from "@/shared/utils/model-catalog-query";
 
+export function defaultModelCatalogOrder(left: ModelCatalogRow, right: ModelCatalogRow): number {
+  return (
+    left.providerLabel.localeCompare(right.providerLabel) ||
+    left.model.id.localeCompare(right.model.id) ||
+    left.model.source.localeCompare(right.model.source)
+  );
+}
+
 const sortColumns = {
   model: { id: "model", label: "모델", initialDirection: "asc" },
   provider: { id: "provider", label: "공급자", initialDirection: "asc" },
