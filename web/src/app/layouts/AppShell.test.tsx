@@ -110,6 +110,8 @@ describe("AppShell", () => {
     renderShell();
     await user.keyboard("{Control>}k{/Control}");
     expect(await screen.findByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
+    expect(document.querySelector(".app-frame")).toHaveAttribute("inert");
+    expect(document.querySelector(".app-frame")).toHaveAttribute("aria-hidden", "true");
     const search = screen.getByRole("combobox", { name: "메뉴 검색" });
     expect(screen.getByRole("option", { name: /통합 현황/ })).toHaveAttribute("aria-selected", "true");
     await user.type(search, "AI 게이트웨이");
@@ -119,6 +121,8 @@ describe("AppShell", () => {
     await user.type(search, "{Enter}");
     expect(screen.getByRole("heading", { name: "Provider content" })).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "명령 팔레트" })).not.toBeInTheDocument();
+    expect(document.querySelector(".app-frame")).not.toHaveAttribute("inert");
+    expect(document.querySelector(".app-frame")).not.toHaveAttribute("aria-hidden");
   });
 
   it("runs a setting from the palette instead of making the operator find its menu", async () => {
