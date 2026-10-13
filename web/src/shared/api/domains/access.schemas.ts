@@ -349,6 +349,7 @@ export type ApiKeyPublic = z.output<typeof apiKeyPublicSchema>;
 
 export const adminApiKeysSchema = looseObject({
   api_keys: orDefault(z.array(apiKeyPublicSchema), []),
+  revoke_review_supported: z.boolean().optional().default(false),
 });
 
 export const apiKeyCreatedSchema = looseObject({

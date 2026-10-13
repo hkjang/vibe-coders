@@ -44,6 +44,9 @@ const allowedScenarios = [
   "AUTH-LIVE-018",
   "AUTH-LIVE-019",
   "AUTH-LIVE-020",
+  "AUTH-LIVE-021",
+  "AUTH-LIVE-022",
+  "AUTH-LIVE-023",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -182,7 +185,7 @@ test("auth reporter emits only safe ID, status, duration and numeric source line
 test("auth reporter rejects non-allowlisted title IDs and ignores helper or unrelated source locations", async () => {
   const fixtures = [
     "AUTH-LIVE-000",
-    "AUTH-LIVE-021",
+    "AUTH-LIVE-024",
     "AUTH-LIVE-999",
     "AUTH-LIVE-01",
     "AUTH-LIVE-001suffix",
@@ -236,11 +239,13 @@ test("auth reporter allows only fixed scenarios and numeric lines from exact spe
             ? "change-set-live.spec.ts"
             : index === 14
               ? "resource-search-live.spec.ts"
-              : index >= 18
-                ? "me-key-rotation-live.spec.ts"
-                : index >= 15
-                  ? "operations-live.spec.ts"
-                  : "access-live.spec.ts";
+              : index >= 20
+                ? "admin-key-revoke-live.spec.ts"
+                : index >= 18
+                  ? "me-key-rotation-live.spec.ts"
+                  : index >= 15
+                    ? "operations-live.spec.ts"
+                    : "access-live.spec.ts";
     const file = index % 2 === 0 ? `/private/${sensitive}/${filename}` : `C:\\private\\${filename}`;
     const fixture = row(id, "passed", [{ title: sensitive, location: { file, line: index + 1, column: 1 } }]);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (${file}:${index + 21}:2)`;
@@ -499,6 +504,7 @@ async function artifactFiles(directory) {
 for (const [filename, scenario, timedOut = false] of [
   ["access-live.spec.ts", "AUTH-LIVE-006"],
   ["me-key-rotation-live.spec.ts", "AUTH-LIVE-019"],
+  ["admin-key-revoke-live.spec.ts", "AUTH-LIVE-021"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011", true],
 ])

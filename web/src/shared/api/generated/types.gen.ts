@@ -4,6 +4,24 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type AdminKeyCatalog = {
+    api_keys: Array<MeKeyPublic>;
+    revoke_review_supported: boolean;
+};
+
+export type AdminKeyRevokeRequest = {
+    [key: string]: never;
+} | null | {
+    /**
+     * Exact reviewed catalog revision; must be paired with reason.
+     */
+    expected_revision: string;
+    /**
+     * Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.
+     */
+    reason: string;
+};
+
 export type AdminModel = {
     created: number | null;
     deprecation: AdminModelDeprecation | null;
@@ -2449,12 +2467,23 @@ export type GetAdminApiKeysData = {
     url: '/admin/api-keys';
 };
 
+export type GetAdminApiKeysErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminApiKeysError = GetAdminApiKeysErrors[keyof GetAdminApiKeysErrors];
+
 export type GetAdminApiKeysResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: AdminKeyCatalog;
 };
+
+export type GetAdminApiKeysResponse = GetAdminApiKeysResponses[keyof GetAdminApiKeysResponses];
 
 export type PostAdminApiKeysData = {
     body?: never;
@@ -2471,20 +2500,67 @@ export type PostAdminApiKeysResponses = {
 };
 
 export type DeleteAdminApiKeysIdData = {
-    body?: never;
+    body?: AdminKeyRevokeRequest;
     path: {
         id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * 1 deletes only the key registration row; otherwise revoke. Requires super_admin when authentication is enabled. Request, audit and rotation history are retained.
+         */
+        hard?: 0 | 1;
+    };
     url: '/admin/api-keys/{id}';
 };
 
+export type DeleteAdminApiKeysIdErrors = {
+    /**
+     * Invalid review body
+     */
+    400: AppError;
+    /**
+     * Authentication required
+     */
+    401: AppError;
+    /**
+     * Insufficient role, scope or team authority
+     */
+    403: AppError;
+    /**
+     * Key not found
+     */
+    404: AppError;
+    /**
+     * Key changed since review or authorization
+     */
+    409: AppError;
+    /**
+     * Change not confirmed; inspect current keys and audit
+     */
+    500: AppError;
+    /**
+     * Review authority unavailable
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminApiKeysIdError = DeleteAdminApiKeysIdErrors[keyof DeleteAdminApiKeysIdErrors];
+
 export type DeleteAdminApiKeysIdResponses = {
     /**
-     * OK
+     * Key revoked or registration deleted
      */
-    200: unknown;
+    200: {
+        id: string;
+        status: 'revoked' | 'deleted';
+    };
 };
+
+export type DeleteAdminApiKeysIdResponse = DeleteAdminApiKeysIdResponses[keyof DeleteAdminApiKeysIdResponses];
 
 export type GetAdminApiKeysIdData = {
     body?: never;

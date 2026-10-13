@@ -22,20 +22,25 @@ const schema = z.object({ scopes: z.array(z.string()) });
 type ScopeForm = z.infer<typeof schema>;
 
 interface Props {
+  owner?: string;
   target: Pick<ApiKeyPublic, "id" | "name" | "scopes">;
   onOpenChange: (open: boolean) => void;
   onSubmit: (id: string, scopes: string[]) => Promise<unknown>;
   returnFocusRef: RefObject<HTMLElement | null>;
+  writeDisabled?: boolean;
 }
 
 export function ApiKeyScopesDialog({
+  owner,
   target,
   onOpenChange,
   onSubmit,
   returnFocusRef,
+  writeDisabled = false,
 }: Props): React.JSX.Element {
   const queryClient = useQueryClient();
-  const roles = useRolesQuery(true);
+  const roles = useRolesQuery(true, owner);
+  const catalogKey = owner ? [...accessKeys.roles, owner] : accessKeys.roles;
   // A refresh may replace the row while this editor is open. Neither its key
   // identity nor its original scope values become a new draft baseline.
   const [baseline] = useState(() => ({
@@ -57,17 +62,22 @@ export function ApiKeyScopesDialog({
       title="API 키 권한 수정"
       description={`${baseline.name || "이름 없는 키"} 키가 사용할 권한을 선택합니다.`}
       submitLabel="권한 저장"
-      submitDisabled={!catalog || unsupported.length > 0}
+      submitDisabled={writeDisabled || !catalog || unsupported.length > 0}
       onSubmit={(values) => {
         // Validation can yield while a refetch, error or catalog update arrives.
         // Read live query state at the actual PATCH boundary, not the render closure.
-        const latest = confirmedScopeCatalog(queryClient.getQueryState<ApiKeyRoleCatalog>(accessKeys.roles));
+        const latest = confirmedScopeCatalog(queryClient.getQueryState<ApiKeyRoleCatalog>(catalogKey));
         if (!latest || unsupportedSelectedScopes(values.scopes, latest).length > 0) {
           throw new AppError("서버 허용 권한을 다시 확인한 뒤 저장하세요.", { kind: "contract" });
         }
         return onSubmit(baseline.id, [...values.scopes]);
       }}
     >
+      {writeDisabled ? (
+        <InlineNotice tone="warning">
+          현재 화면에서 변경할 수 없습니다. 초안은 유지되며 취소할 수 있습니다.
+        </InlineNotice>
+      ) : null}
       <InlineNotice tone={selected.length === 0 ? "warning" : "info"}>
         모두 해제해 저장하면 선택된 권한이 없는 상태가 되며 역할 권한을 자동 상속하지 않습니다. 인증이
         활성화된 환경에서는 필요한 권한이 없는 호출이 거부됩니다. 키 사용을 중단하려면 별도의 ‘중지’ 작업을

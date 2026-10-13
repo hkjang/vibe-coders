@@ -9,6 +9,7 @@ import { apiKeyPublicSchema } from "@/shared/api/domains/access.schemas";
 import { publishLogout, tokenStore } from "@/shared/auth/token-store";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
@@ -36,7 +37,11 @@ function setup(update: ApiHandler = () => ({}), canWrite = true, loadCatalog: Ap
     api,
     ...renderScreen(
       <main id="main-content" tabIndex={-1}>
-        <ApiKeysTab canWrite={canWrite} isSuperAdmin writeDeniedReason="관리 변경 권한 필요" />
+        <FeatureAccessContext.Provider
+          value={{ featureId: "access.users", readOnly: false, permitted: true }}
+        >
+          <ApiKeysTab canWrite={canWrite} isSuperAdmin writeDeniedReason="관리 변경 권한 필요" />
+        </FeatureAccessContext.Provider>
       </main>,
     ),
   };
@@ -135,7 +140,7 @@ describe("API 키 권한 초안", () => {
     }));
     const dialog = await openEditor(user);
     await user.click(scope(dialog, "future:new"));
-    act(() => client.setQueryData(accessKeys.roles, catalog));
+    act(() => client.setQueriesData({ queryKey: accessKeys.roles }, catalog));
     expect(scope(dialog, "future:new")).toBeChecked();
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "권한 저장" })).toBeDisabled());
     await user.click(scope(dialog, "future:new"));
@@ -160,7 +165,10 @@ describe("API 키 권한 초안", () => {
       await act(async () => {
         fireEvent.submit(form);
         if (state === "changed") {
-          client.setQueryData(accessKeys.roles, { roles: [], all_scopes: [...allApiKeyScopes] });
+          client.setQueriesData(
+            { queryKey: accessKeys.roles },
+            { roles: [], all_scopes: [...allApiKeyScopes] },
+          );
         } else {
           const request = client.refetchQueries({ queryKey: accessKeys.roles });
           if (state === "error") {
@@ -239,7 +247,9 @@ describe("API 키 권한 초안", () => {
   it("기존 키의 빈 권한은 목록에서도 상속으로 표시하지 않는다", async () => {
     const { client } = setup();
     await screen.findByRole("button", { name: "권한 수정" });
-    act(() => client.setQueryData(accessKeys.apiKeys, { api_keys: [{ ...row, scopes: [] }] }));
+    act(() =>
+      client.setQueriesData({ queryKey: accessKeys.apiKeys }, { api_keys: [{ ...row, scopes: [] }] }),
+    );
     const keyRow = await screen.findByRole("row", { name: /선택된 권한 없음/ });
     expect(keyRow).not.toHaveTextContent("상속");
   });
@@ -263,12 +273,15 @@ describe("API 키 권한 초안", () => {
     const dialog = await openEditor(user);
     await user.click(scope(dialog, "models:read"));
     act(() =>
-      client.setQueryData(accessKeys.apiKeys, {
-        api_keys: [
-          { ...row, id: "other_key", name: "다른 키" },
-          { ...row, name: "갱신된 키", scopes: ["admin:read"] },
-        ],
-      }),
+      client.setQueriesData(
+        { queryKey: accessKeys.apiKeys },
+        {
+          api_keys: [
+            { ...row, id: "other_key", name: "다른 키" },
+            { ...row, name: "갱신된 키", scopes: ["admin:read"] },
+          ],
+        },
+      ),
     );
     expect(dialog).toHaveTextContent("검토용 키");
     expect(scope(dialog, "future:scope")).toBeChecked();
@@ -342,7 +355,7 @@ describe("API 키 권한 초안", () => {
       // Auth is mocked in this unit: the real router remounts this screen after
       // login. Open directly to isolate old/new draft ownership from Radix's
       // asynchronous focus restoration during that security-only unmount.
-      fireEvent.click(screen.getByRole("button", { name: "권한 수정" }));
+      fireEvent.click(await screen.findByRole("button", { name: "권한 수정" }));
       const reopened = await screen.findByRole("dialog", { name: "API 키 권한 수정" });
       expect(scope(reopened, "models:read")).toBeChecked();
       await user.click(scope(reopened, "chat:completion"));
@@ -382,7 +395,10 @@ describe("API 키 권한 초안", () => {
     const dialog = await openEditor(user);
     await user.click(scope(dialog, "models:read"));
     act(() =>
-      client.setQueryData(accessKeys.apiKeys, { api_keys: [{ ...row, id: "other_key", name: "다른 키" }] }),
+      client.setQueriesData(
+        { queryKey: accessKeys.apiKeys },
+        { api_keys: [{ ...row, id: "other_key", name: "다른 키" }] },
+      ),
     );
     await user.click(within(dialog).getByRole("button", { name: "취소" }));
     await user.click(

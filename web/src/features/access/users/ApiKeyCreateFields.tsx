@@ -35,9 +35,13 @@ export function ApiKeyCreateFields({
       <FormField label="차단 모델" description="쉼표 또는 공백으로 구분합니다.">
         {(control) => <Input {...control} {...createForm.register("denied_models")} />}
       </FormField>
-      <FormField label="월 예산 한도(원)">
+      <FormField
+        label="요청별 예상 비용 상한(원)"
+        description="누적 월 예산이 아닙니다. 비우거나 0이면 이 키의 요청별 비용 상한을 설정하지 않습니다."
+        error={createForm.formState.errors.budget_limit_krw?.message}
+      >
         {(control) => (
-          <Input {...control} type="number" min={0} {...createForm.register("budget_limit_krw")} />
+          <Input {...control} type="number" min={0} step="any" {...createForm.register("budget_limit_krw")} />
         )}
       </FormField>
       <FormField

@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.60"
+var AppVersion = "v0.86.61"
 
 type Server struct {
 	cfg      config.Config
@@ -922,7 +922,7 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			}
 			keys = filtered
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"api_keys": keys})
+		writeJSON(w, http.StatusOK, map[string]any{"api_keys": keys, "revoke_review_supported": true})
 	case http.MethodPost:
 		var payload struct {
 			Name             string    `json:"name"`
@@ -1088,12 +1088,7 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 			return
 		}
-		if err := s.db.RevokeAPIKey(r.Context(), id); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_revoke_failed")
-			return
-		}
-		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_revoked", APIKeyID: id, IP: clientIP(r), UserAgent: r.UserAgent(), CreatedAt: time.Now().UTC()})
-		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "revoked"})
+		s.revokeAdminKey(w, r, existing, false)
 		return
 	}
 	if action != "" {
@@ -1102,29 +1097,7 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodDelete:
-		// ?hard=1 → permanent row delete; super_admin only when auth is enabled
-		// (legacy ADMIN_TOKEN mode: the full-access token is the super user).
-		if r.URL.Query().Get("hard") == "1" {
-			if claims, ok := s.currentAccessClaims(r); s.cfg.Auth.Enabled && (!ok || claims.Role != "super_admin") {
-				writeOpenAIError(w, http.StatusForbidden, "hard delete requires super_admin", "permission_error", "super_admin_required")
-				return
-			}
-			if err := s.db.DeleteAPIKey(r.Context(), id); err != nil {
-				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_delete_failed")
-				return
-			}
-			s.auditAdmin(r, "api_key.delete", auditJSON(map[string]string{"id": id}), "")
-			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_revoked", APIKeyID: id, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "hard_delete", CreatedAt: time.Now().UTC()})
-			writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
-			return
-		}
-		if err := s.db.RevokeAPIKey(r.Context(), id); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
-			return
-		}
-		s.auditAdmin(r, "api_key.status", "", auditJSON(map[string]any{"id": id, "status": "revoked"}))
-		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_revoked", APIKeyID: id, IP: clientIP(r), UserAgent: r.UserAgent(), CreatedAt: time.Now().UTC()})
-		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "revoked"})
+		s.revokeAdminKey(w, r, existing, r.URL.Query().Get("hard") == "1")
 	case http.MethodPatch:
 		// Partial update: status and/or label (name/owner/team). This is also how an
 		// observed external key (ext_…, whose hash the gateway already stored) is
@@ -1190,14 +1163,24 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 			}
 			updated.Scopes = normalized
 		}
-		if err := s.db.UpsertAPIKey(r.Context(), updated); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
+		// Audit only editable metadata, never key hashes or opaque review secrets.
+		metadata := func(key store.APIKeyRecord) string {
+			return auditJSON(map[string]any{"id": key.ID, "name": key.Name, "owner": key.Owner, "team": key.Team, "role": key.Role, "status": key.Status, "scopes": key.Scopes})
+		}
+		audit := store.AdminAuditLog{ID: newID("audit"), AdminID: s.adminKeyActor(r), Action: "api_key.update", BeforeValue: metadata(existing), AfterValue: metadata(updated)}
+		var roleEvent *store.AuthEvent
+		if existing.Role != updated.Role {
+			roleEvent = &store.AuthEvent{ID: newID("ae"), EventType: "role_changed", APIKeyID: id, ActorUserID: s.adminKeyActor(r), TeamID: updated.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: existing.Role + " -> " + updated.Role, CreatedAt: time.Now().UTC()}
+		}
+		if err := s.db.PatchAdminAPIKey(r.Context(), existing, updated, audit, roleEvent); err != nil {
+			if errors.Is(err, store.ErrAPIKeyConflict) {
+				writeOpenAIError(w, http.StatusConflict, "key changed since authorization", "invalid_request_error", "key_update_conflict")
+			} else {
+				writeOpenAIError(w, http.StatusInternalServerError, "could not confirm key update", "server_error", "api_key_update_failed")
+			}
 			return
 		}
-		s.auditAdmin(r, "api_key.update", auditJSON(existing), auditJSON(updated))
-		if existing.Role != updated.Role {
-			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "role_changed", APIKeyID: id, TeamID: updated.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: existing.Role + " -> " + updated.Role, CreatedAt: time.Now().UTC()})
-		}
+		s.runAdminPostChange(r, audit.Action, audit.BeforeValue, audit.AfterValue, "")
 		writeJSON(w, http.StatusOK, map[string]any{"id": updated.ID, "name": updated.Name, "owner": updated.Owner, "team": updated.Team, "role": updated.Role, "scopes": updated.Scopes, "status": updated.Status})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")

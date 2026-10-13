@@ -25,6 +25,7 @@ export default defineConfig({
     "resource-search-live.spec.ts",
     "operations-live.spec.ts",
     "me-key-rotation-live.spec.ts",
+    "admin-key-revoke-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

@@ -383,12 +383,13 @@ export const accessEndpoints = {
       "/admin/api-keys/{id}",
       apiKeyUpdatedSchema,
     ),
-    revoke: operation<WithQuery<DeleteAdminApiKeysIdData, HardDeleteQuery>, unknown>()(
-      "DELETE",
-      "/admin/api-keys/{id}",
-      deletionSchema,
-      hardDeleteQuery,
-    ),
+    revoke: operation<
+      WithBody<
+        WithQuery<DeleteAdminApiKeysIdData, HardDeleteQuery>,
+        { reason: string; expected_revision: string }
+      >,
+      unknown
+    >()("DELETE", "/admin/api-keys/{id}", deletionSchema, hardDeleteQuery),
   },
   roles: {
     list: operation<GetAdminRolesData, unknown>()("GET", "/admin/roles", adminRolesSchema),

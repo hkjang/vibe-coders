@@ -1,6 +1,56 @@
 {
   "components": {
     "schemas": {
+      "AdminKeyCatalog": {
+        "properties": {
+          "api_keys": {
+            "items": {
+              "$ref": "#/components/schemas/MeKeyPublic"
+            },
+            "type": "array"
+          },
+          "revoke_review_supported": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "api_keys",
+          "revoke_review_supported"
+        ],
+        "type": "object"
+      },
+      "AdminKeyRevokeRequest": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "Legacy empty object or JSON null; the whole body may also be omitted.",
+            "maxProperties": 0,
+            "nullable": true,
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "expected_revision": {
+                "description": "Exact reviewed catalog revision; must be paired with reason.",
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "reason": {
+                "description": "Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.",
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "expected_revision"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "AdminModel": {
         "additionalProperties": false,
         "properties": {
@@ -6518,7 +6568,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.60"
+    "version": "v0.86.61"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -6930,7 +6980,24 @@
         "operationId": "get__admin_api_keys",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminKeyCatalog"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -6963,8 +7030,23 @@
     },
     "/admin/api-keys/{id}": {
       "delete": {
+        "description": "Revokes a key, or deletes only its registration row with hard=1 (super_admin only with authentication enabled). Existing request history, audit and rotation lineage are retained. Omitted body, JSON null or {} preserves legacy calls. Any supplied review requires both a nonblank reason and the exact revision from GET /admin/api-keys. The authorized snapshot is compared at write time; key change, admin audit and lifecycle audit commit atomically. Stale reviews conflict. Lost responses must be reconciled using current keys and audit, not automatically retried. Revoke review support is advertised by the responding catalog server; mixed-version deployments must upgrade all pods before using the reviewed operation.",
         "operationId": "delete__admin_api_keys_id",
         "parameters": [
+          {
+            "description": "1 deletes only the key registration row; otherwise revoke. Requires super_admin when authentication is enabled. Request, audit and rotation history are retained.",
+            "in": "query",
+            "name": "hard",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "enum": [
+                0,
+                1
+              ],
+              "type": "integer"
+            }
+          },
           {
             "in": "path",
             "name": "id",
@@ -6974,9 +7056,122 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminKeyRevokeRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "revoked",
+                        "deleted"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Key revoked or registration deleted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid review body"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Insufficient role, scope or team authority"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Key not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Key changed since review or authorization"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Change not confirmed; inspect current keys and audit"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review authority unavailable"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
