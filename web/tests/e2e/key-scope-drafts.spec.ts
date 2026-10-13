@@ -317,6 +317,75 @@ async function login(page: Page) {
   await signIn(page);
 }
 
+for (const mode of ["open", "legacy_token"] as const) {
+  test(`사용자 객체 없는 ${mode} 인증에서도 키 목록을 조회한다`, async ({ page, gateway }) => {
+    await page.route("**/admin/ui-bootstrap", async (route) => {
+      const data = bootstrap(true);
+      delete data.user;
+      data.authentication = { ...data.authentication, enabled: false, mode };
+      data.migration_registry = data.migration_registry.map((feature) => ({ ...feature, enabled_roles: [] }));
+      await route.fulfill({ json: data });
+    });
+    await page.route("**/admin/api-keys", (route) => route.fulfill({ json: { api_keys: [alpha] } }));
+    await page.goto(targetUrl);
+    await expect(page.getByRole("table", { name: "프록시 API 키 목록" })).toBeVisible();
+    await expect(page.getByRole("row", { name: new RegExp(alpha.name) })).toBeVisible();
+    expect(gateway.saves).toEqual([]);
+  });
+}
+
+test("확정된 폐기 충돌은 최신 버전·새 확인으로만 다시 제출한다", async ({ page, gateway }) => {
+  let revision = "a".repeat(64);
+  let writes = 0;
+  await page.route("**/admin/api-keys", (route) =>
+    route.fulfill({
+      json: { api_keys: [{ ...alpha, revision }], revoke_review_supported: true },
+    }),
+  );
+  await page.route(`**/admin/api-keys/${alpha.id}`, async (route) => {
+    expect(route.request().method()).toBe("DELETE");
+    expect(route.request().postDataJSON()).toEqual({ reason: "다시 검토", expected_revision: revision });
+    writes++;
+    if (writes === 1) {
+      revision = "b".repeat(64);
+      await route.fulfill({
+        status: 409,
+        json: { error: { code: "key_revoke_conflict", message: "public conflict" } },
+      });
+    } else await route.fulfill({ json: { id: alpha.id, status: "revoked" } });
+  });
+  await login(page);
+  const trigger = page
+    .getByRole("row", { name: new RegExp(alpha.name) })
+    .getByRole("button", { name: "폐기", exact: true });
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "API 키 폐기", exact: true });
+    const confirm = dialog.getByRole("button", { name: "폐기", exact: true });
+    await expect(confirm).toBeDisabled();
+    const targetInput = dialog.getByRole("textbox", { name: "확인 문구", exact: true });
+    const reasonInput = dialog.getByRole("textbox", { name: "변경 사유", exact: true });
+    await expect(targetInput).toHaveValue("");
+    await expect(reasonInput).toHaveValue("");
+    await targetInput.fill(alpha.id);
+    await reasonInput.fill("다시 검토");
+    await confirm.click();
+    if (attempt === 1) {
+      await expect(dialog.getByRole("alert")).toBeVisible();
+      await expect(confirm).toBeDisabled();
+      await expect(
+        dialog.getByText(
+          "서버가 키를 변경하지 않았음을 확인했습니다. 창을 닫고 최신 목록에서 다시 검토하세요.",
+        ),
+      ).toBeVisible();
+      await dialog.getByRole("button", { name: "취소", exact: true }).click();
+    }
+    await expect(dialog).toBeHidden();
+    expect(writes).toBe(attempt);
+  }
+  expect(gateway.saves).toEqual([]);
+});
+
 for (const width of [390, 1440]) {
   test(`관리자 키 검토 폐기 ${width}px 한글 상태·키보드·대비·취소 포커스를 확인한다`, async ({
     page,

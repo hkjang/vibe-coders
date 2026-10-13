@@ -17,7 +17,7 @@ export function ApiKeysTab(props: ApiKeysTabProps): React.JSX.Element {
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const readable =
     ["authenticated", "legacy", "open"].includes(auth.mode) &&
-    Boolean(auth.user?.id) &&
+    (auth.mode !== "authenticated" || Boolean(auth.user?.id)) &&
     context?.featureId === "access.users" &&
     context.permitted;
   const owner = JSON.stringify([

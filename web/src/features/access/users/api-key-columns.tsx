@@ -8,6 +8,22 @@ import { Button } from "@/shared/components/ui/Button";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { formatDateTime, shortId } from "@/shared/utils/format";
 
+interface KeyActionsMetadata {
+  renderActions: (row: ApiKeyPublic) => React.ReactNode;
+}
+
+// Keep the cell component identity stable while refreshing its handlers through
+// column metadata. Otherwise a query update can detach a pressed/focused button.
+function renderKeyActions({
+  row,
+  column,
+}: {
+  row: { original: ApiKeyPublic };
+  column: { columnDef: { meta?: unknown } };
+}): React.ReactNode {
+  return (column.columnDef.meta as KeyActionsMetadata).renderActions(row.original);
+}
+
 export function apiKeyColumns(
   onEdit: (row: ApiKeyPublic, trigger: HTMLElement) => void,
   onScopes: (row: ApiKeyPublic, trigger: HTMLElement) => void,
@@ -78,38 +94,41 @@ export function apiKeyColumns(
     column.display({
       id: "actions",
       header: "작업",
-      cell: ({ row }) => (
-        <div className="table-actions access-key-actions">
-          <Button
-            ref={(node) => rememberRowTrigger?.(node, row.original.id, "edit")}
-            size="small"
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeDeniedReason}
-            onClick={(event) => onEdit(row.original, event.currentTarget)}
-          >
-            수정
-          </Button>
-          <Button
-            ref={(node) => rememberScopeTrigger(node, row.original.id)}
-            size="small"
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeDeniedReason}
-            onClick={(event) => onScopes(row.original, event.currentTarget)}
-          >
-            권한 수정
-          </Button>
-          <Button
-            ref={(node) => rememberRowTrigger?.(node, row.original.id, "revoke")}
-            size="small"
-            variant="danger"
-            disabled={!canWrite || row.original.status === "revoked" || revokeAttempts.has(row.original.id)}
-            title={canWrite ? undefined : writeDeniedReason}
-            onClick={(event) => onRevoke(row.original, event.currentTarget)}
-          >
-            폐기
-          </Button>
-        </div>
-      ),
+      cell: renderKeyActions,
+      meta: {
+        renderActions: (key: ApiKeyPublic) => (
+          <div className="table-actions access-key-actions">
+            <Button
+              ref={(node) => rememberRowTrigger?.(node, key.id, "edit")}
+              size="small"
+              disabled={!canWrite}
+              title={canWrite ? undefined : writeDeniedReason}
+              onClick={(event) => onEdit(key, event.currentTarget)}
+            >
+              수정
+            </Button>
+            <Button
+              ref={(node) => rememberScopeTrigger(node, key.id)}
+              size="small"
+              disabled={!canWrite}
+              title={canWrite ? undefined : writeDeniedReason}
+              onClick={(event) => onScopes(key, event.currentTarget)}
+            >
+              권한 수정
+            </Button>
+            <Button
+              ref={(node) => rememberRowTrigger?.(node, key.id, "revoke")}
+              size="small"
+              variant="danger"
+              disabled={!canWrite || key.status === "revoked" || revokeAttempts.has(key.id)}
+              title={canWrite ? undefined : writeDeniedReason}
+              onClick={(event) => onRevoke(key, event.currentTarget)}
+            >
+              폐기
+            </Button>
+          </div>
+        ),
+      } satisfies KeyActionsMetadata,
     }),
   ]);
 }

@@ -27,6 +27,7 @@ interface Props {
   returnFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   onAttempt: (id: string) => void;
+  onRejected: (id: string) => void;
   onSubmit: (input: KeyRevokeSubmission) => Promise<unknown>;
 }
 
@@ -39,12 +40,14 @@ export function ApiKeyRevokeDialog({
   returnFocusRef,
   onClose,
   onAttempt,
+  onRejected,
   onSubmit,
 }: Props): React.JSX.Element {
   const client = useQueryClient();
   const [baseline] = useState(target);
   const [hard, setHard] = useState(false);
   const [attempted, setAttempted] = useState(false);
+  const [rejected, setRejected] = useState(false);
   const state = useSyncExternalStore(
     useCallback((notify) => client.getQueryCache().subscribe(notify), [client]),
     useCallback(() => client.getQueryState<Catalog>(catalogKey), [client, catalogKey]),
@@ -95,7 +98,28 @@ export function ApiKeyRevokeDialog({
           throw new AppError("변경 사유는 1,024자 이하로 입력하세요.", { kind: "contract" });
         setAttempted(true);
         onAttempt(baseline.id);
-        await onSubmit({ id: baseline.id, hard, reason: auditReason, expected_revision: baseline.revision });
+        try {
+          await onSubmit({
+            id: baseline.id,
+            hard,
+            reason: auditReason,
+            expected_revision: baseline.revision,
+          });
+        } catch (error) {
+          // Only these exact server responses certify no write. Network, timeout,
+          // generic 5xx and mismatched code/status pairs remain locked.
+          if (
+            isAppError(error) &&
+            error.kind === "http" &&
+            ((error.status === 400 && error.code === "invalid_key_revoke") ||
+              (error.status === 409 && error.code === "key_revoke_conflict") ||
+              (error.status === 503 && error.code === "key_revoke_authority_unavailable"))
+          ) {
+            setRejected(true);
+            onRejected(baseline.id);
+          }
+          throw error;
+        }
         onClose();
       }}
     >
@@ -124,7 +148,11 @@ export function ApiKeyRevokeDialog({
           뒤 다시 검토하세요.
         </InlineNotice>
       ) : null}
-      {attempted ? (
+      {rejected ? (
+        <InlineNotice tone="info">
+          서버가 키를 변경하지 않았음을 확인했습니다. 창을 닫고 최신 목록에서 다시 검토하세요.
+        </InlineNotice>
+      ) : attempted ? (
         <InlineNotice tone="warning">
           이 키에 폐기를 요청해 중복 전송을 막았습니다. 응답을 받지 못했다면 다시 요청하지 말고 목록과 감사
           이력에서 적용 여부를 확인하세요.

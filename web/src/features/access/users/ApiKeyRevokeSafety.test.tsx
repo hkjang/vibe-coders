@@ -21,10 +21,11 @@ const row = apiKeyPublicSchema.parse({
   status: "active",
 });
 const endpoint = "DELETE /admin/api-keys/key_review";
-function setup(supported = true, failure = false) {
+function setup(supported = true, failure: boolean | AppError = false) {
   const api = mockApi({
     "GET /admin/api-keys": () => ({ api_keys: [row], revoke_review_supported: supported }),
     [endpoint]: () => {
+      if (failure instanceof AppError) throw failure;
       if (failure) throw new AppError("응답 없음", { kind: "network" });
       return { id: row.id, status: "revoked" };
     },
@@ -58,6 +59,35 @@ it("대상과 사유를 확인하고 검토 버전을 보내며 완전 삭제 �
   );
   const call = api.spy.mock.calls.find(([route]) => route.method === "DELETE");
   expect(call?.[1]).toMatchObject({ query: { hard: 1 }, retryUnauthorized: false });
+});
+
+it.each([
+  [400, "invalid_key_revoke", true],
+  [409, "key_revoke_conflict", true],
+  [503, "key_revoke_authority_unavailable", true],
+  [500, "key_revoke_failed", false],
+  [503, "upstream_unavailable", false],
+  [500, "key_revoke_conflict", false],
+] as const)("%s %s는 확정 무변경 응답일 때만 새 검토를 허용한다", async (status, code, reopen) => {
+  const { api, client } = setup(true, new AppError("공개 테스트 오류", { kind: "http", status, code }));
+  const { user, dialog } = await review();
+  await user.type(within(dialog).getByLabelText("확인 문구", { exact: false }), row.id);
+  await user.type(within(dialog).getByLabelText("변경 사유", { exact: false }), "사용 종료");
+  await user.click(within(dialog).getByRole("button", { name: "폐기" }));
+  await within(dialog).findByRole("alert");
+  expect(within(dialog).getByRole("button", { name: "폐기" })).toBeDisabled();
+  await user.click(within(dialog).getByRole("button", { name: "취소" }));
+  await act(() => client.invalidateQueries({ queryKey: accessKeys.apiKeys }));
+  const trigger = await screen.findByRole("button", { name: "폐기" });
+  if (reopen) {
+    expect(trigger).toBeEnabled();
+    await user.click(trigger);
+    const next = await screen.findByRole("dialog", { name: "API 키 폐기" });
+    expect(within(next).getByLabelText("확인 문구", { exact: false })).toHaveValue("");
+    expect(within(next).getByLabelText("변경 사유", { exact: false })).toHaveValue("");
+    expect(within(next).getByRole("button", { name: "폐기" })).toBeDisabled();
+  } else expect(trigger).toBeDisabled();
+  expect(api.bodies(endpoint)).toHaveLength(1);
 });
 it("구버전 서버에서는 확인 폐기를 실행하지 않는다", async () => {
   const { api } = setup(false);

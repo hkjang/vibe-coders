@@ -50,6 +50,26 @@ async function submitCreate() {
   await user.click(within(dialog).getByRole("button", { name: "발급" }));
 }
 
+it.each(["legacy", "open"] as const)(
+  "사용자 객체가 없는 %s 모드에서도 기존 키 관리를 제공한다",
+  async (mode) => {
+    state.auth = { ...testAuth(), mode, user: undefined };
+    const api = mockApi({ "GET /admin/api-keys": () => ({ api_keys: [row] }) });
+    mountKeys();
+    expect(await screen.findByRole("row", { name: /이전 계정의 키/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "키 발급" })).toBeEnabled();
+    expect(api.calls.filter((call) => call.key === "GET /admin/api-keys")).toHaveLength(1);
+  },
+);
+
+it("인증된 세션 모드에 사용자 객체가 없으면 키 조회를 차단한다", () => {
+  state.auth = { ...testAuth(), user: undefined };
+  const api = mockApi({ "GET /admin/api-keys": () => ({ api_keys: [row] }) });
+  mountKeys();
+  expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  expect(api.calls).toHaveLength(0);
+});
+
 it.each(["id", "role", "roles", "team_id", "scopes"] as const)(
   "토큰 세대가 같아도 %s 변경 후 이전 발급 비밀값을 숨기고 목록을 새로 조회한다",
   async (dimension) => {

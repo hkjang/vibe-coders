@@ -15,6 +15,7 @@ import {
 import { accessKeys, useApiKeysQuery } from "@/features/access/users/use-access-admin";
 import { useApiKeyScopeDraft } from "@/features/access/users/use-api-key-scope-draft";
 import { useKeyRowFocus } from "./use-key-row-focus";
+import { useKeyRevokeAttempts } from "./use-key-revoke-attempts";
 import { apiClient } from "@/shared/api/client";
 import type { CreateApiKeyBody, UpdateApiKeyBody } from "@/shared/api/domains/access";
 import type { ApiKeyPublic } from "@/shared/api/domains/access.schemas";
@@ -79,7 +80,7 @@ export function OwnedApiKeysPanel({
     rememberTrigger: rememberScopeTrigger,
   } = useApiKeyScopeDraft();
   const [revoking, setRevoking] = useState<ApiKeyPublic | undefined>();
-  const [revokeAttempts, setRevokeAttempts] = useState<ReadonlySet<string>>(new Set());
+  const { attempts: revokeAttempts, record, reject } = useKeyRevokeAttempts(ownsResult, () => keys.refetch());
   const [issuedSecret, setIssuedSecret] = useState("");
   const createTrigger = useRef<HTMLButtonElement>(null);
   const { returnFocusRef: rowTrigger, remember: rememberRowTrigger, bind: bindRowTrigger } = useKeyRowFocus();
@@ -370,7 +371,8 @@ export function OwnedApiKeysPanel({
           reason={writeAccess.reason}
           isSuperAdmin={isSuperAdmin}
           onClose={() => setRevoking(undefined)}
-          onAttempt={(id) => setRevokeAttempts((current) => new Set([...current, id]))}
+          onAttempt={record}
+          onRejected={reject}
           onSubmit={(input) => revokeKey.mutateAsync(input)}
         />
       ) : null}
