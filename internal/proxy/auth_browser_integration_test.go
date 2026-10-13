@@ -247,6 +247,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	verifyBrowserChangeSetFixture(t, h.db)
 	verifyBrowserOperationsFixture(t, h.db)
 	verifyBrowserAdminKeyRevocations(t, h.db)
+	verifyBrowserAdminKeyEdits(t, h.db)
 }
 
 func browserAuthWebDirectory(t *testing.T) string {

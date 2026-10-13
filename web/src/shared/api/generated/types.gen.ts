@@ -6,7 +6,40 @@ export type ClientOptions = {
 
 export type AdminKeyCatalog = {
     api_keys: Array<MeKeyPublic>;
+    edit_review_supported: boolean;
     revoke_review_supported: boolean;
+};
+
+export type AdminKeyEditReview = {
+    /**
+     * Exact catalog snapshot revision.
+     */
+    expected_revision: string;
+    /**
+     * Trimmed nonblank audit reason.
+     */
+    reason: string;
+};
+
+export type AdminKeyLegacyUpdateRequest = {
+    name?: string | null;
+    owner?: string | null;
+    review?: AdminKeyEditReview;
+    role?: string | null;
+    scopes?: Array<string> | null;
+    status?: 'active' | 'disabled' | null;
+    team?: string | null;
+    [key: string]: unknown;
+} | null;
+
+export type AdminKeyReviewedUpdateRequest = {
+    name?: string | null;
+    owner?: string | null;
+    review: AdminKeyEditReview;
+    role?: string | null;
+    scopes?: Array<string> | null;
+    status?: 'active' | 'disabled' | null;
+    team?: string | null;
 };
 
 export type AdminKeyRevokeRequest = {
@@ -20,6 +53,18 @@ export type AdminKeyRevokeRequest = {
      * Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.
      */
     reason: string;
+};
+
+export type AdminKeyUpdateRequest = AdminKeyLegacyUpdateRequest | AdminKeyReviewedUpdateRequest;
+
+export type AdminKeyUpdateResponse = {
+    id: string;
+    name: string;
+    owner: string;
+    role: string;
+    scopes: Array<string> | null;
+    status: string;
+    team: string;
 };
 
 export type AdminModel = {
@@ -2579,7 +2624,7 @@ export type GetAdminApiKeysIdResponses = {
 };
 
 export type PatchAdminApiKeysIdData = {
-    body?: never;
+    body: AdminKeyUpdateRequest;
     path: {
         id: string;
     };
@@ -2587,12 +2632,51 @@ export type PatchAdminApiKeysIdData = {
     url: '/admin/api-keys/{id}';
 };
 
+export type PatchAdminApiKeysIdErrors = {
+    /**
+     * Invalid edit or review
+     */
+    400: AppError;
+    /**
+     * Authentication required
+     */
+    401: AppError;
+    /**
+     * Insufficient role, scope or team authority
+     */
+    403: AppError;
+    /**
+     * Key not found
+     */
+    404: AppError;
+    /**
+     * Key changed since review or authorization
+     */
+    409: AppError;
+    /**
+     * Update not confirmed; inspect current key and audit
+     */
+    500: AppError;
+    /**
+     * Review authority unavailable
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PatchAdminApiKeysIdError = PatchAdminApiKeysIdErrors[keyof PatchAdminApiKeysIdErrors];
+
 export type PatchAdminApiKeysIdResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: AdminKeyUpdateResponse;
 };
+
+export type PatchAdminApiKeysIdResponse = PatchAdminApiKeysIdResponses[keyof PatchAdminApiKeysIdResponses];
 
 export type GetAdminAppTemplatesData = {
     body?: never;

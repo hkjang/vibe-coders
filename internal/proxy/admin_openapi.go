@@ -635,6 +635,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	switch key {
 	case "get /admin/api-keys", "delete /admin/api-keys/{id}":
 		enrichAdminKeyRevokeOpenAPI(strings.ToLower(method), op, responses)
+	case "patch /admin/api-keys/{id}":
+		enrichAdminKeyEditOpenAPI(op, responses)
 	case "get /me/keys", "post /me/keys/{id}/rotate":
 		enrichMeKeyRotationOpenAPI(strings.ToLower(method), op, responses)
 	case "get /admin/retention", "post /admin/retention", "get /admin/fallback", "post /admin/fallback":
@@ -1121,6 +1123,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range adminKeyRevokeOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range adminKeyEditOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas

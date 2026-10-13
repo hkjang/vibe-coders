@@ -922,7 +922,7 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			}
 			keys = filtered
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"api_keys": keys, "revoke_review_supported": true})
+		writeJSON(w, http.StatusOK, map[string]any{"api_keys": keys, "revoke_review_supported": true, "edit_review_supported": true})
 	case http.MethodPost:
 		var payload struct {
 			Name             string    `json:"name"`
@@ -1102,15 +1102,12 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 		// Partial update: status and/or label (name/owner/team). This is also how an
 		// observed external key (ext_…, whose hash the gateway already stored) is
 		// promoted to a named, active managed user — no plaintext needed.
-		var payload struct {
-			Status *string  `json:"status"`
-			Name   *string  `json:"name"`
-			Owner  *string  `json:"owner"`
-			Team   *string  `json:"team"`
-			Role   *string  `json:"role"`
-			Scopes []string `json:"scopes"`
+		payload, err := readAdminKeyPatchRequest(w, r)
+		if errors.Is(err, errAdminKeyEditReview) {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid key edit, review or body size", "invalid_request_error", "invalid_key_update")
+			return
 		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		if err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
@@ -1163,16 +1160,23 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 			}
 			updated.Scopes = normalized
 		}
-		// Audit only editable metadata, never key hashes or opaque review secrets.
-		metadata := func(key store.APIKeyRecord) string {
-			return auditJSON(map[string]any{"id": key.ID, "name": key.Name, "owner": key.Owner, "team": key.Team, "role": key.Role, "status": key.Status, "scopes": key.Scopes})
+		if !s.verifyAdminKeyEditReview(w, r, existing, updated, payload.Review) {
+			return
 		}
-		audit := store.AdminAuditLog{ID: newID("audit"), AdminID: s.adminKeyActor(r), Action: "api_key.update", BeforeValue: metadata(existing), AfterValue: metadata(updated)}
+		// Audit only editable metadata, never key hashes or opaque review secrets.
+		metadata := func(key store.APIKeyRecord, reason string) string {
+			fields := map[string]any{"id": key.ID, "name": key.Name, "owner": key.Owner, "team": key.Team, "role": key.Role, "status": key.Status, "scopes": key.Scopes}
+			if reason != "" {
+				fields["reason"] = reason
+			}
+			return auditJSON(fields)
+		}
+		audit := store.AdminAuditLog{ID: newID("audit"), AdminID: s.adminKeyActor(r), Action: "api_key.update", BeforeValue: metadata(existing, ""), AfterValue: metadata(updated, payload.Review.Reason)}
 		var roleEvent *store.AuthEvent
 		if existing.Role != updated.Role {
 			roleEvent = &store.AuthEvent{ID: newID("ae"), EventType: "role_changed", APIKeyID: id, ActorUserID: s.adminKeyActor(r), TeamID: updated.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: existing.Role + " -> " + updated.Role, CreatedAt: time.Now().UTC()}
 		}
-		if err := s.db.PatchAdminAPIKey(r.Context(), existing, updated, audit, roleEvent); err != nil {
+		if err := s.db.PatchAdminAPIKey(r.Context(), existing, updated, audit, roleEvent, payload.Review.ExpectedRevision); err != nil {
 			if errors.Is(err, store.ErrAPIKeyConflict) {
 				writeOpenAIError(w, http.StatusConflict, "key changed since authorization", "invalid_request_error", "key_update_conflict")
 			} else {
