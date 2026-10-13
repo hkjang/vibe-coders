@@ -77,6 +77,10 @@ function provider(name: string, index: number, overrides: Partial<Provider> = {}
 }
 
 async function install(context: BrowserContext) {
+  const currentBootstrap = structuredClone(bootstrap);
+  const holds = new Map<number, { promise: Promise<void>; release: () => void }>();
+  let providerReads = 0;
+  let failSlo = false;
   let providers = [
     ...ordinaryNames.map((name, index) => provider(name, index)),
     provider("[provider-name-omitted]", 57, { provider_ref: privateRefs[0], priority: 300 }),
@@ -102,10 +106,13 @@ async function install(context: BrowserContext) {
       writes.push(call);
       return json({ error: { message: "No writes expected while exploring" } }, 501);
     }
-    if (url.pathname === "/admin/ui-bootstrap") return json(bootstrap);
+    if (url.pathname === "/admin/ui-bootstrap") return json(currentBootstrap);
     if (url.pathname === "/health" || url.pathname === "/ready") return json({ status: "ok" });
     if (url.pathname === "/admin/providers" || url.pathname === "/admin/providers/slo") {
       reads.push({ path: url.pathname, query: url.search });
+      if (url.pathname === "/admin/providers") await holds.get(++providerReads)?.promise;
+      if (url.pathname === "/admin/providers/slo" && failSlo)
+        return json({ error: { message: "public SLO read failed" } }, 503);
       return json(
         url.pathname === "/admin/providers" ? { providers } : { slos: [], evaluations: [], since: timestamp },
       );
@@ -120,6 +127,29 @@ async function install(context: BrowserContext) {
     reads,
     writes,
     unexpected,
+    owner(id: string) {
+      if (currentBootstrap.user) currentBootstrap.user.id = id;
+    },
+    scopes(scopes: string[]) {
+      if (currentBootstrap.user) currentBootstrap.user.scopes = scopes;
+      currentBootstrap.permissions = scopes;
+    },
+    replace(next: Provider[]) {
+      providers = structuredClone(next);
+    },
+    failSlo(failed: boolean) {
+      failSlo = failed;
+    },
+    holdProviderRead(sequence: number) {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      holds.set(sequence, { promise, release });
+    },
+    releaseProviderRead(sequence: number) {
+      holds.get(sequence)?.release();
+    },
     shrink(count: number) {
       providers = providers.filter((item) => ordinaryNames.slice(0, count).includes(item.name));
     },

@@ -34,6 +34,7 @@ import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { readProviderCatalogPageSize, readProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
 import { sortProviderCatalogRows } from "./provider-table-state";
+import { ProviderExportControl } from "./ProviderExportControl";
 
 const defaultRange: HealthRange = "24h";
 
@@ -340,6 +341,7 @@ export function ProviderPage(): React.JSX.Element {
         routing={routing}
         canReadRouting={canReadRouting}
       />
+      <ProviderExportControl filters={{ query, status, range, sort }} blocked={Boolean(visibleSearchError)} />
       <ProviderTable
         credentialPrefixes={auth.credentialPrefixes}
         allRowCount={allRows.length}
