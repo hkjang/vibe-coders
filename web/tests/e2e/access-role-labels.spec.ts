@@ -63,6 +63,18 @@ async function installGateway(page: Page) {
   let roleStatus = 200;
   let invalidCatalog = false;
   const descriptions = new Map<string, string>();
+  const teams = new Map([
+    [
+      "team_fixture",
+      {
+        id: "team_fixture",
+        name: "기존 검증 팀",
+        created_at: "2026-10-01T00:00:00Z",
+        updated_at: "2026-10-01T00:00:00Z",
+      },
+    ],
+  ]);
+  let teamStatus = 200;
   const roleScopes = new Map<string, string[]>();
   let writeStatus = 200;
   let writeHold: Promise<void> | undefined;
@@ -77,6 +89,28 @@ async function installGateway(page: Page) {
     if (key === "GET /auth/me") return json({ authenticated: true, user });
     if (key === "GET /health") return json({ status: "ok" });
     if (key === "GET /admin/ui-bootstrap") return json(bootstrap);
+    if (key === "GET /admin/teams")
+      return teamStatus === 200
+        ? json({ teams: [], auth_teams: [...teams.values()] })
+        : route.fulfill({
+            status: teamStatus,
+            json: { error: { code: "auth_teams_failed", message: "private fixture failure" } },
+          });
+    if (key === "GET /admin/teams/scorecard" || key === "GET /admin/benchmark/teams")
+      return json({ teams: [] });
+    if (key === "POST /admin/teams") {
+      const body = request.postDataJSON() as { id: string; name: string };
+      writes.push({ method: "POST", path: url.pathname, body });
+      await writeHold;
+      const previous = teams.get(body.id);
+      const team = {
+        ...body,
+        created_at: previous?.created_at ?? "2026-10-01T00:00:00Z",
+        updated_at: "2026-10-14T00:00:00Z",
+      };
+      teams.set(body.id, team);
+      return json({ team });
+    }
     if (key === "GET /admin/users")
       return json({
         auth_users: [{ ...user, role: "ops_admin", status: "active", created_at: "2026-10-01T00:00:00Z" }],
@@ -148,6 +182,15 @@ async function installGateway(page: Page) {
   });
   return {
     writes,
+    teamStatus: (status: number) => {
+      teamStatus = status;
+    },
+    addTeam: (id: string, name: string) =>
+      teams.set(id, { id, name, created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" }),
+    renameTeam: (name: string) => {
+      const team = teams.get("team_fixture");
+      if (team) team.name = name;
+    },
     describeRole: (role: string, description: string) => descriptions.set(role, description),
     unexpected,
     invalidCatalog: (value: boolean) => {
@@ -191,6 +234,156 @@ async function installGateway(page: Page) {
     release: (number: number) => roleHolds.get(number)?.release(),
   };
 }
+
+test("팀 생성·이름 수정은 모바일 변경 비교·중복 방지·초점과 접근성을 유지한다", async ({
+  page,
+}, testInfo) => {
+  const gateway = await installGateway(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  await page.goto("/app/access/users?tab=teams");
+  const createTrigger = page.getByRole("button", { name: "팀 추가", exact: true });
+  await createTrigger.click();
+  const create = page.getByRole("dialog", { name: "팀 추가", exact: true });
+  const id = create.getByRole("textbox", { name: "팀 ID", exact: true });
+  await expect(id).toHaveValue(/^team_[a-f0-9]{32}$/u);
+  await id.fill("team_fixture");
+  await create.getByRole("textbox", { name: "팀 이름", exact: true }).fill("새 검증 팀");
+  await create.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(
+    create.getByText("이미 등록된 팀 ID입니다. 목록의 이름 수정 기능을 이용하세요."),
+  ).toBeVisible();
+  expect(gateway.writes).toHaveLength(0);
+  await id.fill("team_new");
+  await expect(create.getByRole("region", { name: "팀 변경 전후 비교" })).toContainText(
+    "변경 후 이름: 새 검증 팀",
+  );
+  await expect(create.getByRole("button", { name: "저장", exact: true })).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(async () =>
+      (
+        await (
+          window as unknown as { axe: { run(root: Document): Promise<{ violations: { id: string }[] }> } }
+        ).axe.run(document)
+      ).violations.map((item) => item.id),
+    ),
+  ).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("team-editor-mobile.png") });
+  await create.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(create).toBeHidden();
+  await expect(createTrigger).toBeFocused();
+  const row = page
+    .getByRole("table", { name: "등록된 팀 목록", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "team_new" });
+  const editTrigger = row.getByRole("button", { name: "이름 수정" });
+  await editTrigger.click();
+  const edit = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await expect(edit.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveAttribute("readonly");
+  await edit.getByRole("textbox", { name: "팀 이름", exact: true }).fill("수정한 팀");
+  await edit.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(edit).toBeHidden();
+  await expect(editTrigger).toBeFocused();
+  expect(gateway.writes).toEqual([
+    { method: "POST", path: "/admin/teams", body: { id: "team_new", name: "새 검증 팀" } },
+    { method: "POST", path: "/admin/teams", body: { id: "team_new", name: "수정한 팀" } },
+  ]);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("팀 이름 수정은 서버 변경을 발견하면 초안을 보존하고 저장하지 않는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  await page.goto("/app/access/users?tab=teams");
+  await page.getByRole("button", { name: "이름 수정" }).click();
+  const dialog = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await dialog.getByRole("textbox", { name: "팀 이름", exact: true }).fill("이전 초안");
+  gateway.renameTeam("다른 관리자의 이름");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(
+    dialog.getByText("팀이 변경되었거나 없어졌습니다. 편집창을 다시 열어 확인하세요."),
+  ).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: "팀 이름", exact: true })).toHaveValue("이전 초안");
+  expect(gateway.writes).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+for (const panel of [
+  { path: "/admin/teams/scorecard", label: "팀 스코어카드", empty: "스코어카드를 계산할 데이터가 없습니다." },
+  { path: "/admin/benchmark/teams", label: "팀 벤치마크", empty: "벤치마크 데이터가 없습니다." },
+]) {
+  test(`${panel.label} 로딩·장애·재시도한 빈 결과를 구분한다`, async ({ page }) => {
+    const gateway = await installGateway(page);
+    let release = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let fail = true;
+    await page.route(`**${panel.path}?*`, async (route) => {
+      await hold;
+      return fail
+        ? route.fulfill({
+            status: 500,
+            json: { error: { code: "server_error", message: "private fixture failure" } },
+          })
+        : route.fulfill({ json: { teams: [] } });
+    });
+    await page.goto("/app/access/users?tab=teams");
+    await expect(page.getByText(`${panel.label}를 불러오는 중입니다.`)).toBeVisible();
+    await expect(page.getByText(panel.empty)).toHaveCount(0);
+    release();
+    await expect(page.getByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+    await expect(page.getByText(panel.empty)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "팀 추가", exact: true })).toBeEnabled();
+    fail = false;
+    await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await expect(page.getByText(panel.empty)).toBeVisible();
+    await expect(page.getByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toHaveCount(0);
+    expect(gateway.writes).toEqual([]);
+    expect(gateway.unexpected).toEqual([]);
+  });
+}
+
+test("긴 기존 팀 ID를 유지해 수정하고 보호된 ID는 다른 팀을 가리지 않는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  const longId = `legacy_team_${"x".repeat(1024)}`;
+  const protectedId = `vc_sk_${"a".repeat(43)}`;
+  gateway.addTeam(longId, "긴 기존 팀");
+  gateway.addTeam(protectedId, "보호 대상 팀");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/app/access/users?tab=teams");
+  const table = page.getByRole("table", { name: "등록된 팀 목록", exact: true });
+  await expect(table.getByText("기존 검증 팀", { exact: true })).toBeVisible();
+  await expect(
+    table.getByRole("row").filter({ hasText: "보호 대상 팀" }).getByRole("button", { name: "이름 수정" }),
+  ).toBeDisabled();
+  await expect(page.getByText(protectedId, { exact: true })).toHaveCount(0);
+  await table
+    .getByRole("row")
+    .filter({ hasText: "긴 기존 팀" })
+    .getByRole("button", { name: "이름 수정" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await expect(dialog.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveValue(longId);
+  await dialog.getByRole("textbox", { name: "팀 이름", exact: true }).fill("긴 팀 수정");
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(gateway.writes).toEqual([
+    { method: "POST", path: "/admin/teams", body: { id: longId, name: "긴 팀 수정" } },
+  ]);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("팀 등록 조회 실패는 새 팀 저장을 허용하지 않는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  gateway.teamStatus(500);
+  await page.goto("/app/access/users?tab=teams");
+  await expect(page.getByRole("button", { name: "팀 추가", exact: true })).toBeDisabled();
+  await expect(page.getByText("등록된 팀 목록을 불러오지 못했습니다. 다시 조회하세요.")).toBeVisible();
+  expect(gateway.writes).toHaveLength(0);
+});
 
 test("한글 역할 선택·키보드 취소·기존 코드 전송과 역할 식별자를 보존한다", async ({ page }) => {
   const gateway = await installGateway(page);

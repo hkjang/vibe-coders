@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test";
+import { expect, type Request } from "@playwright/test";
 
 import {
   accessPath,
@@ -29,6 +29,97 @@ import {
   signOut,
   test,
 } from "./live-fixture";
+
+test("AUTH-LIVE-028 실제 팀 생성·중복 방지·이름 수정과 팀 관리자 범위", async ({ page }) => {
+  const superAdmin = {
+    email: required("VIBE_AUTH_SUPER_EMAIL"),
+    password: required("VIBE_AUTH_SUPER_PASSWORD"),
+  };
+  const teamName = "브라우저 검증 팀";
+  await login(page, superAdmin, "/app/access/users?tab=teams");
+  // The existing API permits long opaque IDs. Seed through the actual API, then edit in the UI.
+  const longId = `legacy_team_${"x".repeat(1024)}`;
+  expect(
+    await page.evaluate(async (id) => {
+      const response = await fetch("/admin/teams", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionStorage.getItem("vibe.app.auth.access") ?? ""}`,
+        },
+        body: JSON.stringify({ id, name: "긴 ID 기존 팀" }),
+      });
+      return response.status;
+    }, longId),
+  ).toBe(201);
+  await page.reload();
+  const longRow = page
+    .getByRole("table", { name: "등록된 팀 목록", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "긴 ID 기존 팀" });
+  await longRow.getByRole("button", { name: "이름 수정" }).click();
+  const longEditor = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await expect(longEditor.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveValue(longId);
+  await longEditor.getByRole("textbox", { name: "팀 이름", exact: true }).fill("긴 ID 호환 수정");
+  await longEditor.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(longEditor).toBeHidden();
+  await expect(page.getByRole("row").filter({ hasText: "긴 ID 호환 수정" })).toContainText(longId);
+  await page.getByRole("button", { name: "팀 추가", exact: true }).click();
+  const create = page.getByRole("dialog", { name: "팀 추가", exact: true });
+  const teamId = await create.getByRole("textbox", { name: "팀 ID", exact: true }).inputValue();
+  expect(/^team_[a-f0-9]{32}$/u.test(teamId)).toBe(true);
+  await create.getByRole("textbox", { name: "팀 이름", exact: true }).fill(teamName);
+  await create.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(create).toBeHidden();
+  const table = page.getByRole("table", { name: "등록된 팀 목록", exact: true });
+  const row = table.getByRole("row").filter({ hasText: teamId });
+  await expect(row).toContainText(teamName);
+  await page.getByRole("button", { name: "팀 추가", exact: true }).click();
+  await create.getByRole("textbox", { name: "팀 ID", exact: true }).fill(teamId);
+  await create.getByRole("textbox", { name: "팀 이름", exact: true }).fill("덮어쓰면 안 되는 이름");
+  let writes = 0;
+  const countWrite = (request: Request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/admin/teams") writes++;
+  };
+  page.on("request", countWrite);
+  await create.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(
+    create.getByText("이미 등록된 팀 ID입니다. 목록의 이름 수정 기능을 이용하세요."),
+  ).toBeVisible();
+  expect(writes).toBe(0);
+  page.off("request", countWrite);
+  await create.getByRole("button", { name: "취소", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "변경 버리기" }).click();
+  await row.getByRole("button", { name: "이름 수정" }).click();
+  const edit = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await expect(edit.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveAttribute("readonly");
+  await edit.getByRole("textbox", { name: "팀 이름", exact: true }).fill("브라우저 팀 수정");
+  await edit.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(edit).toBeHidden();
+  await expect(row).toContainText("브라우저 팀 수정");
+  const account = {
+    email: "browser-team-admin@example.invalid",
+    password: `Synthetic-${crypto.randomUUID()}`,
+  };
+  await page.getByRole("tab", { name: "사용자", exact: true }).click();
+  await page.getByRole("button", { name: "사용자 등록", exact: true }).click();
+  const user = page.getByRole("dialog", { name: "사용자 등록" });
+  await user.getByRole("textbox", { name: "이메일", exact: true }).fill(account.email);
+  await user.getByLabel("비밀번호", { exact: false }).fill(account.password);
+  await user.getByRole("combobox", { name: "역할", exact: true }).selectOption("team_admin");
+  await user.getByRole("textbox", { name: "팀", exact: true }).fill(teamId);
+  await user.getByRole("button", { name: "등록", exact: true }).click();
+  await expect(user).toBeHidden();
+  await signOut(page);
+  await login(page, account, "/app/access/users?tab=teams");
+  await expect(page.getByRole("button", { name: "팀 추가", exact: true })).toBeDisabled();
+  await expect(table.getByRole("row")).toHaveCount(2);
+  await row.getByRole("button", { name: "이름 수정" }).click();
+  await edit.getByRole("textbox", { name: "팀 이름", exact: true }).fill("소속 팀 이름 수정");
+  await edit.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(edit).toBeHidden();
+  await expect(row).toContainText("소속 팀 이름 수정");
+});
 
 test("AUTH-LIVE-027 실제 사용자 정의 역할 등록·계정 부여·유지·변경", async ({ page }) => {
   const superAdmin = {
