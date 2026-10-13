@@ -79,10 +79,19 @@ const roleLabels = {
   legacy_admin: "기존 관리자",
 } as const;
 
-export function roleLabel(role: string | undefined): string {
+function translatedRoleLabel(role: string | undefined): string | undefined {
   const normalized = role?.trim().toLowerCase();
   if (!normalized || !Object.prototype.hasOwnProperty.call(roleLabels, normalized)) {
-    return "확인 불가";
+    return undefined;
   }
   return roleLabels[normalized as keyof typeof roleLabels];
+}
+
+export function roleLabel(role: string | undefined): string {
+  return translatedRoleLabel(role) ?? "확인 불가";
+}
+
+/** Only for management lists that already display custom role identifiers. */
+export function managedRoleLabel(role: string): string {
+  return translatedRoleLabel(role) ?? (role || "—");
 }

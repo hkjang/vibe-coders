@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
+import { managedRoleLabel } from "@/config/ui-labels";
 import { QueryNotice, ScopeBadges, UpdatedAt } from "@/features/access/access-ui";
 import { accessKeys, useRolesQuery } from "@/features/access/users/use-access-admin";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
@@ -52,7 +53,10 @@ function roleColumns(
       header: "역할",
       cell: ({ row }) => (
         <div>
-          <strong>{row.original.role}</strong>
+          <strong>{managedRoleLabel(row.original.role)}</strong>
+          {row.original.role && managedRoleLabel(row.original.role) !== row.original.role ? (
+            <div className="access-list-detail mono">{row.original.role}</div>
+          ) : null}
           {row.original.description ? (
             <div className="access-list-detail">{row.original.description}</div>
           ) : null}
@@ -64,13 +68,13 @@ function roleColumns(
       header: "구분",
       cell: ({ row }) => (
         <Badge tone={row.original.is_system ? "info" : "muted"}>
-          {row.original.is_system ? "내장" : "커스텀"}
+          {row.original.is_system ? "내장" : "사용자 정의"}
         </Badge>
       ),
     }),
     column.accessor((row) => row.rank, {
       id: "rank",
-      header: "랭크",
+      header: "권한 등급",
       cell: ({ getValue }) => <span className="cell-number">{formatNumber(getValue())}</span>,
     }),
     column.accessor((row) => row.default_home, {
@@ -143,6 +147,31 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
     scopes: [],
   });
   const scopes = form.watch("scopes");
+  const { reset: resetRoleForm } = form;
+  const columns = useMemo(
+    () =>
+      roleColumns(
+        (row, trigger) => {
+          rememberRowTrigger(trigger);
+          resetRoleForm({
+            role: row.role,
+            description: row.description,
+            default_home: row.default_home,
+            // Canonicalize the baseline while retaining unknown scopes.
+            scopes: [...row.scopes].sort(),
+          });
+          setEditingRole(row.role);
+          setEditorOpen(true);
+        },
+        (row, trigger) => {
+          rememberRowTrigger(trigger);
+          setRemovingRole(row);
+        },
+        canWrite,
+        writeDeniedReason,
+      ),
+    [rememberRowTrigger, resetRoleForm, canWrite, writeDeniedReason],
+  );
   const saveRole = useMutationFeedback({
     mutate: (body: SaveRoleBody) => apiClient.request(access.roles.save, { body, routeId }),
     invalidates: [accessKeys.roles],
@@ -175,13 +204,16 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
       <StatGrid label="역할 요약">
         <StatCard label="전체 역할" value={formatNumber(rows.length)} />
         <StatCard label="내장 역할" value={formatNumber(rows.filter((row) => row.is_system).length)} />
-        <StatCard label="커스텀 역할" value={formatNumber(rows.filter((row) => !row.is_system).length)} />
+        <StatCard
+          label="사용자 정의 역할"
+          value={formatNumber(rows.filter((row) => !row.is_system).length)}
+        />
         <StatCard label="스코프 종류" value={formatNumber(allScopes.length)} />
       </StatGrid>
 
-      <InlineNotice tone="info" title="커스텀 역할은 최고 관리자만 부여할 수 있습니다.">
-        커스텀 역할의 랭크는 0이라서, 사용자에게 부여하려면 super_admin 권한이 필요합니다. 내장 역할은
-        수정하거나 삭제할 수 없습니다.
+      <InlineNotice tone="info" title="사용자 정의 역할은 최고 관리자만 부여할 수 있습니다.">
+        사용자 정의 역할의 권한 등급은 0이라서, 사용자에게 부여하려면 최고 관리자(super_admin) 권한이
+        필요합니다. 내장 역할은 수정하거나 삭제할 수 없습니다.
       </InlineNotice>
 
       <SectionCard
@@ -193,7 +225,8 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
             variant="primary"
             disabled={!canWrite}
             title={canWrite ? undefined : writeDeniedReason}
-            onClick={() => {
+            onClick={(event) => {
+              rememberRowTrigger(event.currentTarget);
               form.reset({ role: "", description: "", default_home: "", scopes: [] });
               setEditingRole("");
               setEditorOpen(true);
@@ -206,27 +239,7 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
         {!canWrite ? <InlineNotice tone="info">{writeDeniedReason}</InlineNotice> : null}
         <DataTable
           caption="역할 목록"
-          columns={roleColumns(
-            (row, trigger) => {
-              rememberRowTrigger(trigger);
-              form.reset({
-                role: row.role,
-                description: row.description,
-                default_home: row.default_home,
-                // Scope order is not meaningful. Canonicalize the baseline so
-                // toggling off and back on is clean, retaining unknown scopes.
-                scopes: [...row.scopes].sort(),
-              });
-              setEditingRole(row.role);
-              setEditorOpen(true);
-            },
-            (row, trigger) => {
-              rememberRowTrigger(trigger);
-              setRemovingRole(row);
-            },
-            canWrite,
-            writeDeniedReason,
-          )}
+          columns={columns}
           data={rows}
           getRowId={(row) => row.role}
           emptyMessage="등록된 역할이 없습니다."
@@ -241,7 +254,7 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
           setEditorOpen(open);
           if (!open) setEditingRole("");
         }}
-        returnFocusRef={editingRole ? rowTrigger : createTrigger}
+        returnFocusRef={rowTrigger}
         title={editingRole ? "역할 수정" : "역할 추가"}
         description="역할 이름이 내장 역할과 같으면 저장할 수 없습니다. 스코프는 서버가 제공하는 목록에서만 고를 수 있습니다."
         onSubmit={async (values) => {
@@ -294,7 +307,7 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
         returnFocusRef={rowTrigger}
         tone="danger"
         title="역할 삭제"
-        description={`커스텀 역할 '${removingRole?.role ?? ""}'을(를) 삭제합니다. 이 역할을 쓰던 사용자와 키는 스코프를 잃습니다.`}
+        description={`사용자 정의 역할 '${removingRole?.role ?? ""}'을(를) 삭제합니다. 이 역할을 쓰던 사용자와 키는 스코프를 잃습니다.`}
         confirmLabel="삭제"
         onConfirm={async () => {
           if (removingRole) await removeRole.mutateAsync(removingRole.role);
