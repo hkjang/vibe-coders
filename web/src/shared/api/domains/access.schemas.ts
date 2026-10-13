@@ -135,6 +135,27 @@ export const adminTeamsSchema = looseObject({
   auth_teams: orDefault(z.array(authTeamSchema), []),
 });
 
+export const teamAdministrationSchema = adminTeamsSchema.extend({
+  auth_teams: z
+    .array(
+      z.object({
+        id: z
+          .string()
+          .min(1)
+          .max(256)
+          .refine(
+            (value) =>
+              value.trim() === value &&
+              ![...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
+          ),
+        name: z.string(),
+        created_at: z.string(),
+        updated_at: z.string(),
+      }),
+    )
+    .refine((teams) => new Set(teams.map((team) => team.id)).size === teams.length),
+});
+
 export const adminTeamMutationSchema = looseObject({ team: authTeamSchema.nullish() });
 
 export const adminTeamDetailSchema = looseObject({

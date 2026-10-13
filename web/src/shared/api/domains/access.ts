@@ -12,6 +12,7 @@ import {
   adminTeamDetailSchema,
   adminTeamMutationSchema,
   adminTeamsSchema,
+  teamAdministrationSchema,
   adminUserDetailSchema,
   adminUserMutationSchema,
   adminUserReportSchema,
@@ -306,6 +307,7 @@ export const accessEndpoints = {
     ),
   },
   teams: {
+    administration: operation<GetAdminTeamsData, unknown>()("GET", "/admin/teams", teamAdministrationSchema),
     list: operation<GetAdminTeamsData, unknown>()("GET", "/admin/teams", adminTeamsSchema),
     create: operation<WithBody<PostAdminTeamsData, CreateTeamBody>, unknown>()(
       "POST",

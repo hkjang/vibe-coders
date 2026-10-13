@@ -30,6 +30,7 @@ const scenarios = new Set([
   "AUTH-LIVE-025",
   "AUTH-LIVE-026",
   "AUTH-LIVE-027",
+  "AUTH-LIVE-028",
 ]);
 const sourceFiles = new Set([
   "auth-live.spec.ts",

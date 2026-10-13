@@ -2,18 +2,25 @@
   display: grid;
   gap: var(--space-4);
 }
-.dialog-content:has(.access-key-edit-review, .access-role-change-review) {
+.dialog-content:has(.access-key-edit-review, .access-role-change-review, .access-team-edit-review) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.dialog-content:has(.access-key-edit-review, .access-role-change-review) > .dialog-header,
-.dialog-content:has(.access-key-edit-review, .access-role-change-review) > .dialog-footer {
+.dialog-content:has(.access-key-edit-review, .access-role-change-review, .access-team-edit-review)
+  > .dialog-header,
+.dialog-content:has(.access-key-edit-review, .access-role-change-review, .access-team-edit-review)
+  > .dialog-footer {
   flex-shrink: 0;
 }
-.dialog-content:has(.access-key-edit-review, .access-role-change-review) > .dialog-body {
+.dialog-content:has(.access-key-edit-review, .access-role-change-review, .access-team-edit-review)
+  > .dialog-body {
   min-height: 0;
   overflow: auto;
+}
+.access-team-edit-review {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .access-role-change-review {
   min-width: 0;

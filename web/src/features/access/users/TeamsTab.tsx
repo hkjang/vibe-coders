@@ -1,44 +1,27 @@
-import { useRef, useState } from "react";
-import { z } from "zod";
+import { useMemo, useRef, useState } from "react";
 
 import { formatSignedRatio, formatSignedScore } from "@/features/access/access-format";
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
 import { TeamDetailSheet } from "@/features/access/users/TeamDetailSheet";
-import {
-  accessKeys,
-  useTeamBenchmarkQuery,
-  useTeamScorecardQuery,
-  useTeamsQuery,
-} from "@/features/access/users/use-access-admin";
-import { apiClient } from "@/shared/api/client";
-import type { CreateTeamBody } from "@/shared/api/domains/access";
+import { useTeamBenchmarkQuery, useTeamScorecardQuery } from "@/features/access/users/use-access-admin";
+import { useTeamAdmin } from "./use-team-admin";
+import { TeamEditor } from "./TeamEditor";
+import { useFeatureReadOwner, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import type { AuthTeamRow, TeamSummary } from "@/shared/api/domains/access.schemas";
-import { endpoints } from "@/shared/api/endpoints";
-import { FormDialog } from "@/shared/components/form/FormDialog";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
-import { LoadingState } from "@/shared/components/state/PageStates";
+import { ErrorState, LoadingState, PermissionDenied } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
 
-const access = endpoints.domains.access;
 const routeId = "access.users";
-
-const teamSchema = z.object({
-  id: z.string(),
-  name: z.string().min(1, "팀 이름을 입력하세요."),
-});
-type TeamForm = z.infer<typeof teamSchema>;
 
 function gradeTone(grade: string): "danger" | "info" | "muted" | "success" | "warning" {
   switch (grade) {
@@ -96,7 +79,10 @@ function usageColumns(): ReadonlyArray<DataTableColumn<TeamSummary>> {
   ]);
 }
 
-function registeredColumns(): ReadonlyArray<DataTableColumn<AuthTeamRow>> {
+function registeredColumns(
+  onEdit: (row: AuthTeamRow, trigger: HTMLElement) => void,
+  canEdit: (row: AuthTeamRow) => boolean,
+): ReadonlyArray<DataTableColumn<AuthTeamRow>> {
   const column = createDataTableColumnHelper<AuthTeamRow>();
   return column.columns([
     column.accessor((row) => row.name, { id: "name", header: "팀 이름" }),
@@ -115,6 +101,19 @@ function registeredColumns(): ReadonlyArray<DataTableColumn<AuthTeamRow>> {
       header: "수정",
       cell: ({ getValue }) => formatDateTime(getValue()),
     }),
+    column.display({
+      id: "actions",
+      header: "작업",
+      cell: ({ row }) => (
+        <Button
+          size="small"
+          disabled={!canEdit(row.original)}
+          onClick={(event) => onEdit(row.original, event.currentTarget)}
+        >
+          이름 수정
+        </Button>
+      ),
+    }),
   ]);
 }
 
@@ -124,23 +123,66 @@ interface TeamsTabProps {
 }
 
 export function TeamsTab({ canWrite, writeDeniedReason }: TeamsTabProps): React.JSX.Element {
-  const teams = useTeamsQuery();
+  const owner = useFeatureReadOwner(routeId, "team-administration");
+  if (!owner.readable) return <PermissionDenied permission="admin:read" />;
+  if (owner.denied)
+    return (
+      <ErrorState
+        title="팀 조회 권한을 다시 확인하세요."
+        message="이전 팀 목록과 초안을 표시하지 않습니다."
+        onRetry={owner.restart}
+        legacyHref="/admin#/users"
+      />
+    );
+  return (
+    <TeamsContent key={owner.id} owner={owner} canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
+  );
+}
+
+function TeamsContent({
+  owner,
+  canWrite,
+  writeDeniedReason,
+}: TeamsTabProps & { owner: FeatureReadOwner }): React.JSX.Element {
+  const { teams, save, write, assertCurrent, canEdit, canCreate, confirmed } = useTeamAdmin(
+    owner,
+    canWrite,
+    writeDeniedReason,
+  );
   const [window, setWindow] = useState("30d");
-  const scorecard = useTeamScorecardQuery(window, true);
-  const benchmark = useTeamBenchmarkQuery(window, true);
+  const scorecard = useTeamScorecardQuery(window, true, owner);
+  const benchmark = useTeamBenchmarkQuery(window, true, owner);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<AuthTeamRow>();
   const [selectedTeam, setSelectedTeam] = useState("");
   const createTrigger = useRef<HTMLButtonElement>(null);
   const detailTrigger = useRef<HTMLElement>(null);
-
-  const form = useZodForm<TeamForm, TeamForm>(teamSchema, { id: "", name: "" });
-  const saveTeam = useMutationFeedback({
-    mutate: (body: CreateTeamBody) => apiClient.request(access.teams.create, { body, routeId }),
-    invalidates: [accessKeys.teams, accessKeys.users],
-    successMessage: "팀을 저장했습니다.",
-  });
+  const { returnFocusRef, remember } = useReturnFocus();
+  const usageTableColumns = useMemo(() => usageColumns(), []);
+  // Keep cell renderers stable through loading/invalidation so the opener remains mounted.
+  const registrationColumns = useMemo(
+    () =>
+      registeredColumns((row, trigger) => {
+        remember(trigger);
+        setEditing(row);
+        setCreateOpen(true);
+      }, canEdit),
+    [remember, canEdit],
+  );
 
   if (teams.isPending && !teams.data) return <LoadingState label="팀 목록을 불러오는 중입니다." />;
+  if (teams.isError && !teams.data)
+    return (
+      <div className="access-stack">
+        <Button disabled>팀 추가</Button>
+        <QueryNotice
+          error={teams.error}
+          hasData={false}
+          label="팀 목록"
+          onRetry={() => void teams.refetch()}
+        />
+      </div>
+    );
 
   const usage = teams.data?.teams ?? [];
   const registered = teams.data?.auth_teams ?? [];
@@ -172,15 +214,20 @@ export function TeamsTab({ canWrite, writeDeniedReason }: TeamsTabProps): React.
 
       <SectionCard
         title="등록된 팀"
-        description="팀 ID와 이름을 관리합니다. 같은 ID로 저장하면 이름이 갱신됩니다."
+        description="새 팀 추가와 기존 팀 이름 수정을 구분합니다. 팀 ID는 수정하지 않습니다."
         actions={
           <Button
             ref={createTrigger}
             variant="primary"
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeDeniedReason}
-            onClick={() => {
-              form.reset({ id: "", name: "" });
+            disabled={!canCreate || !confirmed}
+            title={
+              canCreate
+                ? undefined
+                : "팀 추가 권한이 없습니다. 팀 관리자는 소속 팀의 이름만 수정할 수 있습니다."
+            }
+            onClick={(event) => {
+              remember(event.currentTarget);
+              setEditing(undefined);
               setCreateOpen(true);
             }}
           >
@@ -188,10 +235,10 @@ export function TeamsTab({ canWrite, writeDeniedReason }: TeamsTabProps): React.
           </Button>
         }
       >
-        {!canWrite ? <InlineNotice tone="info">{writeDeniedReason}</InlineNotice> : null}
+        {!write.allowed ? <InlineNotice tone="info">{write.reason}</InlineNotice> : null}
         <DataTable
           caption="등록된 팀 목록"
-          columns={registeredColumns()}
+          columns={registrationColumns}
           data={registered}
           getRowId={(row) => row.id}
           emptyMessage="등록된 팀이 없습니다. '팀 추가'로 첫 팀을 만드세요."
@@ -201,7 +248,7 @@ export function TeamsTab({ canWrite, writeDeniedReason }: TeamsTabProps): React.
       <SectionCard title="팀별 사용량" description="행을 선택하면 팀 상세 사용 내역을 볼 수 있습니다.">
         <DataTable
           caption="팀별 사용량"
-          columns={usageColumns()}
+          columns={usageTableColumns}
           data={usage}
           getRowId={(row) => row.team}
           getRowActionLabel={(row) => `${row.team} 상세 열기`}
@@ -251,7 +298,7 @@ export function TeamsTab({ canWrite, writeDeniedReason }: TeamsTabProps): React.
                   <th scope="col">종합</th>
                   <th scope="col">성공률</th>
                   <th scope="col">캐시</th>
-                  <th scope="col">Skill 재사용</th>
+                  <th scope="col">스킬 재사용</th>
                   <th scope="col">정책 준수</th>
                   <th scope="col">비용</th>
                 </tr>
@@ -325,30 +372,22 @@ export function TeamsTab({ canWrite, writeDeniedReason }: TeamsTabProps): React.
         )}
       </SectionCard>
 
-      <FormDialog
-        form={form}
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        returnFocusRef={createTrigger}
-        title="팀 추가"
-        description="팀 ID를 비우면 서버가 새 ID를 만듭니다. 기존 ID를 넣으면 이름이 갱신됩니다."
-        onSubmit={async (values) => {
-          await saveTeam.mutateAsync({
-            ...(values.id ? { id: values.id } : {}),
-            name: values.name,
-          });
-          setCreateOpen(false);
-        }}
-      >
-        <FormField label="팀 이름" required error={form.formState.errors.name?.message}>
-          {(control) => <Input {...control} {...form.register("name")} />}
-        </FormField>
-        <FormField label="팀 ID" description="비우면 자동으로 생성합니다.">
-          {(control) => <Input {...control} {...form.register("id")} />}
-        </FormField>
-      </FormDialog>
+      {createOpen ? (
+        <TeamEditor
+          baseline={editing}
+          allowed={confirmed && (editing ? canEdit(editing) : canCreate)}
+          reason={write.reason}
+          onClose={() => setCreateOpen(false)}
+          returnFocusRef={returnFocusRef}
+          onSave={async (body) => {
+            await save.mutateAsync({ body, baseline: editing });
+            assertCurrent();
+          }}
+        />
+      ) : null}
 
       <TeamDetailSheet
+        owner={owner}
         team={selectedTeam}
         onClose={() => setSelectedTeam("")}
         returnFocusRef={detailTrigger}
