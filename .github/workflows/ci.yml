@@ -278,6 +278,8 @@ jobs:
         run: go test -race ./internal/proxy -run '^TestRoutingDomainReview' -count=1 -timeout=5m
       - name: Verify PostgreSQL domain decision filters, signal identity and raw-read permission contracts
         run: go test -race ./internal/proxy -run '^TestRoutingDomainDecisions' -count=1 -timeout=5m
+      - name: Verify PostgreSQL personal key revision, rotation, quota family and expiry contracts
+        run: go test -p 1 -race ./internal/store ./internal/proxy -run '^Test(APIKeyRevision|APIKeyRotation|APIKeyScopes|APIKeyQuota|SelfService|MeKeyRotationOpenAPI)' -count=1 -timeout=7m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck

@@ -219,6 +219,9 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.ensureAPIKeyRevisionSecret(ctx); err != nil {
+		return err
+	}
 	// Recorded after the schema exists and only on the first run, so an existing database
 	// does not claim its day totals cover traffic from before they were being kept.
 	return s.markUsageRollupStarted(ctx)
@@ -423,6 +426,10 @@ func migrationStatements() []string {
 		`ALTER TABLE api_keys ADD COLUMN budget_limit_krw REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE api_keys ADD COLUMN expires_at TEXT`,
 		`ALTER TABLE api_keys ADD COLUMN revoked_at TEXT`,
+		`CREATE TABLE IF NOT EXISTS api_key_revision_secret (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			secret TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS api_key_rotations (
 			old_key_id TEXT PRIMARY KEY,
 			old_key_hash TEXT NOT NULL UNIQUE,
@@ -2540,6 +2547,10 @@ func isAlreadyExistsErr(err error) bool {
 }
 
 func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
+	secret, err := s.apiKeyRevisionSecret(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(owner, ''), COALESCE(team, ''),
 		COALESCE(user_id, ''), COALESCE(service_account_id, ''), COALESCE(role, ''), status,
 		COALESCE(scopes, '[]'), COALESCE(allowed_ips, '[]'), COALESCE(allowed_models, '[]'), COALESCE(denied_models, '[]'),
@@ -2570,13 +2581,16 @@ func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
 		key.DeniedModels = decodeStringList(deniedModels)
 		key.AllowedProviders = decodeStringList(allowedProviders)
 		key.DeniedProviders = decodeStringList(deniedProviders)
-		key.Revision = APIKeyRevision(APIKeyRecord{
+		key.Revision, err = apiKeyRevision(APIKeyRecord{
 			ID: key.ID, Name: key.Name, KeyHash: hash, Owner: key.Owner, Team: key.Team,
 			UserID: key.UserID, ServiceAccountID: key.ServiceAccountID, Role: key.Role, Status: key.Status,
 			Scopes: key.Scopes, AllowedIPs: key.AllowedIPs, AllowedModels: key.AllowedModels, DeniedModels: key.DeniedModels,
 			AllowedProviders: key.AllowedProviders, DeniedProviders: key.DeniedProviders, BudgetLimitKRW: key.BudgetLimitKRW,
 			ExpiresAt: parseOptionalTime(key.ExpiresAt), RevokedAt: parseOptionalTime(key.RevokedAt), CreatedAt: parseOptionalTime(key.CreatedAt),
-		})
+		}, secret)
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, key)
 	}
 	if result == nil {

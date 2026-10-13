@@ -42,8 +42,12 @@ func TestAPIKeyRotationGrace(t *testing.T) {
 			if err != nil || len(keys) != 2 {
 				t.Fatal("public metadata unavailable")
 			}
+			revision, err := db.APIKeyRevision(t.Context(), old)
+			if err != nil {
+				t.Fatal("review protection unavailable")
+			}
 			for _, public := range keys {
-				if public.ID == key.ID && (public.ReplacedBy != next.ID || public.GraceEndsAt != formatTime(next.GraceEndsAt) || public.Revision != APIKeyRevision(old)) {
+				if public.ID == key.ID && (public.ReplacedBy != next.ID || public.GraceEndsAt != formatTime(next.GraceEndsAt) || public.Revision != revision) {
 					t.Fatal("public lineage or reviewed revision mismatch")
 				}
 			}

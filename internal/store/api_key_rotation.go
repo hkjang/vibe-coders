@@ -2,12 +2,8 @@ package store
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"time"
 )
@@ -19,20 +15,6 @@ const MaxAPIKeyRotationGrace = 24 * time.Hour
 type APIKeyRotationResult struct {
 	APIKeyRecord
 	GraceEndsAt time.Time
-}
-
-// APIKeyRevision binds the browser's reviewed public metadata to the complete
-// persisted snapshot without disclosing the credential hash. It is an opaque
-// concurrency token, never an authorization credential.
-func APIKeyRevision(key APIKeyRecord) string {
-	_, values := apiKeySnapshotPredicate(key)
-	encoded, err := json.Marshal(values)
-	if err != nil {
-		return ""
-	}
-	mac := hmac.New(sha256.New, []byte(key.KeyHash))
-	_, _ = mac.Write(encoded)
-	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // apiKeySnapshotPredicate compares every persisted security and metadata field.

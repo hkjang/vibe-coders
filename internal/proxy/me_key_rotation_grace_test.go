@@ -60,7 +60,8 @@ func TestSelfServiceRotationReviewedGraceLifecycle(t *testing.T) {
 			revision = public.Revision
 		}
 	}
-	if revision == "" || revision != store.APIKeyRevision(key) {
+	expectedRevision, err := db.APIKeyRevision(t.Context(), key)
+	if err != nil || revision == "" || revision != expectedRevision {
 		t.Fatal("public snapshot revision mismatch")
 	}
 	resp := postJSON(t, ts.URL+"/me/keys/"+key.ID+"/rotate", "usersecret", map[string]any{"reason": "정기 교체", "expected_revision": revision, "grace_seconds": 1})
@@ -131,7 +132,10 @@ func TestSelfServiceRotationRejectsStaleBrowserReview(t *testing.T) {
 		t.Fatal("seed failed")
 	}
 	key, _, _ = db.GetAPIKey(t.Context(), key.ID)
-	revision := store.APIKeyRevision(key)
+	revision, err := db.APIKeyRevision(t.Context(), key)
+	if err != nil {
+		t.Fatal("review protection unavailable")
+	}
 	key.Name = "수정 후"
 	if err := db.UpsertAPIKey(t.Context(), key); err != nil {
 		t.Fatal("concurrent edit failed")

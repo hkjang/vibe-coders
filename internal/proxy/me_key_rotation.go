@@ -16,9 +16,16 @@ func (s *Server) rotateSelfServiceKey(w http.ResponseWriter, r *http.Request, me
 		writeOpenAIError(w, http.StatusBadRequest, "invalid rotation review, reason or grace period", "invalid_request_error", "invalid_key_rotation")
 		return
 	}
-	if input.ExpectedRevision != "" && subtle.ConstantTimeCompare([]byte(input.ExpectedRevision), []byte(store.APIKeyRevision(existing))) != 1 {
-		writeOpenAIError(w, http.StatusConflict, "key changed since review; reload before rotating", "invalid_request_error", "key_rotation_conflict")
-		return
+	if input.ExpectedRevision != "" {
+		revision, err := s.db.APIKeyRevision(r.Context(), existing)
+		if err != nil {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "could not verify key review", "server_error", "key_rotation_authority_unavailable")
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(input.ExpectedRevision), []byte(revision)) != 1 {
+			writeOpenAIError(w, http.StatusConflict, "key changed since review; reload before rotating", "invalid_request_error", "key_rotation_conflict")
+			return
+		}
 	}
 	if existing.Status != "active" || !existing.RevokedAt.IsZero() || !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(time.Now()) {
 		writeOpenAIError(w, http.StatusConflict, "key is no longer active or has expired", "invalid_request_error", "key_rotation_conflict")
