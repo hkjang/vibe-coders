@@ -277,7 +277,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
       committed.current = target;
       flight.current = undefined;
       setOutcome({ kind: "success", refreshFailed: false });
-      void client.invalidateQueries({ queryKey: ["governance", "policies"], refetchType: "none" });
+      void client.invalidateQueries({ queryKey: access.catalogKey, refetchType: "none" });
       void refreshCommitted(target);
     } catch (cause) {
       try {
@@ -313,7 +313,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
       });
       stillOpen();
       access.assertRead();
-      client.setQueryData(["governance", "policies"], policies);
+      client.setQueryData(access.catalogKey, policies);
       setOutcome({ kind: "success", refreshFailed: false });
     } catch {
       try {

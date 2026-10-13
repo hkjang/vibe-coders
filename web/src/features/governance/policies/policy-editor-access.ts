@@ -4,17 +4,25 @@ import { AppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
+import { policyCatalogKey } from "./policy-catalog-key";
 
 export function usePolicyEditorAccess(canWrite: boolean) {
   const auth = useAuth();
   const context = useContext(FeatureAccessContext);
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const owner = context?.featureId;
-  const principal = JSON.stringify([auth.user?.id, auth.user?.role, auth.user?.roles, auth.user?.team_id]);
+  const principal = JSON.stringify([
+    auth.mode,
+    auth.user?.id,
+    auth.user?.role,
+    auth.user?.roles,
+    auth.user?.team_id,
+  ]);
   const known =
     owner === "governance.policies" && context?.permitted === true && typeof context.readOnly === "boolean";
   const read = known && auth.user?.scopes.includes("security:read") === true;
   const prefixKey = JSON.stringify(auth.credentialPrefixes);
+  const sessionKey = JSON.stringify([epoch, owner, principal, known, auth.mode]);
   const write = useFeatureMutationAccess(
     ["governance.policies"],
     canWrite && read && auth.user?.scopes.includes("admin:write") === true,
@@ -69,7 +77,8 @@ export function usePolicyEditorAccess(canWrite: boolean) {
     read,
     prefixKey,
     prefixes: auth.credentialPrefixes,
-    sessionKey: JSON.stringify([epoch, owner, principal, known]),
+    sessionKey,
+    catalogKey: policyCatalogKey(sessionKey),
   };
 }
 export type PolicyEditorAccess = ReturnType<typeof usePolicyEditorAccess>;
