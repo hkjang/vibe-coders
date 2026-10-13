@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { AppError } from "@/shared/api/error";
 import { deferred, policy, savePath, setupEditor as setupBaseEditor } from "./policy-editor-test-harness";
 
-async function setupEditor() {
-  const c = await setupBaseEditor();
+async function setupEditor(initial = structuredClone(policy)) {
+  const c = await setupBaseEditor(initial);
   // The server may keep the feature available while withdrawing an API scope.
   // Exercise the dialog's read boundary independently of route-level unmounting.
   c.update({ serverAvailable: true });
@@ -31,14 +31,29 @@ describe("정책 조회 권한 회수 시 화면 원문 제거", () => {
     c.update({ scopes: ["admin:write"] });
     expect(c.dialog()).not.toHaveTextContent("public-read-reference");
   });
-  it("정책 사용·중지 확인도 조회 권한이 없으면 원래 사용 상태를 숨긴다", async () => {
-    const c = await setupEditor();
-    await c.user.click(screen.getByRole("button", { name: `${policy.name} 사용` }));
-    c.update({ scopes: ["admin:write"] });
-    const dialog = screen.getByRole("dialog", { name: "정책 변경 확인" });
-    expect(within(dialog).getByRole("button", { name: "확인" })).toBeDisabled();
-    expect(c.api.bodies(savePath)).toEqual([]);
-  });
+  it.each([false, true])(
+    "정책 사용 상태 %s의 확인창은 조회 권한이 없으면 같은 버튼 색상과 문구를 사용한다",
+    async (enabled) => {
+      const c = await setupEditor({ ...structuredClone(policy), enabled });
+      const action = enabled ? "중지" : "사용";
+      await c.user.click(screen.getByRole("button", { name: `${policy.name} ${action}` }));
+      const original = screen.getByRole("dialog");
+      expect(within(original).getByRole("button", { name: action })).toHaveClass(
+        enabled ? "button-danger" : "button-primary",
+      );
+      c.update({ scopes: ["admin:write"] });
+      const dialog = screen.getByRole("dialog", { name: "정책 변경 확인" });
+      const confirm = within(dialog).getByRole("button", { name: "확인" });
+      expect(confirm).toBeDisabled();
+      expect(confirm).toHaveClass("button-primary");
+      expect(confirm).not.toHaveClass("button-danger");
+      c.update({ scopes: ["security:read", "admin:write"] });
+      expect(within(original).getByRole("button", { name: action })).toHaveClass(
+        enabled ? "button-danger" : "button-primary",
+      );
+      expect(c.api.bodies(savePath)).toEqual([]);
+    },
+  );
   it.each(["fields", "review", "saving"])(
     "%s 상태에서 원문을 제거하고 작업 수명은 유지한다",
     async (phase) => {

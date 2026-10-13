@@ -751,7 +751,7 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
         }
         confirmLabel={!editorAccess.read ? "확인" : pendingToggle?.enabled ? "중지" : "사용"}
         confirmDisabled={!toggleAccess.allowed || !pendingToggle || !policyCurrent(pendingToggle)}
-        tone={pendingToggle?.enabled ? "danger" : "primary"}
+        tone={editorAccess.read && pendingToggle?.enabled ? "danger" : "primary"}
         onConfirm={async () => {
           toggleAccess.assertCurrent();
           if (pendingToggle) {
