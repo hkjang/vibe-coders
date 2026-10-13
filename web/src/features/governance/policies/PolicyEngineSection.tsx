@@ -12,7 +12,8 @@ import { PolicyEditorDialog } from "./PolicyEditorDialog";
 import { PolicyImportEntry } from "./PolicyImportEntry";
 import { usePolicyEditorAccess } from "./policy-editor-access";
 import { editorJson, editorText } from "./policy-editor-security";
-import { policyCatalogCurrent } from "./policy-catalog-key";
+import { catalogRecordCurrent, policyCatalogCurrent } from "./policy-catalog-key";
+import { usePolicyWriteGuard } from "./use-policy-write-guard";
 import { policyProblem } from "./policy-editor-state";
 import {
   actionLabels,
@@ -22,7 +23,7 @@ import {
 } from "@/features/governance/policies/policy-labels";
 import { apiClient } from "@/shared/api/client";
 import { AppError } from "@/shared/api/error";
-import type { Policy, PolicyRegressionRun } from "@/shared/api/domains/governance";
+import type { Policy, PolicyRegressionCase, PolicyRegressionRun } from "@/shared/api/domains/governance";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
@@ -127,6 +128,8 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
 function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const queryClient = useQueryClient();
   const editorAccess = usePolicyEditorAccess(canWrite);
+  const writeGuard = usePolicyWriteGuard(editorAccess);
+  const caseKey = ["governance", "regression-cases", editorAccess.sessionKey] as const;
   const toggleAccess = editorAccess.write;
   const ownsResult = () => {
     try {
@@ -143,11 +146,21 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   const [policyFormOpen, setPolicyFormOpen] = useState(false);
   const [regressionFormOpen, setRegressionFormOpen] = useState(false);
   const [pendingToggle, setPendingToggle] = useState<Policy | undefined>();
-  const [pendingCaseDelete, setPendingCaseDelete] = useState<{ id: string; name: string } | undefined>();
+  const [pendingCaseDelete, setPendingCaseDelete] = useState<PolicyRegressionCase>();
+  const caseSelection = useRef<PolicyRegressionCase | undefined>(undefined);
   const [runResult, setRunResult] = useState<PolicyRegressionRun | undefined>();
   const policyTriggerRef = useRef<HTMLButtonElement>(null);
   const regressionTriggerRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const caseTriggers = useRef(new Map<string, HTMLButtonElement>());
+  const caseFocusId = useRef<string | undefined>(undefined);
+  const casePanel = useRef<HTMLDivElement | null>(null);
+  const caseReturnFocus = {
+    get current() {
+      const trigger = caseFocusId.current ? caseTriggers.current.get(caseFocusId.current) : undefined;
+      return trigger?.isConnected && !trigger.disabled ? trigger : casePanel.current;
+    },
+  };
 
   const policies = useQuery({
     queryKey: editorAccess.catalogKey,
@@ -158,7 +171,7 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
     retry: false,
   });
   const regressionCases = useQuery({
-    queryKey: ["governance", "regression-cases", editorAccess.sessionKey],
+    queryKey: caseKey,
     enabled: editorAccess.read,
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.governance.regression.list, { signal, routeId }),
@@ -166,6 +179,7 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
     retry: false,
   });
   const policyCurrent = (row: Policy) => policyCatalogCurrent(queryClient, editorAccess.catalogKey, row);
+  const caseCurrent = (row: PolicyRegressionCase) => catalogRecordCurrent(queryClient, caseKey, "cases", row);
 
   const policyForm = useZodForm<PolicyFormInput, PolicyFormValues>(policyFormSchema, {
     name: "",
@@ -188,26 +202,29 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   const savePolicy = useMutationFeedback({
     ownsResult,
     mutate: (values: PolicyFormValues) =>
-      apiClient.request(endpoints.domains.governance.policies.save, {
-        body: {
-          name: values.name,
-          description: "정책 화면의 빠른 정책 폼에서 생성",
-          enabled: true,
-          priority: values.priority,
-          rollout_percent: values.rollout,
-          rules: [
-            {
-              name: `${values.conditionKey} -> ${values.action}`,
-              enabled: true,
-              priority: 100,
-              conditions: conditionsFrom(values),
-              actions: actionsFrom(values),
-            },
-          ],
-        },
-        routeId,
-      }),
-    invalidates: [["governance", "policies"]],
+      writeGuard.run("policy-create", () =>
+        apiClient.request(endpoints.domains.governance.policies.save, {
+          body: {
+            name: values.name,
+            description: "정책 화면의 빠른 정책 폼에서 생성",
+            enabled: true,
+            priority: values.priority,
+            rollout_percent: values.rollout,
+            rules: [
+              {
+                name: `${values.conditionKey} -> ${values.action}`,
+                enabled: true,
+                priority: 100,
+                conditions: conditionsFrom(values),
+                actions: actionsFrom(values),
+              },
+            ],
+          },
+          routeId,
+          retryUnauthorized: false,
+        }),
+      ),
+    invalidates: [editorAccess.catalogKey],
     successMessage: "AI 정책을 저장했습니다.",
     errorMessage: "AI 정책을 저장하지 못했습니다.",
   });
@@ -249,34 +266,48 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   const saveCase = useMutationFeedback({
     ownsResult,
     mutate: (values: RegressionFormValues) =>
-      apiClient.request(endpoints.domains.governance.regression.save, {
-        body: {
-          name: values.name,
-          model: values.model,
-          provider: values.provider,
-          risk_score: values.risk,
-          contains_secret: values.containsSecret,
-          expect: values.expect,
-        },
-        routeId,
-      }),
-    invalidates: [["governance", "regression-cases"]],
+      writeGuard.run("case-create", () =>
+        apiClient.request(endpoints.domains.governance.regression.save, {
+          body: {
+            name: values.name,
+            model: values.model,
+            provider: values.provider,
+            risk_score: values.risk,
+            contains_secret: values.containsSecret,
+            expect: values.expect,
+          },
+          routeId,
+          retryUnauthorized: false,
+        }),
+      ),
+    invalidates: [caseKey],
     successMessage: "회귀 시나리오를 저장했습니다.",
     errorMessage: "회귀 시나리오를 저장하지 못했습니다.",
   });
 
   const removeCase = useMutationFeedback({
     ownsResult,
-    mutate: (id: string) =>
-      apiClient.request(endpoints.domains.governance.regression.remove, { query: { id }, routeId }),
-    invalidates: [["governance", "regression-cases"]],
+    mutate: (row: PolicyRegressionCase) =>
+      writeGuard.run("case-delete", () => {
+        if (caseSelection.current !== row || !caseCurrent(row))
+          throw new AppError("현재 시나리오를 다시 조회하고 검토하세요.", { kind: "permission" });
+        return apiClient.request(endpoints.domains.governance.regression.remove, {
+          query: { id: row.id },
+          routeId,
+          retryUnauthorized: false,
+        });
+      }),
+    invalidates: [caseKey],
     successMessage: "회귀 시나리오를 삭제했습니다.",
     errorMessage: "회귀 시나리오를 삭제하지 못했습니다.",
   });
 
   const runRegression = useMutationFeedback({
     ownsResult,
-    mutate: () => apiClient.request(endpoints.domains.governance.regression.run, { routeId }),
+    mutate: () =>
+      writeGuard.run("regression-run", () =>
+        apiClient.request(endpoints.domains.governance.regression.run, { routeId, retryUnauthorized: false }),
+      ),
     successMessage: (result) =>
       `회귀 실행 완료 — 통과 ${formatNumber(Number(result.passed ?? 0))} / 실패 ${formatNumber(Number(result.failed ?? 0))}`,
     errorMessage: "회귀 테스트를 실행하지 못했습니다.",
@@ -422,12 +453,20 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
         <Button
           size="small"
           variant="danger"
-          disabled={!canWrite}
-          title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+          disabled={!editorAccess.write.allowed || !caseCurrent(row)}
+          title={editorAccess.write.reason}
           aria-label={`${row.name || row.id} 시나리오 삭제`}
+          ref={(node) => {
+            if (node) caseTriggers.current.set(row.id, node);
+            else caseTriggers.current.delete(row.id);
+          }}
           onClick={(event) => {
+            if (!writeGuard.canOpen() || !caseCurrent(row)) return;
             rowTriggerRef.current = event.currentTarget;
-            setPendingCaseDelete({ id: row.id, name: row.name ?? row.id });
+            const snapshot = structuredClone(row);
+            caseFocusId.current = row.id;
+            caseSelection.current = snapshot;
+            setPendingCaseDelete(snapshot);
           }}
         >
           <Trash2 aria-hidden="true" /> 삭제
@@ -460,9 +499,11 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
             <Button
               ref={policyTriggerRef}
               variant="primary"
-              disabled={!canWrite}
-              title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-              onClick={() => setPolicyFormOpen(true)}
+              disabled={!editorAccess.write.allowed}
+              title={editorAccess.write.reason}
+              onClick={() => {
+                if (writeGuard.canOpen()) setPolicyFormOpen(true);
+              }}
             >
               <Plus aria-hidden="true" /> 정책 추가
             </Button>
@@ -498,61 +539,69 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
         )}
       </SectionCard>
 
-      <SectionCard
-        title="정책 회귀 테스트"
-        description="고정 입력 시나리오의 기대 결과를 저장해 두고 현재 활성 정책에 재생합니다. 프롬프트·SQL 원문은 저장하지 않습니다."
-        actions={
-          <div className="governance-actions">
-            <Button
-              ref={regressionTriggerRef}
-              disabled={!canWrite}
-              title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-              onClick={() => setRegressionFormOpen(true)}
+      <div ref={casePanel} tabIndex={-1}>
+        <SectionCard
+          title="정책 회귀 테스트"
+          description="고정 입력 시나리오의 기대 결과를 저장해 두고 현재 활성 정책에 재생합니다. 프롬프트·SQL 원문은 저장하지 않습니다."
+          actions={
+            <div className="governance-actions">
+              <Button
+                ref={regressionTriggerRef}
+                disabled={!editorAccess.write.allowed}
+                title={editorAccess.write.reason}
+                onClick={() => {
+                  if (writeGuard.canOpen()) setRegressionFormOpen(true);
+                }}
+              >
+                <Plus aria-hidden="true" /> 시나리오 추가
+              </Button>
+              <Button
+                variant="primary"
+                disabled={
+                  !editorAccess.write.allowed ||
+                  runRegression.isPending ||
+                  writeGuard.pending.has("regression-run")
+                }
+                title={editorAccess.write.reason}
+                onClick={() => runRegression.mutate(undefined)}
+              >
+                <Play aria-hidden="true" /> 전체 회귀 실행
+              </Button>
+            </div>
+          }
+        >
+          {regressionCases.isError ? (
+            <PanelFailure
+              error={regressionCases.error}
+              hasData={false}
+              label="회귀 시나리오"
+              onRetry={() => void regressionCases.refetch()}
+            />
+          ) : null}
+          {runResult && editorAccess.read ? (
+            <InlineNotice
+              tone={Number(runResult.failed ?? 0) > 0 ? "warning" : "success"}
+              title={`회귀 결과 — 통과 ${formatNumber(Number(runResult.passed ?? 0))} / 실패 ${formatNumber(Number(runResult.failed ?? 0))}`}
             >
-              <Plus aria-hidden="true" /> 시나리오 추가
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!canWrite || runRegression.isPending}
-              title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-              onClick={() => runRegression.mutate(undefined)}
-            >
-              <Play aria-hidden="true" /> 전체 회귀 실행
-            </Button>
-          </div>
-        }
-      >
-        {regressionCases.isError ? (
-          <PanelFailure
-            error={regressionCases.error}
-            hasData={false}
-            label="회귀 시나리오"
-            onRetry={() => void regressionCases.refetch()}
+              {(runResult.results ?? [])
+                .filter((result) => result.pass === false)
+                .slice(0, 5)
+                .map(
+                  (result) =>
+                    `${result.name ?? result.id}: 기대 ${policyDecisionLabel(result.expect)} · 실제 ${policyDecisionLabel(result.actual)}`,
+                )
+                .join(" / ") || "모든 시나리오가 기대한 판단과 일치합니다."}
+            </InlineNotice>
+          ) : null}
+          <GovernanceTable
+            caption="정책 회귀 시나리오"
+            columns={caseColumns}
+            rows={caseRows}
+            loading={regressionCases.isPending || regressionCases.isFetching}
+            emptyMessage="저장된 회귀 시나리오가 없습니다. 시나리오를 추가하면 정책 변경이 판단을 뒤집는지 확인할 수 있습니다."
           />
-        ) : null}
-        {runResult && editorAccess.read ? (
-          <InlineNotice
-            tone={Number(runResult.failed ?? 0) > 0 ? "warning" : "success"}
-            title={`회귀 결과 — 통과 ${formatNumber(Number(runResult.passed ?? 0))} / 실패 ${formatNumber(Number(runResult.failed ?? 0))}`}
-          >
-            {(runResult.results ?? [])
-              .filter((result) => result.pass === false)
-              .slice(0, 5)
-              .map(
-                (result) =>
-                  `${result.name ?? result.id}: 기대 ${policyDecisionLabel(result.expect)} · 실제 ${policyDecisionLabel(result.actual)}`,
-              )
-              .join(" / ") || "모든 시나리오가 기대한 판단과 일치합니다."}
-          </InlineNotice>
-        ) : null}
-        <GovernanceTable
-          caption="정책 회귀 시나리오"
-          columns={caseColumns}
-          rows={caseRows}
-          loading={regressionCases.isPending || regressionCases.isFetching}
-          emptyMessage="저장된 회귀 시나리오가 없습니다. 시나리오를 추가하면 정책 변경이 판단을 뒤집는지 확인할 수 있습니다."
-        />
-      </SectionCard>
+        </SectionCard>
+      </div>
 
       <FormDialog
         open={policyFormOpen}
@@ -562,10 +611,22 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
         title="AI 정책 추가"
         description="자주 쓰는 단일 규칙 정책을 빠르게 만듭니다. 복잡한 정책은 API로 등록하세요."
         submitLabel="정책 저장"
+        submitDisabled={!editorAccess.write.allowed}
         onSubmit={async (values) => {
           await savePolicy.mutateAsync(values);
         }}
       >
+        {!editorAccess.write.allowed ? (
+          <InlineNotice title="정책 저장이 잠겼습니다.">
+            {editorAccess.write.reason} 입력한 초안은 유지합니다.
+          </InlineNotice>
+        ) : null}
+        {savePolicy.isError ? (
+          <p>
+            서버에서 이미 생성되었을 수 있습니다. 정책 목록을 확인한 뒤 다시 저장하세요. 재전송하면 중복
+            생성될 수 있습니다.
+          </p>
+        ) : null}
         <FormField label="정책 이름" required error={policyForm.formState.errors.name?.message}>
           {(control) => <Input {...control} {...policyForm.register("name")} />}
         </FormField>
@@ -633,10 +694,19 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
         title="회귀 시나리오 추가"
         description="고정 입력과 기대 판단을 저장합니다. 프롬프트 원문은 저장하지 않습니다."
         submitLabel="시나리오 저장"
+        submitDisabled={!editorAccess.write.allowed}
         onSubmit={async (values) => {
           await saveCase.mutateAsync(values);
         }}
       >
+        {!editorAccess.write.allowed ? (
+          <InlineNotice title="시나리오 저장이 잠겼습니다.">
+            {editorAccess.write.reason} 입력한 초안은 유지합니다.
+          </InlineNotice>
+        ) : null}
+        {saveCase.isError ? (
+          <p>시나리오 목록에서 생성 여부를 확인하세요. 다시 저장하면 중복 생성될 수 있습니다.</p>
+        ) : null}
         <FormField label="시나리오 이름" required error={regressionForm.formState.errors.name?.message}>
           {(control) => <Input {...control} {...regressionForm.register("name")} />}
         </FormField>
@@ -696,17 +766,27 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
       <ConfirmDialog
         open={pendingCaseDelete !== undefined}
         onOpenChange={(open) => {
-          if (!open) setPendingCaseDelete(undefined);
+          if (!open) {
+            caseSelection.current = undefined;
+            setPendingCaseDelete(undefined);
+          }
         }}
-        returnFocusRef={rowTriggerRef}
+        returnFocusRef={caseReturnFocus}
         title="회귀 시나리오를 삭제할까요?"
         description={`"${pendingCaseDelete?.name ?? ""}" 시나리오를 삭제합니다. 되돌릴 수 없습니다.`}
         confirmLabel="삭제"
+        confirmDisabled={!editorAccess.write.allowed || !pendingCaseDelete || !caseCurrent(pendingCaseDelete)}
         tone="danger"
         onConfirm={async () => {
-          if (pendingCaseDelete) await removeCase.mutateAsync(pendingCaseDelete.id);
+          if (pendingCaseDelete) await removeCase.mutateAsync(pendingCaseDelete);
         }}
-      />
+      >
+        {!editorAccess.write.allowed || (pendingCaseDelete && !caseCurrent(pendingCaseDelete)) ? (
+          <InlineNotice title="시나리오 삭제가 잠겼습니다.">
+            {editorAccess.write.reason ?? "시나리오 원본을 다시 조회하고 검토하세요."}
+          </InlineNotice>
+        ) : null}
+      </ConfirmDialog>
     </>
   );
 }
