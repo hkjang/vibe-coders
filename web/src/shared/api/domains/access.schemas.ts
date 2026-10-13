@@ -139,15 +139,8 @@ export const teamAdministrationSchema = adminTeamsSchema.extend({
   auth_teams: z
     .array(
       z.object({
-        id: z
-          .string()
-          .min(1)
-          .max(256)
-          .refine(
-            (value) =>
-              value.trim() === value &&
-              ![...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
-          ),
+        // Existing server IDs are opaque TEXT, not the new-team form's input policy.
+        id: z.string().min(1),
         name: z.string(),
         created_at: z.string(),
         updated_at: z.string(),

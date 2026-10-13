@@ -82,6 +82,7 @@ function usageColumns(): ReadonlyArray<DataTableColumn<TeamSummary>> {
 function registeredColumns(
   onEdit: (row: AuthTeamRow, trigger: HTMLElement) => void,
   canEdit: (row: AuthTeamRow) => boolean,
+  protectedId: (id: string) => boolean,
 ): ReadonlyArray<DataTableColumn<AuthTeamRow>> {
   const column = createDataTableColumnHelper<AuthTeamRow>();
   return column.columns([
@@ -89,7 +90,9 @@ function registeredColumns(
     column.accessor((row) => row.id, {
       id: "id",
       header: "팀 ID",
-      cell: ({ getValue }) => <span className="mono">{getValue()}</span>,
+      cell: ({ getValue }) => (
+        <span className="mono">{protectedId(getValue()) ? "보호된 팀 ID" : getValue()}</span>
+      ),
     }),
     column.accessor((row) => row.created_at, {
       id: "created_at",
@@ -108,6 +111,7 @@ function registeredColumns(
         <Button
           size="small"
           disabled={!canEdit(row.original)}
+          title={protectedId(row.original.id) ? "ID 표시 보호 정책에 따라 수정할 수 없습니다." : undefined}
           onClick={(event) => onEdit(row.original, event.currentTarget)}
         >
           이름 수정
@@ -144,7 +148,7 @@ function TeamsContent({
   canWrite,
   writeDeniedReason,
 }: TeamsTabProps & { owner: FeatureReadOwner }): React.JSX.Element {
-  const { teams, save, write, assertCurrent, canEdit, canCreate, confirmed } = useTeamAdmin(
+  const { teams, save, write, assertCurrent, canEdit, canCreate, confirmed, protectedId } = useTeamAdmin(
     owner,
     canWrite,
     writeDeniedReason,
@@ -162,12 +166,16 @@ function TeamsContent({
   // Keep cell renderers stable through loading/invalidation so the opener remains mounted.
   const registrationColumns = useMemo(
     () =>
-      registeredColumns((row, trigger) => {
-        remember(trigger);
-        setEditing(row);
-        setCreateOpen(true);
-      }, canEdit),
-    [remember, canEdit],
+      registeredColumns(
+        (row, trigger) => {
+          remember(trigger);
+          setEditing(row);
+          setCreateOpen(true);
+        },
+        canEdit,
+        protectedId,
+      ),
+    [remember, canEdit, protectedId],
   );
 
   if (teams.isPending && !teams.data) return <LoadingState label="팀 목록을 불러오는 중입니다." />;
@@ -282,12 +290,13 @@ function TeamsContent({
             onRetry={() => void scorecard.refetch()}
           />
         ) : null}
-        {scorecardRows.length === 0 && !scorecard.isPending ? (
+        {scorecard.isPending ? <LoadingState label="팀 스코어카드를 불러오는 중입니다." /> : null}
+        {scorecardRows.length === 0 && scorecard.isSuccess ? (
           <EmptyState
             title="스코어카드를 계산할 데이터가 없습니다."
             description="선택한 기간에 팀 요청이 쌓이면 등급이 계산됩니다."
           />
-        ) : (
+        ) : scorecardRows.length > 0 ? (
           <div className="data-table-scroll" tabIndex={0} aria-label="팀 성숙도 스코어카드 표 영역">
             <table className="data-table">
               <caption className="sr-only">팀 성숙도 스코어카드</caption>
@@ -321,8 +330,9 @@ function TeamsContent({
               </tbody>
             </table>
           </div>
-        )}
+        ) : null}
         {scorecard.data?.note ? <p className="access-note">{scorecard.data.note}</p> : null}
+        <UpdatedAt at={scorecard.dataUpdatedAt} />
       </SectionCard>
 
       <SectionCard title="팀 벤치마크" description="팀별 활동 사용자와 성과 점수입니다.">
@@ -334,12 +344,13 @@ function TeamsContent({
             onRetry={() => void benchmark.refetch()}
           />
         ) : null}
-        {benchmarkRows.length === 0 && !benchmark.isPending ? (
+        {benchmark.isPending ? <LoadingState label="팀 벤치마크를 불러오는 중입니다." /> : null}
+        {benchmarkRows.length === 0 && benchmark.isSuccess ? (
           <EmptyState
             title="벤치마크 데이터가 없습니다."
             description="선택한 기간에 팀 요청이 기록되면 점수가 채워집니다."
           />
-        ) : (
+        ) : benchmarkRows.length > 0 ? (
           <div className="data-table-scroll" tabIndex={0} aria-label="팀 벤치마크 표 영역">
             <table className="data-table">
               <caption className="sr-only">팀 벤치마크</caption>
@@ -369,7 +380,8 @@ function TeamsContent({
               </tbody>
             </table>
           </div>
-        )}
+        ) : null}
+        <UpdatedAt at={benchmark.dataUpdatedAt} />
       </SectionCard>
 
       {createOpen ? (

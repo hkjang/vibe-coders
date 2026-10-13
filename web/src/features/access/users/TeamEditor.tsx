@@ -41,7 +41,7 @@ export function TeamEditor({
       `team_${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("")}`,
     name: baseline?.name ?? "",
   }));
-  const form = useZodForm(schema, initial);
+  const form = useZodForm(baseline ? schema.extend({ id: z.literal(baseline.id) }) : schema, initial);
   const draft = form.watch();
   return (
     <FormDialog

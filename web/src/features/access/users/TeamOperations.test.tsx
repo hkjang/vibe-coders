@@ -71,6 +71,130 @@ async function edit(user: ReturnType<typeof userEvent.setup>) {
   return within(await screen.findByRole("dialog", { name: "팀 이름 수정" }));
 }
 describe("팀 생성과 이름 수정", () => {
+  it.each(["team_" + "x".repeat(1024), "team_with\nseparator"])(
+    "서버가 허용한 기존 ID는 목록 계약을 깨뜨리지 않고 이름만 수정한다 (%#)",
+    async (id) => {
+      const existing = { ...team, id };
+      expect(teamAdministrationSchema.safeParse({ ...catalog, auth_teams: [existing] }).success).toBe(true);
+      const user = userEvent.setup();
+      const { api } = setup({ "GET /admin/teams": () => ({ ...catalog, auth_teams: [existing] }) });
+      const dialog = await edit(user);
+      await user.clear(dialog.getByLabelText("팀 이름", { exact: false }));
+      await user.type(dialog.getByLabelText("팀 이름", { exact: false }), "호환 팀");
+      await user.click(dialog.getByRole("button", { name: "저장" }));
+      await waitFor(() => expect(api.bodies("POST /admin/teams")).toEqual([{ id, name: "호환 팀" }]));
+    },
+  );
+  it.each(["vc_sk_" + "a".repeat(43), "x".repeat(16385)])(
+    "표시 보호 대상 ID는 다른 팀의 목록과 수정을 차단하지 않는다 (%#)",
+    async (id) => {
+      setup({
+        "GET /admin/teams": () => ({ ...catalog, auth_teams: [team, { ...team, id, name: "보호 대상 팀" }] }),
+      });
+      expect(await screen.findByText("첫 팀")).toBeVisible();
+      expect(screen.getByText("보호된 팀 ID")).toBeVisible();
+      expect(screen.queryByText(id)).not.toBeInTheDocument();
+      const row = screen.getByRole("row", { name: /보호 대상 팀/ });
+      expect(within(row).getByRole("button", { name: "이름 수정" })).toBeDisabled();
+      expect(
+        within(screen.getByRole("row", { name: /첫 팀/ })).getByRole("button", { name: "이름 수정" }),
+      ).toBeEnabled();
+      expect(screen.getByRole("button", { name: "팀 추가" })).toBeEnabled();
+    },
+  );
+  for (const panel of [
+    {
+      key: "GET /admin/teams/scorecard",
+      label: "팀 스코어카드",
+      empty: "스코어카드를 계산할 데이터가 없습니다.",
+      loading: "팀 스코어카드를 불러오는 중입니다.",
+    },
+    {
+      key: "GET /admin/benchmark/teams",
+      label: "팀 벤치마크",
+      empty: "벤치마크 데이터가 없습니다.",
+      loading: "팀 벤치마크를 불러오는 중입니다.",
+    },
+  ]) {
+    it(`${panel.label} 갱신 실패는 마지막 정상 행과 갱신 시각을 유지한다`, async () => {
+      let reads = 0;
+      const { view } = setup({
+        [panel.key]: () => {
+          if (++reads > 1) throw apiFailure("private failure");
+          return {
+            teams: [
+              {
+                team: "보존할 사용량 팀",
+                grade: "A",
+                overall: 1,
+                success_rate: 1,
+                cache_rate: 0,
+                skill_reuse: 0,
+                policy_compliance: 1,
+                cost_krw: 0,
+                active_users: 1,
+                requests: 2,
+                commits: 0,
+                merged_mrs: 0,
+                score: 1,
+              },
+            ],
+          };
+        },
+      });
+      expect(await screen.findByText("보존할 사용량 팀")).toBeVisible();
+      await act(async () => {
+        await view.client.invalidateQueries({ queryKey: ["access", "teams"] });
+      });
+      expect(await screen.findByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+      expect(screen.getByText("보존할 사용량 팀")).toBeVisible();
+      expect(screen.getByText(/마지막으로 확인된 값을 표시합니다/)).toBeVisible();
+      expect(screen.getAllByText(/^마지막 갱신 /).length).toBeGreaterThanOrEqual(2);
+    });
+    it(`${panel.label} 첫 조회 실패는 정상 빈 결과가 아니며 해당 조회만 재시도한다`, async () => {
+      const user = userEvent.setup();
+      let reads = 0;
+      const { api } = setup({
+        [panel.key]: () => {
+          if (++reads === 1) throw apiFailure("private failure");
+          return { teams: [] };
+        },
+      });
+      expect(await screen.findByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+      expect(screen.queryByText(panel.empty)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "팀 추가" })).toBeEnabled();
+      await user.click(screen.getByRole("button", { name: "다시 시도" }));
+      expect(await screen.findByText(panel.empty)).toBeVisible();
+      expect(screen.queryByText(`${panel.label}을(를) 불러오지 못했습니다.`)).not.toBeInTheDocument();
+      expect(api.calls.filter((call) => call.key === "GET /admin/teams")).toHaveLength(1);
+      expect(api.calls.filter((call) => call.key === panel.key)).toHaveLength(2);
+    });
+    it(`${panel.label} 보류는 로딩을 표시하고 정상 응답 뒤에만 빈 상태를 표시한다`, async () => {
+      const held = deferred();
+      setup({ [panel.key]: () => held.promise });
+      expect(await screen.findByText(panel.loading)).toBeVisible();
+      expect(screen.queryByText(panel.empty)).not.toBeInTheDocument();
+      await act(async () => held.resolve({ teams: [] }));
+      expect(await screen.findByText(panel.empty)).toBeVisible();
+      expect(screen.queryByText(panel.loading)).not.toBeInTheDocument();
+    });
+    it(`${panel.label} 빈 결과 이후 갱신 실패는 이전 빈 상태를 현재 결과로 안내하지 않는다`, async () => {
+      let reads = 0;
+      const { view } = setup({
+        [panel.key]: () => {
+          if (++reads > 1) throw apiFailure("private failure");
+          return { teams: [] };
+        },
+      });
+      expect(await screen.findByText(panel.empty)).toBeVisible();
+      await act(async () => {
+        await view.client.invalidateQueries({ queryKey: ["access", "teams"] });
+      });
+      expect(await screen.findByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+      expect(screen.queryByText(panel.empty)).not.toBeInTheDocument();
+      expect(screen.getByText(/마지막으로 확인된 값을 표시합니다/)).toBeVisible();
+    });
+  }
   it("생성은 명시적인 새 ID를 제안하고 기존 ID를 덮어쓰지 않는다", async () => {
     const user = userEvent.setup();
     const { api } = setup();

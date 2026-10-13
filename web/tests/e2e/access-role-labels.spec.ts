@@ -185,6 +185,8 @@ async function installGateway(page: Page) {
     teamStatus: (status: number) => {
       teamStatus = status;
     },
+    addTeam: (id: string, name: string) =>
+      teams.set(id, { id, name, created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" }),
     renameTeam: (name: string) => {
       const team = teams.get("team_fixture");
       if (team) team.name = name;
@@ -304,6 +306,73 @@ test("팀 이름 수정은 서버 변경을 발견하면 초안을 보존하고 
   ).toBeVisible();
   await expect(dialog.getByRole("textbox", { name: "팀 이름", exact: true })).toHaveValue("이전 초안");
   expect(gateway.writes).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+for (const panel of [
+  { path: "/admin/teams/scorecard", label: "팀 스코어카드", empty: "스코어카드를 계산할 데이터가 없습니다." },
+  { path: "/admin/benchmark/teams", label: "팀 벤치마크", empty: "벤치마크 데이터가 없습니다." },
+]) {
+  test(`${panel.label} 로딩·장애·재시도한 빈 결과를 구분한다`, async ({ page }) => {
+    const gateway = await installGateway(page);
+    let release = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let fail = true;
+    await page.route(`**${panel.path}?*`, async (route) => {
+      await hold;
+      return fail
+        ? route.fulfill({
+            status: 500,
+            json: { error: { code: "server_error", message: "private fixture failure" } },
+          })
+        : route.fulfill({ json: { teams: [] } });
+    });
+    await page.goto("/app/access/users?tab=teams");
+    await expect(page.getByText(`${panel.label}를 불러오는 중입니다.`)).toBeVisible();
+    await expect(page.getByText(panel.empty)).toHaveCount(0);
+    release();
+    await expect(page.getByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+    await expect(page.getByText(panel.empty)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "팀 추가", exact: true })).toBeEnabled();
+    fail = false;
+    await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await expect(page.getByText(panel.empty)).toBeVisible();
+    await expect(page.getByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toHaveCount(0);
+    expect(gateway.writes).toEqual([]);
+    expect(gateway.unexpected).toEqual([]);
+  });
+}
+
+test("긴 기존 팀 ID를 유지해 수정하고 보호된 ID는 다른 팀을 가리지 않는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  const longId = `legacy_team_${"x".repeat(1024)}`;
+  const protectedId = `vc_sk_${"a".repeat(43)}`;
+  gateway.addTeam(longId, "긴 기존 팀");
+  gateway.addTeam(protectedId, "보호 대상 팀");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/app/access/users?tab=teams");
+  const table = page.getByRole("table", { name: "등록된 팀 목록", exact: true });
+  await expect(table.getByText("기존 검증 팀", { exact: true })).toBeVisible();
+  await expect(
+    table.getByRole("row").filter({ hasText: "보호 대상 팀" }).getByRole("button", { name: "이름 수정" }),
+  ).toBeDisabled();
+  await expect(page.getByText(protectedId, { exact: true })).toHaveCount(0);
+  await table
+    .getByRole("row")
+    .filter({ hasText: "긴 기존 팀" })
+    .getByRole("button", { name: "이름 수정" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await expect(dialog.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveValue(longId);
+  await dialog.getByRole("textbox", { name: "팀 이름", exact: true }).fill("긴 팀 수정");
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(gateway.writes).toEqual([
+    { method: "POST", path: "/admin/teams", body: { id: longId, name: "긴 팀 수정" } },
+  ]);
   expect(gateway.unexpected).toEqual([]);
 });
 

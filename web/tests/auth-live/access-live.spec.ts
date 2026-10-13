@@ -37,6 +37,33 @@ test("AUTH-LIVE-028 실제 팀 생성·중복 방지·이름 수정과 팀 관�
   };
   const teamName = "브라우저 검증 팀";
   await login(page, superAdmin, "/app/access/users?tab=teams");
+  // The existing API permits long opaque IDs. Seed through the actual API, then edit in the UI.
+  const longId = `legacy_team_${"x".repeat(1024)}`;
+  expect(
+    await page.evaluate(async (id) => {
+      const response = await fetch("/admin/teams", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionStorage.getItem("vibe.app.auth.access") ?? ""}`,
+        },
+        body: JSON.stringify({ id, name: "긴 ID 기존 팀" }),
+      });
+      return response.status;
+    }, longId),
+  ).toBe(201);
+  await page.reload();
+  const longRow = page
+    .getByRole("table", { name: "등록된 팀 목록", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "긴 ID 기존 팀" });
+  await longRow.getByRole("button", { name: "이름 수정" }).click();
+  const longEditor = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await expect(longEditor.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveValue(longId);
+  await longEditor.getByRole("textbox", { name: "팀 이름", exact: true }).fill("긴 ID 호환 수정");
+  await longEditor.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(longEditor).toBeHidden();
+  await expect(page.getByRole("row").filter({ hasText: "긴 ID 호환 수정" })).toContainText(longId);
   await page.getByRole("button", { name: "팀 추가", exact: true }).click();
   const create = page.getByRole("dialog", { name: "팀 추가", exact: true });
   const teamId = await create.getByRole("textbox", { name: "팀 ID", exact: true }).inputValue();

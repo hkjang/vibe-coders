@@ -43,8 +43,6 @@ export function useTeamAdmin(owner: FeatureReadOwner, canWrite: boolean, reason:
       assertFeatureRead(owner, signal);
       const data = await apiClient.request(api.administration, { signal, routeId });
       assertFeatureRead(owner, signal);
-      if (data.auth_teams.some((row) => containsPotentialSecret(row.id, auth.credentialPrefixes)))
-        throw new AppError("팀 목록을 확인하지 못했습니다.", { kind: "contract" });
       return data;
     },
     staleTime: 0,
@@ -60,9 +58,15 @@ export function useTeamAdmin(owner: FeatureReadOwner, canWrite: boolean, reason:
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
+  const prefixKey = JSON.stringify(auth.credentialPrefixes);
+  const protectedId = useCallback(
+    (id: string) => containsPotentialSecret(id, JSON.parse(prefixKey) as string[]),
+    [prefixKey],
+  );
   const canEdit = useCallback(
-    (row: AuthTeamRow) => write.allowed && (!teamAdmin || row.id === auth.user?.team_id),
-    [write.allowed, teamAdmin, auth.user?.team_id],
+    (row: AuthTeamRow) =>
+      write.allowed && !protectedId(row.id) && (!teamAdmin || row.id === auth.user?.team_id),
+    [write.allowed, protectedId, teamAdmin, auth.user?.team_id],
   );
   const save = useMutationFeedback({
     gcTime: 0,
@@ -83,8 +87,10 @@ export function useTeamAdmin(owner: FeatureReadOwner, canWrite: boolean, reason:
         });
       if (
         !body.id.trim() ||
-        body.id !== body.id.trim() ||
-        [...body.id].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127) ||
+        (!baseline &&
+          (body.id.length > 256 ||
+            body.id !== body.id.trim() ||
+            [...body.id].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127))) ||
         !body.name.trim() ||
         containsPotentialSecret(body.id, auth.credentialPrefixes)
       )
@@ -141,6 +147,7 @@ export function useTeamAdmin(owner: FeatureReadOwner, canWrite: boolean, reason:
     write,
     assertCurrent,
     canEdit,
+    protectedId,
     canCreate: write.allowed && !teamAdmin,
     confirmed: teams.isSuccess && teams.fetchStatus === "idle",
   };
