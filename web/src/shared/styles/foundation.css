@@ -1,3 +1,26 @@
+/* Keep rich status notifications on the console's contrast-tested palette.
+   Explicit theme specificity also wins over Sonner's injected default colors. */
+[data-sonner-toaster].app-toaster[data-sonner-theme] {
+  --normal-bg: var(--color-card);
+  --normal-text: var(--color-foreground);
+  --normal-border: var(--color-border);
+  --success-bg: var(--color-success-soft);
+  --success-text: var(--color-success);
+  --success-border: var(--color-success);
+  --info-bg: var(--color-info-soft);
+  --info-text: var(--color-info);
+  --info-border: var(--color-info);
+  --warning-bg: var(--color-warning-soft);
+  --warning-text: var(--color-warning);
+  --warning-border: var(--color-warning);
+  --error-bg: var(--color-danger-soft);
+  --error-text: var(--color-danger);
+  --error-border: var(--color-danger);
+}
+[data-sonner-toaster].app-toaster [data-sonner-toast] {
+  font-size: 0.875rem;
+}
+
 .input {
   width: 100%;
   min-height: 2.5rem;

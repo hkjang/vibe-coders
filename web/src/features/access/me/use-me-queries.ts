@@ -83,21 +83,25 @@ export function useMeSkillsQuery(enabled: boolean) {
   );
 }
 
-export function useMeSessionsQuery(enabled: boolean) {
+export function useMeSessionsQuery(enabled: boolean, owner?: string) {
   return useMeQuery(
-    meKeys.sessions,
+    owner === undefined ? meKeys.sessions : [...meKeys.sessions, owner],
     (signal) => apiClient.request(access.me.sessions, { signal, routeId }),
     enabled,
   );
 }
 
-export function useMeKeysQuery(enabled: boolean) {
-  return useMeQuery(meKeys.keys, (signal) => apiClient.request(access.me.keys, { signal, routeId }), enabled);
+export function useMeKeysQuery(enabled: boolean, owner?: string) {
+  return useMeQuery(
+    owner === undefined ? meKeys.keys : [...meKeys.keys, owner],
+    (signal) => apiClient.request(access.me.keys, { signal, routeId }),
+    enabled,
+  );
 }
 
-export function useMeOnboardingPackQuery(client: string, enabled: boolean) {
+export function useMeOnboardingPackQuery(client: string, enabled: boolean, owner?: string) {
   return useMeQuery(
-    [...meKeys.onboarding, client],
+    owner === undefined ? [...meKeys.onboarding, client] : [...meKeys.onboarding, client, owner],
     (signal) => apiClient.request(access.me.onboardingPack, { query: { client }, signal, routeId }),
     enabled,
   );

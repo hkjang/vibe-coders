@@ -5,7 +5,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MePage } from "@/features/access/me/MePage";
 import { apiFailure, mockApi } from "@/test/api";
-import { renderScreen } from "@/test/render";
+import { renderScreen as renderBase } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
+
+function renderScreen(ui: React.ReactNode, options?: Parameters<typeof renderBase>[1]) {
+  return renderBase(
+    <FeatureAccessContext.Provider value={{ featureId: "me.home", readOnly: false, permitted: true }}>
+      {ui}
+    </FeatureAccessContext.Provider>,
+    options,
+  );
+}
 
 // `/me/*` works for any authenticated caller, so the screen must not depend on
 // admin scopes.
@@ -87,6 +97,7 @@ const myKeys = {
   api_keys: [
     {
       id: "key_mine",
+      revision: "a".repeat(64),
       name: "노트북",
       owner: "",
       team: "platform",
@@ -253,6 +264,7 @@ describe("MePage", () => {
       "GET /me/sessions": () => ({ current_session_id: "", sessions: [] }),
       "POST /me/keys/key_mine/rotate": () => ({
         rotated_from: "key_mine",
+        grace_ends_at: "2026-10-13T00:00:00Z",
         api_key: { id: "key_new", name: "노트북", scopes: ["chat:completion"], status: "active" },
         secret: "vc_sk_rotated_once",
       }),
@@ -261,6 +273,8 @@ describe("MePage", () => {
 
     await user.click(await screen.findByRole("button", { name: "회전" }));
     const confirm = await screen.findByRole("dialog");
+    await user.type(within(confirm).getByLabelText(/확인 문구/u), "key_mine");
+    await user.type(within(confirm).getByLabelText(/변경 사유/u), "정기 교체");
     await user.click(within(confirm).getByRole("button", { name: "회전" }));
 
     await waitFor(() => {

@@ -581,6 +581,17 @@ func (s *Server) chatTestInjectedAuthContext(w http.ResponseWriter, r *http.Requ
 		writeOpenAIError(w, http.StatusNotFound, "api key not found", "invalid_request_error", "api_key_not_found")
 		return nil, "", false
 	}
+	// Apply the same immutable retirement deadline as normal key authentication;
+	// a metadata edit must not resurrect a retired credential for injected tests.
+	key, found, err = s.db.FindActiveAPIKeyByHash(r.Context(), key.KeyHash)
+	if err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "could not verify key lifecycle", "server_error", "api_key_lookup_failed")
+		return nil, "", false
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusForbidden, "api key is not active", "permission_error", "api_key_inactive")
+		return nil, "", false
+	}
 	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && key.Team != claims.TeamID {
 		writeOpenAIError(w, http.StatusForbidden, "team_admin can only test own team api keys", "permission_error", "team_scope_denied")
 		return nil, "", false

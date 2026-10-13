@@ -164,9 +164,11 @@ func (s *SQLStore) usageRollupStartedAt(ctx context.Context) (time.Time, bool) {
 // day totals when they cover the period, and falls back to the exact aggregate when they
 // do not — an unaligned start, or a period that began before this database started
 // keeping them. Both paths return the same numbers; the difference is only what they cost.
+// API-key quotas cover the durable rotation family. UsageSince remains the
+// individual-credential reporting API; old request attribution is never rewritten.
 func (s *SQLStore) UsageForPeriod(ctx context.Context, filter UsageFilter) (int64, float64, int64, error) {
 	if !s.rollupCovers(ctx, filter.Since) {
-		return s.UsageSince(ctx, filter)
+		return s.usageSince(ctx, filter, true)
 	}
 	day := kstDay(filter.Since)
 	var query string
@@ -176,7 +178,11 @@ func (s *SQLStore) UsageForPeriod(ctx context.Context, filter UsageFilter) (int6
 		query = `SELECT COALESCE(SUM(requests), 0), COALESCE(SUM(cost), 0), COALESCE(SUM(tokens), 0)
 			FROM usage_rollup WHERE scope = 'global' AND scope_value = '*' AND day >= ?`
 		args = []any{day}
-	case "api_key", "ip":
+	case "api_key":
+		query = apiKeyQuotaFamilyCTE + `SELECT COALESCE(SUM(requests), 0), COALESCE(SUM(cost), 0), COALESCE(SUM(tokens), 0)
+			FROM usage_rollup WHERE scope = 'api_key' AND scope_value IN (SELECT id FROM key_family) AND day >= ?`
+		args = []any{filter.ScopeValue, day}
+	case "ip":
 		query = `SELECT COALESCE(SUM(requests), 0), COALESCE(SUM(cost), 0), COALESCE(SUM(tokens), 0)
 			FROM usage_rollup WHERE scope = ? AND scope_value = ? AND day >= ?`
 		args = []any{filter.Scope, filter.ScopeValue, day}

@@ -49,6 +49,9 @@ type APIKeyRecord struct {
 }
 
 type APIKeyPublic struct {
+	Revision         string   `json:"revision"`
+	ReplacedBy       string   `json:"replaced_by,omitempty"`
+	GraceEndsAt      string   `json:"grace_ends_at,omitempty"`
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	Owner            string   `json:"owner"`

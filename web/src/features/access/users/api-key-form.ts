@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { keyExpirySchema } from "../key-expiry";
 
 export const createKeySchema = z.object({
   name: z.string().min(1, "키 이름을 입력하세요."),
@@ -9,7 +10,7 @@ export const createKeySchema = z.object({
   allowed_models: z.string(),
   denied_models: z.string(),
   budget_limit_krw: z.string(),
-  expires_at: z.string(),
+  expires_at: keyExpirySchema,
   scopes: z.array(z.string()),
 });
 export type CreateKeyForm = z.infer<typeof createKeySchema>;

@@ -15,6 +15,8 @@ interface ConfirmDialogProps {
   /** Optional current prerequisite; preserves the draft reason and cancel/close actions. */
   confirmDisabled?: boolean;
   description: string;
+  /** Route-owned, allowlisted messages; never return a raw server error. */
+  errorFormatter?: typeof safeAppErrorMessage;
   onConfirm: (reason: string, target?: string) => Promise<unknown> | unknown;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -48,6 +50,7 @@ function Confirmation({
   confirmLabel = "확인",
   confirmDisabled = false,
   description,
+  errorFormatter = safeAppErrorMessage,
   onConfirm,
   onOpenChange,
   open,
@@ -109,7 +112,7 @@ function Confirmation({
     } catch (cause) {
       if (!mounted.current) return;
       setError({
-        message: safeAppErrorMessage(cause, "작업을 완료하지 못했습니다."),
+        message: errorFormatter(cause, "작업을 완료하지 못했습니다."),
         requestId: isAppError(cause) ? cause.requestId : undefined,
       });
     } finally {

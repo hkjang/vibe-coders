@@ -522,6 +522,80 @@ export type MattermostTestResponse = {
     webhook_status: number;
 };
 
+export type MeKeyCatalog = {
+    api_keys: Array<MeKeyPublic>;
+    grantable_scopes: Array<string>;
+    role: string;
+};
+
+export type MeKeyPublic = {
+    allowed_ips: Array<string>;
+    allowed_models: Array<string>;
+    allowed_providers: Array<string>;
+    /**
+     * Existing per-request estimated cost ceiling. This is not a cumulative usage balance.
+     */
+    budget_limit_krw: number;
+    created_at: string;
+    denied_models: Array<string>;
+    denied_providers: Array<string>;
+    expires_at: string;
+    /**
+     * Immutable previous-key deadline, including immediate retirement. Authentication cannot extend it via ordinary key metadata edits.
+     */
+    grace_ends_at?: string;
+    id: string;
+    name: string;
+    owner: string;
+    /**
+     * Replacement ID; presence means this key cannot be rotated or scope-edited again.
+     */
+    replaced_by?: string;
+    /**
+     * Opaque reviewed-snapshot token, not a credential.
+     */
+    revision: string;
+    revoked_at: string;
+    role: string;
+    scopes: Array<string>;
+    service_account_id: string;
+    status: string;
+    team: string;
+    user_id: string;
+};
+
+export type MeKeyRotationRequest = {
+    /**
+     * Exact revision from the reviewed catalog; requires reason.
+     */
+    expected_revision?: string;
+    /**
+     * Requires reason and expected_revision, including zero. Actual grace cannot extend original expiry.
+     */
+    grace_seconds?: number;
+    /**
+     * Nonblank trimmed audit reason. Required with a revision or grace period. Total body limit 8192 bytes; duplicate and unknown fields rejected.
+     */
+    reason?: string;
+};
+
+export type MeKeyRotationResult = {
+    api_key: {
+        id: string;
+        name: string;
+        role: string;
+        scopes: Array<string>;
+        status: string;
+        user_id: string;
+    };
+    grace_ends_at: string;
+    rotated_from: string;
+    /**
+     * One-time plaintext credential. Never log, persist in browser storage or send to telemetry.
+     */
+    secret: string;
+};
+
 export type MigrationFeature = {
     app_path: string;
     availability_reason?: string;
@@ -11751,12 +11825,23 @@ export type GetMeKeysData = {
     url: '/me/keys';
 };
 
+export type GetMeKeysErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeKeysError = GetMeKeysErrors[keyof GetMeKeysErrors];
+
 export type GetMeKeysResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeKeyCatalog;
 };
+
+export type GetMeKeysResponse = GetMeKeysResponses[keyof GetMeKeysResponses];
 
 export type PostMeKeysData = {
     body?: never;
@@ -11805,7 +11890,7 @@ export type PatchMeKeysIdResponses = {
 };
 
 export type PostMeKeysIdRotateData = {
-    body?: never;
+    body?: MeKeyRotationRequest;
     path: {
         id: string;
     };
@@ -11813,12 +11898,51 @@ export type PostMeKeysIdRotateData = {
     url: '/me/keys/{id}/rotate';
 };
 
+export type PostMeKeysIdRotateErrors = {
+    /**
+     * Invalid review, reason or grace period
+     */
+    400: AppError;
+    /**
+     * Authentication required
+     */
+    401: AppError;
+    /**
+     * Current authority does not permit this rotation
+     */
+    403: AppError;
+    /**
+     * Key not owned by caller or self-service disabled
+     */
+    404: AppError;
+    /**
+     * Key changed, expired, inactive or already rotated
+     */
+    409: AppError;
+    /**
+     * Rotation not confirmed; inspect current keys before any further action
+     */
+    500: AppError;
+    /**
+     * Current team authority could not be verified
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostMeKeysIdRotateError = PostMeKeysIdRotateErrors[keyof PostMeKeysIdRotateErrors];
+
 export type PostMeKeysIdRotateResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeKeyRotationResult;
 };
+
+export type PostMeKeysIdRotateResponse = PostMeKeysIdRotateResponses[keyof PostMeKeysIdRotateResponses];
 
 export type GetMeNavigationData = {
     body?: never;

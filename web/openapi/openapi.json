@@ -1831,6 +1831,229 @@
         ],
         "type": "object"
       },
+      "MeKeyCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "api_keys": {
+            "items": {
+              "$ref": "#/components/schemas/MeKeyPublic"
+            },
+            "type": "array"
+          },
+          "grantable_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_keys",
+          "role",
+          "grantable_scopes"
+        ],
+        "type": "object"
+      },
+      "MeKeyPublic": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "allowed_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "allowed_providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "budget_limit_krw": {
+            "description": "Existing per-request estimated cost ceiling. This is not a cumulative usage balance.",
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "denied_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "denied_providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "grace_ends_at": {
+            "description": "Immutable previous-key deadline, including immediate retirement. Authentication cannot extend it via ordinary key metadata edits.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "replaced_by": {
+            "description": "Replacement ID; presence means this key cannot be rotated or scope-edited again.",
+            "type": "string"
+          },
+          "revision": {
+            "description": "Opaque reviewed-snapshot token, not a credential.",
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "service_account_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "owner",
+          "team",
+          "user_id",
+          "service_account_id",
+          "role",
+          "status",
+          "expires_at",
+          "revoked_at",
+          "created_at",
+          "revision",
+          "scopes",
+          "allowed_ips",
+          "allowed_models",
+          "denied_models",
+          "allowed_providers",
+          "denied_providers",
+          "budget_limit_krw"
+        ],
+        "type": "object"
+      },
+      "MeKeyRotationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "description": "Exact revision from the reviewed catalog; requires reason.",
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "grace_seconds": {
+            "default": 0,
+            "description": "Requires reason and expected_revision, including zero. Actual grace cannot extend original expiry.",
+            "maximum": 86400,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Nonblank trimmed audit reason. Required with a revision or grace period. Total body limit 8192 bytes; duplicate and unknown fields rejected.",
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MeKeyRotationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "scopes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "type": "string"
+              },
+              "user_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "user_id",
+              "role",
+              "scopes",
+              "status"
+            ],
+            "type": "object"
+          },
+          "grace_ends_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "rotated_from": {
+            "type": "string"
+          },
+          "secret": {
+            "description": "One-time plaintext credential. Never log, persist in browser storage or send to telemetry.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "rotated_from",
+          "grace_ends_at",
+          "api_key",
+          "secret"
+        ],
+        "type": "object"
+      },
       "MigrationFeature": {
         "properties": {
           "app_path": {
@@ -6295,7 +6518,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.59"
+    "version": "v0.86.60"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -21708,7 +21931,24 @@
         "operationId": "get__me_keys",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeKeyCatalog"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -21797,6 +22037,7 @@
     },
     "/me/keys/{id}/rotate": {
       "post": {
+        "description": "Rotates only an active, unexpired key owned by the caller and within their current role, team and scopes. Preserves the original key restrictions and replacement expiry. All keys in a rotation lineage share key-scoped daily/monthly quota rules, committed usage and in-flight reservations; rotation does not reset the allowance. Individual request history remains attributed to each key. Omitted body or {} uses legacy immediate revocation. Supplying grace_seconds or expected_revision requires both a reason and a revision from GET /me/keys. Grace is capped by original expiry, at most 86400 seconds. Replacement, durable retirement lineage and both lifecycle audit events commit atomically. Duplicate rotation conflicts even during grace or after audit retention. A lost response cannot recover the one-time secret: inspect current keys and revoke an unusable replacement rather than automatically retrying.",
         "operationId": "post__me_keys_id_rotate",
         "parameters": [
           {
@@ -21808,9 +22049,106 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeKeyRotationRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeKeyRotationResult"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid review, reason or grace period"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Current authority does not permit this rotation"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Key not owned by caller or self-service disabled"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Key changed, expired, inactive or already rotated"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Rotation not confirmed; inspect current keys before any further action"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Current team authority could not be verified"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

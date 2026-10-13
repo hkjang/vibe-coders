@@ -11,6 +11,7 @@ import { apiKeyPublicSchema, meKeysSchema } from "@/shared/api/domains/access.sc
 import { publishLogout, tokenStore } from "@/shared/auth/token-store";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
@@ -38,7 +39,9 @@ function setup(update: ApiHandler = () => ({}), load: ApiHandler = () => catalog
     api,
     ...renderScreen(
       <main id="main-content" tabIndex={-1}>
-        <MeKeysTab />
+        <FeatureAccessContext.Provider value={{ featureId: "me.home", readOnly: false, permitted: true }}>
+          <MeKeysTab />
+        </FeatureAccessContext.Provider>
       </main>,
     ),
   };
@@ -266,7 +269,7 @@ describe("개인 API 키 권한 초안", () => {
     }));
     const dialog = await openEditor(user);
     await user.click(scope(dialog, "future:new"));
-    act(() => client.setQueryData(meKeys.keys, catalog));
+    act(() => client.setQueriesData({ queryKey: meKeys.keys }, catalog));
     expect(scope(dialog, "future:new")).toBeChecked();
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "권한 저장" })).toBeDisabled());
     await user.click(scope(dialog, "future:new"));
@@ -283,7 +286,8 @@ describe("개인 API 키 권한 초안", () => {
       const dialog = await openEditor(user);
       await act(async () => {
         fireEvent.submit(scopeForm(dialog));
-        if (state === "changed") client.setQueryData(meKeys.keys, { ...catalog, grantable_scopes: [] });
+        if (state === "changed")
+          client.setQueriesData({ queryKey: meKeys.keys }, { ...catalog, grantable_scopes: [] });
         else if (state === "invalidated")
           await client.invalidateQueries({ queryKey: meKeys.keys, refetchType: "none" });
         else {
@@ -308,13 +312,16 @@ describe("개인 API 키 권한 초안", () => {
     const dialog = await openEditor(user);
     await user.click(scope(dialog, "models:read"));
     act(() =>
-      client.setQueryData(meKeys.keys, {
-        ...catalog,
-        api_keys: [
-          { ...row, id: "other_key", name: "다른 키" },
-          { ...row, name: "갱신된 키", scopes: [] },
-        ],
-      }),
+      client.setQueriesData(
+        { queryKey: meKeys.keys },
+        {
+          ...catalog,
+          api_keys: [
+            { ...row, id: "other_key", name: "다른 키" },
+            { ...row, name: "갱신된 키", scopes: [] },
+          ],
+        },
+      ),
     );
     expect(dialog).toHaveTextContent(row.name);
     expect(scope(dialog, "future:scope")).toBeChecked();
@@ -338,7 +345,12 @@ describe("개인 API 키 권한 초안", () => {
     const user = userEvent.setup();
     const { client } = setup();
     const dialog = await openEditor(user);
-    act(() => client.setQueryData(meKeys.keys, { ...catalog, api_keys: [{ ...row, id: "other_key" }] }));
+    act(() =>
+      client.setQueriesData(
+        { queryKey: meKeys.keys },
+        { ...catalog, api_keys: [{ ...row, id: "other_key" }] },
+      ),
+    );
     await user.click(within(dialog).getByRole("button", { name: "취소" }));
     await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());
     expect(screen.getByRole("button", { name: "권한 수정" })).not.toHaveFocus();
@@ -393,7 +405,7 @@ describe("개인 API 키 권한 초안", () => {
         else tokenStore.setLegacyToken("synthetic-personal-session");
       });
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "권한 수정" }));
+      fireEvent.click(await screen.findByRole("button", { name: "권한 수정" }));
       const reopened = await screen.findByRole("dialog", { name: "내 API 키 권한 수정" });
       await user.click(scope(reopened, "chat:completion"));
       expect(within(reopened).getByRole("button", { name: "권한 저장" })).toBeEnabled();

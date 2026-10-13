@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.59"
+var AppVersion = "v0.86.60"
 
 type Server struct {
 	cfg      config.Config
@@ -955,6 +955,11 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		plainKey := payload.Key
+		expiry := parseAPITime(payload.ExpiresAt)
+		if strings.TrimSpace(payload.ExpiresAt) != "" && expiry.IsZero() {
+			writeOpenAIError(w, http.StatusBadRequest, "expiry must be an RFC3339 timestamp with a timezone", "invalid_request_error", "invalid_key_expiry")
+			return
+		}
 		generated := false
 		if plainKey == "" {
 			var err error
@@ -1015,7 +1020,7 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			AllowedProviders: payload.AllowedProviders,
 			DeniedProviders:  payload.DeniedProviders,
 			BudgetLimitKRW:   payload.BudgetLimitKRW,
-			ExpiresAt:        parseAPITime(payload.ExpiresAt),
+			ExpiresAt:        expiry,
 		}
 		if err := s.db.UpsertAPIKey(r.Context(), record); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_create_failed")

@@ -2916,12 +2916,25 @@ func (s *SQLStore) SearchPrompts(ctx context.Context, q PromptSearch) ([]RecentR
 }
 
 func (s *SQLStore) UsageSince(ctx context.Context, filter UsageFilter) (int64, float64, int64, error) {
+	return s.usageSince(ctx, filter, false)
+}
+
+// Exact request reporting remains per credential. Only quota/budget accounting
+// expands the rotation family, including when daily rollups do not cover it.
+func (s *SQLStore) usageSince(ctx context.Context, filter UsageFilter, quotaFamily bool) (int64, float64, int64, error) {
+	prefix := ""
 	where := []string{"r.created_at >= ?"}
 	args := []any{filter.Since.UTC().Format(time.RFC3339Nano)}
 	switch filter.Scope {
 	case "api_key":
-		where = append(where, "r.api_key_id = ?")
-		args = append(args, filter.ScopeValue)
+		if quotaFamily {
+			prefix = apiKeyQuotaFamilyCTE
+			where = append(where, "r.api_key_id IN (SELECT id FROM key_family)")
+			args = append([]any{filter.ScopeValue}, args...)
+		} else {
+			where = append(where, "r.api_key_id = ?")
+			args = append(args, filter.ScopeValue)
+		}
 	case "team":
 		where = append(where, requestTeamFilter)
 		args = append(args, filter.ScopeValue)
@@ -2934,7 +2947,7 @@ func (s *SQLStore) UsageSince(ctx context.Context, filter UsageFilter) (int64, f
 		return 0, 0, 0, fmt.Errorf("unsupported quota scope %q", filter.Scope)
 	}
 
-	query := s.bind(`SELECT COUNT(r.id), COALESCE(SUM(t.total_tokens), 0), COALESCE(SUM(t.estimated_cost), 0)
+	query := s.bind(prefix + `SELECT COUNT(r.id), COALESCE(SUM(t.total_tokens), 0), COALESCE(SUM(t.estimated_cost), 0)
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		WHERE ` + strings.Join(where, " AND "))
@@ -2984,9 +2997,17 @@ func (s *SQLStore) ListQuotas(ctx context.Context) ([]QuotaPublic, error) {
 }
 
 func (s *SQLStore) ActiveQuotasFor(ctx context.Context, scope string, scopeValue string) ([]QuotaRecord, error) {
+	values := []string{scopeValue}
+	if scope == "api_key" {
+		var err error
+		values, err = s.apiKeyQuotaFamily(ctx, scopeValue)
+		if err != nil {
+			return nil, err
+		}
+	}
 	now := time.Now()
-	if cached, ok := s.quotas.filter(scope, scopeValue, now); ok {
-		return cached, nil
+	if cached, ok := s.quotas.active.get(now); ok {
+		return filterQuotasForValues(cached, scope, values), nil
 	}
 	gen := s.quotas.beginLoad()
 	all, err := s.loadActiveQuotas(ctx)
@@ -2994,7 +3015,7 @@ func (s *SQLStore) ActiveQuotasFor(ctx context.Context, scope string, scopeValue
 		return nil, err
 	}
 	s.quotas.storeActive(all, gen, now)
-	return filterQuotas(all, scope, scopeValue), nil
+	return filterQuotasForValues(all, scope, values), nil
 }
 
 func (s *SQLStore) loadActiveQuotas(ctx context.Context) ([]QuotaRecord, error) {

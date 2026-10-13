@@ -48,9 +48,19 @@ func (c *quotaCache) filter(scope, scopeValue string, now time.Time) ([]QuotaRec
 // filterQuotas is the same selection applied to a freshly loaded set, kept next to filter
 // so the two cannot drift apart.
 func filterQuotas(all []QuotaRecord, scope, scopeValue string) []QuotaRecord {
+	return filterQuotasForValues(all, scope, []string{scopeValue})
+}
+
+// Definitions may be cached; rotation relationships deliberately are not.
+// A replacement committed by another pool must inherit limits immediately.
+func filterQuotasForValues(all []QuotaRecord, scope string, values []string) []QuotaRecord {
+	allowed := make(map[string]bool, len(values))
+	for _, value := range values {
+		allowed[value] = true
+	}
 	result := []QuotaRecord{}
 	for _, q := range all {
-		if q.Scope == scope && q.ScopeValue == scopeValue {
+		if q.Scope == scope && allowed[q.ScopeValue] {
 			result = append(result, q)
 		}
 	}

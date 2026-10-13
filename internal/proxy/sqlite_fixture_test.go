@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -166,7 +167,26 @@ func TestSQLiteFixtureMatchesFreshMigration(t *testing.T) {
 	for _, table := range tables {
 		name := strings.TrimPrefix(table[0], "value:")
 		query := `SELECT * FROM "` + strings.ReplaceAll(name, `"`, `""`) + `" ORDER BY rowid`
-		if !reflect.DeepEqual(fixtureRows(t, cloneRaw, query), fixtureRows(t, freshRaw, query)) {
+		got, want := fixtureRows(t, cloneRaw, query), fixtureRows(t, freshRaw, query)
+		if name == "api_key_revision_secret" {
+			// Fresh databases intentionally generate independent private secrets.
+			// Check the complete row shape and entropy size without printing values;
+			// the schema above and all other seed rows still compare exactly.
+			for _, rows := range [][][]string{got, want} {
+				if len(rows) != 1 || len(rows[0]) != 2 || rows[0][0] != "value:1" {
+					t.Fatal("revision protection singleton differs from migration contract")
+				}
+				secret, err := hex.DecodeString(strings.TrimPrefix(rows[0][1], "value:"))
+				if err != nil || len(secret) != 32 {
+					t.Fatal("revision protection secret is not a 256-bit value")
+				}
+			}
+			if reflect.DeepEqual(got, want) {
+				t.Fatal("independent migration reused the fixture revision secret")
+			}
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("fixture seed data differs for table %s", name)
 		}
 	}

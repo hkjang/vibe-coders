@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"errors"
+	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -61,15 +64,17 @@ func (s *SQLStore) ReleaseQuota(ctx context.Context, requestID string) error {
 
 // ReservedUsage sums the in-flight reservations for one quota scope. Expired rows are
 // excluded by the query itself, so a stalled cleanup can never over-count and block a
-// tenant. Scope handling mirrors UsageSince deliberately: the two numbers are added
+// tenant. Scope handling mirrors UsageForPeriod deliberately: the two numbers are added
 // together, so they have to agree on what a scope means.
 func (s *SQLStore) ReservedUsage(ctx context.Context, scope, scopeValue string, now time.Time) (int64, float64, error) {
+	prefix := ""
 	where := []string{"expires_at > ?"}
 	args := []any{formatTime(now.UTC())}
 	switch scope {
 	case "api_key":
-		where = append(where, "api_key_id = ?")
-		args = append(args, scopeValue)
+		prefix = apiKeyQuotaFamilyCTE
+		where = append(where, "api_key_id IN (SELECT id FROM key_family)")
+		args = append([]any{scopeValue}, args...)
 	case "team":
 		// Reuse the committed-usage expression verbatim rather than storing a team
 		// column: the two sums are added together, so any divergence in what "team"
@@ -86,7 +91,7 @@ func (s *SQLStore) ReservedUsage(ctx context.Context, scope, scopeValue string, 
 	}
 	var tokens int64
 	var cost float64
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT COALESCE(SUM(tokens), 0), COALESCE(SUM(cost_krw), 0)
+	err := s.db.QueryRowContext(ctx, s.bind(prefix+`SELECT COALESCE(SUM(tokens), 0), COALESCE(SUM(cost_krw), 0)
 		FROM quota_reservations
 		WHERE `+strings.Join(where, " AND ")), args...).Scan(&tokens, &cost)
 	if err != nil {
@@ -117,6 +122,26 @@ type ReservedTotals struct {
 	CostKRW float64
 }
 
+const liveReservationsQuery = `WITH RECURSIVE live AS (
+		SELECT COALESCE(api_key_id, '') AS api_key_id,
+			COALESCE(NULLIF(client_ip, ''), 'unknown') AS client_ip,
+			COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = quota_reservations.api_key_id), ''), 'unassigned') AS team,
+			COALESCE(tokens, 0) AS tokens, COALESCE(cost_krw, 0) AS cost_krw
+		FROM quota_reservations
+		WHERE expires_at > ?
+	), key_family(id) AS (
+		SELECT DISTINCT api_key_id FROM live
+		UNION
+		SELECT CASE WHEN r.old_key_id = f.id THEN r.new_key_id ELSE r.old_key_id END
+		FROM api_key_rotations r JOIN key_family f ON r.old_key_id = f.id OR r.new_key_id = f.id
+	)
+	SELECT 'api_key', api_key_id, '', SUM(tokens), SUM(cost_krw) FROM live GROUP BY api_key_id
+	UNION ALL SELECT 'rotation', old_key_id, new_key_id, 0, 0 FROM api_key_rotations
+		WHERE old_key_id IN (SELECT id FROM key_family)
+	UNION ALL SELECT 'global', '*', '', SUM(tokens), SUM(cost_krw) FROM live HAVING COUNT(*) > 0
+	UNION ALL SELECT 'ip', client_ip, '', SUM(tokens), SUM(cost_krw) FROM live GROUP BY client_ip
+	UNION ALL SELECT 'team', team, '', SUM(tokens), SUM(cost_krw) FROM live GROUP BY team`
+
 // LiveReservations sums the outstanding reservations for every scope at once.
 //
 // checkQuotas asks about each quota's scope separately, which is a round trip per quota
@@ -129,13 +154,10 @@ type ReservedTotals struct {
 // usage resolves them with. Divergence between the two would silently mis-count, because
 // the two sums are added together.
 func (s *SQLStore) LiveReservations(ctx context.Context, now time.Time) (map[string]map[string]ReservedTotals, error) {
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT
-			COALESCE(api_key_id, ''),
-			COALESCE(NULLIF(client_ip, ''), 'unknown'),
-			COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = quota_reservations.api_key_id), ''), 'unassigned'),
-			COALESCE(tokens, 0), COALESCE(cost_krw, 0)
-		FROM quota_reservations
-		WHERE expires_at > ?`), formatTime(now.UTC()))
+	// Read reservations and lineage in one statement/snapshot. Only families
+	// with live reservations are traversed, not the complete rotation history.
+	// Key-family expansion is excluded from global/IP/team sums to avoid doubling.
+	rows, err := s.db.QueryContext(ctx, s.bind(liveReservationsQuery), formatTime(now.UTC()))
 	if err != nil {
 		return nil, err
 	}
@@ -144,23 +166,70 @@ func (s *SQLStore) LiveReservations(ctx context.Context, now time.Time) (map[str
 	totals := map[string]map[string]ReservedTotals{
 		"global": {}, "api_key": {}, "ip": {}, "team": {},
 	}
-	add := func(scope, value string, tokens int64, cost float64) {
-		t := totals[scope][value]
-		t.Tokens += tokens
-		t.CostKRW += cost
-		totals[scope][value] = t
-	}
+	neighbors := map[string][]string{}
 	for rows.Next() {
-		var apiKeyID, clientIP, team string
+		var scope, value, related string
 		var tokens int64
 		var cost float64
-		if err := rows.Scan(&apiKeyID, &clientIP, &team, &tokens, &cost); err != nil {
+		if err := rows.Scan(&scope, &value, &related, &tokens, &cost); err != nil {
 			return nil, err
 		}
-		add("global", "*", tokens, cost)
-		add("api_key", apiKeyID, tokens, cost)
-		add("ip", clientIP, tokens, cost)
-		add("team", team, tokens, cost)
+		if scope == "rotation" {
+			neighbors[value] = append(neighbors[value], related)
+			neighbors[related] = append(neighbors[related], value)
+			continue
+		}
+		totals[scope][value] = ReservedTotals{Tokens: tokens, CostKRW: cost}
 	}
-	return totals, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Traverse each connected family once, not once per live key. SQL returns
+	// original per-key totals and reachable edges from the same snapshot; only
+	// after a complete component has been summed may its totals be expanded.
+	visited := map[string]bool{}
+	for seed := range neighbors {
+		if visited[seed] {
+			continue
+		}
+		visited[seed] = true
+		members := []string{seed}
+		for i := 0; i < len(members); i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			for _, next := range neighbors[members[i]] {
+				if !visited[next] {
+					visited[next] = true
+					members = append(members, next)
+				}
+			}
+		}
+		// Stable addition order avoids map iteration affecting fractional costs.
+		sort.Strings(members)
+		var sum ReservedTotals
+		for _, id := range members {
+			var err error
+			sum, err = addReservedTotals(sum, totals["api_key"][id])
+			if err != nil {
+				return nil, err
+			}
+		}
+		for _, id := range members {
+			totals["api_key"][id] = sum
+		}
+	}
+	return totals, nil
+}
+
+// Match SQL SUM/Scan's overflow failure instead of wrapping a family total.
+func addReservedTotals(a, b ReservedTotals) (ReservedTotals, error) {
+	if (b.Tokens > 0 && a.Tokens > math.MaxInt64-b.Tokens) || (b.Tokens < 0 && a.Tokens < math.MinInt64-b.Tokens) {
+		return ReservedTotals{}, errors.New("reservation token total overflow")
+	}
+	cost := a.CostKRW + b.CostKRW
+	if math.IsInf(cost, 0) || math.IsNaN(cost) {
+		return ReservedTotals{}, errors.New("reservation cost total invalid")
+	}
+	return ReservedTotals{Tokens: a.Tokens + b.Tokens, CostKRW: cost}, nil
 }

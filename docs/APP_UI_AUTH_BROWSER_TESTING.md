@@ -11,6 +11,7 @@
 - 변경 세트 저장값·설정 이력·감사 검사: `internal/proxy/change_set_browser_fixture_test.go`
 - 브라우저 설정과 시나리오: `web/playwright.auth.config.ts`, `web/tests/auth-live/auth-live.spec.ts`, `web/tests/auth-live/access-live.spec.ts`, `web/tests/auth-live/recovery-live.spec.ts`
 - 안전 보고서: `web/tests/auth-live/safe-reporter.ts`
+- 개인 키 회전 검사: `web/tests/auth-live/me-key-rotation-live.spec.ts`
 - 보고서 누출 방지 회귀: `web/scripts/auth-report-sanitization.test.mjs`
 
 게이트웨이와 IdP는 임의의 loopback 포트에서 실행한다. 임시 DB에는 합성 관리자·읽기 전용 관리자·팀을 만들고, 비밀번호·JWT 서명 비밀·IdP 클라이언트 비밀은 실행마다 생성한다. IdP는 실제 HTTP discovery/JWKS/인증 코드/토큰 엔드포인트와 RSA 서명 ID 토큰을 제공하는 **테스트용 구현**이지 Keycloak 제품 인스턴스는 아니다.
@@ -35,6 +36,14 @@ React 화면은 Vite 개발 서버가 아니라 Go 바이너리에 포함된 정
 | `AUTH-LIVE-012` | 실제 Text2SQL 중지·재개 확인창→Go POST→새로고침 상태 복원, DB 감사 2건과 기존 토큰 기반 행위자 참조, 읽기 전용 UI 잠금·실제 POST 401·상태 불변 |
 | `AUTH-LIVE-013` | 실제 변경 세트 생성·미리보기·제출·승인·적용·되돌리기·삭제, 적용 전 값 복원, 설정 이력 3건과 변경 감사 6종 각각 1건·사유 확인 |
 | `AUTH-LIVE-014` | 읽기 전용 변경 세트의 생성·수명 주기 작업 비활성화, 실제 GET 200·적용 POST 401과 승인 상태 불변 |
+| `AUTH-LIVE-019` | 현지 만료일의 ISO 전송·실제 저장 순간 확인, 개인 키 발급·검토·5분 유예 회전, 원래 키와 대체 키 호출, 원래 키 폐기 후 거부, 비밀값 일회 표시, 확인창 키보드 포커스와 axe 검사 |
+| `AUTH-LIVE-020` | 실제 회전 커밋 뒤 응답 전달만 차단, 자동·반복 재전송 방지, 새로고침 후 대체 키 확인·폐기, 비밀값 비노출과 원래 키 즉시 거부 |
+
+019·020을 위해 격리된 Go 하네스에서만 개인 키 기능을 활성화한다. 운영 기본 설정은 바꾸지 않는다.
+019의 5분 유예 종료까지 브라우저가 기다리지는 않는다. 실제 종료 시각과 원래 만료일 상한은
+별도 Go HTTP/저장소 검사로 검증한다. 020은 성공 응답을 합성하지 않고 실제 커밋 응답의 전달을
+차단한다. `personal-key-a11y.json`은 위반 개수와 고정 분류 번호만 담는 로컬 진단용이며,
+노드·선택자·HTML·계정·키 원문은 담지 않는다. CI의 기본 업로드 대상은 기존 안전 요약 파일뿐이다.
 
 다음 세부 조건도 증명 범위를 해석할 때 중요하다.
 

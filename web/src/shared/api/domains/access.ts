@@ -117,6 +117,7 @@ import type {
   PostMeConnectionDoctorData,
   PostMeKeysData,
   PostMeKeysIdRotateData,
+  PostMeKeysIdRotateResponse,
   PostMeRecommendationsIdFeedbackData,
   PostMeSessionsRevokeOthersData,
   PostMeSkillsNameFeedbackData,
@@ -492,7 +493,7 @@ export const accessEndpoints = {
       "/me/keys/{id}",
       meKeyScopesSchema,
     ),
-    rotateKey: operation<PostMeKeysIdRotateData, unknown>()(
+    rotateKey: operation<PostMeKeysIdRotateData, PostMeKeysIdRotateResponse>()(
       "POST",
       "/me/keys/{id}/rotate",
       meKeyRotatedSchema,
