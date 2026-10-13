@@ -54,6 +54,7 @@ function Comparison({
   const lifetime = useId();
   const inputId = useId();
   const input = useRef<HTMLInputElement>(null);
+  const submissionSerial = useRef(0);
   const [other, setOther] = useState("");
   const [submitted, setSubmitted] = useState<{ id: string; serial: number }>();
   const [error, setError] = useState<string>();
@@ -94,12 +95,13 @@ function Comparison({
     const id = other.trim();
     const invalid = comparisonIdError(id, access.prefixes);
     if (invalid) {
+      setSubmitted(undefined);
       setError(invalid);
       input.current?.focus();
       return;
     }
     setError(undefined);
-    setSubmitted((previous) => ({ id, serial: (previous?.serial ?? 0) + 1 }));
+    setSubmitted({ id, serial: ++submissionSerial.current });
   };
   if (!access.readable) return <p role="status">현재 요청 조회 권한을 확인하세요.</p>;
   const pair = diff.isSuccess && !diff.isFetching ? diff.data : undefined;

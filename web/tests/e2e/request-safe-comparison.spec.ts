@@ -106,6 +106,31 @@ test("계정이 바뀌면 진행 중 비교를 취소하고 늦은 결과를 새
   await expect(page.getByLabel("비교할 요청 ID")).toHaveValue("");
   await expect(table(page)).toHaveCount(0);
 });
+test("정상 비교 후 잘못된 ID를 제출하면 이전 결과를 지우고 새 조회 전까지 복원하지 않는다", async ({
+  page,
+  gateway,
+}) => {
+  await open(page, gateway);
+  await compare(page);
+  await expect(table(page)).toBeVisible();
+  for (const invalid of ["", "corp_" + "a".repeat(32)]) {
+    const reads = gateway.listCalls.length;
+    const input = page.getByLabel("비교할 요청 ID");
+    await input.fill(invalid);
+    await page.getByRole("button", { name: "비교", exact: true }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(input).toBeFocused();
+    await expect(table(page)).toHaveCount(0);
+    expect(gateway.listCalls).toHaveLength(reads);
+    await input.fill("req-b");
+    await expect(table(page)).toHaveCount(0);
+    gateway.listReply(reads + 1, { body: response([left]) });
+    gateway.listReply(reads + 2, { body: response([right]) });
+    await page.getByRole("button", { name: "비교", exact: true }).click();
+    await expect(table(page)).toBeVisible();
+    expect(gateway.listCalls).toHaveLength(reads + 2);
+  }
+});
 test("안전한 요약 계약에 원문 필드가 섞인 응답은 표시하지 않는다", async ({ page, gateway }) => {
   await open(page, gateway);
   gateway.listReply(3, { body: { ...response([right]), prompts: [{ content: "unexpected raw content" }] } });

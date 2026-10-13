@@ -62,6 +62,31 @@ describe("RequestComparePanel", () => {
     expect(screen.getByLabelText("비교할 요청 ID")).toHaveFocus();
     expect(api.calls).toHaveLength(0);
   });
+  it.each(["", "corp_" + "a".repeat(32)])(
+    "retires a successful comparison when a replacement ID fails validation (%s)",
+    async (invalid) => {
+      const api = safeApi();
+      const user = userEvent.setup();
+      renderScreen(panel());
+      await compare(user);
+      await screen.findByRole("table");
+      const input = screen.getByLabelText("비교할 요청 ID");
+      await user.clear(input);
+      if (invalid) await user.type(input, invalid);
+      await user.click(screen.getByRole("button", { name: "비교" }));
+      expect(screen.getByRole("alert")).toBeVisible();
+      expect(input).toHaveFocus();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(api.calls).toHaveLength(2);
+      // Editing away the invalid value must not resurrect the old result.
+      await user.clear(input);
+      await user.type(input, "req-b");
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "비교" }));
+      await screen.findByRole("table");
+      expect(api.calls).toHaveLength(4);
+    },
+  );
   it("removes the old comparison during a fresh read and failed retry, then permits explicit recovery", async () => {
     let fail = false;
     const api = mockApi({
