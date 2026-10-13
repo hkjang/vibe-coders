@@ -16,6 +16,7 @@ export function catalogRecordCurrent<T extends { id: string }>(
   key: QueryKey,
   field: string,
   baseline: T,
+  recordFingerprint: (row: T) => string = fingerprint,
 ): boolean {
   const state = client.getQueryState(key);
   const data = client.getQueryData<Record<string, T[] | null | undefined>>(key);
@@ -25,6 +26,7 @@ export function catalogRecordCurrent<T extends { id: string }>(
     !state.isInvalidated &&
     state.fetchStatus === "idle" &&
     rows?.length === 1 &&
-    fingerprint(rows[0]) === fingerprint(baseline)
+    rows[0] !== undefined &&
+    recordFingerprint(rows[0]) === recordFingerprint(baseline)
   );
 }
