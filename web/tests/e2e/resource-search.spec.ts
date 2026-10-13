@@ -113,11 +113,13 @@ test("검색 재조회와 실패 동안 이전 결과 이동을 차단하고 명
     await expect(dialog.getByRole("option")).toBeVisible();
     await dialog.getByRole("button", { name: "자원 검색 다시 시도" }).click();
     await expect(dialog.getByRole("status")).toContainText("검색하고 있습니다");
+    await expect(input).toBeFocused();
     await expect(dialog.getByRole("option")).toHaveCount(0);
     await input.press("Enter");
     await expect(dialog).toBeVisible();
     release();
     await expect(dialog.getByRole("status")).toContainText("실패했습니다");
+    await expect(input).toBeFocused();
     await expect(dialog.getByRole("option")).toHaveCount(0);
     await expect(dialog.getByText("요청 ID: search-failed-request", { exact: true })).toBeVisible();
     await expect(dialog.getByText(/synthetic-search-request/)).toHaveCount(0);
@@ -125,6 +127,7 @@ test("검색 재조회와 실패 동안 이전 결과 이동을 차단하고 명
     await expect(page).not.toHaveURL(/workflow=/);
     await dialog.getByRole("button", { name: "자원 검색 다시 시도" }).click();
     await expect(dialog.getByRole("option")).toBeVisible();
+    await expect(input).toBeFocused();
     await input.press("Enter");
     await expect(page).toHaveURL(new RegExp(`workflow=${first.id}`));
     expect(calls).toBe(3);

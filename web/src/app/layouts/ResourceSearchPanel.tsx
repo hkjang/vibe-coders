@@ -199,7 +199,14 @@ function ResourceSearchContent({
         {limited ? " 결과가 더 있습니다. 이름을 더 구체적으로 입력하세요." : ""}
       </div>
       {ready && (result.isError || partial) ? (
-        <Button variant="secondary" disabled={result.isFetching} onClick={() => void result.refetch()}>
+        <Button
+          variant="secondary"
+          disabled={result.isFetching}
+          onClick={() => {
+            inputRef.current?.focus();
+            void result.refetch();
+          }}
+        >
           자원 검색 다시 시도
         </Button>
       ) : null}

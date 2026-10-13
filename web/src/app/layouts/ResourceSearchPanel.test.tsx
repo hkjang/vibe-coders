@@ -243,6 +243,34 @@ describe("permission-scoped resource search", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("0개의 자원"));
   });
 
+  it("재시도 버튼이 사라져도 검색 입력에 포커스를 유지한다", async () => {
+    let finish!: (value: typeof response) => void;
+    const held = new Promise<typeof response>((resolve) => {
+      finish = resolve;
+    });
+    vi.spyOn(apiClient, "request")
+      .mockResolvedValueOnce({
+        ...response,
+        groups: [...response.groups, { kind: "app", status: "unavailable", limited: false, items: [] }],
+      })
+      .mockReturnValueOnce(held);
+    setup();
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "정산" } });
+    const retry = await screen.findByRole("button", { name: "자원 검색 다시 시도" });
+    retry.focus();
+    expect(retry).toHaveFocus();
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("검색하고 있습니다"));
+    expect(input).toHaveFocus();
+    await act(async () => {
+      finish(response);
+      await held;
+    });
+    expect(await screen.findByRole("option")).toBeVisible();
+    expect(input).toHaveFocus();
+  });
+
   it("does not execute the selected resource during Korean composition", async () => {
     vi.spyOn(apiClient, "request").mockResolvedValue(response);
     const { go } = setup();
