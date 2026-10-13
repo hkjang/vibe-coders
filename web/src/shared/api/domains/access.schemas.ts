@@ -431,6 +431,25 @@ export const roleMatrixSchema = z.object({
   all_scopes: z.array(matrixIdentifier),
 });
 
+export const roleAdminSchema = z.object({
+  roles: z
+    .array(
+      roleSchema.extend({
+        role: matrixIdentifier,
+        scopes: z
+          .array(matrixIdentifier)
+          .nullable()
+          .transform((scopes) => scopes ?? []),
+        description: z.string(),
+        default_home: z.string(),
+        is_system: z.boolean(),
+      }),
+    )
+    .min(1)
+    .refine((roles) => new Set(roles.map((row) => row.role)).size === roles.length),
+  all_scopes: z.array(matrixIdentifier).min(1),
+});
+
 export const roleSavedSchema = looseObject({ role: roleSchema.nullish() });
 
 export const roleDeletedSchema = looseObject({ role: text, deleted: orDefault(z.boolean(), false) });
