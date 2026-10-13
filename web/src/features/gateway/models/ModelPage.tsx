@@ -26,7 +26,8 @@ import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
-import { sortModelCatalogRows } from "./model-catalog-table-state";
+import { defaultModelCatalogOrder, sortModelCatalogRows } from "./model-catalog-table-state";
+import { ModelExportControl } from "./ModelExportControl";
 import { ModelReadBoundary } from "./ModelReadBoundary";
 
 const defaultRange: HealthRange = "24h";
@@ -147,10 +148,7 @@ function ModelPageContent(): React.JSX.Element {
     () =>
       models.data
         ? buildModelRows(models.data, quality.data, pricing.data, tags.data?.tags).sort(
-            (left, right) =>
-              left.providerLabel.localeCompare(right.providerLabel) ||
-              left.model.id.localeCompare(right.model.id) ||
-              left.model.source.localeCompare(right.model.source),
+            defaultModelCatalogOrder,
           )
         : [],
     [models.data, pricing.data, quality.data, tags.data?.tags],
@@ -322,6 +320,10 @@ function ModelPageContent(): React.JSX.Element {
               requestId={models.data?.request_id ?? ""}
             />
 
+            <ModelExportControl
+              filters={{ query, provider: providerFilter, status, range, sort }}
+              blocked={unsafeStoredQuery || providerFilterInvalid}
+            />
             <ModelTable
               allRowCount={allRows.length}
               catalogueAvailable={catalogueAvailable}

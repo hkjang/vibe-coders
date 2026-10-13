@@ -179,6 +179,7 @@ async function install(context: BrowserContext) {
   const data = fixtures();
   const currentBootstrap = structuredClone(bootstrap);
   let modelStatus = 200;
+  let pricingStatus = 200;
   const holds = new Map<number, { promise: Promise<void>; release: () => void }>();
   const reads: Array<{ path: string; query: string }> = [];
   const writes: string[] = [];
@@ -216,7 +217,10 @@ async function install(context: BrowserContext) {
         return json(data.catalogue);
       }
       if (url.pathname === "/admin/models/quality") return json(data.quality);
-      if (url.pathname === "/admin/pricing") return json(data.pricing);
+      if (url.pathname === "/admin/pricing")
+        return pricingStatus === 200
+          ? json(data.pricing)
+          : json({ error: { message: "Synthetic pricing unavailable" } }, pricingStatus);
       return json({ tags: [] });
     }
     if (/^\/(admin|auth|v1|mcp)(\/|$)/u.test(url.pathname)) {
@@ -248,6 +252,9 @@ async function install(context: BrowserContext) {
     },
     status(value: number) {
       modelStatus = value;
+    },
+    pricingStatus(value: number) {
+      pricingStatus = value;
     },
     holdModelRead(sequence: number) {
       let release!: () => void;
