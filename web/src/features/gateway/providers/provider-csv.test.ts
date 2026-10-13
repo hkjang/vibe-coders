@@ -20,6 +20,30 @@ const emptySlo = { slos: [], evaluations: [], since: "2026-10-14T00:00:00Z" };
 const filters = { query: "", status: "all", range: "24h" } as const;
 
 describe("공급자 CSV 투영", () => {
+  it("동점의 다음 기준까지 적용하여 전체 CSV를 화면과 같은 순서로 내보낸다", () => {
+    const result = providerExportCsv(
+      {
+        providers: {
+          providers: [
+            exportProvider(0, { priority: 9, timeout_ms: 100 }),
+            exportProvider(1, { priority: 9, timeout_ms: 0 }),
+            exportProvider(2, { priority: 1, timeout_ms: 0 }),
+          ],
+        },
+        slo: emptySlo,
+      },
+      { ...filters, sort: ["priority_desc", "timeout_asc"] },
+      [],
+      "time",
+    );
+    expect(
+      result.csv
+        .trim()
+        .split("\r\n")
+        .slice(1)
+        .map((line) => line.split(",")[0]),
+    ).toEqual(["공개 공급자 1", "공개 공급자 0", "공개 공급자 2"]);
+  });
   it("전체 수신 목록에 필터·정렬을 적용하고 페이지 제한을 두지 않는다", () => {
     const providers = Array.from({ length: 31 }, (_, index) =>
       exportProvider(index, { enabled: index < 25 }),

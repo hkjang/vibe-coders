@@ -11,6 +11,8 @@ import {
   providerCatalogSortValues,
   readProviderCatalogPageSize,
   readProviderCatalogSort,
+  readProviderCatalogSorting,
+  providerCatalogSortQuery,
 } from "@/shared/utils/provider-catalog-query";
 
 function row(displayName: string, priority = 0, timeout = 0): ProviderCatalogRow {
@@ -36,6 +38,72 @@ function row(displayName: string, priority = 0, timeout = 0): ProviderCatalogRow
 const names = (rows: readonly ProviderCatalogRow[]) => rows.map((item) => item.displayName);
 
 describe("provider local table state", () => {
+  it("compares tied groups by ordered criteria without changing source configuration", () => {
+    const rows = [row("b", 9, 2), row("a", 9, 2), row("zero", 9, 0), row("low", 1, 0)];
+    const before = structuredClone(rows);
+    expect(names(sortProviderCatalogRows(rows, ["priority_desc", "timeout_asc", "name_desc"]))).toEqual([
+      "zero",
+      "b",
+      "a",
+      "low",
+    ]);
+    expect(names(sortProviderCatalogRows(rows, ["timeout_asc", "name_asc"]))).toEqual([
+      "low",
+      "zero",
+      "a",
+      "b",
+    ]);
+    expect(rows).toEqual(before);
+    expect(sortProviderCatalogRows(rows, [])).toBe(rows);
+    expect(providerCatalogSortLabel(["priority_desc", "timeout_asc"])).toBe(
+      "우선순위 내림차순 → 제한 시간 오름차순",
+    );
+  });
+  it("keeps unknown values last per tie group and preserves equal default ties", () => {
+    const rows = [
+      row("unknown-z", NaN, 0),
+      row("known", 1, Infinity),
+      row("unknown-a", NaN, 0),
+      row("zero", 1, 0),
+    ];
+    expect(names(sortProviderCatalogRows(rows, ["priority_desc", "timeout_desc"]))).toEqual([
+      "zero",
+      "known",
+      "unknown-z",
+      "unknown-a",
+    ]);
+    expect(names(sortProviderCatalogRows(rows, ["priority_desc", "timeout_asc", "name_asc"]))).toEqual([
+      "zero",
+      "known",
+      "unknown-a",
+      "unknown-z",
+    ]);
+  });
+  it("accepts only bounded, unique multi-sort columns and preserves single-value compatibility", () => {
+    for (const sort of providerCatalogSortValues) expect(readProviderCatalogSorting([sort])).toEqual([sort]);
+    expect(readProviderCatalogSorting(["priority_desc,timeout_asc,name_desc"])).toEqual([
+      "priority_desc",
+      "timeout_asc",
+      "name_desc",
+    ]);
+    for (const values of [
+      [],
+      [""],
+      ["name_asc", "timeout_desc"],
+      ["name_asc,name_desc"],
+      ["name_asc,name_asc"],
+      ["name_asc,"],
+      ["name_asc, timeout_desc"],
+      ["priority_asc,missing_desc"],
+      ["name_asc,priority_asc,timeout_asc,name_desc"],
+      ["x".repeat(129)],
+    ]) {
+      expect(readProviderCatalogSorting(values)).toBeUndefined();
+    }
+    expect(providerCatalogSortQuery(["priority_desc", "timeout_asc"])).toBe("priority_desc,timeout_asc");
+    expect(providerCatalogSortQuery("name_asc")).toBe("name_asc");
+    expect(providerCatalogSortQuery([])).toBeUndefined();
+  });
   it("preserves default order and references without changing the source", () => {
     const rows = [row("z"), row("a")];
     expect(sortProviderCatalogRows(rows)).toBe(rows);

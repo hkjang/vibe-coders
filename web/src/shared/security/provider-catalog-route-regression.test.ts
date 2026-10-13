@@ -68,6 +68,40 @@ describe("provider catalog public URL security regression", () => {
   });
 
   describe.each(providerPaths)("%s and its /app entry", (path) => {
+    it("preserves bounded multi-sort through route, bootstrap and SSO return guards", () => {
+      const search = "?sort=priority_desc%2Ctimeout_asc%2Cname_desc&page_size=25&page=2";
+      for (const entry of [path, `/app${path}`]) {
+        expect(sanitizeAppRouteSearch(entry, search)).toEqual({
+          search,
+          rejectedKeys: [],
+          sensitiveKeys: [],
+        });
+      }
+      window.history.replaceState(null, "", `/app${path}${search}`);
+      sanitizeWindowAppLocationBeforeBootstrap();
+      expect(window.location.search).toBe(search);
+      expect(appReturnTo(path, search, "")).toBe(`/app${path}${search}`);
+      expect(stageSsoReturnTo(`${path}${search}`)).toBe(`/app${path}${search}`);
+      expect(consumeSsoReturnTo()).toBe(`/app${path}${search}`);
+    });
+    it("rejects duplicate or foreign columns without dropping safe filters", () => {
+      for (const sort of [
+        "name_asc,name_desc",
+        "priority_asc,quality_desc",
+        "timeout_asc,",
+        "priority_asc, timeout_desc",
+      ]) {
+        const result = sanitizeAppRouteSearch(
+          path,
+          `?sort=${encodeURIComponent(sort)}&q=public&page_size=25`,
+        );
+        expect(result).toEqual({
+          search: "?q=public&page_size=25",
+          rejectedKeys: ["sort"],
+          sensitiveKeys: [],
+        });
+      }
+    });
     it("preserves the default route and existing filter/detail identity", () => {
       const search = "?q=public&provider=managed-main&status=enabled&range=24h&page=3";
       for (const entry of [path, `/app${path}`]) {
