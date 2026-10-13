@@ -21,6 +21,27 @@ export type AdminKeyEditReview = {
     reason: string;
 };
 
+export type AdminKeyLegacyUpdateRequest = {
+    name?: string | null;
+    owner?: string | null;
+    review?: AdminKeyEditReview;
+    role?: string | null;
+    scopes?: Array<string> | null;
+    status?: 'active' | 'disabled' | null;
+    team?: string | null;
+    [key: string]: unknown;
+} | null;
+
+export type AdminKeyReviewedUpdateRequest = {
+    name?: string | null;
+    owner?: string | null;
+    review: AdminKeyEditReview;
+    role?: string | null;
+    scopes?: Array<string> | null;
+    status?: 'active' | 'disabled' | null;
+    team?: string | null;
+};
+
 export type AdminKeyRevokeRequest = {
     [key: string]: never;
 } | null | {
@@ -34,15 +55,7 @@ export type AdminKeyRevokeRequest = {
     reason: string;
 };
 
-export type AdminKeyUpdateRequest = {
-    name?: string | null;
-    owner?: string | null;
-    review?: AdminKeyEditReview;
-    role?: string | null;
-    scopes?: Array<string> | null;
-    status?: 'active' | 'disabled' | null;
-    team?: string | null;
-} | null;
+export type AdminKeyUpdateRequest = AdminKeyLegacyUpdateRequest | AdminKeyReviewedUpdateRequest;
 
 export type AdminKeyUpdateResponse = {
     id: string;

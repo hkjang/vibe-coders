@@ -27,7 +27,13 @@ func adminKeyEditOpenAPISchemas() map[string]any {
 			"reason":            map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Trimmed nonblank audit reason."},
 			"expected_revision": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Exact catalog snapshot revision."},
 		}},
-		"AdminKeyUpdateRequest":  map[string]any{"type": "object", "nullable": true, "additionalProperties": false, "properties": fields},
-		"AdminKeyUpdateResponse": map[string]any{"type": "object", "required": []string{"id", "name", "owner", "team", "role", "scopes", "status"}, "properties": response},
+		// The legacy decoder ignores extensions, but any review marker opts in
+		// to the strict variant. Keep review's property type in both branches
+		// for generators that cannot express the JSON Schema `not` constraint.
+		"AdminKeyLegacyUpdateRequest": map[string]any{"type": "object", "nullable": true, "additionalProperties": true, "properties": fields,
+			"not": map[string]any{"type": "object", "required": []string{"review"}}},
+		"AdminKeyReviewedUpdateRequest": map[string]any{"type": "object", "additionalProperties": false, "properties": fields, "required": []string{"review"}},
+		"AdminKeyUpdateRequest":         map[string]any{"oneOf": []any{schemaRef("AdminKeyLegacyUpdateRequest"), schemaRef("AdminKeyReviewedUpdateRequest")}},
+		"AdminKeyUpdateResponse":        map[string]any{"type": "object", "required": []string{"id", "name", "owner", "team", "role", "scopes", "status"}, "properties": response},
 	}
 }

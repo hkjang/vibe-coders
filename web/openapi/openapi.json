@@ -44,40 +44,14 @@
         ],
         "type": "object"
       },
-      "AdminKeyRevokeRequest": {
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "description": "Legacy empty object or JSON null; the whole body may also be omitted.",
-            "maxProperties": 0,
-            "nullable": true,
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "expected_revision": {
-                "description": "Exact reviewed catalog revision; must be paired with reason.",
-                "pattern": "^[a-f0-9]{64}$",
-                "type": "string"
-              },
-              "reason": {
-                "description": "Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.",
-                "maxLength": 1024,
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason",
-              "expected_revision"
-            ],
-            "type": "object"
-          }
-        ]
-      },
-      "AdminKeyUpdateRequest": {
-        "additionalProperties": false,
+      "AdminKeyLegacyUpdateRequest": {
+        "additionalProperties": true,
+        "not": {
+          "required": [
+            "review"
+          ],
+          "type": "object"
+        },
         "nullable": true,
         "properties": {
           "name": {
@@ -117,6 +91,92 @@
           }
         },
         "type": "object"
+      },
+      "AdminKeyReviewedUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "owner": {
+            "nullable": true,
+            "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/AdminKeyEditReview"
+          },
+          "role": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "disabled",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "team": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "review"
+        ],
+        "type": "object"
+      },
+      "AdminKeyRevokeRequest": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "Legacy empty object or JSON null; the whole body may also be omitted.",
+            "maxProperties": 0,
+            "nullable": true,
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "expected_revision": {
+                "description": "Exact reviewed catalog revision; must be paired with reason.",
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "reason": {
+                "description": "Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.",
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "expected_revision"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "AdminKeyUpdateRequest": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AdminKeyLegacyUpdateRequest"
+          },
+          {
+            "$ref": "#/components/schemas/AdminKeyReviewedUpdateRequest"
+          }
+        ]
       },
       "AdminKeyUpdateResponse": {
         "properties": {

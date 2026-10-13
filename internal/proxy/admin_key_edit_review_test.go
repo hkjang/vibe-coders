@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -29,6 +30,33 @@ func TestAdminKeyEditReviewRejectsStaleBrowserSnapshot(t *testing.T) {
 	f.request(t, http.MethodPatch, "/admin/api-keys/"+key.ID, f.adminToken, string(body), http.StatusConflict)
 	if f.key(t, key.ID).Name != key.Name {
 		t.Fatal("stale browser review overwrote a newer edit")
+	}
+}
+
+func TestAdminKeyEditReviewRejectsCappedRotation(t *testing.T) {
+	f := newAPIKeyScopeContractFixture(t)
+	key := store.APIKeyRecord{ID: "edit-capped-rotation", Name: "교체 전", KeyHash: "synthetic-capped-old", UserID: "review-owner", Role: "developer", Status: "active", Scopes: []string{"chat:completion"}, ExpiresAt: time.Now().UTC().Add(time.Hour)}
+	if f.db.UpsertAPIKey(t.Context(), key) != nil {
+		t.Fatal("fixture unavailable")
+	}
+	key = f.key(t, key.ID)
+	revision, err := f.db.APIKeyRevision(t.Context(), key)
+	if err != nil {
+		t.Fatal("revision unavailable")
+	}
+	created := store.AuthEvent{ID: "edit-capped-created", APIKeyID: "edit-capped-replacement", EventType: "api_key_created", ActorUserID: key.UserID}
+	rotated := store.AuthEvent{ID: "edit-capped-rotated", APIKeyID: key.ID, EventType: "api_key_rotated", ActorUserID: key.UserID}
+	if _, err := f.db.RotateAPIKey(t.Context(), key, created.APIKeyID, "synthetic-capped-new", store.MaxAPIKeyRotationGrace, created, rotated); err != nil {
+		t.Fatal("rotation failed")
+	}
+	body, _ := json.Marshal(map[string]any{"scopes": []string{}, "review": map[string]string{"reason": "교체 전 권한 검토", "expected_revision": revision}})
+	f.request(t, http.MethodPatch, "/admin/api-keys/"+key.ID, f.adminToken, string(body), http.StatusConflict)
+	if len(f.key(t, key.ID).Scopes) != 1 || len(f.key(t, created.APIKeyID).Scopes) != 1 {
+		t.Fatal("stale edit changed original or replacement grants")
+	}
+	audits, err := f.db.ListAdminAudit(t.Context(), 20)
+	if err != nil || len(audits) != 0 {
+		t.Fatal("rejected stale edit produced success audit")
 	}
 }
 
