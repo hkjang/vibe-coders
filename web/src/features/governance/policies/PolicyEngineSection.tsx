@@ -735,15 +735,23 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
           if (!open) setPendingToggle(undefined);
         }}
         returnFocusRef={rowTriggerRef}
-        title={pendingToggle?.enabled ? "정책을 중지할까요?" : "정책을 사용할까요?"}
-        description={
-          pendingToggle?.enabled
-            ? "이 정책의 규칙이 더 이상 적용되지 않습니다."
-            : "이 정책의 규칙이 즉시 적용됩니다."
+        title={
+          !editorAccess.read
+            ? "정책 변경 확인"
+            : pendingToggle?.enabled
+              ? "정책을 중지할까요?"
+              : "정책을 사용할까요?"
         }
-        confirmLabel={pendingToggle?.enabled ? "중지" : "사용"}
+        description={
+          !editorAccess.read
+            ? "조회 권한이 없어 정책 상태를 표시하지 않습니다."
+            : pendingToggle?.enabled
+              ? "이 정책의 규칙이 더 이상 적용되지 않습니다."
+              : "이 정책의 규칙이 즉시 적용됩니다."
+        }
+        confirmLabel={!editorAccess.read ? "확인" : pendingToggle?.enabled ? "중지" : "사용"}
         confirmDisabled={!toggleAccess.allowed || !pendingToggle || !policyCurrent(pendingToggle)}
-        tone={pendingToggle?.enabled ? "danger" : "primary"}
+        tone={editorAccess.read && pendingToggle?.enabled ? "danger" : "primary"}
         onConfirm={async () => {
           toggleAccess.assertCurrent();
           if (pendingToggle) {
@@ -773,7 +781,11 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
         }}
         returnFocusRef={caseReturnFocus}
         title="회귀 시나리오를 삭제할까요?"
-        description={`"${pendingCaseDelete?.name ?? ""}" 시나리오를 삭제합니다. 되돌릴 수 없습니다.`}
+        description={
+          editorAccess.read
+            ? `"${pendingCaseDelete?.name ?? ""}" 시나리오를 삭제합니다. 되돌릴 수 없습니다.`
+            : "조회 권한이 없어 시나리오 이름을 표시하지 않습니다."
+        }
         confirmLabel="삭제"
         confirmDisabled={!editorAccess.write.allowed || !pendingCaseDelete || !caseCurrent(pendingCaseDelete)}
         tone="danger"

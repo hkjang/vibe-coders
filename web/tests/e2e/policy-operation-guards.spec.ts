@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { account, test, type PolicyEditorGateway } from "./fixtures/policy-editor";
+import { account, policy, test, type PolicyEditorGateway } from "./fixtures/policy-editor";
 
 const sample = { id: "public-case", name: "공개 회귀 시나리오", expect: "allow" };
 async function login(page: Page, gateway: PolicyEditorGateway) {
@@ -70,6 +70,46 @@ test("열린 삭제 검토는 조회한 시나리오가 바뀌면 잠긴다", as
   await dialog.getByRole("button", { name: "취소", exact: true }).click();
   await expect(page.getByRole("button", { name: `${sample.name} 시나리오 삭제` })).toBeFocused();
 });
+test("조회 권한이 없으면 열린 삭제 확인창에서 시나리오 이름을 제거한다", async ({ page, gateway }) => {
+  await login(page, gateway);
+  await page.getByRole("button", { name: `${sample.name} 시나리오 삭제` }).click();
+  gateway.readable(false);
+  await bootstrap(page);
+  const dialog = page.getByRole("dialog", { name: "회귀 시나리오를 삭제할까요?" });
+  await expect(dialog).not.toContainText(sample.name);
+  await expect(dialog.getByRole("button", { name: "삭제", exact: true })).toBeDisabled();
+  expect(gateway.operations).toEqual([]);
+  gateway.readable(true);
+  await bootstrap(page);
+  await expect(dialog).toContainText(sample.name);
+  expect(gateway.operations).toEqual([]);
+});
+for (const enabled of [false, true]) {
+  test(`정책 사용 상태 ${enabled}는 조회 권한 회수 후 버튼 색상으로 드러나지 않는다`, async ({
+    page,
+    gateway,
+  }) => {
+    gateway.policies([{ ...structuredClone(policy), enabled }]);
+    await login(page, gateway);
+    const action = enabled ? "중지" : "사용";
+    await page.getByRole("button", { name: `${policy.name} ${action}`, exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const originalTone = enabled ? /button-danger/u : /button-primary/u;
+    await expect(dialog.getByRole("button", { name: action, exact: true })).toHaveClass(originalTone);
+    gateway.readable(false);
+    await bootstrap(page);
+    await expect(dialog).toHaveAccessibleName("정책 변경 확인");
+    const confirm = dialog.getByRole("button", { name: "확인", exact: true });
+    await expect(confirm).toBeDisabled();
+    await expect(confirm).toHaveClass(/button-primary/u);
+    await expect(confirm).not.toHaveClass(/button-danger/u);
+    gateway.readable(true);
+    await bootstrap(page);
+    await expect(dialog.getByRole("button", { name: action, exact: true })).toHaveClass(originalTone);
+    expect(gateway.saves).toEqual([]);
+    expect(gateway.operations).toEqual([]);
+  });
+}
 test("이전 계정의 늦은 회귀 결과는 새 계정에 나타나지 않는다", async ({ page, gateway }) => {
   gateway.holdRun(1);
   await login(page, gateway);

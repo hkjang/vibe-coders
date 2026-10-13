@@ -272,6 +272,10 @@ test("같은 계정의 조회 권한 회수 중 미확정 응답도 복구 후 �
   gateway.readable(false);
   await runtime(page);
   await expect(panel(page).getByText("현재 정책을 저장할 수 없습니다.", { exact: true })).toBeVisible();
+  await expect(panel(page).getByRole("table", { name: "정책 변경 전후" })).toHaveCount(0);
+  await expect(panel(page).getByRole("textbox")).toHaveCount(0);
+  await expect(panel(page)).not.toContainText(policy.description ?? "");
+  await expect(panel(page)).not.toContainText(renamed);
   gateway.releaseSave(1);
   await expect.poll(() => gateway.finished).toEqual([1]);
   await expect(panel(page).getByRole("button", { name: "취소", exact: true })).toBeEnabled();
@@ -287,6 +291,31 @@ test("같은 계정의 조회 권한 회수 중 미확정 응답도 복구 후 �
   await expect(save(page)).toBeEnabled();
   expect(gateway.saves).toEqual([renamedBody]);
 });
+
+for (const phase of ["fields", "review"]) {
+  test(`${phase} 정책 편집 원문은 조회 권한 회수 시 제거한다`, async ({ page, gateway }) => {
+    await login(page);
+    if (phase === "fields") await trigger(page).click();
+    else await rename(page);
+    if (phase === "fields") await panel(page).getByLabel("정책 이름", { exact: true }).focus();
+    gateway.readable(false);
+    await runtime(page);
+    await expect(panel(page).getByRole("region", { name: "정책 조회 권한 안내" })).toBeVisible();
+    await expect(panel(page).getByRole("textbox")).toHaveCount(0);
+    await expect(panel(page).getByRole("table", { name: "정책 변경 전후" })).toHaveCount(0);
+    await expect(panel(page)).not.toContainText(policy.description ?? "");
+    await expect(panel(page)).not.toContainText("첫 번째 규칙");
+    if (phase === "fields")
+      await expect(panel(page).getByRole("region", { name: "정책 조회 권한 안내" })).toBeFocused();
+    expect(gateway.saves).toEqual([]);
+    gateway.readable(true);
+    await runtime(page);
+    if (phase === "fields")
+      await expect(panel(page).getByLabel("정책 이름", { exact: true })).toHaveValue(policy.name ?? "");
+    else await expect(save(page)).toBeDisabled();
+    expect(gateway.saves).toEqual([]);
+  });
+}
 
 test("확정 저장 뒤 목록 실패는 저장 실패로 바꾸거나 다시 저장하지 않는다", async ({ page, gateway }) => {
   await login(page);
