@@ -469,6 +469,56 @@ test("권한 비교의 대기 중 조회를 계정 변경 시 취소하고 늦�
   expect(gateway.unexpected).toEqual([]);
 });
 
+test("역할 변경 비교는 입력·원복·모바일 접근성과 저장 전후 초점을 유지한다", async ({ page }, testInfo) => {
+  const gateway = await installGateway(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  await page.goto("/app/access/users?tab=roles");
+  const row = page
+    .getByRole("table", { name: "역할 목록", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "custom_reviewer" });
+  const trigger = row.getByRole("button", { name: "수정", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "역할 수정", exact: true });
+  const review = dialog.getByRole("region", { name: "역할 변경 전후 비교", exact: true });
+  await expect(review.getByText("변경된 항목이 없습니다.")).toBeVisible();
+  const description = dialog.getByRole("textbox", { name: "설명", exact: true });
+  await description.fill("긴 설명 ".repeat(30));
+  const scope = dialog.getByRole("checkbox", { name: "관리 설정 변경 (admin:write)" });
+  await scope.check();
+  await expect(review.getByText("권한 추가 1개 · 제거 0개")).toBeVisible();
+  await expect(review.getByRole("row", { name: "관리 설정 변경 (admin:write) 미부여 부여됨" })).toBeVisible();
+  const scroll = review.getByRole("region", { name: "역할 변경 비교 표, 가로 스크롤 가능" });
+  const beforeColumn = review.getByRole("columnheader", { name: "변경 전", exact: true });
+  expect(
+    await beforeColumn.evaluate((element) => element.getBoundingClientRect().width),
+  ).toBeGreaterThanOrEqual(100);
+  await scroll.focus();
+  await expect(scroll).toBeFocused();
+  expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(dialog.getByRole("button", { name: "저장", exact: true })).toBeInViewport();
+  expect(
+    await page.evaluate(async () => {
+      const axe = (
+        window as unknown as { axe: { run(root: Document): Promise<{ violations: { id: string }[] }> } }
+      ).axe;
+      return (await axe.run(document)).violations.map((violation) => violation.id);
+    }),
+  ).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("role-change-review-mobile.png") });
+  await scope.uncheck();
+  await description.fill("");
+  await expect(review.getByText("변경된 항목이 없습니다.")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect(gateway.writes).toEqual([]);
+  expect(gateway.unexpected).toEqual([]);
+});
+
 test("역할 추가는 기존 이름의 덮어쓰기를 막고 새 이름과 한글 권한만 저장한다", async ({ page }) => {
   const gateway = await installGateway(page);
   await page.goto("/app/access/users?tab=roles");
@@ -482,6 +532,8 @@ test("역할 추가는 기존 이름의 덮어쓰기를 막고 새 이름과 한
   expect(gateway.writes).toHaveLength(0);
   await name.fill("new_reviewer");
   await dialog.getByRole("checkbox", { name: "모델 조회 (models:read)", exact: true }).check();
+  await expect(dialog.getByRole("row", { name: "역할 이름 새 역할 new_reviewer" })).toBeVisible();
+  await expect(dialog.getByRole("row", { name: "모델 조회 (models:read) 미부여 부여됨" })).toBeVisible();
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await expect(dialog).toBeHidden();
   expect(gateway.writes).toEqual([

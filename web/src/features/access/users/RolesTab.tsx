@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { managedRoleLabel } from "@/config/ui-labels";
 import { RolePermissionMatrix } from "./RolePermissionMatrix";
+import { RoleChangeReview } from "./RoleChangeReview";
 import { QueryNotice, ScopeBadges, UpdatedAt } from "@/features/access/access-ui";
 import { useRoleAdmin } from "./use-role-admin";
 import { scopeTitle } from "./role-permission-matrix";
@@ -181,7 +182,8 @@ function RolesContent({
     default_home: "",
     scopes: [],
   });
-  const scopes = form.watch("scopes");
+  const draft = form.watch();
+  const scopes = draft.scopes;
   const { reset: resetRoleForm } = form;
   const columns = useMemo(
     () =>
@@ -341,6 +343,7 @@ function RolesContent({
             ))}
           </div>
         </fieldset>
+        <RoleChangeReview baseline={baseline} draft={draft} />
       </FormDialog>
 
       <ConfirmDialog

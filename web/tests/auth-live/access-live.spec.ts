@@ -43,6 +43,9 @@ test("AUTH-LIVE-027 실제 사용자 정의 역할 등록·계정 부여·유지
   const roleDialog = page.getByRole("dialog", { name: "역할 추가", exact: true });
   await roleDialog.getByRole("textbox", { name: "역할 이름", exact: true }).fill(role);
   await roleDialog.getByRole("checkbox", { name: "모델 조회 (models:read)", exact: true }).check();
+  const roleReview = roleDialog.getByRole("region", { name: "역할 변경 전후 비교", exact: true });
+  await expect(roleReview.getByText("권한 추가 1개 · 제거 0개")).toBeVisible();
+  await expect(roleReview.getByRole("row", { name: "모델 조회 (models:read) 미부여 부여됨" })).toBeVisible();
   const roleSaved = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/roles",
