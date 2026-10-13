@@ -160,8 +160,18 @@ async function mount(entry = "/gateway/providers") {
     </QueryClientProvider>,
   );
   await waitFor(() => {
-    expect(client.getQueryState(["admin", "providers"])?.status).toBe("success");
-    expect(client.getQueryState(["admin", "providers", "slo", "24h"])?.status).toBe("success");
+    for (const prefix of [
+      ["admin", "providers"],
+      ["admin", "providers", "slo", "24h"],
+    ]) {
+      const queries = client.getQueryCache().findAll({
+        queryKey: prefix,
+        predicate: (query) =>
+          query.queryKey.length === prefix.length + 2 && query.queryKey.at(-2) === "provider-read-owner",
+      });
+      expect(queries).toHaveLength(1);
+      expect(queries[0]?.state.status).toBe("success");
+    }
     expect(client.isFetching()).toBe(0);
     expect(links().length).toBeGreaterThan(0);
   });
@@ -177,7 +187,10 @@ async function mount(entry = "/gateway/providers") {
     async refreshCatalogue(next: Provider[]) {
       providers = next;
       await act(async () => {
-        await client.refetchQueries({ queryKey: ["admin", "providers"], exact: true });
+        await client.refetchQueries({
+          queryKey: ["admin", "providers"],
+          predicate: (query) => query.queryKey.length === 4 && query.queryKey[2] === "provider-read-owner",
+        });
       });
     },
   };

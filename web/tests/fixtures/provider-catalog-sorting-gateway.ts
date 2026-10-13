@@ -81,6 +81,7 @@ async function install(context: BrowserContext) {
   const holds = new Map<number, { promise: Promise<void>; release: () => void }>();
   let providerReads = 0;
   let failSlo = false;
+  let providerStatus = 200;
   let providers = [
     ...ordinaryNames.map((name, index) => provider(name, index)),
     provider("[provider-name-omitted]", 57, { provider_ref: privateRefs[0], priority: 300 }),
@@ -111,6 +112,8 @@ async function install(context: BrowserContext) {
     if (url.pathname === "/admin/providers" || url.pathname === "/admin/providers/slo") {
       reads.push({ path: url.pathname, query: url.search });
       if (url.pathname === "/admin/providers") await holds.get(++providerReads)?.promise;
+      if (url.pathname === "/admin/providers" && providerStatus !== 200)
+        return json({ error: { message: "public catalog denied" } }, providerStatus);
       if (url.pathname === "/admin/providers/slo" && failSlo)
         return json({ error: { message: "public SLO read failed" } }, 503);
       return json(
@@ -129,6 +132,16 @@ async function install(context: BrowserContext) {
     unexpected,
     owner(id: string) {
       if (currentBootstrap.user) currentBootstrap.user.id = id;
+    },
+    readonly(value: boolean) {
+      const feature = currentBootstrap.migration_registry.find(
+        (item) => item.feature_id === "gateway.providers",
+      );
+      if (!feature) throw new Error("Provider fixture must register its feature");
+      feature.read_only = value;
+    },
+    status(value: number) {
+      providerStatus = value;
     },
     scopes(scopes: string[]) {
       if (currentBootstrap.user) currentBootstrap.user.scopes = scopes;

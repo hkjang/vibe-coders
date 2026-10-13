@@ -212,7 +212,7 @@ describe("공급자 현재 설정 영향 조회", () => {
         .getQueryCache()
         .getAll()
         .map((query) => query.queryKey),
-    ).toEqual([["admin", "providers", "impact", providerRef]]);
+    ).toEqual([["admin", "providers", "impact", providerRef, "provider-read-owner", expect.any(Number)]]);
     await act(async () => request.resolve(providerImpactFixture(providerRef)));
     expect(deleteButton()).toBeDisabled();
     expect(await screen.findByText(/서버 조회 시각/)).toBeInTheDocument();
