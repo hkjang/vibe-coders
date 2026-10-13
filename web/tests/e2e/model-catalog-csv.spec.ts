@@ -18,6 +18,25 @@ async function csv(download: Download) {
   }
   return text + decoder.decode();
 }
+test("가격 503 뒤 모델 403이 도착해도 이전 목록을 숨긴다", async ({ page, modelGateway }) => {
+  await ready(page);
+  modelGateway.holdModelRead(2);
+  modelGateway.pricingStatus(503);
+  modelGateway.status(403);
+  const downloads: Download[] = [];
+  page.on("download", (download) => downloads.push(download));
+  const unavailable = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/pricing" && response.status() === 503,
+  );
+  await page.getByRole("button", { name: "CSV 내보내기" }).click();
+  await (await unavailable).finished();
+  await expect(page.getByRole("button", { name: "내보낼 모델 조회 중" })).toBeVisible();
+  modelGateway.releaseModelRead(2);
+  await expect(page.getByRole("heading", { name: "모델 조회 권한 확인 필요" })).toBeVisible();
+  await expect(page.getByRole("table")).toHaveCount(0);
+  expect(downloads).toHaveLength(0);
+  expect(modelGateway.reads).toHaveLength(8);
+});
 test("읽기 전용 모델 목록의 필터·정렬 전체 결과를 현재 페이지와 무관하게 내보낸다", async ({
   page,
   modelGateway,

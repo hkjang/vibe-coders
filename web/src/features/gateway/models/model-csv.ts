@@ -1,6 +1,6 @@
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
-import { AppError } from "@/shared/api/error";
+import { AppError, isAppError } from "@/shared/api/error";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { toCsv } from "@/shared/utils/csv";
 import type { ModelCatalogSort } from "@/shared/utils/model-catalog-query";
@@ -30,13 +30,30 @@ export interface ModelExportFilters {
 /** Independent fresh reads; never turn a failed request into a cached export. */
 export async function loadModelExport(range: HealthRange, signal: AbortSignal) {
   const options = { signal, routeId: "gateway.models" };
-  const [catalogue, quality, pricing, tags] = await Promise.all([
-    apiClient.request(endpoints.admin.models.list, options),
-    apiClient.request(endpoints.admin.models.quality, { ...options, query: { window: range } }),
-    apiClient.request(endpoints.admin.models.pricing, options),
-    apiClient.request(endpoints.admin.models.tags, options),
+  let rejectDenied!: (error: AppError) => void;
+  const denied = new Promise<never>((_, reject) => {
+    rejectDenied = reject;
+  });
+  const observe = <T>(read: Promise<T>): Promise<T> =>
+    read.catch((cause: unknown) => {
+      if (isAppError(cause) && (cause.status === 401 || cause.status === 403)) rejectDenied(cause);
+      throw cause;
+    });
+  // A transient failure must not mask a sibling authorization denial. Wait for
+  // ordinary outcomes, but publish any denial immediately even if another read
+  // is still pending. The export owner then conceals data and aborts siblings.
+  const outcomes = Promise.allSettled([
+    observe(apiClient.request(endpoints.admin.models.list, options)),
+    observe(apiClient.request(endpoints.admin.models.quality, { ...options, query: { window: range } })),
+    observe(apiClient.request(endpoints.admin.models.pricing, options)),
+    observe(apiClient.request(endpoints.admin.models.tags, options)),
   ]);
-  return { catalogue, quality, pricing, tags };
+  const [catalogue, quality, pricing, tags] = await Promise.race([outcomes, denied]);
+  const value = <T>(result: PromiseSettledResult<T>): T => {
+    if (result.status === "rejected") throw result.reason;
+    return result.value;
+  };
+  return { catalogue: value(catalogue), quality: value(quality), pricing: value(pricing), tags: value(tags) };
 }
 
 export function modelExportCsv(

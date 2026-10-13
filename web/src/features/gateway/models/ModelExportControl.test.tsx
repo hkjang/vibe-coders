@@ -9,6 +9,7 @@ import * as downloads from "@/shared/utils/csv";
 import * as exporter from "./model-csv";
 import { ModelExportControl } from "./ModelExportControl";
 import { ModelReadBoundary } from "./ModelReadBoundary";
+import { mockApi } from "@/test/api";
 
 const runtime = vi.hoisted(() => ({
   id: "public-a",
@@ -55,6 +56,37 @@ const snapshot: Awaited<ReturnType<typeof exporter.loadModelExport>> = {
   pricing: { effective: {}, versions: [] },
   tags: { tags: [] },
 };
+
+it.each([401, 403])("먼저 발생한 503 뒤의 %s는 남은 조회를 기다리지 않고 화면을 감춘다", async (status) => {
+  const c = setup();
+  c.read.mockRestore();
+  let deny!: (reason: AppError) => void;
+  let finish!: (value: typeof snapshot.quality) => void;
+  const denied = new Promise<typeof snapshot.catalogue>((_, reject) => {
+    deny = reject;
+  });
+  const pending = new Promise<typeof snapshot.quality>((resolve) => {
+    finish = resolve;
+  });
+  mockApi({
+    "GET /admin/models": () => denied,
+    "GET /admin/models/quality": () => pending,
+    "GET /admin/pricing": () => {
+      throw new AppError("public-transient", { kind: "http", status: 503 });
+    },
+    "GET /admin/model-tags": () => snapshot.tags,
+  });
+  await c.user.click(c.button());
+  await act(async () =>
+    deny(new AppError("public-denied", { kind: status === 401 ? "auth" : "permission", status })),
+  );
+  expect(await screen.findByRole("heading", { name: "모델 조회 권한 확인 필요" })).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveFocus();
+  expect(c.download).not.toHaveBeenCalled();
+  expect(c.client.getQueryCache().getAll()).toHaveLength(0);
+  await act(async () => finish(snapshot.quality));
+  expect(c.download).not.toHaveBeenCalled();
+});
 function deferred() {
   let resolve!: (value: typeof snapshot) => void;
   const promise = new Promise<typeof snapshot>((done) => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AdminModel } from "@/shared/api/schemas";
 import { mockApi, apiFailure } from "@/test/api";
+import { AppError } from "@/shared/api/error";
 import { loadModelExport, modelExportCsv, type ModelExportFilters } from "./model-csv";
 
 const at = "2026-10-14T00:00:00Z";
@@ -42,6 +43,52 @@ const csv = (data = exportSnapshot(), overrides: Partial<ModelExportFilters> = {
   modelExportCsv(data, { ...filters, ...overrides }, ["corp_"], at);
 
 describe("모델 CSV 투영", () => {
+  it.each(["catalogue", "quality", "pricing", "tags"] as const)(
+    "%s 조회의 인증·권한 거부는 먼저 발생한 일시 오류보다 우선한다",
+    async (kind) => {
+      const data = exportSnapshot();
+      const entries = [
+        ["catalogue", "GET /admin/models"],
+        ["quality", "GET /admin/models/quality"],
+        ["pricing", "GET /admin/pricing"],
+        ["tags", "GET /admin/model-tags"],
+      ] as const;
+      for (const status of [401, 403]) {
+        let deny!: (error: AppError) => void;
+        let finish!: (value: unknown) => void;
+        const denied = new Promise<never>((_, reject) => {
+          deny = reject;
+        });
+        const pending = new Promise<unknown>((resolve) => {
+          finish = resolve;
+        });
+        let ordinary = 0;
+        mockApi(
+          Object.fromEntries(
+            entries.map(([name, path]) => {
+              if (name === kind) return [path, () => denied];
+              ordinary++;
+              if (ordinary === 1)
+                return [
+                  path,
+                  () => {
+                    throw apiFailure("public-transient", 503);
+                  },
+                ];
+              if (ordinary === 2) return [path, () => pending];
+              return [path, () => data[name]];
+            }),
+          ),
+        );
+        const read = loadModelExport("24h", new AbortController().signal);
+        const rejected = expect(read).rejects.toMatchObject({ status });
+        await Promise.resolve();
+        deny(new AppError("public-denied", { kind: status === 401 ? "auth" : "permission", status }));
+        await rejected;
+        finish({});
+      }
+    },
+  );
   it("페이지 구분 없이 수신 목록 전체에 필터와 정렬을 적용한다", () => {
     const data = exportSnapshot();
     data.catalogue.models = Array.from({ length: 31 }, (_, i) => ({
