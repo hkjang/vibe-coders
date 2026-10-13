@@ -2227,8 +2227,9 @@ func (s *Server) authorizeAdmin(r *http.Request) bool {
 		return true
 	}
 	if s.cfg.Auth.AdminReadonlyToken != "" && secureTokenEqual(token, s.cfg.Auth.AdminReadonlyToken) {
-		// readonly: only allow safe methods on /admin
-		return r.Method == http.MethodGet || r.Method == http.MethodHead
+		// Some legacy GET endpoints also dispatch actions. A safe method alone
+		// must not authorize those actions for the readonly token.
+		return (r.Method == http.MethodGet || r.Method == http.MethodHead) && adminRequiredScope(r) != "admin:write"
 	}
 	// Never put presented or configured credentials in logs. A short event is enough
 	// for operators; the auth audit record already contains IP and user-agent context.
@@ -2257,6 +2258,9 @@ func (s *Server) currentAccessClaims(r *http.Request) (accessClaims, bool) {
 }
 
 func adminRequiredScope(r *http.Request) string {
+	if r.URL.Path == "/admin/budgets/alerts" && budgetAlertsNotifyRequested(r) {
+		return "admin:write"
+	}
 	if strings.HasPrefix(r.URL.Path, "/admin/routing") {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead ||
 			r.URL.Path == "/admin/routing/preview" ||

@@ -2,6 +2,122 @@ import { expect, test, type Page } from "@playwright/test";
 
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 
+async function installBudgetNotifications(page: Page) {
+  const gateway = await installGateway(page);
+  let sent = 0;
+  let status = 200;
+  let release = () => {};
+  let held: Promise<void> | undefined;
+  await page.route("**/admin/quotas", (route) => route.fulfill({ json: { quotas: [], usage: [] } }));
+  await page.route("**/admin/budgets", (route) => route.fulfill({ json: { budgets: [] } }));
+  await page.route("**/admin/budgets/projection", (route) =>
+    route.fulfill({ json: { teams: [], exceeding: 0 } }),
+  );
+  await page.route("**/admin/budgets/alerts?*", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("notify") === "1") {
+      sent++;
+      await held;
+    }
+    return route.fulfill({
+      status,
+      json:
+        status === 200
+          ? { alerts: [], warn: 0, critical: 0, thresholds: { warn: 0.8, critical: 1 } }
+          : { error: { code: "server_error", message: "private-budget-notification-error" } },
+    });
+  });
+  return {
+    gateway,
+    sent: () => sent,
+    status: (value: number) => {
+      status = value;
+    },
+    hold: () => {
+      held = new Promise<void>((done) => {
+        release = done;
+      });
+    },
+    release: () => release(),
+  };
+}
+
+test("예산 경보 조회·취소는 발송하지 않고 확인한 요청만 한 번 전송한다", async ({ page }) => {
+  const fixture = await installBudgetNotifications(page);
+  await page.goto("/app/access/users?tab=quotas");
+  await page.getByRole("button", { name: "경보 확인", exact: true }).click();
+  await expect(page.getByText("경보가 없습니다.")).toBeVisible();
+  await page.getByRole("button", { name: "경보 발송", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "예산 경보 발송" });
+  await dialog.getByRole("button", { name: "취소", exact: true }).click();
+  expect(fixture.sent()).toBe(0);
+  fixture.hold();
+  await page.getByRole("button", { name: "경보 발송", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "예산 경보 발송" });
+  await dialog.getByRole("button", { name: "발송", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "처리 중" })).toBeDisabled();
+  await expect.poll(fixture.sent).toBe(1);
+  fixture.release();
+  await expect(dialog).not.toBeVisible();
+  await expect(
+    page.getByText("예산 경보 발송 요청을 처리했습니다. 실제 수신 여부는 알림 채널에서 확인하세요."),
+  ).toBeVisible();
+  expect(fixture.gateway.unexpected).toEqual([]);
+});
+
+test("예산 경보 오류는 자동 재발송하지 않고 확인창에서 다시 선택한다", async ({ page }) => {
+  const fixture = await installBudgetNotifications(page);
+  fixture.status(500);
+  await page.goto("/app/access/users?tab=quotas");
+  await page.getByRole("button", { name: "경보 발송", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "예산 경보 발송" });
+  await dialog.getByRole("button", { name: "발송", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "발송", exact: true })).toBeEnabled();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  expect(fixture.sent()).toBe(1);
+  await expect(page.getByText("private-budget-notification-error")).toHaveCount(0);
+  fixture.status(200);
+  await dialog.getByRole("button", { name: "발송", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  expect(fixture.sent()).toBe(2);
+});
+
+test("읽기 전용 화면은 예산 경보를 조회하되 발송할 수 없다", async ({ page }) => {
+  const fixture = await installBudgetNotifications(page);
+  fixture.gateway.revokeWrite("readonly");
+  await page.goto("/app/access/users?tab=quotas");
+  await expect(page.getByRole("button", { name: "경보 발송", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "경보 확인", exact: true }).click();
+  await expect(page.getByText("경보가 없습니다.")).toBeVisible();
+  expect(fixture.sent()).toBe(0);
+});
+
+test("모바일 어두운 화면의 예산 발송 확인창은 키보드·접근성·초점을 유지한다", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  const fixture = await installBudgetNotifications(page);
+  await page.goto("/app/access/users?tab=quotas");
+  const trigger = page.getByRole("button", { name: "경보 발송", exact: true });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "예산 경보 발송" });
+  await expect(dialog).toBeVisible();
+  expect(
+    await page.evaluate(async () => {
+      const axe = (
+        window as unknown as { axe: { run(root: Document): Promise<{ violations: { id: string }[] }> } }
+      ).axe;
+      return (await axe.run(document)).violations.map((violation) => violation.id);
+    }),
+  ).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("budget-notification-mobile.png") });
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  expect(fixture.sent()).toBe(0);
+});
+
 async function installGateway(page: Page) {
   const user = {
     id: "usr_role_labels",

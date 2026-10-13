@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { z } from "zod";
 
 import { formatSignedRatio, severityTone } from "@/features/access/access-format";
+import { BudgetNotificationAction } from "./BudgetNotificationAction";
 import { QueryNotice, UpdatedAt, UsageMeter } from "@/features/access/access-ui";
 import {
   accessKeys,
@@ -110,11 +111,9 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
   const [togglingQuota, setTogglingQuota] = useState<QuotaUsage | undefined>();
   const [removingQuota, setRemovingQuota] = useState<QuotaUsage | undefined>();
   const [removingBudget, setRemovingBudget] = useState<BudgetStatus | undefined>();
-  const [notifying, setNotifying] = useState(false);
   const quotaTrigger = useRef<HTMLButtonElement>(null);
   const budgetTrigger = useRef<HTMLButtonElement>(null);
   const rowTrigger = useRef<HTMLElement>(null);
-  const notifyTrigger = useRef<HTMLButtonElement>(null);
 
   const alerts = useQuery({
     queryKey: [...accessKeys.budgetAlerts, "check"],
@@ -167,10 +166,6 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
     mutate: (id: string) => apiClient.request(withPathParams(access.budgets.remove, { id }), { routeId }),
     invalidates: [accessKeys.budgets],
     successMessage: "예산을 삭제했습니다.",
-  });
-  const sendAlerts = useMutationFeedback({
-    mutate: () => apiClient.request(access.budgets.alerts, { query: { all: 1, notify: 1 }, routeId }),
-    successMessage: (result) => `예산 경보 ${formatNumber(result.alerts.length)}건을 발송했습니다.`,
   });
 
   if (quotas.isPending && !quotas.data) {
@@ -506,15 +501,7 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
             <Button onClick={() => setAlertsRequested(true)} disabled={alerts.isFetching}>
               {alerts.isFetching ? "확인 중" : "경보 확인"}
             </Button>
-            <Button
-              ref={notifyTrigger}
-              variant="secondary"
-              disabled={!canWrite}
-              title={canWrite ? undefined : writeDeniedReason}
-              onClick={() => setNotifying(true)}
-            >
-              경보 발송
-            </Button>
+            <BudgetNotificationAction canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
           </div>
         }
       >
@@ -756,19 +743,6 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
         onConfirm={async () => {
           if (removingBudget) await removeBudget.mutateAsync(removingBudget.budget.id);
           setRemovingBudget(undefined);
-        }}
-      />
-
-      <ConfirmDialog
-        open={notifying}
-        onOpenChange={setNotifying}
-        returnFocusRef={notifyTrigger}
-        title="예산 경보 발송"
-        description="현재 임계값을 넘은 예산 경보를 Mattermost로 발송합니다. 실제 알림이 나가므로 확인 후 진행하세요."
-        confirmLabel="발송"
-        onConfirm={async () => {
-          await sendAlerts.mutateAsync(undefined);
-          setNotifying(false);
         }}
       />
     </div>
