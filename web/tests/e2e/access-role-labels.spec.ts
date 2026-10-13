@@ -61,6 +61,7 @@ async function installGateway(page: Page) {
   let roleNames = ["developer", "viewer", "ops_admin", "custom_reviewer"];
   let roleReads = 0;
   let roleStatus = 200;
+  let invalidCatalog = false;
   let writeStatus = 200;
   let writeHold: Promise<void> | undefined;
   let releaseWrite = () => undefined;
@@ -87,7 +88,16 @@ async function installGateway(page: Page) {
         role,
         is_system: role !== "custom_reviewer",
         rank: role === "custom_reviewer" ? 0 : 2,
-        scopes: [],
+        ...(invalidCatalog
+          ? {}
+          : {
+              scopes:
+                role === "developer"
+                  ? ["models:read", "chat:completion"]
+                  : role === "custom_reviewer"
+                    ? ["future:review"]
+                    : ["models:read"],
+            }),
         description: "",
         default_home: "",
       }));
@@ -96,7 +106,7 @@ async function installGateway(page: Page) {
         return route.fulfill({ status: roleStatus, json: { error: { message: "private fixture failure" } } });
       return json({
         roles,
-        all_scopes: [],
+        all_scopes: ["models:read", "chat:completion", "admin:write"],
       });
     }
     if (key === "POST /admin/users" || key === "PATCH /admin/users/usr_role_labels") {
@@ -115,6 +125,9 @@ async function installGateway(page: Page) {
   return {
     writes,
     unexpected,
+    invalidCatalog: (value: boolean) => {
+      invalidCatalog = value;
+    },
     holdWrite: (status: number) => {
       writeStatus = status;
       writeHold = new Promise<void>((resolve) => {
@@ -334,3 +347,99 @@ for (const kind of ["readonly", "scope"]) {
     });
   }
 }
+
+test("읽기 전용 권한 비교의 한글 검색·차이 필터·네 역할·모바일 접근성과 초점을 검증한다", async ({
+  page,
+}, testInfo) => {
+  const gateway = await installGateway(page);
+  gateway.revokeWrite("readonly");
+  gateway.revokeWrite("scope");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  await page.goto("/app/access/users?tab=roles");
+  const trigger = page.getByRole("button", { name: "권한 비교", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "역할별 권한 비교" });
+  const table = dialog.getByRole("table");
+  await expect(table).toBeVisible();
+  await dialog.getByRole("combobox", { name: "비교 역할 3" }).selectOption("custom_reviewer");
+  await dialog.getByRole("combobox", { name: "비교 역할 4" }).selectOption("ops_admin");
+  await dialog.getByRole("checkbox", { name: "차이가 있는 권한만" }).check();
+  await expect(table.getByRole("row", { name: /future:review/ })).toContainText("부여됨");
+  const search = dialog.getByRole("textbox", { name: "권한 검색" });
+  await search.fill("대화");
+  await expect(table).toContainText("대화 생성");
+  await expect(table).not.toContainText("모델 조회");
+  expect(page.url()).not.toContain(encodeURIComponent("대화"));
+  await dialog.getByRole("button", { name: "검색·필터 초기화" }).click();
+  await expect(search).toBeFocused();
+  const scroll = dialog.getByRole("region", { name: "역할별 권한 비교 표, 가로 스크롤 가능" });
+  await scroll.focus();
+  await expect(scroll).toBeFocused();
+  expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(dialog.getByRole("button", { name: "닫기", exact: true })).toBeInViewport();
+  expect(
+    await page.evaluate(async () => {
+      const axe = (
+        window as unknown as { axe: { run(root: Document): Promise<{ violations: { id: string }[] }> } }
+      ).axe;
+      return (await axe.run(document)).violations.map((violation) => violation.id);
+    }),
+  ).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("role-matrix-mobile.png") });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect(gateway.writes).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("권한 비교 재조회 실패와 누락된 권한 계약을 빈 권한으로 표시하지 않는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  await page.goto("/app/access/users?tab=roles");
+  await page.getByRole("button", { name: "권한 비교", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "역할별 권한 비교" });
+  await expect(dialog.getByRole("table")).toBeVisible();
+  gateway.roleStatus(503);
+  await dialog.getByRole("button", { name: "목록 새로 조회" }).click();
+  await expect(dialog.getByText("역할 목록을 확인하지 못했습니다. 목록을 다시 조회하세요.")).toBeVisible();
+  await expect(dialog.getByRole("table")).toHaveCount(0);
+  gateway.roleStatus(200);
+  gateway.invalidCatalog(true);
+  const malformed = page.waitForResponse((response) => new URL(response.url()).pathname === "/admin/roles");
+  await dialog.getByRole("button", { name: "목록 새로 조회" }).click();
+  await (await malformed).finished();
+  await expect(dialog.getByText("역할 목록을 확인하지 못했습니다. 목록을 다시 조회하세요.")).toBeVisible();
+  await expect(dialog.getByRole("table")).toHaveCount(0);
+  gateway.invalidCatalog(false);
+  await dialog.getByRole("button", { name: "목록 새로 조회" }).click();
+  await expect(dialog.getByRole("table")).toBeVisible();
+  expect(gateway.writes).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});
+
+test("권한 비교의 대기 중 조회를 계정 변경 시 취소하고 늦은 권한을 표시하지 않는다", async ({ page }) => {
+  const gateway = await installGateway(page);
+  gateway.hold(2);
+  await page.goto("/app/access/users?tab=roles");
+  await expect(page.getByRole("table", { name: "역할 목록", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "권한 비교", exact: true }).click();
+  await expect.poll(() => gateway.roleReads()).toBe(2);
+  const canceled = page.waitForEvent(
+    "requestfailed",
+    (request) => new URL(request.url()).pathname === "/admin/roles",
+  );
+  gateway.owner("usr_next_matrix_reader");
+  const refreshed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await (await refreshed).finished();
+  await canceled;
+  await expect(page.getByRole("dialog", { name: "역할별 권한 비교" })).toBeHidden();
+  gateway.release(2);
+  expect(gateway.writes).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});

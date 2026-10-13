@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { managedRoleLabel } from "@/config/ui-labels";
+import { RolePermissionMatrix } from "./RolePermissionMatrix";
 import { QueryNotice, ScopeBadges, UpdatedAt } from "@/features/access/access-ui";
 import { accessKeys, useRolesQuery } from "@/features/access/users/use-access-admin";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
@@ -85,7 +86,12 @@ function roleColumns(
     column.accessor((row) => row.scopes.join(" "), {
       id: "scopes",
       header: "스코프",
-      cell: ({ row }) => <ScopeBadges scopes={row.original.scopes} />,
+      cell: ({ row }) =>
+        row.original.scopes.length > 0 ? (
+          <ScopeBadges scopes={row.original.scopes} />
+        ) : (
+          <span>부여된 권한 없음</span>
+        ),
     }),
     column.display({
       id: "actions",
@@ -135,6 +141,8 @@ interface RolesTabProps {
 export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.JSX.Element {
   const roles = useRolesQuery(true);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [matrixOpen, setMatrixOpen] = useState(false);
+  const matrixTrigger = useRef<HTMLButtonElement>(null);
   const [editingRole, setEditingRole] = useState("");
   const [removingRole, setRemovingRole] = useState<RoleRow | undefined>();
   const createTrigger = useRef<HTMLButtonElement>(null);
@@ -220,20 +228,25 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
         title="역할과 스코프"
         description="역할별로 부여되는 스코프와 기본 진입 화면입니다. 내장 역할은 읽기 전용입니다."
         actions={
-          <Button
-            ref={createTrigger}
-            variant="primary"
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeDeniedReason}
-            onClick={(event) => {
-              rememberRowTrigger(event.currentTarget);
-              form.reset({ role: "", description: "", default_home: "", scopes: [] });
-              setEditingRole("");
-              setEditorOpen(true);
-            }}
-          >
-            역할 추가
-          </Button>
+          <div className="table-actions">
+            <Button ref={matrixTrigger} onClick={() => setMatrixOpen(true)}>
+              권한 비교
+            </Button>
+            <Button
+              ref={createTrigger}
+              variant="primary"
+              disabled={!canWrite}
+              title={canWrite ? undefined : writeDeniedReason}
+              onClick={(event) => {
+                rememberRowTrigger(event.currentTarget);
+                form.reset({ role: "", description: "", default_home: "", scopes: [] });
+                setEditingRole("");
+                setEditorOpen(true);
+              }}
+            >
+              역할 추가
+            </Button>
+          </div>
         }
       >
         {!canWrite ? <InlineNotice tone="info">{writeDeniedReason}</InlineNotice> : null}
@@ -247,6 +260,9 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
         <UpdatedAt at={roles.dataUpdatedAt} />
       </SectionCard>
 
+      {matrixOpen ? (
+        <RolePermissionMatrix onClose={() => setMatrixOpen(false)} returnFocusRef={matrixTrigger} />
+      ) : null}
       <FormDialog
         form={form}
         open={editorOpen}

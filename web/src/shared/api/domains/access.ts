@@ -7,6 +7,7 @@ import {
   adminIpsSchema,
   adminQuotasSchema,
   adminRolesSchema,
+  roleMatrixSchema,
   adminTeamDetailSchema,
   adminTeamMutationSchema,
   adminTeamsSchema,
@@ -394,6 +395,7 @@ export const accessEndpoints = {
   },
   roles: {
     list: operation<GetAdminRolesData, unknown>()("GET", "/admin/roles", adminRolesSchema),
+    matrix: operation<GetAdminRolesData, unknown>()("GET", "/admin/roles", roleMatrixSchema),
     save: operation<WithBody<PostAdminRolesData, SaveRoleBody>, unknown>()(
       "POST",
       "/admin/roles",
