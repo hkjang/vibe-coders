@@ -58,6 +58,10 @@ async function installGateway(context: BrowserContext, origin: string) {
   const unexpected: string[] = [];
   const otherWrites: string[] = [];
   let regressionEnabled = false;
+  let alertsEnabled = false;
+  let alertRows: Record<string, unknown>[] = [];
+  let alertReadFailure = false;
+  const alertOperations: Array<{ call: string; body?: unknown }> = [];
   let cases: Record<string, unknown>[] = [];
   const operations: Array<{ call: string; body?: unknown; id?: string }> = [];
   const sessions = new Set<string>();
@@ -65,7 +69,7 @@ async function installGateway(context: BrowserContext, origin: string) {
   const replies = new Map<number, Reply>();
   const failedReads = new Set<number>();
   let failReadsAfterSave = false;
-  function hold(kind: "read" | "save" | "run", sequence: number) {
+  function hold(kind: "read" | "save" | "run" | "alert-write", sequence: number) {
     let release!: () => void;
     const promise = new Promise<void>((resolve) => {
       release = resolve;
@@ -130,6 +134,15 @@ async function installGateway(context: BrowserContext, origin: string) {
     // Count before authentication. The transport does not enforce readonly,
     // current revision, active/disabled state or duplicate guards for the UI.
     let save = 0;
+    const alertWrite =
+      alertsEnabled &&
+      (call === "POST /admin/alerts" ||
+        (["PATCH", "DELETE"].includes(request.method()) && /^\/admin\/alerts\/[^/]+$/u.test(url.pathname)));
+    if (alertWrite)
+      alertOperations.push({
+        call,
+        ...(request.postData() ? { body: request.postDataJSON() as unknown } : {}),
+      });
     const regressionWrite =
       regressionEnabled &&
       [
@@ -150,7 +163,12 @@ async function installGateway(context: BrowserContext, origin: string) {
       if (!object(body)) throw new Error("Expected object policy body");
       saves.push(body);
       save = saves.length;
-    } else if (!regressionWrite && url.pathname.startsWith("/admin/") && request.method() !== "GET")
+    } else if (
+      !regressionWrite &&
+      !alertWrite &&
+      url.pathname.startsWith("/admin/") &&
+      request.method() !== "GET"
+    )
       otherWrites.push(call);
     const json = (body: unknown, responseStatus = 200, requestId = "req-public-policy-editor") =>
       route.fulfill({
@@ -241,6 +259,23 @@ async function installGateway(context: BrowserContext, origin: string) {
         cases = cases.filter((row) => row.id !== url.searchParams.get("id"));
         return json({ ok: true });
       }
+      if (alertWrite) {
+        await holds.get(`alert-write:${alertOperations.length}`)?.promise;
+        const id = url.pathname.split("/").at(-1);
+        if (request.method() === "DELETE") alertRows = alertRows.filter((row) => row.id !== id);
+        else {
+          const body: unknown = request.postDataJSON();
+          if (!object(body)) throw new Error("Expected alert object");
+          if (request.method() === "POST")
+            alertRows.push({ ...body, id: `public-alert-${alertOperations.length}`, enabled: true });
+          else alertRows = alertRows.map((row) => (row.id === id ? { ...row, ...body } : row));
+        }
+        return json({ ok: true });
+      }
+      if (alertsEnabled && call === "GET /admin/alerts")
+        return alertReadFailure
+          ? json({ error: { message: "public alert read unavailable" } }, 503)
+          : json({ rules: alertRows, events: [{ id: "public-alert-event", rule_name: "공개 알림 발생" }] });
       if (call === "GET /admin/policies") {
         reads += 1;
         const sequence = reads;
@@ -285,6 +320,16 @@ async function installGateway(context: BrowserContext, origin: string) {
     unexpected,
     otherWrites,
     operations,
+    alertOperations,
+    alerts: (next: Record<string, unknown>[]) => {
+      alertsEnabled = true;
+      alertRows = structuredClone(next);
+    },
+    failAlertRead: (failed: boolean) => {
+      alertReadFailure = failed;
+    },
+    holdAlertWrite: (sequence: number) => hold("alert-write", sequence),
+    releaseAlertWrite: (sequence: number) => holds.get(`alert-write:${sequence}`)?.release(),
     regression: (next: Record<string, unknown>[]) => {
       regressionEnabled = true;
       cases = structuredClone(next);

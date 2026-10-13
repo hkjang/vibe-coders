@@ -281,14 +281,13 @@ it.each(["resume", "deactivate"] as const)(
   },
 );
 
-it("guards policy and regression creation without changing unrelated alert controls", async () => {
+it("guards policy, regression and alert creation under feature readonly", async () => {
   const current = await setup("stop");
   await current.changeAccess("feature", false);
   expect(screen.getByRole("button", { name: definitions.stop.trigger })).toBeDisabled();
   expect(screen.getByRole("button", { name: definitions.activate.trigger })).toBeDisabled();
   for (const label of ["정책 추가", "시나리오 추가"])
     expect(screen.getByRole("button", { name: label })).toBeDisabled();
-  // Alert rules are a separate operation boundary, not changed by policy guards.
-  expect(screen.getByRole("button", { name: "규칙 추가" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "규칙 추가" })).toBeDisabled();
   expect(current.attempts).toEqual([]);
 });
