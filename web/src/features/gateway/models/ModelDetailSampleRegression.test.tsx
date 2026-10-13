@@ -1,3 +1,4 @@
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -152,7 +153,9 @@ function mount() {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/gateway/models"]}>
-        <ModelPage />
+        <FeatureAccessHarness featureId="gateway.models">
+          <ModelPage />
+        </FeatureAccessHarness>
       </MemoryRouter>
     </QueryClientProvider>,
   );
