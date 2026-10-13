@@ -1176,7 +1176,7 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 		if existing.Role != updated.Role {
 			roleEvent = &store.AuthEvent{ID: newID("ae"), EventType: "role_changed", APIKeyID: id, ActorUserID: s.adminKeyActor(r), TeamID: updated.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: existing.Role + " -> " + updated.Role, CreatedAt: time.Now().UTC()}
 		}
-		if err := s.db.PatchAdminAPIKey(r.Context(), existing, updated, audit, roleEvent); err != nil {
+		if err := s.db.PatchAdminAPIKey(r.Context(), existing, updated, audit, roleEvent, payload.Review.ExpectedRevision); err != nil {
 			if errors.Is(err, store.ErrAPIKeyConflict) {
 				writeOpenAIError(w, http.StatusConflict, "key changed since authorization", "invalid_request_error", "key_update_conflict")
 			} else {
