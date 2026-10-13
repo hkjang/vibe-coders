@@ -1,7 +1,6 @@
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Search, X } from "lucide-react";
 import {
   lazy,
@@ -12,6 +11,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type RefObject,
 } from "react";
 import { useNavigate } from "react-router";
@@ -19,11 +19,14 @@ import { useNavigate } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { jumpItems, matchesQuery, type CommandItem } from "@/app/layouts/command-items";
 import { featurePath, resolveFeature } from "@/config/migration-registry";
-import { commandPaletteLabels, migrationStatusLabels, preferenceLabels, uiLabels } from "@/config/ui-labels";
+import { commandPaletteLabels, migrationStatusLabels, uiLabels } from "@/config/ui-labels";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
+import { tokenStore } from "@/shared/auth/token-store";
+import { rememberCommand } from "./recent-commands";
+import { useConsoleActions } from "./use-console-actions";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -40,13 +43,31 @@ const kindLabels: Record<CommandItem["kind"], string> = {
   feature: "이동",
   jump: "바로 찾기",
   recent: "최근",
+  recentAction: commandPaletteLabels.recentCommand,
 };
 
 function normalize(value: string): string {
   return value.trim().toLocaleLowerCase("ko-KR");
 }
 
-export function CommandPalette({
+export function CommandPalette(props: CommandPaletteProps): React.JSX.Element {
+  const auth = useAuth();
+  const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
+  // Remount on ownership changes, including A → B → A, so no previous search or
+  // command history survives a session/account/permission boundary. Never persist.
+  const owner = JSON.stringify([
+    epoch,
+    auth.mode,
+    auth.user?.id,
+    auth.user?.team_id,
+    auth.user?.role,
+    auth.user?.roles,
+    auth.user?.scopes,
+  ]);
+  return <CommandPaletteContent key={owner} {...props} />;
+}
+
+function CommandPaletteContent({
   open,
   onOpenChange,
   returnFocusRef,
@@ -56,10 +77,10 @@ export function CommandPalette({
   const { user, backendVersion, features, legacyFallback } = auth;
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [resourceMode, setResourceMode] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const composing = useRef(false);
   const setComposing = useCallback((value: boolean) => {
     composing.current = value;
@@ -67,14 +88,7 @@ export function CommandPalette({
   const [navigating, setNavigating] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
-  const theme = usePreferences((state) => state.theme);
-  const density = usePreferences((state) => state.density);
-  const refreshInterval = usePreferences((state) => state.refreshInterval);
   const recentFeatures = usePreferences((state) => state.recentFeatures);
-  const setTheme = usePreferences((state) => state.setTheme);
-  const setDensity = usePreferences((state) => state.setDensity);
-  const setRefreshInterval = usePreferences((state) => state.setRefreshInterval);
-  const toggleSidebar = usePreferences((state) => state.toggleSidebar);
 
   const updateOpen = useCallback(
     (nextOpen: boolean): void => {
@@ -109,79 +123,7 @@ export function CommandPalette({
     [updateOpen],
   );
 
-  /** The settings and one-off operations that otherwise live in the header menus. */
-  const actions = useMemo((): CommandItem[] => {
-    const list: CommandItem[] = [
-      {
-        id: "action:refresh",
-        kind: "action",
-        title: "지금 새로고침",
-        hint: "열려 있는 화면의 데이터를 다시 불러옵니다",
-        keywords: ["refresh", "reload", "갱신"],
-        run: () => run(() => void queryClient.invalidateQueries()),
-      },
-      {
-        id: "action:theme",
-        kind: "action",
-        title: `${preferenceLabels.theme} 전환`,
-        hint: preferenceLabels[theme],
-        keywords: ["theme", "dark", "light", "테마", "다크", "라이트"],
-        run: () => run(() => setTheme(theme === "dark" ? "light" : theme === "light" ? "system" : "dark")),
-      },
-      {
-        id: "action:density",
-        kind: "action",
-        title: `${preferenceLabels.density} 전환`,
-        hint: preferenceLabels[density],
-        keywords: ["density", "compact", "밀도"],
-        run: () =>
-          run(() =>
-            setDensity(
-              density === "compact" ? "comfortable" : density === "comfortable" ? "default" : "compact",
-            ),
-          ),
-      },
-      {
-        id: "action:refresh-interval",
-        kind: "action",
-        title: "자동 갱신 주기 전환",
-        hint: refreshInterval === 0 ? "사용 안 함" : `${refreshInterval / 60}분`,
-        keywords: ["auto", "interval", "자동", "주기", "폴링"],
-        run: () =>
-          run(() => setRefreshInterval(refreshInterval === 0 ? 60 : refreshInterval === 60 ? 300 : 0)),
-      },
-      {
-        id: "action:sidebar",
-        kind: "action",
-        title: "사이드바 접기/펼치기",
-        keywords: ["sidebar", "menu", "사이드바", "메뉴"],
-        run: () => run(toggleSidebar),
-      },
-    ];
-    if (onShowShortcuts) {
-      list.push({
-        id: "action:shortcuts",
-        kind: "action",
-        title: "단축키 도움말",
-        hint: "?",
-        keywords: ["shortcut", "keyboard", "단축키", "키보드"],
-        run: () => run(onShowShortcuts),
-      });
-    }
-    return list;
-  }, [
-    density,
-    onShowShortcuts,
-    queryClient,
-    refreshInterval,
-    run,
-    setDensity,
-    setRefreshInterval,
-    setTheme,
-    theme,
-    toggleSidebar,
-  ]);
-
+  const actions = useConsoleActions(run, onShowShortcuts);
   const available = useMemo(
     () =>
       features
@@ -226,10 +168,29 @@ export function CommandPalette({
       ({ feature, effective }) =>
         feature.featureId === "observability.requests" && effective.status !== "legacy",
     );
-    return [...(canJump ? jumpItems(query, go) : []), ...ordered, ...actions].filter((item) =>
-      matchesQuery(item, needle),
-    );
-  }, [actions, available, go, query, recentFeatures]);
+    const commands = actions.map((item): CommandItem => ({
+      ...item,
+      run: () => {
+        setRecentCommands((history) => rememberCommand(history, item.id));
+        item.run();
+      },
+    }));
+    // Resolve IDs against currently offered commands, preserving live setting
+    // hints and callbacks instead of retaining snapshots or prior authority.
+    const recent =
+      needle === ""
+        ? recentCommands.flatMap((id) => {
+            const item = commands.find((command) => command.id === id);
+            return item ? [{ ...item, kind: "recentAction" as const }] : [];
+          })
+        : [];
+    return [
+      ...(canJump ? jumpItems(query, go) : []),
+      ...recent,
+      ...ordered,
+      ...commands.filter((item) => !recent.some((previous) => previous.id === item.id)),
+    ].filter((item) => matchesQuery(item, needle));
+  }, [actions, available, go, query, recentFeatures, recentCommands]);
 
   const selectedIndex = items.length ? Math.min(activeIndex, items.length - 1) : 0;
   const activeResult = items[selectedIndex];
@@ -317,6 +278,21 @@ export function CommandPalette({
             </Suspense>
           ) : (
             <>
+              {recentCommands.length > 0 ? (
+                <div className="command-footer">
+                  <span>{commandPaletteLabels.commandHistoryHint}</span>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setRecentCommands([]);
+                      setActiveIndex(0);
+                      searchRef.current?.focus();
+                    }}
+                  >
+                    {commandPaletteLabels.clearCommands}
+                  </Button>
+                </div>
+              ) : null}
               <label className="command-search">
                 <span className="sr-only">메뉴 검색</span>
                 <Search aria-hidden="true" />

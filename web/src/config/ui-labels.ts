@@ -12,6 +12,9 @@ export const commandPaletteLabels = {
   empty: "검색 결과가 없습니다.",
   emptyHint: "다른 메뉴 이름이나 명령으로 검색해 보세요. 접근 가능한 기능만 표시됩니다.",
   clear: "검색어 지우기",
+  recentCommand: "최근 명령",
+  clearCommands: "최근 명령 지우기",
+  commandHistoryHint: "최근 명령 최대 5개를 이 탭에서만 기억합니다. 새로고침·사용자 변경 시 지워집니다.",
   keyboardHint: "↑↓ 선택 · Enter 실행 · Esc 닫기",
   results: (count: number): string => `검색 결과 ${count}개`,
 } as const;
