@@ -3,7 +3,7 @@ import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import type { ProviderList, ProviderSLOResponse, RoutingHealth } from "@/shared/api/schemas";
 import { toCsv } from "@/shared/utils/csv";
-import type { ProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
+import type { ProviderCatalogSortOrder } from "@/shared/utils/provider-catalog-query";
 import type { HealthRange } from "@/features/health/health-utils";
 import {
   buildProviderRows,
@@ -19,7 +19,7 @@ export interface ProviderExportFilters {
   query: string;
   status: ProviderStatusFilter;
   range: HealthRange;
-  sort?: ProviderCatalogSort;
+  sort?: ProviderCatalogSortOrder;
 }
 
 /** Fresh authorized reads, independent of the screen's potentially stale cache. */

@@ -324,6 +324,36 @@ describe("independent ProviderPage local table controls", () => {
     expectReadOnlyTransport(calls);
   });
 
+  it("applies a Korean multi-sort draft once, restores history and keeps header sorting single-column", async () => {
+    const user = userEvent.setup();
+    const { calls, router } = await mount("/gateway/providers?sort=name_desc&page_size=25&page=2");
+    const trigger = screen.getByRole("button", { name: "다중 정렬" });
+    await user.click(trigger);
+    await user.selectOptions(screen.getByRole("combobox", { name: "1순위 정렬 열" }), "failover");
+    await user.selectOptions(screen.getByRole("combobox", { name: "1순위 정렬 방향" }), "desc");
+    await user.click(screen.getByRole("button", { name: "정렬 기준 추가" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "2순위 정렬 열" }), "timeout");
+    await user.selectOptions(screen.getByRole("combobox", { name: "2순위 정렬 방향" }), "asc");
+    expect(params(router).get("sort")).toBe("name_desc");
+    await user.click(screen.getByRole("button", { name: "정렬 적용" }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(params(router).get("sort")).toBe("priority_desc,timeout_asc");
+    expect(params(router).get("page")).toBeNull();
+    expect(params(router).get("page_size")).toBe("25");
+    expect(names().slice(0, 2)).toEqual(["z-late-zero", "a-late-slow"]);
+    await act(async () => {
+      await router.navigate(-1);
+    });
+    expect(params(router).get("sort")).toBe("name_desc");
+    expect(params(router).get("page")).toBe("2");
+    await act(async () => {
+      await router.navigate(1);
+    });
+    await sortOnce(user, "우선순위", "asc");
+    expect(params(router).get("sort")).toBe("priority_asc");
+    expectReadOnlyTransport(calls);
+  });
+
   it("preserves default ties under descending priority and restores the original order", async () => {
     const user = userEvent.setup();
     const { calls, router } = await mount();

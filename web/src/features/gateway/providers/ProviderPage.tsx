@@ -32,7 +32,11 @@ import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { isProviderRef } from "@/shared/api/provider-ref";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
-import { readProviderCatalogPageSize, readProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
+import {
+  readProviderCatalogPageSize,
+  readProviderCatalogSorting,
+  providerCatalogSortQuery,
+} from "@/shared/utils/provider-catalog-query";
 import { sortProviderCatalogRows } from "./provider-table-state";
 import { ProviderExportControl } from "./ProviderExportControl";
 import { ProviderReadBoundary } from "./ProviderReadBoundary";
@@ -51,7 +55,11 @@ function ProviderPageContent(): React.JSX.Element {
   const auth = useAuth();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const sort = readProviderCatalogSort(searchParams.getAll("sort"));
+  const sortValue = searchParams.getAll("sort").join("\u0000");
+  const sort = useMemo(
+    () => readProviderCatalogSorting(sortValue ? sortValue.split("\u0000") : []),
+    [sortValue],
+  );
   const pageSize = readProviderCatalogPageSize(searchParams.getAll("page_size")) ?? 10;
   const requestedRange = searchParams.get("range");
   const requestedStatus = searchParams.get("status");
@@ -361,7 +369,9 @@ function ProviderPageContent(): React.JSX.Element {
           updateSearch({ page: pageIndex === 0 ? undefined : String(pageIndex + 1) }, false)
         }
         sort={sort}
-        onSortChange={(value) => updateSearch({ sort: value, page: undefined }, false)}
+        onSortChange={(value) =>
+          updateSearch({ sort: providerCatalogSortQuery(value), page: undefined }, false)
+        }
         pageSize={pageSize}
         onPageSizeChange={(value) =>
           updateSearch({ page_size: value === 10 ? undefined : String(value), page: undefined }, false)

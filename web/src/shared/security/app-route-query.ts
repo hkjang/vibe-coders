@@ -11,7 +11,10 @@ import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
 import { domainDecisionRequestIDError } from "@/shared/utils/domain-decision-filters";
 import { readModelCatalogPageSize, readModelCatalogSorting } from "@/shared/utils/model-catalog-query";
-import { readProviderCatalogPageSize, readProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
+import {
+  readProviderCatalogPageSize,
+  readProviderCatalogSorting,
+} from "@/shared/utils/provider-catalog-query";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   // Screens declare their own query keys next to their route registration; this
@@ -109,7 +112,7 @@ export function sanitizeAppRouteSearch(
     const exactCatalogueRoute = route === "/providers" || route === "/gateway/providers";
     if (
       parameters.has("sort") &&
-      (!exactCatalogueRoute || !readProviderCatalogSort(parameters.getAll("sort")))
+      (!exactCatalogueRoute || !readProviderCatalogSorting(parameters.getAll("sort")))
     )
       invalidOperationalKeys.add("sort");
     if (
