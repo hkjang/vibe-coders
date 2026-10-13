@@ -1,20 +1,16 @@
 import { useMemo, useRef, useState } from "react";
-import { z } from "zod";
 
-import { managedRoleLabel, roleLabel } from "@/config/ui-labels";
+import { managedRoleLabel } from "@/config/ui-labels";
+import { UserAccountDialog } from "@/features/access/users/UserAccountDialog";
 import { formatSignedRatio, statusLabel, statusTone } from "@/features/access/access-format";
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
 import { UserDetailSheet } from "@/features/access/users/UserDetailSheet";
 import { accessKeys, useUserBenchmarkQuery, useUsersQuery } from "@/features/access/users/use-access-admin";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
-import type { CreateUserBody, UpdateUserBody } from "@/shared/api/domains/access";
 import type { AuthUserRow, UserSummary } from "@/shared/api/domains/access.schemas";
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
-import { FormDialog } from "@/shared/components/form/FormDialog";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -34,37 +30,6 @@ import { formatDateTime, formatKRW, formatNumber, shortId } from "@/shared/utils
 
 const access = endpoints.domains.access;
 const routeId = "access.users";
-
-const assignableRoles = [
-  "super_admin",
-  "admin",
-  "ops_admin",
-  "ai_admin",
-  "security_admin",
-  "billing_admin",
-  "team_admin",
-  "team_manager",
-  "developer",
-  "service_account",
-  "viewer",
-  "readonly_admin",
-] as const;
-
-const createUserSchema = z.object({
-  email: z.email("올바른 이메일 주소를 입력하세요."),
-  password: z.string().min(8, "비밀번호는 8자 이상이어야 합니다."),
-  name: z.string(),
-  role: z.string(),
-  team_id: z.string(),
-});
-type CreateUserForm = z.infer<typeof createUserSchema>;
-
-const updateUserSchema = z.object({
-  role: z.string(),
-  status: z.enum(["active", "disabled"]),
-  team_id: z.string(),
-});
-type UpdateUserForm = z.infer<typeof updateUserSchema>;
 
 interface UsersTabProps {
   canWrite: boolean;
@@ -239,19 +204,6 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
     });
   }, [keyUsers, search, statusFilter]);
 
-  const createForm = useZodForm<CreateUserForm, CreateUserForm>(createUserSchema, {
-    email: "",
-    password: "",
-    name: "",
-    role: "developer",
-    team_id: "",
-  });
-  const editForm = useZodForm<UpdateUserForm, UpdateUserForm>(updateUserSchema, {
-    role: "developer",
-    status: "active",
-    team_id: "",
-  });
-  const { reset: resetEditForm } = editForm;
   // Stable cell renderers keep the opener connected while the dialog changes.
   const accountTableColumns = useMemo(
     () =>
@@ -259,30 +211,14 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
         teamNames ?? {},
         (user, trigger) => {
           rememberDialogTrigger(trigger);
-          resetEditForm({
-            role: user.role || "developer",
-            status: user.status === "disabled" ? "disabled" : "active",
-            team_id: user.team_id,
-          });
           setEditing(user);
         },
         canWrite,
         writeDeniedReason,
       ),
-    [teamNames, rememberDialogTrigger, resetEditForm, canWrite, writeDeniedReason],
+    [teamNames, rememberDialogTrigger, canWrite, writeDeniedReason],
   );
 
-  const createUser = useMutationFeedback({
-    mutate: (body: CreateUserBody) => apiClient.request(access.users.create, { body, routeId }),
-    invalidates: [accessKeys.users],
-    successMessage: "사용자를 등록했습니다.",
-  });
-  const updateUser = useMutationFeedback({
-    mutate: ({ id, body }: { id: string; body: UpdateUserBody }) =>
-      apiClient.request(withPathParams(access.users.update, { id }), { body, routeId }),
-    invalidates: [accessKeys.users],
-    successMessage: "사용자 정보를 변경했습니다.",
-  });
   const promoteKey = useMutationFeedback({
     mutate: (row: UserSummary) =>
       apiClient.request(withPathParams(access.apiKeys.update, { id: row.api_key_id }), {
@@ -325,7 +261,6 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
             disabled={!canWrite}
             title={canWrite ? undefined : writeDeniedReason}
             onClick={() => {
-              createForm.reset({ email: "", password: "", name: "", role: "developer", team_id: "" });
               setCreateOpen(true);
             }}
           >
@@ -441,103 +376,24 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
         )}
       </SectionCard>
 
-      <FormDialog
-        form={createForm}
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        returnFocusRef={createTrigger}
-        title="사용자 등록"
-        description="콘솔에 로그인할 계정을 만듭니다. 내 역할보다 낮은 역할만 부여할 수 있습니다."
-        submitLabel="등록"
-        onSubmit={async (values) => {
-          await createUser.mutateAsync({
-            email: values.email,
-            password: values.password,
-            ...(values.name ? { name: values.name } : {}),
-            role: values.role,
-            ...(values.team_id ? { team_id: values.team_id } : {}),
-          });
-          setCreateOpen(false);
-        }}
-      >
-        <FormField label="이메일" required error={createForm.formState.errors.email?.message}>
-          {(control) => <Input {...control} type="email" {...createForm.register("email")} />}
-        </FormField>
-        <FormField
-          label="비밀번호"
-          required
-          description="8자 이상. 등록 후에는 이 화면에서 변경할 수 없습니다."
-          error={createForm.formState.errors.password?.message}
-        >
-          {(control) => (
-            <Input
-              {...control}
-              type="password"
-              autoComplete="new-password"
-              {...createForm.register("password")}
-            />
-          )}
-        </FormField>
-        <FormField label="이름">
-          {(control) => <Input {...control} {...createForm.register("name")} />}
-        </FormField>
-        <FormField label="역할">
-          {(control) => (
-            <Select {...control} {...createForm.register("role")}>
-              {assignableRoles.map((role) => (
-                <option key={role} value={role}>
-                  {roleLabel(role)}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <FormField label="팀" description="팀 ID 또는 팀 이름. 비우면 팀 없이 등록합니다.">
-          {(control) => <Input {...control} {...createForm.register("team_id")} />}
-        </FormField>
-      </FormDialog>
-
-      <FormDialog
-        form={editForm}
-        open={editing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setEditing(undefined);
-        }}
-        returnFocusRef={dialogTrigger}
-        title="사용자 변경"
-        description={`${editing?.email ?? ""} 계정의 역할, 상태, 팀을 변경합니다. 이름과 비밀번호는 변경할 수 없습니다.`}
-        onSubmit={async (values) => {
-          if (!editing) return;
-          await updateUser.mutateAsync({
-            id: editing.id,
-            body: { role: values.role, status: values.status, team_id: values.team_id },
-          });
-          setEditing(undefined);
-        }}
-      >
-        <FormField label="역할">
-          {(control) => (
-            <Select {...control} {...editForm.register("role")}>
-              {assignableRoles.map((role) => (
-                <option key={role} value={role}>
-                  {roleLabel(role)}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <FormField label="상태" description="중지하면 해당 사용자의 모든 세션이 즉시 폐기됩니다.">
-          {(control) => (
-            <Select {...control} {...editForm.register("status")}>
-              <option value="active">사용</option>
-              <option value="disabled">중지</option>
-            </Select>
-          )}
-        </FormField>
-        <FormField label="팀" description="팀 ID 또는 팀 이름. 비우면 팀 배정을 해제합니다.">
-          {(control) => <Input {...control} {...editForm.register("team_id")} />}
-        </FormField>
-      </FormDialog>
+      {createOpen ? (
+        <UserAccountDialog
+          canWrite={canWrite}
+          writeDeniedReason={writeDeniedReason}
+          returnFocusRef={createTrigger}
+          onClose={() => setCreateOpen(false)}
+        />
+      ) : null}
+      {editing ? (
+        <UserAccountDialog
+          key={editing.id}
+          user={editing}
+          canWrite={canWrite}
+          writeDeniedReason={writeDeniedReason}
+          returnFocusRef={dialogTrigger}
+          onClose={() => setEditing(undefined)}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={promoting !== undefined}

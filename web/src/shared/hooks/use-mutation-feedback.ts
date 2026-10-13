@@ -7,6 +7,8 @@ import { tokenStore } from "@/shared/auth/token-store";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 interface MutationFeedbackOptions<Variables, Result> {
+  /** Sensitive forms may discard detached mutation snapshots immediately. */
+  gcTime?: number;
   /** Server call. */
   mutate: (variables: Variables) => Promise<Result>;
   /** Query keys (prefixes) to invalidate after success. */
@@ -26,6 +28,7 @@ interface MutationFeedbackOptions<Variables, Result> {
  * Callers that show errors inline (dialogs) can still read `error`.
  */
 export function useMutationFeedback<Variables, Result>({
+  gcTime,
   errorMessage = "작업을 완료하지 못했습니다.",
   errorFormatter = safeAppErrorMessage,
   invalidates = [],
@@ -48,6 +51,7 @@ export function useMutationFeedback<Variables, Result>({
     }
   };
   const mutation = useMutation<Result, Error, Submission>({
+    gcTime,
     retry: false,
     mutationFn: async (submission) => {
       assertCurrent(submission);

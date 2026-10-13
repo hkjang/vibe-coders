@@ -160,6 +160,7 @@ function handlers(overrides: Record<string, () => unknown> = {}) {
   return {
     "GET /admin/users": () => usersResponse,
     "GET /admin/benchmark/users": () => benchmark,
+    "GET /admin/roles": () => ({ roles: [{ role: "developer" }], all_scopes: [] }),
     ...overrides,
   };
 }
