@@ -43,3 +43,46 @@ test("AUTH-LIVE-032 실제 MCP 도구 위험 설정 검토와 저장", async ({ 
   await expect(details).toBeVisible();
   // Go's harness separately verifies the stored row and exactly one audit event.
 });
+
+test("AUTH-LIVE-033 실제 MCP 정책 검토·편집·허용목록·삭제", async ({ page }) => {
+  await login(page, admin, "/app/mcp?tab=policy");
+  await page.getByRole("button", { name: "정책 추가", exact: true }).click();
+  const create = page.getByRole("dialog", { name: "MCP 서버 정책 추가", exact: true });
+  await create.getByLabel("서버 라벨", { exact: false }).fill("browser-policy-reviewed");
+  await create.getByLabel("모드", { exact: false }).selectOption("block");
+  await create.getByLabel("메모", { exact: true }).fill("browser policy baseline");
+  await create.getByRole("button", { name: "검토한 정책 저장", exact: true }).click();
+  await expect(create).toHaveCount(0);
+  await page.getByRole("button", { name: "browser-policy-reviewed 정책 편집", exact: true }).click();
+  const edit = page.getByRole("dialog", { name: "MCP 서버 정책 편집", exact: true });
+  await expect(edit.getByRole("button", { name: "검토한 정책 저장", exact: true })).toBeDisabled();
+  await edit.getByLabel("모드", { exact: false }).selectOption("warn");
+  await edit.getByLabel("메모", { exact: true }).fill("browser policy reviewed");
+  await expect(edit.getByText("변경 전: 차단", { exact: false })).toBeVisible();
+  await edit.getByRole("button", { name: "검토한 정책 저장", exact: true }).click();
+  await expect(edit).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("table", { name: "MCP 서버 정책", exact: true })).toContainText(
+    "browser policy reviewed",
+  );
+  for (const target of ["허용목록 사용", "허용목록 해제"]) {
+    await page.getByRole("button", { name: "허용목록 변경 검토", exact: true }).click();
+    const confirm = page.getByRole("dialog", { name: "허용목록 모드를 변경할까요?", exact: true });
+    const apply = confirm.getByRole("button", { name: "검토한 모드 적용", exact: true });
+    await expect(apply).toBeDisabled();
+    await confirm.getByLabel("확인 문구", { exact: false }).fill(target);
+    await apply.click();
+    await expect(confirm).toHaveCount(0);
+  }
+  await page.getByRole("button", { name: "browser-policy-reviewed 정책 삭제", exact: true }).click();
+  const remove = page.getByRole("dialog", { name: "정책을 삭제할까요?", exact: true });
+  await expect(remove.getByText("삭제 후: 미등록 · 서버 기본 허용", { exact: true })).toBeVisible();
+  await remove.getByLabel("확인 문구", { exact: false }).fill("browser-policy-reviewed");
+  await remove.getByRole("button", { name: "삭제", exact: true }).click();
+  await expect(remove).toHaveCount(0);
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "browser-policy-reviewed 정책 편집", exact: true }),
+  ).toHaveCount(0);
+  // The Go harness checks final state and exactly five matching audit events.
+});
