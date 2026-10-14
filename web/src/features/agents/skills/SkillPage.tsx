@@ -80,11 +80,11 @@ function SkillPageContent(): React.JSX.Element {
   const [params, updateSearch] = useSearchState();
   const refreshInterval = useRefreshInterval();
   const rawQuery = params.get("q") ?? "";
-  const query = containsPotentialSecret(rawQuery) ? "" : rawQuery;
+  const query = containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? "" : rawQuery;
   const status = params.get("status") ?? "all";
   const selectedName = params.get("skill") ?? "";
   const [searchError, setSearchError] = useState<string | undefined>(
-    containsPotentialSecret(rawQuery) ? secretSearchMessage : undefined,
+    containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? secretSearchMessage : undefined,
   );
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Skill | undefined>();
@@ -371,8 +371,9 @@ function SkillPageContent(): React.JSX.Element {
                 event.preventDefault();
                 const submitted = new FormData(event.currentTarget).get("q");
                 const next = typeof submitted === "string" ? submitted.trim() : "";
-                if (containsPotentialSecret(next)) {
+                if (containsPotentialSecret(next, auth.credentialPrefixes)) {
                   setSearchError(secretSearchMessage);
+                  event.currentTarget.querySelector<HTMLInputElement>('[name="q"]')?.focus();
                   return;
                 }
                 setSearchError(undefined);
