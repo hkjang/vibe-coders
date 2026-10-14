@@ -454,6 +454,36 @@ export type FallbackStats = {
     path: string;
 };
 
+export type GatewayMcpInfoResponse = {
+    contracts: Array<{
+        allowed_roles: string;
+        cost_policy: string;
+        executes: boolean;
+        name: string;
+        output_schema: string;
+        risk_level: string;
+        timeout_ms: number;
+    }>;
+    endpoint: string;
+    note: string;
+    prompts: Array<{
+        description?: string;
+        name: string;
+    }>;
+    protocol_version: string;
+    resources: Array<{
+        description?: string;
+        mimeType?: string;
+        name: string;
+        uri: string;
+    }>;
+    tools: Array<{
+        description?: string;
+        inputSchema?: unknown;
+        name: string;
+    }>;
+};
+
 export type GroupedStat = {
     average_latency_ms: number;
     cost_krw: number;
@@ -636,6 +666,76 @@ export type MattermostConfigResponse = {
 export type MattermostTestResponse = {
     status: 'sent';
     webhook_status: number;
+};
+
+export type McpContract = {
+    allowed_roles: string;
+    cost_policy: string;
+    created_at: string;
+    created_by: string;
+    description: string;
+    enabled: boolean;
+    id: string;
+    input_schema: string;
+    name: string;
+    namespace: string;
+    output_schema: string;
+    owner: string;
+    risk_level: string;
+    timeout_ms: number;
+    title: string;
+    updated_at: string;
+};
+
+export type McpContractDeletedResponse = {
+    ok: boolean;
+};
+
+export type McpContractListResponse = {
+    contracts: Array<McpContract>;
+};
+
+export type McpContractSavedResponse = {
+    id: string;
+    ok: boolean;
+};
+
+export type McpContractValidateRequest = {
+    contract_id?: string;
+    namespace?: string;
+};
+
+export type McpContractValidationResponse = {
+    checked: number;
+    drift_count: number;
+    missing_count: number;
+    note: string;
+    results: Array<{
+        contract_id: string;
+        declared_only?: Array<string>;
+        detail?: string;
+        live_only?: Array<string>;
+        name: string;
+        namespace: string;
+        risk_level: string;
+        status: string;
+    }>;
+};
+
+export type McpContractWriteRequest = {
+    allowed_roles?: string;
+    cost_policy?: string;
+    description?: string;
+    enabled?: boolean;
+    id?: string;
+    input_schema?: string;
+    name: string;
+    namespace?: string;
+    output_schema?: string;
+    owner?: string;
+    risk_level?: string;
+    timeout_ms?: number;
+    title?: string;
 };
 
 export type McpRouteExplainRequest = {
@@ -4576,12 +4676,39 @@ export type GetAdminGatewayMcpInfoData = {
     url: '/admin/gateway-mcp/info';
 };
 
+export type GetAdminGatewayMcpInfoErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminGatewayMcpInfoError = GetAdminGatewayMcpInfoErrors[keyof GetAdminGatewayMcpInfoErrors];
+
 export type GetAdminGatewayMcpInfoResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: GatewayMcpInfoResponse;
 };
+
+export type GetAdminGatewayMcpInfoResponse = GetAdminGatewayMcpInfoResponses[keyof GetAdminGatewayMcpInfoResponses];
 
 export type GetAdminGoldenPromptsData = {
     body?: never;
@@ -5154,58 +5281,178 @@ export type GetAdminMcpCatalogResponses = {
 export type DeleteAdminMcpContractsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query: {
+        id: string;
+    };
     url: '/admin/mcp/contracts';
 };
+
+export type DeleteAdminMcpContractsErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminMcpContractsError = DeleteAdminMcpContractsErrors[keyof DeleteAdminMcpContractsErrors];
 
 export type DeleteAdminMcpContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpContractDeletedResponse;
 };
+
+export type DeleteAdminMcpContractsResponse = DeleteAdminMcpContractsResponses[keyof DeleteAdminMcpContractsResponses];
 
 export type GetAdminMcpContractsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        namespace?: string;
+        /**
+         * Exactly 1 selects enabled declarations.
+         */
+        enabled?: string;
+    };
     url: '/admin/mcp/contracts';
 };
+
+export type GetAdminMcpContractsErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminMcpContractsError = GetAdminMcpContractsErrors[keyof GetAdminMcpContractsErrors];
 
 export type GetAdminMcpContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpContractListResponse;
 };
 
+export type GetAdminMcpContractsResponse = GetAdminMcpContractsResponses[keyof GetAdminMcpContractsResponses];
+
 export type PostAdminMcpContractsData = {
-    body?: never;
+    body: McpContractWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/mcp/contracts';
 };
 
+export type PostAdminMcpContractsErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMcpContractsError = PostAdminMcpContractsErrors[keyof PostAdminMcpContractsErrors];
+
 export type PostAdminMcpContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpContractSavedResponse;
 };
 
+export type PostAdminMcpContractsResponse = PostAdminMcpContractsResponses[keyof PostAdminMcpContractsResponses];
+
 export type PostAdminMcpContractsValidateData = {
-    body?: never;
+    body: McpContractValidateRequest;
     path?: never;
     query?: never;
     url: '/admin/mcp/contracts/validate';
 };
 
+export type PostAdminMcpContractsValidateErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Explicit contract ID not found
+     */
+    404: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMcpContractsValidateError = PostAdminMcpContractsValidateErrors[keyof PostAdminMcpContractsValidateErrors];
+
 export type PostAdminMcpContractsValidateResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpContractValidationResponse;
 };
+
+export type PostAdminMcpContractsValidateResponse = PostAdminMcpContractsValidateResponses[keyof PostAdminMcpContractsValidateResponses];
 
 export type GetAdminMcpEffectivePolicyData = {
     body?: never;

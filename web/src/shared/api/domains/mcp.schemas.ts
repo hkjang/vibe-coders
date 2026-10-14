@@ -440,64 +440,91 @@ export const mcpTestResultSchema = looseObject({
 /* ------------------------------------------------------------- gateway MCP */
 
 export const gatewayMcpInfoSchema = looseObject({
-  endpoint: text,
-  protocol_version: text,
-  note: text,
-  tools: looseList({ name: text, description: text, inputSchema: z.unknown().optional() }),
-  contracts: looseList({
-    name: text,
-    risk_level: text,
-    cost_policy: text,
-    timeout_ms: count,
-    allowed_roles: text,
-    executes: flag,
-    output_schema: text,
-  }),
-  resources: looseList({ uri: text, name: text, description: text, mimeType: text }),
-  prompts: looseList({ name: text, description: text }),
+  endpoint: z.string().min(1),
+  protocol_version: z.string().min(1),
+  note: z.string(),
+  tools: z.array(
+    looseObject({
+      name: z.string().min(1),
+      description: z.string().default(""),
+      inputSchema: z.unknown().optional(),
+    }),
+  ),
+  contracts: z.array(
+    looseObject({
+      name: z.string().min(1),
+      risk_level: z.string(),
+      cost_policy: z.string(),
+      timeout_ms: z.number().int().safe(),
+      allowed_roles: z.string(),
+      executes: z.boolean(),
+      output_schema: z.string(),
+    }),
+  ),
+  resources: z.array(
+    looseObject({
+      uri: z.string(),
+      name: z.string(),
+      description: z.string().default(""),
+      mimeType: z.string().default(""),
+    }),
+  ),
+  prompts: z.array(looseObject({ name: z.string(), description: z.string().default("") })),
 });
 
 export const mcpContractSchema = looseObject({
-  id: text,
-  namespace: text,
-  name: text,
-  title: text,
-  description: text,
-  input_schema: text,
-  output_schema: text,
-  risk_level: text,
-  timeout_ms: count,
-  allowed_roles: text,
-  cost_policy: text,
-  owner: text,
-  enabled: flag,
-  created_by: text,
-  updated_at: text,
+  id: z.string().min(1),
+  namespace: z.string(),
+  name: z.string(),
+  title: z.string(),
+  description: z.string(),
+  input_schema: z.string(),
+  output_schema: z.string(),
+  risk_level: z.string(),
+  timeout_ms: z.number().int().safe(),
+  allowed_roles: z.string(),
+  cost_policy: z.string(),
+  owner: z.string(),
+  enabled: z.boolean(),
+  created_by: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
 });
 export type McpContract = z.output<typeof mcpContractSchema>;
 
 export const mcpContractListSchema = looseObject({
-  contracts: orDefault(z.array(mcpContractSchema), [] as McpContract[]),
+  contracts: z
+    .array(mcpContractSchema)
+    .refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "Duplicate contract IDs"),
 });
 
-export const mcpContractWriteSchema = looseObject({ id: text, ok: flag });
+export const mcpContractWriteSchema = looseObject({ id: z.string().min(1), ok: z.literal(true) });
+export const mcpContractDeletedSchema = looseObject({ ok: z.literal(true) });
 
 export const mcpContractValidationSchema = looseObject({
-  checked: count,
-  drift_count: count,
-  missing_count: count,
-  note: text,
-  results: looseList({
-    contract_id: text,
-    namespace: text,
-    name: text,
-    risk_level: text,
-    status: text,
-    detail: text,
-    declared_only: textList,
-    live_only: textList,
-  }),
-});
+  checked: z.number().int().nonnegative(),
+  drift_count: z.number().int().nonnegative(),
+  missing_count: z.number().int().nonnegative(),
+  note: z.string(),
+  results: z.array(
+    looseObject({
+      contract_id: z.string(),
+      namespace: z.string(),
+      name: z.string(),
+      risk_level: z.string(),
+      status: z.string(),
+      detail: z.string().default(""),
+      declared_only: z.array(z.string()).default([]),
+      live_only: z.array(z.string()).default([]),
+    }),
+  ),
+}).refine(
+  (value) =>
+    value.checked === value.results.length &&
+    value.drift_count === value.results.filter((row) => row.status === "drift").length &&
+    value.missing_count === value.results.filter((row) => row.status === "missing").length,
+  "Inconsistent contract validation counts",
+);
 
 /* ------------------------------------------------------ agents / agent routes */
 
