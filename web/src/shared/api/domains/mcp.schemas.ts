@@ -148,10 +148,26 @@ export const mcpRouteListSchema = looseObject({
   errors: errorMap,
 });
 
-export const mcpTopologySchema = looseObject({
-  nodes: looseList({ id: text, label: text, kind: text, status: text, decision: text }),
-  edges: looseList({ from: text, to: text, label: text }),
+const mcpTopologyNodeSchema = looseObject({
+  id: z.string().min(1),
+  label: z.string(),
+  kind: z.string().min(1),
+  status: text,
+  decision: text,
 });
+const mcpTopologyEdgeSchema = looseObject({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  label: z.string(),
+});
+export const mcpTopologySchema = looseObject({
+  nodes: z.array(mcpTopologyNodeSchema),
+  edges: z.array(mcpTopologyEdgeSchema),
+}).refine((value) => new Set(value.nodes.map((node) => node.id)).size === value.nodes.length, {
+  message: "연결 구조의 노드 ID가 중복되어 대상을 구분할 수 없습니다.",
+});
+export type McpTopology = z.output<typeof mcpTopologySchema>;
+export type McpTopologyNode = z.output<typeof mcpTopologyNodeSchema>;
 
 /* -------------------------------------------------------------------- tools */
 

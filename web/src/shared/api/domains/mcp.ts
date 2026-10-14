@@ -23,6 +23,7 @@ import type {
   GetAdminMcpServersData,
   GetAdminMcpToolsData,
   GetAdminMcpTopologyData,
+  GetAdminMcpTopologyResponse,
   GetAdminMcpTrustScoresData,
   GetAdminMcpUpstreamsData,
   GetAdminMcpUpstreamsIdFlowData,
@@ -266,7 +267,11 @@ export interface AgentRouteTestBody {
 export const mcpEndpoints = {
   overview: operation<GetAdminMcpOverviewData, unknown>()("GET", "/admin/mcp/overview", mcpOverviewSchema),
   routes: operation<GetAdminMcpRoutesData, unknown>()("GET", "/admin/mcp/routes", mcpRouteListSchema),
-  topology: operation<GetAdminMcpTopologyData, unknown>()("GET", "/admin/mcp/topology", mcpTopologySchema),
+  topology: operation<GetAdminMcpTopologyData, GetAdminMcpTopologyResponse>()(
+    "GET",
+    "/admin/mcp/topology",
+    mcpTopologySchema,
+  ),
   servers: operation<WithQuery<GetAdminMcpServersData, McpFilterQuery>, unknown>()(
     "GET",
     "/admin/mcp/servers",

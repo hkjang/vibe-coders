@@ -321,7 +321,11 @@ func (s *Server) handleMCPTopology(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	upstreams, _ := s.db.ListMCPUpstreams(r.Context())
+	upstreams, err := s.db.ListMCPUpstreams(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "MCP topology configuration is unavailable", "server_error", "mcp_topology_unavailable")
+		return
+	}
 	routes := mcpRouteViews(s.mcpToolsSnapshotAdmin())
 	nodes := []map[string]any{{"id": "gateway", "label": "/mcp gateway", "kind": "gateway"}}
 	edges := []map[string]any{}

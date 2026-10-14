@@ -638,6 +638,25 @@ export type MattermostTestResponse = {
     webhook_status: number;
 };
 
+export type McpTopologyEdge = {
+    from: string;
+    label: string;
+    to: string;
+};
+
+export type McpTopologyNode = {
+    decision?: string;
+    id: string;
+    kind: string;
+    label: string;
+    status?: string;
+};
+
+export type McpTopologyResponse = {
+    edges: Array<McpTopologyEdge>;
+    nodes: Array<McpTopologyNode>;
+};
+
 export type MeKeyCatalog = {
     api_keys: Array<MeKeyPublic>;
     grantable_scopes: Array<string>;
@@ -5427,12 +5446,35 @@ export type GetAdminMcpTopologyData = {
     url: '/admin/mcp/topology';
 };
 
+export type GetAdminMcpTopologyErrors = {
+    /**
+     * Invalid authentication or missing observability:read scope (existing admin authorization behavior)
+     */
+    401: AppError;
+    /**
+     * GET required
+     */
+    405: AppError;
+    /**
+     * MCP topology configuration unavailable
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminMcpTopologyError = GetAdminMcpTopologyErrors[keyof GetAdminMcpTopologyErrors];
+
 export type GetAdminMcpTopologyResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpTopologyResponse;
 };
+
+export type GetAdminMcpTopologyResponse = GetAdminMcpTopologyResponses[keyof GetAdminMcpTopologyResponses];
 
 export type GetAdminMcpTrustScoresData = {
     body?: never;

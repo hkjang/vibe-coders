@@ -1,0 +1,86 @@
+.mcp-topology-explorer,
+.mcp-topology-explorer > .section-card,
+.mcp-topology-explorer .section-card-body,
+.mcp-topology-diagram {
+  min-width: 0;
+}
+.mcp-topology-scroll,
+.mcp-topology-connections {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+}
+.mcp-topology-canvas {
+  position: relative;
+}
+.mcp-topology-scroll {
+  max-height: 36rem;
+}
+.mcp-topology-canvas svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.mcp-topology-canvas svg > path {
+  fill: none;
+  stroke: var(--color-muted);
+  stroke-width: 2;
+}
+.mcp-topology-canvas svg > path.is-selected {
+  stroke: var(--color-primary);
+  stroke-width: 3;
+}
+.mcp-topology-canvas marker path {
+  fill: var(--color-muted);
+}
+.mcp-topology-node {
+  position: absolute;
+  display: grid;
+  gap: var(--space-1);
+  width: 210px;
+  height: 92px;
+  line-height: 20px;
+  grid-template-rows: 20px 20px 20px;
+  padding: var(--space-2) var(--space-3);
+  text-align: start;
+  cursor: pointer;
+  background: var(--color-card);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+}
+.mcp-topology-node[aria-pressed="true"] {
+  border-color: var(--color-primary);
+  outline: 2px solid var(--color-primary);
+}
+.mcp-topology-node span {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+.mcp-topology-node strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-topology-diagram {
+  margin-block: var(--space-4);
+}
+.mcp-topology-diagram summary {
+  cursor: pointer;
+  padding: var(--space-2);
+}
+.mcp-topology-connections table {
+  min-width: 32rem;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.mcp-topology-connections th,
+.mcp-topology-connections td {
+  padding: var(--space-2);
+  text-align: start;
+  border-bottom: 1px solid var(--color-border);
+  overflow-wrap: anywhere;
+}

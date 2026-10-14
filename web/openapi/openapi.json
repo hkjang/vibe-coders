@@ -2228,6 +2228,75 @@
         ],
         "type": "object"
       },
+      "McpTopologyEdge": {
+        "properties": {
+          "from": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "to": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "label"
+        ],
+        "type": "object"
+      },
+      "McpTopologyNode": {
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "McpTopologyResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/McpTopologyEdge"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/McpTopologyNode"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "type": "object"
+      },
       "MeKeyCatalog": {
         "additionalProperties": false,
         "properties": {
@@ -11849,10 +11918,58 @@
     },
     "/admin/mcp/topology": {
       "get": {
+        "description": "Read-only MCP topology requiring observability:read when authentication is enabled. Nodes describe the gateway, configured upstreams and cached discovered routes, not agent relationships or live calls. Configuration, discovery and current policy decisions are separate reads, not an atomic snapshot. Enabled/disabled is configuration, not health. Edges use from/to node IDs; cache/config timing can leave missing endpoints. Consumers must not silently invent endpoints or merge duplicate IDs. No server pagination. A configuration-read failure returns 503, not an empty topology.",
         "operationId": "get__admin_mcp_topology",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTopologyResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid authentication or missing observability:read scope (existing admin authorization behavior)"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "GET required"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "MCP topology configuration unavailable"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
