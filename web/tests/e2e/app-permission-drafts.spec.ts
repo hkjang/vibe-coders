@@ -259,7 +259,7 @@ test("앱 접근 추가 저장 중에는 모든 입력·상위 닫기·접기를
   await expect(form.getByRole("combobox", { name: "대상 종류", exact: true })).toBeDisabled();
   await expect(form.getByRole("textbox", { name: "팀 ID", exact: true })).toBeDisabled();
   await expect(form.getByRole("button", { name: "취소", exact: true })).toBeDisabled();
-  for (const name of ["검증", "실행(플랜)", "발행", "지원 중단", "버전 이력", "수정", "삭제"])
+  for (const name of ["검증", "실행 계획 생성", "발행", "지원 중단", "버전 이력", "수정", "삭제"])
     await expect(page.getByRole("button", { name, exact: true, includeHidden: true })).toBeDisabled();
   for (const method of ["Escape", "외부 클릭", "닫기 버튼"] as const) {
     await close(page, form, method);

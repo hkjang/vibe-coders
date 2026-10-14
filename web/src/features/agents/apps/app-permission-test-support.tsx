@@ -41,14 +41,6 @@ function Host({ writable = true }: { writable?: boolean }) {
         onDeprecate={() => undefined}
         onEdit={() => undefined}
         onPublish={() => undefined}
-        onRun={() => undefined}
-        onValidate={() => undefined}
-        runError={null}
-        runPending={false}
-        runPlan={undefined}
-        validation={undefined}
-        validationError={null}
-        validationPending={false}
         writeDisabledReason="앱 변경에는 admin:write 권한이 필요합니다."
       />
     </main>

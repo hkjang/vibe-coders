@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { z } from "zod";
@@ -12,14 +12,7 @@ import { OnboardingChecklist } from "@/features/agents/apps/OnboardingChecklist"
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { displayColumn } from "@/features/agents/table-columns";
 import { apiClient } from "@/shared/api/client";
-import type {
-  AppRun,
-  AppRunPlan,
-  AppTemplate,
-  AppValidation,
-  OnboardingCheck,
-  WorkApp,
-} from "@/shared/api/domains/agents.schemas";
+import type { AppRun, AppTemplate, OnboardingCheck, WorkApp } from "@/shared/api/domains/agents.schemas";
 import { onboardingCheckSchema } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
@@ -87,8 +80,6 @@ export function AppPage(): React.JSX.Element {
   const [deprecateTarget, setDeprecateTarget] = useState<WorkApp | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<WorkApp | undefined>();
   const [templateTarget, setTemplateTarget] = useState<AppTemplate | undefined>();
-  const [validation, setValidation] = useState<AppValidation | undefined>();
-  const [runPlan, setRunPlan] = useState<AppRunPlan | undefined>();
   const [receiptRunId, setReceiptRunId] = useState("");
   const createButtonRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
@@ -131,8 +122,6 @@ export function AppPage(): React.JSX.Element {
   const selected = apps.find((app) => app.id === selectedId);
 
   const closeSheet = useCallback((): void => {
-    setValidation(undefined);
-    setRunPlan(undefined);
     updateSearch({ app: undefined });
   }, [updateSearch]);
 
@@ -195,22 +184,6 @@ export function AppPage(): React.JSX.Element {
     successMessage: "템플릿에서 AI 업무 앱을 만들었습니다.",
     errorMessage: "템플릿에서 앱을 만들지 못했습니다.",
     onSuccess: () => setTab("apps"),
-  });
-
-  const validate = useMutation({
-    mutationFn: (id: string) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.apps.validate, { id }), {
-        routeId: "agents.apps",
-      }),
-    onSuccess: (result) => setValidation(result),
-  });
-
-  const run = useMutation({
-    mutationFn: (id: string) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.apps.run, { id }), {
-        routeId: "agents.apps",
-      }),
-    onSuccess: (result) => setRunPlan(result),
   });
 
   const columns = useMemo<ReadonlyArray<DataTableColumn<WorkApp>>>(
@@ -440,8 +413,6 @@ export function AppPage(): React.JSX.Element {
               getRowActionLabel={(row) => `${row.title ?? row.id} 상세 열기`}
               onRowClick={(row) => {
                 rowTriggerRef.current = document.activeElement as HTMLElement | null;
-                setValidation(undefined);
-                setRunPlan(undefined);
                 updateSearch({ app: row.id });
               }}
             />
@@ -551,20 +522,8 @@ export function AppPage(): React.JSX.Element {
           if (!open) closeSheet();
         }}
         onPublish={() => setPublishTarget(selected)}
-        onRun={() => {
-          if (selected) run.mutate(selected.id);
-        }}
-        onValidate={() => {
-          if (selected) validate.mutate(selected.id);
-        }}
         open={selectedId !== ""}
         returnFocusRef={rowTriggerRef}
-        runError={run.error}
-        runPending={run.isPending}
-        runPlan={runPlan}
-        validation={validation}
-        validationError={validate.error}
-        validationPending={validate.isPending}
         writeDisabledReason={writeDisabledReason}
       />
 
