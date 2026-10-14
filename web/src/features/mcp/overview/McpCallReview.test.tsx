@@ -18,6 +18,11 @@ const runtime = vi.hoisted(() => ({
 }));
 const notices = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: notices }));
+// Cross-document locking is exercised with real Web Locks in browser tests.
+vi.mock("./mcp-call-lock", () => ({
+  supportsMcpCallLock: () => true,
+  withMcpCallLock: <T,>(operation: () => Promise<T>) => operation(),
+}));
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
   return {

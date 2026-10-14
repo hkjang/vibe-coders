@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type axe from "axe-core";
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 
-async function install(page: Page) {
+async function install(page: Page, holdCall?: Promise<void>) {
   const user = {
     id: "public-call-admin",
     email: "policy@example.invalid",
@@ -95,6 +95,7 @@ async function install(page: Page) {
     }
     if (url.pathname === "/admin/mcp/test" && request.method() === "POST") {
       writes.push(request.postDataJSON() as unknown);
+      await holdCall;
       if (state.testStatus !== 200)
         return route.fulfill({
           status: state.testStatus,
@@ -129,6 +130,44 @@ async function open(page: Page) {
   return dialog(page);
 }
 
+test("다른 탭의 호출이 진행 중이면 대기 실행 없이 중복 전송을 차단한다", async ({ page, context }) => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const first = await install(page, pending);
+  const secondPage = await context.newPage();
+  const second = await install(secondPage);
+  try {
+    const firstReview = await open(page);
+    const secondReview = await open(secondPage);
+    await firstReview.getByLabel(/확인 문구/).fill("실제 호출");
+    await secondReview.getByLabel(/확인 문구/).fill("실제 호출");
+    await firstReview.getByRole("button", { name: "검토한 호출 실행", exact: true }).click();
+    await expect.poll(() => first.writes.length).toBe(1);
+    await secondReview.getByRole("button", { name: "검토한 호출 실행", exact: true }).click();
+    await expect(
+      secondReview.getByText("다른 탭에서 MCP 호출이 진행 중입니다. 완료 후 다시 검토하세요.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(second.writes).toEqual([]);
+    expect(second.state.calls).toBe(1);
+    release();
+    await expect(page.getByText("호출 성공", { exact: true })).toBeVisible();
+    expect(second.writes).toEqual([]);
+    await secondReview.getByRole("button", { name: "취소", exact: true }).click();
+    const freshReview = await open(secondPage);
+    await freshReview.getByLabel(/확인 문구/).fill("실제 호출");
+    await freshReview.getByRole("button", { name: "검토한 호출 실행", exact: true }).click();
+    await expect(secondPage.getByText("호출 성공", { exact: true })).toBeVisible();
+    expect(second.writes).toHaveLength(1);
+  } finally {
+    release();
+    await secondPage.close();
+  }
+});
+
 test("검토 후 정확한 인수·대상으로 한 번 호출하고 결과를 초기화한다", async ({ page }) => {
   const fixture = await install(page);
   const review = await open(page);
@@ -154,6 +193,15 @@ test("검토 후 정확한 인수·대상으로 한 번 호출하고 결과를 �
   await page.reload();
   await expect(page.getByLabel("노출 이름", { exact: true })).toHaveValue("");
   expect(fixture.unexpected).toEqual([]);
+});
+test("탭 간 잠금이 없으면 경로만 확인하고 실제 호출은 차단한다", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, "locks", { value: undefined }));
+  const fixture = await install(page);
+  await inspect(page);
+  await expect(page.getByText(/탭 간 호출 잠금을 사용할 수 없어 실제 호출을 중지했습니다/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "테스트 호출 검토", exact: true })).toBeDisabled();
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.state.calls).toBe(1);
 });
 test("읽기 전용은 경로 확인만 가능하고 관리자 범위 없는 조회자는 설명도 보내지 않는다", async ({ page }) => {
   const fixture = await install(page);
@@ -205,6 +253,11 @@ test("경로 변경과 전송 후 오류를 구분하고 즉시 재호출하지 
   ).toBeVisible();
   await expect(review.getByRole("button", { name: "검토한 호출 실행", exact: true })).toBeDisabled();
   expect(fixture.writes).toHaveLength(1);
+  expect(
+    await page.evaluate(async () =>
+      (await navigator.locks.query()).held?.filter((lock) => lock.name === "vibe:app:mcp-test-call"),
+    ),
+  ).toEqual([]);
 });
 test("잘못된 JSON은 해당 입력으로 초점을 옮기고 API를 호출하지 않는다", async ({ page }) => {
   const fixture = await install(page);

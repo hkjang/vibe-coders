@@ -68,6 +68,7 @@ export function McpCallConsole({
     }
   };
   const allowed =
+    operation.lockSupported &&
     operation.access.allowed &&
     Boolean(review && callable(review.explanation)) &&
     !operation.conflict &&
@@ -85,6 +86,12 @@ export function McpCallConsole({
         경로 확인에도 서버의 MCP 관리 권한이 필요합니다. 읽기 전용 미리보기에서는 경로 확인만 가능하고 실제
         호출은 실행하지 않습니다.
       </p>
+      {!operation.lockSupported ? (
+        <InlineNotice tone="warning">
+          탭 간 호출 잠금을 사용할 수 없어 실제 호출을 중지했습니다. HTTPS와 지원 브라우저를 확인하세요. 경로
+          확인은 계속 사용할 수 있습니다.
+        </InlineNotice>
+      ) : null}
       <form
         ref={formRef}
         className="mcp-inline-form"
@@ -275,6 +282,10 @@ export function McpCallConsole({
           ) : (
             <p>이 메서드는 인수를 보내지 않습니다.</p>
           )}
+          <p>
+            같은 브라우저·주소의 다른 탭에서 호출 중이면 전송하지 않습니다. 다른 브라우저·기기, 탭 종료 이후의
+            외부 실행이나 응답 유실 후 재호출까지 막는 서버 멱등성은 아닙니다.
+          </p>
           <p>
             실행 직전에 경로와 정책을 다시 비교합니다. 서버의 동시 변경 잠금이나 승인 절차를 대신하지
             않습니다. 기존 관리자 테스트 API는 일반 게이트웨이의 정책 집행·비용 상한·작업별 감사 기록을

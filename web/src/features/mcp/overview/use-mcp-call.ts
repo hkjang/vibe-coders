@@ -8,6 +8,7 @@ import { tokenStore } from "@/shared/auth/token-store";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { assertFeatureRead, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { supportsMcpCallLock, withMcpCallLock } from "./mcp-call-lock";
 import {
   callable,
   checkedExplanation,
@@ -94,34 +95,38 @@ export function useMcpCall(owner: FeatureReadOwner, canWrite: boolean) {
       if (active.has(principal)) throw new AppError("테스트 호출이 진행 중입니다.", { kind: "aborted" });
       active.add(principal);
       try {
-        const current = checkedExplanation(
-          await apiClient.request(endpoints.domains.mcp.routeExplain, {
-            body: selected.command.input,
+        return await withMcpCallLock(async () => {
+          assertRead();
+          access.assertCurrent();
+          const current = checkedExplanation(
+            await apiClient.request(endpoints.domains.mcp.routeExplain, {
+              body: selected.command.input,
+              routeId: "mcp.overview",
+              retryUnauthorized: false,
+            }),
+            selected.command.input,
+          );
+          assertRead();
+          access.assertCurrent();
+          if (selected.revision !== revision.current)
+            throw new AppError("입력이 바뀌었습니다.", { kind: "aborted" });
+          if (explanationFingerprint(current) !== explanationFingerprint(selected.explanation)) {
+            setConflict(true);
+            throw new AppError("경로나 정책이 바뀌었습니다. 다시 확인하세요.", { kind: "http", status: 409 });
+          }
+          // Once dispatched, no blind retry: a lost response may still mean the tool executed.
+          setAttempted(true);
+          return await apiClient.request(endpoints.domains.mcp.test, {
+            body: {
+              ...selected.command.input,
+              ...(["tools/call", "prompts/get"].includes(selected.command.input.method)
+                ? { arguments: selected.command.arguments }
+                : {}),
+              upstream_id: current.route.upstream_id,
+            },
             routeId: "mcp.overview",
             retryUnauthorized: false,
-          }),
-          selected.command.input,
-        );
-        assertRead();
-        access.assertCurrent();
-        if (selected.revision !== revision.current)
-          throw new AppError("입력이 바뀌었습니다.", { kind: "aborted" });
-        if (explanationFingerprint(current) !== explanationFingerprint(selected.explanation)) {
-          setConflict(true);
-          throw new AppError("경로나 정책이 바뀌었습니다. 다시 확인하세요.", { kind: "http", status: 409 });
-        }
-        // Once dispatched, no blind retry: a lost response may still mean the tool executed.
-        setAttempted(true);
-        return await apiClient.request(endpoints.domains.mcp.test, {
-          body: {
-            ...selected.command.input,
-            ...(["tools/call", "prompts/get"].includes(selected.command.input.method)
-              ? { arguments: selected.command.arguments }
-              : {}),
-            upstream_id: current.route.upstream_id,
-          },
-          routeId: "mcp.overview",
-          retryUnauthorized: false,
+          });
         });
       } finally {
         active.delete(principal);
@@ -140,5 +145,16 @@ export function useMcpCall(owner: FeatureReadOwner, canWrite: boolean) {
     reset();
     explain.mutate({ command, version: revision.current });
   };
-  return { review, explain, run, reset, inspect, conflict, attempted, canExplain: scope, access };
+  return {
+    review,
+    explain,
+    run,
+    reset,
+    inspect,
+    conflict,
+    attempted,
+    canExplain: scope,
+    access,
+    lockSupported: supportsMcpCallLock(),
+  };
 }
