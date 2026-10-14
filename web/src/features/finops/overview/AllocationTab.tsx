@@ -1,4 +1,6 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { FinopsReadBoundary } from "./FinopsReadBoundary";
+import { useFinopsReadQuery } from "./use-finops-read-query";
+import { assertFeatureRead, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { Download } from "lucide-react";
 
 import {
@@ -6,6 +8,7 @@ import {
   allocationDimensions,
   costWindowFrom,
   costWindows,
+  costWindowLabels,
   dimensionLabels,
   finopsAllocationQueryKey,
 } from "@/features/finops/overview/finops-shared";
@@ -55,20 +58,24 @@ function allocationColumns(): ReadonlyArray<DataTableColumn<CostAllocationRow>> 
 }
 
 export function AllocationTab(): React.JSX.Element {
+  return (
+    <FinopsReadBoundary scope="allocation">
+      {(owner) => <AllocationContent owner={owner} />}
+    </FinopsReadBoundary>
+  );
+}
+function AllocationContent({ owner }: { owner: FeatureReadOwner }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
   const window = costWindowFrom(searchParams.get("window"));
   const dimension = allocationDimensionFrom(searchParams.get("dimension"));
 
-  const allocation = useQuery({
-    queryKey: [...finopsAllocationQueryKey, dimension, window],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.finops.costAllocation, {
-        query: { dimension, window, limit: 100 },
-        signal,
-        routeId: "finops.overview",
-      }),
-    placeholderData: keepPreviousData,
-  });
+  const allocation = useFinopsReadQuery(owner, [...finopsAllocationQueryKey, dimension, window], (signal) =>
+    apiClient.request(endpoints.domains.finops.costAllocation, {
+      query: { dimension, window, limit: 100 },
+      signal,
+      routeId: "finops.overview",
+    }),
+  );
 
   const rows = allocation.data?.rows ?? [];
   const totalCost = rows.reduce((sum, row) => sum + row.cost_krw, 0);
@@ -81,8 +88,9 @@ export function AllocationTab(): React.JSX.Element {
         label="비용 배부 조회 조건"
         end={
           <Button
-            disabled={rows.length === 0}
-            onClick={() =>
+            disabled={rows.length === 0 || allocation.isFetching || allocation.isError}
+            onClick={() => {
+              assertFeatureRead(owner);
               downloadCsv(
                 `cost-allocation-${dimension}-${window}`,
                 toCsv(rows, [
@@ -92,8 +100,8 @@ export function AllocationTab(): React.JSX.Element {
                   { header: "cost_krw", value: (row) => row.cost_krw },
                   { header: "error_requests", value: (row) => row.error_requests },
                 ]),
-              )
-            }
+              );
+            }}
           >
             <Download aria-hidden="true" /> CSV 내보내기
           </Button>
@@ -122,7 +130,7 @@ export function AllocationTab(): React.JSX.Element {
           >
             {costWindows.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {costWindowLabels[item]}
               </option>
             ))}
           </select>

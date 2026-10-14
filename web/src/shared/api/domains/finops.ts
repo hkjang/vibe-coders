@@ -91,7 +91,16 @@ const chargebackPackSchema = looseObject({
   note: text,
   dimensions: list({
     dimension: text,
-    rows: list(costRowShape),
+    // Chargeback's dedicated Go row uses `errors`, unlike CostAllocationRow.
+    rows: orDefault(
+      z.array(
+        looseObject({ ...costRowShape, errors: numberish.nullish() }).transform(({ errors, ...row }) => ({
+          ...row,
+          error_requests: errors ?? row.error_requests,
+        })),
+      ),
+      [],
+    ),
     total_cost_krw: count,
     total_requests: count,
   }),

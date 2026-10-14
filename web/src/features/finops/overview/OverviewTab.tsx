@@ -1,9 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { FinopsReadBoundary } from "./FinopsReadBoundary";
+import { useFinopsReadQuery } from "./use-finops-read-query";
+import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
+import { LoadingState } from "@/shared/components/state/PageStates";
 import { RefreshCw } from "lucide-react";
 
 import {
   costWindowFrom,
   costWindows,
+  costWindowLabels,
   dimensionLabels,
   finopsBillingQueryKey,
 } from "@/features/finops/overview/finops-shared";
@@ -30,20 +34,26 @@ function budgetTone(status: BudgetStatusRow): "danger" | "warning" | "default" {
 }
 
 export function OverviewTab(): React.JSX.Element {
+  return (
+    <FinopsReadBoundary scope="billing">{(owner) => <OverviewContent owner={owner} />}</FinopsReadBoundary>
+  );
+}
+function OverviewContent({ owner }: { owner: FeatureReadOwner }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
   const window = costWindowFrom(searchParams.get("window"));
   const refreshInterval = useRefreshInterval();
 
-  const billing = useQuery({
-    queryKey: [...finopsBillingQueryKey, window],
-    queryFn: ({ signal }) =>
+  const billing = useFinopsReadQuery(
+    owner,
+    [...finopsBillingQueryKey, window],
+    (signal) =>
       apiClient.request(endpoints.domains.finops.billingDashboard, {
         query: { window },
         signal,
         routeId: "finops.overview",
       }),
-    refetchInterval: refreshInterval,
-  });
+    refreshInterval,
+  );
 
   const unavailable = billing.isPending || (billing.isError && !billing.data);
   const budgets = billing.data?.budgets ?? [];
@@ -101,7 +111,7 @@ export function OverviewTab(): React.JSX.Element {
           >
             {costWindows.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {costWindowLabels[item]}
               </option>
             ))}
           </select>
@@ -135,8 +145,13 @@ export function OverviewTab(): React.JSX.Element {
         />
       </StatGrid>
 
-      <SectionCard title="비용센터별 비용" description={`${window} 동안 비용센터에 배부된 금액입니다.`}>
-        {(billing.data?.by_cost_center.length ?? 0) === 0 ? (
+      <SectionCard
+        title="비용센터별 비용"
+        description={`${costWindowLabels[window]} 동안 비용센터에 배부된 금액입니다.`}
+      >
+        {billing.isPending ? (
+          <LoadingState label="비용센터별 비용을 불러오는 중입니다." />
+        ) : !billing.data ? null : billing.data.by_cost_center.length === 0 ? (
           <EmptyState
             title="비용센터별 비용이 없습니다."
             description="요청에 비용센터 메타데이터가 붙으면 이 목록이 채워집니다."
@@ -153,8 +168,13 @@ export function OverviewTab(): React.JSX.Element {
         )}
       </SectionCard>
 
-      <SectionCard title="모델별 비용" description={`${window} 동안 모델별로 집계한 비용입니다.`}>
-        {(billing.data?.by_model.length ?? 0) === 0 ? (
+      <SectionCard
+        title="모델별 비용"
+        description={`${costWindowLabels[window]} 동안 모델별로 집계한 비용입니다.`}
+      >
+        {billing.isPending ? (
+          <LoadingState label="모델별 비용을 불러오는 중입니다." />
+        ) : !billing.data ? null : billing.data.by_model.length === 0 ? (
           <EmptyState title="모델별 비용이 없습니다." description="요청이 쌓이면 모델별 비용이 보입니다." />
         ) : (
           <CostBars
@@ -169,7 +189,9 @@ export function OverviewTab(): React.JSX.Element {
       </SectionCard>
 
       <SectionCard title="예산 소진율" description="이번 달 예산 대비 사용액과 추세입니다.">
-        {budgets.length === 0 ? (
+        {billing.isPending ? (
+          <LoadingState label="예산 소진율을 불러오는 중입니다." />
+        ) : !billing.data ? null : budgets.length === 0 ? (
           <EmptyState
             title="등록된 예산이 없습니다."
             description="사용자·팀 화면에서 예산을 등록하면 소진율과 예상 초과 시점을 계산합니다."

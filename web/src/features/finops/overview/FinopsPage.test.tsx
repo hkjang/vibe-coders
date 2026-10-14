@@ -215,7 +215,9 @@ describe("FinopsPage", () => {
     mockAllEndpoints();
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response("month,dimension,key\n", { status: 200 }));
+      .mockResolvedValue(
+        new Response("month,dimension,key\n", { status: 200, headers: { "Content-Type": "text/csv" } }),
+      );
     render("/finops?tab=chargeback&month=2026-08");
 
     await screen.findByRole("table", { name: "비용센터 비용 배부" });
