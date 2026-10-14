@@ -114,6 +114,20 @@ describe("업무 앱 검증·계획의 대상과 수명", () => {
     expect(screen.getByText("plan_two")).toBeVisible();
     expect(invalidate).toHaveBeenCalledTimes(1);
   });
+  it.each(["읽기 전용 전환", "권한 편집 중"])(
+    "계획 응답 전에 %s이면 결과와 이력 갱신을 수락하지 않는다",
+    async (action) => {
+      const pending = deferred();
+      const { user, client } = setup(undefined, () => pending.promise);
+      const invalidate = vi.spyOn(client, "invalidateQueries");
+      await user.click(screen.getByRole("button", { name: "실행 계획 생성" }));
+      await user.click(screen.getByRole("button", { name: action }));
+      await act(async () => pending.resolve(plan));
+      await waitFor(() => expect(screen.queryByText("실행 계획 생성 중입니다.")).not.toBeInTheDocument());
+      expect(screen.queryByText("plan_one")).not.toBeInTheDocument();
+      expect(invalidate).not.toHaveBeenCalled();
+    },
+  );
   it.each(["계정", "팀", "조회 권한", "세션"])("%s 변경 뒤 응답과 오류를 노출하지 않는다", async (change) => {
     const pending = deferred();
     const { user } = setup(undefined, () => pending.promise);

@@ -71,6 +71,11 @@ function Inspection({ app, disabled, owner }: Props & { owner: FeatureReadOwner 
   const onError = (error: Error) => {
     if (current() && isAppError(error) && (error.status === 401 || error.status === 403)) setDenied(true);
   };
+  const assertPlanResult = () => {
+    if (!current() || paused.current)
+      throw new AppError("실행 계획을 수락할 화면 상태가 변경되었습니다.", { kind: "aborted" });
+    access.assertCurrent();
+  };
   const validate = useMutation({
     retry: false,
     mutationFn: async () => {
@@ -104,7 +109,7 @@ function Inspection({ app, disabled, owner }: Props & { owner: FeatureReadOwner 
           withPathParams(endpoints.domains.agents.apps.run, { id: app.id }),
           { routeId: "agents.apps", retryUnauthorized: false },
         );
-        if (!current()) throw new AppError("조회 대상이 변경되었습니다.", { kind: "aborted" });
+        assertPlanResult();
         const parsed = appRunPlanSchema.safeParse(response);
         if (!parsed.success || parsed.data.app_id !== app.id)
           throw new AppError("실행 계획의 대상 또는 응답 형식을 확인할 수 없습니다.", { kind: "contract" });
@@ -116,7 +121,12 @@ function Inspection({ app, disabled, owner }: Props & { owner: FeatureReadOwner 
     },
     onError,
     onSuccess: () => {
-      if (current()) void client.invalidateQueries({ queryKey: ["agents", "apps", "runs"] });
+      try {
+        assertPlanResult();
+      } catch {
+        return;
+      }
+      void client.invalidateQueries({ queryKey: ["agents", "apps", "runs"] });
     },
   });
   const busy = validate.isPending || plan.isPending;
