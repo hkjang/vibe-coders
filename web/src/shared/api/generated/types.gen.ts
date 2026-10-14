@@ -344,6 +344,59 @@ export type AuthUser = {
     team_id?: string;
 };
 
+export type BillingBudgetStatus = {
+    budget?: {
+        created_at?: string;
+        id?: string;
+        monthly_krw?: number;
+        note?: string;
+        scope?: string;
+        scope_value?: string;
+    };
+    burn_ratio?: number;
+    days_elapsed?: number;
+    days_in_month?: number;
+    exhaustion_date?: string;
+    on_track?: boolean;
+    projected_krw?: number;
+    projected_ratio?: number;
+    spent_krw?: number;
+};
+
+export type BillingCostRow = {
+    cost_krw?: number;
+    error_requests?: number;
+    key?: string;
+    requests?: number;
+    tokens?: number;
+};
+
+export type BillingDashboardResponse = {
+    budgets: Array<BillingBudgetStatus> | null;
+    by_cost_center: Array<BillingCostRow> | null;
+    by_model: Array<BillingCostRow> | null;
+    estimated_savings_krw: number;
+    migration_candidates: Array<BillingMigrationCandidate> | null;
+    since: string;
+    total_cost_krw: number;
+    total_requests: number;
+    totals_scope?: 'all_retained_requests';
+    unavailable_sections?: Array<'by_cost_center' | 'by_model' | 'budgets' | 'migration_candidates'>;
+};
+
+export type BillingMigrationCandidate = {
+    current_avg_cost_krw?: number;
+    current_model?: string;
+    current_success_rate?: number;
+    estimated_savings_krw?: number;
+    fingerprint?: string;
+    recommended_avg_cost_krw?: number;
+    recommended_model?: string;
+    recommended_success_rate?: number;
+    requests?: number;
+    task_type?: string;
+};
+
 export type CategoryScore = {
     pass_rate: number;
     samples: number;
@@ -11786,16 +11839,44 @@ export type GetAuthSsoStatusResponse = GetAuthSsoStatusResponses[keyof GetAuthSs
 export type GetBillingDashboardData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Existing parseWindow rules: 1h, 6h, 24h/1d, 7d, 30d or a Go duration; omitted/invalid defaults to 30 days. No upper time bound or pagination.
+         */
+        window?: string;
+    };
     url: '/billing/dashboard';
 };
+
+export type GetBillingDashboardErrors = {
+    /**
+     * admin:read scope required
+     */
+    403: AppError;
+    /**
+     * GET required
+     */
+    405: AppError;
+    /**
+     * billing_dashboard_unavailable: totals cannot be read; no partial data or storage error details returned
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetBillingDashboardError = GetBillingDashboardErrors[keyof GetBillingDashboardErrors];
 
 export type GetBillingDashboardResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: BillingDashboardResponse;
 };
+
+export type GetBillingDashboardResponse = GetBillingDashboardResponses[keyof GetBillingDashboardResponses];
 
 export type GetFaviconIcoData = {
     body?: never;

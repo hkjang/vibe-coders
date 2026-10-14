@@ -1344,6 +1344,187 @@
         ],
         "type": "object"
       },
+      "BillingBudgetStatus": {
+        "properties": {
+          "budget": {
+            "properties": {
+              "created_at": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "monthly_krw": {
+                "type": "number"
+              },
+              "note": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "scope_value": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "burn_ratio": {
+            "type": "number"
+          },
+          "days_elapsed": {
+            "type": "number"
+          },
+          "days_in_month": {
+            "type": "number"
+          },
+          "exhaustion_date": {
+            "type": "string"
+          },
+          "on_track": {
+            "type": "boolean"
+          },
+          "projected_krw": {
+            "type": "number"
+          },
+          "projected_ratio": {
+            "type": "number"
+          },
+          "spent_krw": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "BillingCostRow": {
+        "properties": {
+          "cost_krw": {
+            "type": "number"
+          },
+          "error_requests": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "BillingDashboardResponse": {
+        "properties": {
+          "budgets": {
+            "items": {
+              "$ref": "#/components/schemas/BillingBudgetStatus"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "by_cost_center": {
+            "items": {
+              "$ref": "#/components/schemas/BillingCostRow"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/BillingCostRow"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "estimated_savings_krw": {
+            "type": "number"
+          },
+          "migration_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/BillingMigrationCandidate"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "total_cost_krw": {
+            "type": "number"
+          },
+          "total_requests": {
+            "type": "integer"
+          },
+          "totals_scope": {
+            "enum": [
+              "all_retained_requests"
+            ],
+            "type": "string"
+          },
+          "unavailable_sections": {
+            "items": {
+              "enum": [
+                "by_cost_center",
+                "by_model",
+                "budgets",
+                "migration_candidates"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "since",
+          "total_cost_krw",
+          "total_requests",
+          "by_cost_center",
+          "by_model",
+          "budgets",
+          "migration_candidates",
+          "estimated_savings_krw"
+        ],
+        "type": "object"
+      },
+      "BillingMigrationCandidate": {
+        "properties": {
+          "current_avg_cost_krw": {
+            "type": "number"
+          },
+          "current_model": {
+            "type": "string"
+          },
+          "current_success_rate": {
+            "type": "number"
+          },
+          "estimated_savings_krw": {
+            "type": "number"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "recommended_avg_cost_krw": {
+            "type": "number"
+          },
+          "recommended_model": {
+            "type": "string"
+          },
+          "recommended_success_rate": {
+            "type": "number"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "task_type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CategoryScore": {
         "additionalProperties": false,
         "properties": {
@@ -22126,10 +22307,69 @@
     },
     "/billing/dashboard": {
       "get": {
+        "description": "Read-only organization cost view requiring admin:read when authentication is enabled. Totals use the existing exact aggregate over retained request_logs since the requested window, including models outside the top-20 lists and requests without token usage. Retention removes records from these totals; this is not a complete billing ledger. Reads are separate, not an atomic snapshot. Cost-center and model lists each return at most 20 rows ordered by cost. Budgets always describe the current month, independently of window. Migration advice considers the 10 busiest prompt clusters with at least 20 requests; estimated savings sum only returned candidates, not guaranteed or organization-wide savings. A total-read failure returns 503 without data. Optional-section failures retain healthy sections, discard partial failed rows, and name failed fields in unavailable_sections; failed lists are null and failed migration savings are zero, not a confirmed zero. New servers emit totals_scope=all_retained_requests; its absence identifies older top-model-only totals.",
         "operationId": "get__billing_dashboard",
+        "parameters": [
+          {
+            "description": "Existing parseWindow rules: 1h, 6h, 24h/1d, 7d, 30d or a Go duration; omitted/invalid defaults to 30 days. No upper time bound or pagination.",
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "default": "30d",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingDashboardResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "admin:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "GET required"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "billing_dashboard_unavailable: totals cannot be read; no partial data or storage error details returned"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
