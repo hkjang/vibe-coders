@@ -85,6 +85,15 @@ describe("MCP 연결 구조", () => {
     expect(within(dialog).getByText("차단")).toBeVisible();
     expect(screen.getByLabelText("현재 주소")).toHaveTextContent("node=tool%3Aread");
   });
+  it("삭제된 선택 주소에서 다른 노드를 열면 실제 버튼으로 초점을 복원한다", async () => {
+    setup(undefined, "/mcp?tab=topology&node=deleted");
+    await screen.findByText("선택한 노드가 현재 목록에 없습니다.");
+    const trigger = screen.getByRole("button", { name: "공개 서버 연결 상세" });
+    await userEvent.click(trigger);
+    await screen.findByRole("dialog", { name: "MCP 연결 상세" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
   it("필터와 페이지를 주소에 반영하고 결과 없음을 구분한다", async () => {
     setup();
     await screen.findByRole("table", { name: "MCP 연결 노드" });

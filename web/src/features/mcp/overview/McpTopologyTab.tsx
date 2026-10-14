@@ -86,7 +86,7 @@ function TopologyContent({ owner }: { owner: FeatureReadOwner }) {
       return;
     }
     setError("");
-    if (!selected && document.activeElement instanceof HTMLElement)
+    if (!selection && document.activeElement instanceof HTMLElement)
       returnFocusRef.current = document.activeElement;
     update({ node: id });
   };

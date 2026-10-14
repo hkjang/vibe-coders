@@ -94,6 +94,18 @@ async function install(page: Page) {
 }
 const dialog = (page: Page) => page.getByRole("dialog", { name: "MCP 연결 상세", exact: true });
 
+test("삭제된 선택 주소를 유효한 노드로 바꾼 뒤 실제 버튼에 초점을 복원한다", async ({ page }) => {
+  await install(page);
+  await page.goto("/app/mcp?tab=topology&node=deleted");
+  await expect(page.getByText("선택한 노드가 현재 목록에 없습니다.", { exact: true })).toBeVisible();
+  const trigger = page.getByRole("button", { name: "공개 서버 연결 상세", exact: true });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+});
+
 test("연결도·상세·직접 주소 새로고침과 초점 복귀", async ({ page }) => {
   const fixture = await install(page);
   await page.goto("/app/mcp?tab=topology");
