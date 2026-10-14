@@ -54,3 +54,69 @@ func assertBrowserMcpRisk(t *testing.T, db *store.SQLStore) {
 		t.Fatal("MCP risk must be written and audited once")
 	}
 }
+
+func assertBrowserMcpPolicy(t *testing.T, db *store.SQLStore) {
+	t.Helper()
+	const server = "browser-policy-reviewed"
+	policies, err := db.ListMCPPolicies(t.Context())
+	if err != nil {
+		t.Fatal("MCP policy verification lookup failed")
+	}
+	for _, policy := range policies {
+		if policy.ServerLabel == server {
+			t.Fatal("reviewed MCP policy was not deleted")
+		}
+	}
+	flag, found, err := db.GetFlag(t.Context(), "mcp_allowlist_enabled")
+	if err != nil || !found || flag.Value != "false" {
+		t.Fatal("reviewed MCP allowlist was not disabled")
+	}
+	audits, err := db.ListAdminAudit(t.Context(), 1000)
+	if err != nil {
+		t.Fatal("MCP policy audit lookup failed")
+	}
+	counts := map[string]int{}
+	for _, event := range audits {
+		switch event.Action {
+		case "mcp.policy.upsert":
+			var policy store.MCPPolicy
+			if json.Unmarshal([]byte(event.AfterValue), &policy) != nil {
+				t.Fatal("invalid MCP policy audit")
+			}
+			if policy.ServerLabel == server {
+				if policy.Mode == "block" && policy.Note == "browser policy baseline" {
+					counts["create"]++
+				} else if policy.Mode == "warn" && policy.Note == "browser policy reviewed" {
+					counts["edit"]++
+				} else {
+					t.Fatal("MCP policy audit does not match reviewed change")
+				}
+			}
+		case "mcp.policy.delete":
+			var policy store.MCPPolicy
+			if json.Unmarshal([]byte(event.BeforeValue), &policy) != nil {
+				t.Fatal("invalid MCP policy deletion audit")
+			}
+			if policy.ServerLabel == server {
+				counts["delete"]++
+			}
+		case "mcp.allowlist":
+			var state struct {
+				Enabled *bool `json:"enabled"`
+			}
+			if json.Unmarshal([]byte(event.AfterValue), &state) != nil || state.Enabled == nil {
+				t.Fatal("invalid MCP allowlist audit")
+			}
+			if *state.Enabled {
+				counts["enable"]++
+			} else {
+				counts["disable"]++
+			}
+		}
+	}
+	for _, action := range []string{"create", "edit", "delete", "enable", "disable"} {
+		if counts[action] != 1 {
+			t.Fatal("each reviewed MCP policy operation must be audited exactly once")
+		}
+	}
+}

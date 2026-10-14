@@ -236,8 +236,9 @@ describe("McpPage", () => {
     const user = userEvent.setup();
     renderPage("/mcp?tab=policy");
 
-    await user.click(await screen.findByRole("button", { name: "삭제" }));
+    await user.click(await screen.findByRole("button", { name: "GitHub MCP 정책 삭제" }));
     const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/확인 문구/), "GitHub MCP");
     await user.click(within(dialog).getByRole("button", { name: "삭제" }));
 
     await waitFor(() => {

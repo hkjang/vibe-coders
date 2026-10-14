@@ -266,17 +266,19 @@ export const mcpTrustScoreSchema = looseObject({
 /* ----------------------------------------------------------------- policies */
 
 export const mcpPolicySchema = looseObject({
-  server_label: text,
-  mode: text,
-  note: text,
+  server_label: z.string().min(1),
+  mode: z.string().min(1),
+  note: z.string(),
   created_at: text,
   updated_at: text,
 });
 export type McpPolicy = z.output<typeof mcpPolicySchema>;
 
 export const mcpPolicyListSchema = looseObject({
-  policies: orDefault(z.array(mcpPolicySchema), [] as McpPolicy[]),
-  allowlist_enabled: flag,
+  policies: z.array(mcpPolicySchema),
+  allowlist_enabled: z.boolean(),
+}).refine((value) => new Set(value.policies.map((row) => row.server_label)).size === value.policies.length, {
+  message: "서버 정책의 고유한 대상을 확인할 수 없습니다.",
 });
 
 export const mcpPolicyWriteSchema = looseObject({
