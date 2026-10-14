@@ -116,6 +116,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	seedBrowserChangeSetFixture(t, db)
 	seedBrowserUserFixture(t, db)
 	seedBrowserFinopsFixture(t, db)
+	seedBrowserMcpRiskFixture(t, db)
 	seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
 	seedBrowserOperationsFixture(t, db, filepath.Join(scratch, "fallback.ndjson"))
 	logger.Start()
@@ -219,6 +220,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	if h.upstream.calls.Load() < 2 || h.upstream.deniedModelCalls.Load() != 0 {
 		t.Fatal("live key authorization did not reach the local model as expected, or a denied call reached it")
 	}
+	assertBrowserMcpRisk(t, h.db)
 	audits, err := h.db.ListAdminAudit(t.Context(), 1000)
 	if err != nil {
 		t.Fatal("browser emergency audit verification failed")

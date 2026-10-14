@@ -49,3 +49,23 @@
   font-size: 0.8125rem;
   margin: 0;
 }
+.mcp-risk-review {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mcp-risk-review dl {
+  display: grid;
+  gap: var(--space-3);
+}
+.mcp-risk-review dl > div {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  padding: var(--space-3);
+}
+.mcp-risk-review dt {
+  font-weight: 650;
+}
+.mcp-risk-review dd {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+}

@@ -27,6 +27,7 @@ export function useFeatureReadOwner(
   featureId: string,
   marker: string,
   readScopes: readonly string[] = [],
+  requiredReadScope = "admin:read",
 ): FeatureReadOwner {
   const auth = useAuth();
   const feature = useContext(FeatureAccessContext);
@@ -40,11 +41,12 @@ export function useFeatureReadOwner(
     feature.permitted === true &&
     feature.status !== "hidden" &&
     feature.status !== "legacy" &&
-    (auth.user ? auth.user.scopes.includes("admin:read") : auth.mode !== "authenticated");
+    (auth.user ? auth.user.scopes.includes(requiredReadScope) : auth.mode !== "authenticated");
   const identity = JSON.stringify([
     epoch,
     feature?.featureId,
     readable,
+    requiredReadScope,
     auth.mode,
     auth.user?.id,
     auth.user?.team_id,
