@@ -9,6 +9,7 @@ import type {
   GetAdminCostAnomaliesData,
   GetAdminCostChargebackPackData,
   GetBillingDashboardData,
+  BillingDashboardResponse,
 } from "@/shared/api/generated";
 import { operation, type WithQuery } from "@/shared/api/endpoint-factory";
 import { looseList, looseObject, numberish, orDefault } from "@/shared/api/loose";
@@ -67,13 +68,17 @@ const migrationCandidateShape = {
 
 const billingDashboardSchema = looseObject({
   since: text,
-  total_cost_krw: count,
-  total_requests: count,
+  total_cost_krw: numberish.pipe(z.number().finite()),
+  total_requests: numberish.pipe(z.number().int().nonnegative()),
   by_cost_center: list(costRowShape),
   by_model: list(costRowShape),
   budgets: list(budgetStatusShape),
   migration_candidates: list(migrationCandidateShape),
   estimated_savings_krw: count,
+  totals_scope: z.literal("all_retained_requests").optional(),
+  unavailable_sections: z
+    .array(z.enum(["by_cost_center", "by_model", "budgets", "migration_candidates"]))
+    .default([]),
 });
 
 const costAllocationSchema = looseObject({
@@ -171,12 +176,10 @@ export type FinopsAnomaliesQuery = z.input<typeof anomaliesQuerySchema>;
 export type FinopsBudgetAlertsQuery = z.input<typeof budgetAlertsQuerySchema>;
 
 export const finopsEndpoints = {
-  billingDashboard: operation<WithQuery<GetBillingDashboardData, FinopsWindowQuery>, unknown>()(
-    "GET",
-    "/billing/dashboard",
-    billingDashboardSchema,
-    windowQuerySchema,
-  ),
+  billingDashboard: operation<
+    WithQuery<GetBillingDashboardData, FinopsWindowQuery>,
+    BillingDashboardResponse
+  >()("GET", "/billing/dashboard", billingDashboardSchema, windowQuerySchema),
   costAllocation: operation<WithQuery<GetAdminCostAllocationData, FinopsAllocationQuery>, unknown>()(
     "GET",
     "/admin/cost/allocation",
