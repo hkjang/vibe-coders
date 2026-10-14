@@ -225,6 +225,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	assertBrowserMcpRisk(t, h.db)
 	assertBrowserMcpPolicy(t, h.db)
 	h.verifyMcpCall()
+	assertBrowserMCPContract(t, h.db)
 	audits, err := h.db.ListAdminAudit(t.Context(), 1000)
 	if err != nil {
 		t.Fatal("browser emergency audit verification failed")

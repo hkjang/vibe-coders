@@ -1,6 +1,46 @@
 import { expect } from "@playwright/test";
 import { admin, login, test } from "./live-fixture";
 
+test("AUTH-LIVE-036 실제 MCP 계약 생성·출력 선언 보존·검증·삭제", async ({ page }) => {
+  await login(page, admin, "/app/mcp-gateway");
+  await page.getByRole("button", { name: "계약 등록", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "도구 계약", exact: true });
+  const output = '{"type":"object","properties":{"answer":{"type":"string"}}}';
+  await editor.getByLabel("도구 이름", { exact: false }).fill("browser_contract");
+  await editor.getByLabel("출력 스키마 (JSON)", { exact: true }).fill(output);
+  await editor.getByRole("button", { name: "검토한 계약 저장", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await page.reload();
+  const row = page
+    .getByRole("table", { name: "MCP 도구 계약 레지스트리", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "browser_contract" });
+  await row.getByRole("button", { name: "수정", exact: true }).click();
+  await expect(editor.getByLabel("출력 스키마 (JSON)", { exact: true })).toHaveValue(output);
+  await editor.getByLabel("위험도", { exact: false }).selectOption("high");
+  await editor.getByRole("button", { name: "검토한 계약 저장", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "수정", exact: true })).toBeFocused();
+  await page.reload();
+  await row.getByRole("button", { name: "수정", exact: true }).click();
+  await expect(editor.getByLabel("출력 스키마 (JSON)", { exact: true })).toHaveValue(output);
+  await expect(editor.getByLabel("위험도", { exact: false })).toHaveValue("high");
+  await editor.getByRole("button", { name: "취소", exact: true }).click();
+  await page.getByRole("button", { name: "드리프트 검증", exact: true }).click();
+  await expect(page.getByRole("table", { name: "도구 계약 드리프트 검증 결과", exact: true })).toContainText(
+    "도구 누락",
+  );
+  await row.getByRole("button", { name: "삭제", exact: true }).click();
+  const deletion = page.getByRole("dialog", { name: "도구 계약을 삭제할까요?", exact: true });
+  const confirm = deletion.getByRole("button", { name: "검토한 계약 삭제", exact: true });
+  await expect(confirm).toBeDisabled();
+  await deletion.getByLabel("확인 문구", { exact: false }).fill("browser_contract");
+  await confirm.click();
+  await expect(deletion).toHaveCount(0);
+  await expect(row).toHaveCount(0);
+  // Go verifies the two upserts and deletion have the same ID and existing audit events.
+});
+
 test("AUTH-LIVE-035 실제 MCP 호출 검토와 격리 업스트림 실행", async ({ page }) => {
   await login(page, admin, "/app/mcp");
   await page.getByLabel("노출 이름", { exact: true }).fill("browser-call__echo");

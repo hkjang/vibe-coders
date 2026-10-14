@@ -4,15 +4,18 @@ import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-
 import type {
   DeleteAdminAgentRoutesIdData,
   DeleteAdminMcpContractsData,
+  DeleteAdminMcpContractsResponse,
   DeleteAdminMcpPoliciesServerData,
   DeleteAdminMcpUpstreamsIdData,
   GetAdminAgentRoutesData,
   GetAdminAgentRoutesToolCatalogData,
   GetAdminAgentsData,
   GetAdminGatewayMcpInfoData,
+  GetAdminGatewayMcpInfoResponse,
   GetAdminMcpAgenticRunsData,
   GetAdminMcpCatalogData,
   GetAdminMcpContractsData,
+  GetAdminMcpContractsResponse,
   GetAdminMcpEffectivePolicyData,
   GetAdminMcpLoopsData,
   GetAdminMcpOverviewData,
@@ -32,7 +35,9 @@ import type {
   PostAdminAgentRoutesData,
   PostAdminAgentRoutesIdTestData,
   PostAdminMcpContractsData,
+  PostAdminMcpContractsResponse,
   PostAdminMcpContractsValidateData,
+  PostAdminMcpContractsValidateResponse,
   PostAdminMcpOnboardingCheckData,
   PostAdminMcpPoliciesData,
   PostAdminMcpRouteExplainData,
@@ -54,6 +59,7 @@ import {
   mcpAgenticRunSchema,
   mcpCatalogSchema,
   mcpContractListSchema,
+  mcpContractDeletedSchema,
   mcpContractValidationSchema,
   mcpContractWriteSchema,
   mcpDeleteAcknowledgementSchema,
@@ -389,31 +395,26 @@ export const mcpEndpoints = {
     mcpTestResultSchema,
   ),
   gateway: {
-    info: operation<GetAdminGatewayMcpInfoData, unknown>()(
+    info: operation<GetAdminGatewayMcpInfoData, GetAdminGatewayMcpInfoResponse>()(
       "GET",
       "/admin/gateway-mcp/info",
       gatewayMcpInfoSchema,
     ),
-    contracts: operation<WithQuery<GetAdminMcpContractsData, McpContractQuery>, unknown>()(
-      "GET",
-      "/admin/mcp/contracts",
-      mcpContractListSchema,
-      mcpContractQuerySchema,
-    ),
-    saveContract: operation<WithBody<PostAdminMcpContractsData, McpContractBody>, unknown>()(
-      "POST",
-      "/admin/mcp/contracts",
-      mcpContractWriteSchema,
-    ),
-    deleteContract: operation<WithQuery<DeleteAdminMcpContractsData, McpContractDeleteQuery>, unknown>()(
-      "DELETE",
-      "/admin/mcp/contracts",
-      mcpContractWriteSchema,
-      mcpContractDeleteQuerySchema,
-    ),
+    contracts: operation<
+      WithQuery<GetAdminMcpContractsData, McpContractQuery>,
+      GetAdminMcpContractsResponse
+    >()("GET", "/admin/mcp/contracts", mcpContractListSchema, mcpContractQuerySchema),
+    saveContract: operation<
+      WithBody<PostAdminMcpContractsData, McpContractBody>,
+      PostAdminMcpContractsResponse
+    >()("POST", "/admin/mcp/contracts", mcpContractWriteSchema),
+    deleteContract: operation<
+      WithQuery<DeleteAdminMcpContractsData, McpContractDeleteQuery>,
+      DeleteAdminMcpContractsResponse
+    >()("DELETE", "/admin/mcp/contracts", mcpContractDeletedSchema, mcpContractDeleteQuerySchema),
     validateContracts: operation<
       WithBody<PostAdminMcpContractsValidateData, McpContractValidateBody>,
-      unknown
+      PostAdminMcpContractsValidateResponse
     >()("POST", "/admin/mcp/contracts/validate", mcpContractValidationSchema),
   },
   agents: {

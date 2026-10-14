@@ -6,13 +6,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GatewayMcpPage } from "@/features/mcp/gateway/GatewayMcpPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
+function Screen() {
+  return (
+    <FeatureAccessHarness featureId="mcp.gateway" readOnly={authRuntime.readOnly}>
+      <GatewayMcpPage />
+    </FeatureAccessHarness>
+  );
+}
 
-const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "mcp:admin"] }));
+const authRuntime = vi.hoisted(() => ({
+  scopes: ["admin:read", "observability:read", "mcp:admin"],
+  readOnly: false,
+  id: "contract-admin",
+}));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return { useAuth: () => testAuth({ scopes: authRuntime.scopes, user: { id: authRuntime.id } }) };
 });
 
 vi.mock("sonner", () => ({ toast: toastSpy }));
@@ -48,7 +60,7 @@ const contracts = {
       title: "Gateway Chat",
       description: "",
       input_schema: '{"type":"object","properties":{"model":{"type":"string"}}}',
-      output_schema: "",
+      output_schema: '{"type":"object","properties":{"answer":{"type":"string"}}}',
       risk_level: "medium",
       timeout_ms: 120000,
       allowed_roles: "",
@@ -56,6 +68,7 @@ const contracts = {
       owner: "platform",
       enabled: true,
       created_by: "admin",
+      created_at: "2026-10-01T00:00:00Z",
       updated_at: "2026-09-01T00:00:00Z",
     },
   ],
@@ -67,7 +80,9 @@ const baseHandlers = {
 };
 
 beforeEach(() => {
-  authRuntime.scopes = ["admin:read", "mcp:admin"];
+  authRuntime.scopes = ["admin:read", "observability:read", "mcp:admin"];
+  authRuntime.readOnly = false;
+  authRuntime.id = "contract-admin";
   toastSpy.success.mockClear();
   toastSpy.error.mockClear();
 });
@@ -75,7 +90,7 @@ beforeEach(() => {
 describe("GatewayMcpPage", () => {
   it("연결 정보와 도구, 계약을 보여 준다", async () => {
     mockApi(baseHandlers);
-    renderScreen(<GatewayMcpPage />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
+    renderScreen(<Screen />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
 
     expect(await screen.findByText("/mcp/gateway")).toBeInTheDocument();
     expect(await screen.findAllByText("gateway_chat")).not.toHaveLength(0);
@@ -90,15 +105,15 @@ describe("GatewayMcpPage", () => {
   it("한국어 위험도를 선택해도 계약의 원래 enum과 식별자를 저장한다", async () => {
     const api = mockApi({
       ...baseHandlers,
-      "POST /admin/mcp/contracts": () => ({ contract: { ...contracts.contracts[0], risk_level: "high" } }),
+      "POST /admin/mcp/contracts": () => ({ id: "mtc_1", ok: true }),
     });
     const user = userEvent.setup();
-    renderScreen(<GatewayMcpPage />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
+    renderScreen(<Screen />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
 
     await user.click(await screen.findByRole("button", { name: "수정" }));
     const dialog = await screen.findByRole("dialog", { name: "도구 계약" });
     await user.selectOptions(within(dialog).getByLabelText("위험도*"), "높음");
-    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+    await user.click(within(dialog).getByRole("button", { name: "검토한 계약 저장" }));
 
     await waitFor(() => expect(api.bodies("POST /admin/mcp/contracts")).toHaveLength(1));
     expect(api.bodies("POST /admin/mcp/contracts")[0]).toMatchObject({
@@ -107,13 +122,14 @@ describe("GatewayMcpPage", () => {
       name: "gateway_chat",
       risk_level: "high",
       cost_policy: "per_call_model_cost",
+      output_schema: contracts.contracts[0]?.output_schema,
     });
     await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("도구 계약을 저장했습니다."));
   });
 
   it("계약이 없으면 빈 상태를 안내한다", async () => {
     mockApi({ ...baseHandlers, "GET /admin/mcp/contracts": () => ({ contracts: [] }) });
-    renderScreen(<GatewayMcpPage />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
+    renderScreen(<Screen />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
 
     expect(await screen.findByText("등록된 도구 계약이 없습니다.")).toBeInTheDocument();
   });
@@ -125,16 +141,16 @@ describe("GatewayMcpPage", () => {
         throw apiFailure("info failed", 500, "req_gw_1");
       },
     });
-    renderScreen(<GatewayMcpPage />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
+    renderScreen(<Screen />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
 
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText(/요청 ID: req_gw_1/)).toBeInTheDocument();
   });
 
   it("mcp:admin 권한이 없으면 계약 등록과 검증을 비활성화한다", async () => {
-    authRuntime.scopes = ["admin:read"];
+    authRuntime.scopes = ["admin:read", "observability:read"];
     mockApi(baseHandlers);
-    renderScreen(<GatewayMcpPage />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
+    renderScreen(<Screen />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
 
     expect(await screen.findByRole("button", { name: /계약 등록/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "드리프트 검증" })).toBeDisabled();
@@ -163,7 +179,7 @@ describe("GatewayMcpPage", () => {
       }),
     });
     const user = userEvent.setup();
-    renderScreen(<GatewayMcpPage />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
+    renderScreen(<Screen />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
 
     await user.click(await screen.findByRole("button", { name: "드리프트 검증" }));
 
@@ -177,11 +193,12 @@ describe("GatewayMcpPage", () => {
       "DELETE /admin/mcp/contracts": () => ({ id: "mtc_1", ok: true }),
     });
     const user = userEvent.setup();
-    renderScreen(<GatewayMcpPage />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
+    renderScreen(<Screen />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
 
     await user.click(await screen.findByRole("button", { name: "삭제" }));
     const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "삭제" }));
+    await user.type(within(dialog).getByLabelText(/확인 문구/), "gateway_chat");
+    await user.click(within(dialog).getByRole("button", { name: "검토한 계약 삭제" }));
 
     await waitFor(() => {
       expect(api.calls.filter((call) => call.key === "DELETE /admin/mcp/contracts")).toHaveLength(1);
@@ -196,7 +213,7 @@ describe("GatewayMcpPage", () => {
 
   it("접근성 위반이 없다", async () => {
     mockApi(baseHandlers);
-    const { container } = renderScreen(<GatewayMcpPage />, {
+    const { container } = renderScreen(<Screen />, {
       route: "/mcp-gateway",
       path: "/mcp-gateway/*",
     });

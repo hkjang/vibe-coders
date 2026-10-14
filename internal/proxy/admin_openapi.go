@@ -633,6 +633,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "get /admin/gateway-mcp/info", "get /admin/mcp/contracts", "post /admin/mcp/contracts", "delete /admin/mcp/contracts", "post /admin/mcp/contracts/validate":
+		enrichMCPContractsOpenAPI(key, op, responses)
 	case "post /admin/mcp/route/explain", "post /admin/mcp/test":
 		enrichMCPCallOpenAPI(route, op, responses)
 	case "get /admin/mcp/topology":
@@ -1063,6 +1065,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range mcpCallOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range mcpContractsOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range operationalHealthOpenAPISchemas() {
