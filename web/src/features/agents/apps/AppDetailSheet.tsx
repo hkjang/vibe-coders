@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useAppRead } from "./app-scope";
 import { useRef, useState, type RefObject } from "react";
 
 import { appComponentKindLabels } from "@/features/agents/apps/app-form";
@@ -66,7 +66,7 @@ function AppDetailSheetContent({
   const [showPermissions, setShowPermissions] = useState(false);
   const permissionsButtonRef = useRef<HTMLButtonElement>(null);
   const appId = app?.id ?? "";
-  const versions = useQuery({
+  const versions = useAppRead({
     queryKey: ["agents", "apps", appId, "versions"],
     enabled: open && showVersions && appId !== "",
     queryFn: ({ signal }) =>
