@@ -55,6 +55,7 @@ export function useFeatureReadOwner(
     readScopes.map((scope) => auth.user?.scopes.includes(scope)),
     marker,
     auth.credentialPrefixes,
+    auth.capabilities?.raw_prompt_view ?? false,
   ]);
   const active = useRef<FeatureReadOwner | undefined>(undefined);
   const owner = useMemo<FeatureReadOwner>(() => {
