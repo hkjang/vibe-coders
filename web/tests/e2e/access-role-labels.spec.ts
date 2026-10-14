@@ -41,6 +41,138 @@ async function installBudgetNotifications(page: Page) {
   };
 }
 
+async function installQuotaEditor(page: Page) {
+  const fixture = await installBudgetNotifications(page);
+  const quota = {
+    id: "quota_editor",
+    scope: "team",
+    scope_value: "한글 운영팀",
+    period: "monthly",
+    token_limit: 1000,
+    krw_limit: 5000,
+    enabled: true,
+    note: "변경 비교 메모",
+  };
+  const writes: unknown[] = [];
+  let status = 200;
+  let reads = 0;
+  await page.route("**/admin/quotas", (route) => {
+    reads++;
+    return route.fulfill({
+      status,
+      json:
+        status === 200
+          ? {
+              quotas: [quota],
+              usage: [{ quota, tokens: 0, cost_krw: 0, token_remain_ratio: 1, krw_remain_ratio: 1 }],
+            }
+          : { error: { code: "quota_read_failed", message: "private-quota-read" } },
+    });
+  });
+  await page.route("**/admin/quotas/quota_editor", (route) => {
+    writes.push(route.request().postDataJSON());
+    Object.assign(quota, route.request().postDataJSON());
+    return route.fulfill({ json: { quota } });
+  });
+  return {
+    ...fixture,
+    writes,
+    reads: () => reads,
+    quotaStatus: (value: number) => {
+      status = value;
+    },
+  };
+}
+
+test("할당량 변경 비교는 수정값을 표시하고 저장 후 기존 목록을 갱신한다", async ({ page }) => {
+  const fixture = await installQuotaEditor(page);
+  await page.goto("/app/access/users?tab=quotas");
+  await page
+    .getByRole("table", { name: "할당량과 사용량", exact: true })
+    .getByRole("button", { name: "수정", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "할당량 수정", exact: true });
+  await dialog.getByRole("spinbutton", { name: "토큰 한도", exact: true }).fill("2000");
+  await expect(
+    dialog
+      .getByRole("table", { name: "저장 전 변경 비교" })
+      .getByRole("row", { name: "토큰 한도 1,000 2,000" }),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(fixture.writes).toEqual([
+    { token_limit: 2000, krw_limit: 5000, enabled: true, note: "변경 비교 메모" },
+  ]);
+  await expect(page.getByRole("table", { name: "할당량과 사용량", exact: true })).toContainText("2,000");
+});
+
+test("할당량 편집 중 읽기 전용 전환은 입력을 유지하고 저장만 막는다", async ({ page }) => {
+  const fixture = await installQuotaEditor(page);
+  await page.goto("/app/access/users?tab=quotas");
+  await page
+    .getByRole("table", { name: "할당량과 사용량", exact: true })
+    .getByRole("button", { name: "수정", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "할당량 수정", exact: true });
+  await dialog.getByRole("spinbutton", { name: "토큰 한도", exact: true }).fill("2000");
+  fixture.gateway.revokeWrite("readonly");
+  const refreshed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await (await refreshed).finished();
+  await expect(dialog.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("spinbutton", { name: "토큰 한도", exact: true })).toHaveValue("2000");
+  expect(fixture.writes).toEqual([]);
+});
+
+test("할당량 첫 조회 실패는 빈 목록이 아니며 수동 재조회로 복구한다", async ({ page }) => {
+  const fixture = await installQuotaEditor(page);
+  fixture.quotaStatus(500);
+  await page.goto("/app/access/users?tab=quotas");
+  const notice = page.getByRole("alert").filter({ hasText: "할당량을(를) 불러오지 못했습니다." });
+  await expect(notice).toBeVisible();
+  await expect(page.getByText("설정된 할당량이 없습니다.")).toHaveCount(0);
+  fixture.quotaStatus(200);
+  await notice.getByRole("button", { name: "다시 시도" }).click();
+  await expect(page.getByRole("table", { name: "할당량과 사용량", exact: true })).toBeVisible();
+  expect(fixture.reads()).toBeGreaterThan(1);
+});
+
+test("모바일 할당량 수정은 상태 변경도 이탈 경고하고 비교표·접근성을 유지한다", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  const fixture = await installQuotaEditor(page);
+  await page.goto("/app/access/users?tab=quotas");
+  const trigger = page
+    .getByRole("table", { name: "할당량과 사용량", exact: true })
+    .getByRole("button", { name: "수정", exact: true });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "할당량 수정", exact: true });
+  await dialog.getByRole("switch", { name: "사용 중", exact: true }).click();
+  await expect(
+    dialog.getByRole("table", { name: "저장 전 변경 비교" }).getByRole("row", { name: "상태 사용 중지" }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "저장", exact: true })).toBeInViewport();
+  expect(
+    await page.evaluate(async () => {
+      const axe = (
+        window as unknown as { axe: { run(root: Document): Promise<{ violations: { id: string }[] }> } }
+      ).axe;
+      return (await axe.run(document)).violations.map((violation) => violation.id);
+    }),
+  ).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("quota-budget-editor-mobile.png") });
+  await dialog.getByRole("button", { name: "취소", exact: true }).click();
+  await expect(page.getByRole("alertdialog", { name: /저장하지 않은 변경/ })).toBeVisible();
+  expect(fixture.writes).toEqual([]);
+});
+
 test("예산 경보 조회·취소는 발송하지 않고 확인한 요청만 한 번 전송한다", async ({ page }) => {
   const fixture = await installBudgetNotifications(page);
   await page.goto("/app/access/users?tab=quotas");

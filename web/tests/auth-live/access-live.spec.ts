@@ -30,6 +30,60 @@ import {
   test,
 } from "./live-fixture";
 
+test("AUTH-LIVE-030 실제 할당량·예산 생성·수정·중지·삭제와 읽기 권한", async ({ page }) => {
+  const target = "browser-quota-budget-safety";
+  await login(page, admin, "/app/access/users?tab=quotas");
+  await page.getByRole("button", { name: "할당량 추가", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "할당량 추가", exact: true });
+  await dialog.getByRole("textbox", { name: "대상", exact: true }).fill(target);
+  await dialog.getByRole("spinbutton", { name: "토큰 한도", exact: true }).fill("500");
+  const created = page.waitForResponse((value) => matches(value, "POST", "/admin/quotas"));
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  expect((await created).status()).toBe(201);
+  await expect(dialog).toBeHidden();
+  const row = page
+    .getByRole("table", { name: "할당량과 사용량", exact: true })
+    .getByRole("row")
+    .filter({ hasText: target });
+  await row.getByRole("button", { name: "수정", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "할당량 수정", exact: true });
+  await dialog.getByRole("spinbutton", { name: "토큰 한도", exact: true }).fill("900");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(row).toContainText("900");
+  await row.getByRole("button", { name: "중지", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "할당량 중지", exact: true });
+  await dialog.getByRole("button", { name: "중지", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(row.getByRole("button", { name: "사용", exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "삭제", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "할당량 삭제", exact: true });
+  await dialog.getByRole("button", { name: "삭제", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(row).toHaveCount(0);
+  await page.getByRole("button", { name: "예산 추가", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "예산 추가", exact: true });
+  await dialog.getByRole("textbox", { name: "대상", exact: true }).fill(target);
+  await dialog.getByRole("spinbutton", { name: /월 예산/ }).fill("1000");
+  const budgetCreated = page.waitForResponse((value) => matches(value, "POST", "/admin/budgets"));
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  expect((await budgetCreated).status()).toBe(201);
+  await expect(dialog).toBeHidden();
+  const budgetRow = page
+    .getByRole("table", { name: "월 예산 소진 현황", exact: true })
+    .getByRole("row")
+    .filter({ hasText: target });
+  await budgetRow.getByRole("button", { name: "삭제", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "예산 삭제", exact: true });
+  await dialog.getByRole("button", { name: "삭제", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(budgetRow).toHaveCount(0);
+  await signOut(page);
+  await login(page, reader, "/app/access/users?tab=quotas");
+  await expect(page.getByRole("button", { name: "할당량 추가", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "예산 추가", exact: true })).toBeDisabled();
+});
+
 test("AUTH-LIVE-029 실제 사용자 상세·외부 키 등록·읽기 전용 계정 전환", async ({ page }) => {
   await login(page, admin, "/app/access/users");
   const row = page

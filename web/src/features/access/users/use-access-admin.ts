@@ -102,27 +102,30 @@ export function useIpsQuery(enabled: boolean) {
   );
 }
 
-export function useQuotasQuery(enabled: boolean) {
+export function useQuotasQuery(enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.quotas,
     (signal) => apiClient.request(access.quotas.list, { signal, routeId }),
     enabled,
+    owner,
   );
 }
 
-export function useBudgetsQuery(enabled: boolean) {
+export function useBudgetsQuery(enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.budgets,
     (signal) => apiClient.request(access.budgets.list, { signal, routeId }),
     enabled,
+    owner,
   );
 }
 
-export function useBudgetProjectionQuery(enabled: boolean) {
+export function useBudgetProjectionQuery(enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.budgetProjection,
     (signal) => apiClient.request(access.budgets.projection, { signal, routeId }),
     enabled,
+    owner,
   );
 }
 

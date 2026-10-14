@@ -24,6 +24,8 @@ interface FormDialogProps<Input extends FieldValues, Output> {
   submitDisabled?: boolean;
   /** Optional plain-text keyboard scroll target, outside pending-disabled inputs. */
   scrollHint?: string;
+  /** Keep actions visible while long form content scrolls. */
+  scrollBody?: boolean;
   title: string;
 }
 
@@ -69,6 +71,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   submitLabel = "저장",
   submitDisabled = false,
   scrollHint,
+  scrollBody = false,
   title,
 }: FormDialogProps<Input, Output>): React.JSX.Element {
   const coordinator = useUnsavedChanges();
@@ -175,6 +178,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
 
   return (
     <Dialog
+      scrollBody={scrollBody}
       open={open}
       onOpenChange={(next) => {
         if (next) onOpenChange(true);
