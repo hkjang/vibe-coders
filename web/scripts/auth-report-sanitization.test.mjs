@@ -55,6 +55,7 @@ const allowedScenarios = [
   "AUTH-LIVE-029",
   "AUTH-LIVE-030",
   "AUTH-LIVE-031",
+  "AUTH-LIVE-032",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -193,7 +194,7 @@ test("auth reporter emits only safe ID, status, duration and numeric source line
 test("auth reporter rejects non-allowlisted title IDs and ignores helper or unrelated source locations", async () => {
   const fixtures = [
     "AUTH-LIVE-000",
-    "AUTH-LIVE-032",
+    "AUTH-LIVE-033",
     "AUTH-LIVE-999",
     "AUTH-LIVE-01",
     "AUTH-LIVE-001suffix",
@@ -515,6 +516,7 @@ for (const [filename, scenario, timedOut = false] of [
   ["admin-key-revoke-live.spec.ts", "AUTH-LIVE-021"],
   ["admin-key-edit-live.spec.ts", "AUTH-LIVE-024"],
   ["finops-live.spec.ts", "AUTH-LIVE-031"],
+  ["mcp-risk-live.spec.ts", "AUTH-LIVE-032"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011", true],
 ])

@@ -28,6 +28,7 @@ export default defineConfig({
     "admin-key-revoke-live.spec.ts",
     "admin-key-edit-live.spec.ts",
     "finops-live.spec.ts",
+    "mcp-risk-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,
