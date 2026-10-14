@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FinopsPage } from "@/features/finops/overview/FinopsPage";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "costs:read"] as string[] }));
 
@@ -147,7 +148,14 @@ afterEach(() => {
 });
 
 function render(route = "/finops") {
-  return renderScreen(<FinopsPage />, { route, path: "/finops/*" });
+  return renderScreen(
+    <FeatureAccessContext.Provider
+      value={{ featureId: "finops.overview", permitted: true, readOnly: true, status: "preview" }}
+    >
+      <FinopsPage />
+    </FeatureAccessContext.Provider>,
+    { route, path: "/finops/*" },
+  );
 }
 
 describe("FinopsPage", () => {
@@ -238,7 +246,10 @@ describe("FinopsPage", () => {
     mockAllEndpoints();
     render("/finops?tab=budget");
 
-    expect(await screen.findByRole("link", { name: "사용자·팀" })).toHaveAttribute("href", "/access/users");
+    expect(await screen.findByRole("link", { name: "할당량·예산 관리 열기" })).toHaveAttribute(
+      "href",
+      "/access/users?tab=quotas",
+    );
     expect(await screen.findByText("42회 반복")).toBeInTheDocument();
     const projections = screen.getAllByRole("listitem");
     expect(projections.some((item) => item.textContent?.includes("월말 예상"))).toBe(true);
