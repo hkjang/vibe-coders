@@ -24,5 +24,22 @@ test("AUTH-LIVE-032 실제 MCP 도구 위험 설정 검토와 저장", async ({ 
   await expect(table.getByText("심각", { exact: true })).toBeVisible();
   await page.reload();
   await expect(table.getByText("심각", { exact: true })).toBeVisible();
+  await page.goto("/app/mcp?tab=requests&server=browser-risk-server&tool=write_record");
+  const details = page.getByRole("button", { name: "browser_mcp_risk 처리 흐름 열기", exact: true });
+  await details.click();
+  const flow = page.getByRole("dialog", { name: "MCP 요청 처리 흐름", exact: true });
+  await expect(flow.getByText("호출 당시의 정책 기록과 구분하세요.", { exact: true })).toBeVisible();
+  await expect(flow.getByRole("table", { name: "요청의 도구 호출", exact: true })).toContainText(
+    "write_record",
+  );
+  await expect(flow.getByRole("table", { name: "MCP 요청 처리 단계", exact: true })).toContainText(
+    "현재 서버 정책",
+  );
+  await page.reload();
+  await expect(flow.getByRole("table", { name: "요청의 도구 호출", exact: true })).toContainText(
+    "write_record",
+  );
+  await flow.getByRole("button", { name: "패널 닫기", exact: true }).click();
+  await expect(details).toBeVisible();
   // Go's harness separately verifies the stored row and exactly one audit event.
 });
