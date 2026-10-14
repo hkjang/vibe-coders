@@ -40,6 +40,8 @@ const stepStates: Readonly<Record<string, string>> = {
   allow: "허용",
   block: "차단",
   require_approval: "승인 필요",
+  approval_required: "승인 필요",
+  not_in_allowlist: "허용목록 외",
 };
 
 const requestColumn = createDataTableColumnHelper<McpRequest>();

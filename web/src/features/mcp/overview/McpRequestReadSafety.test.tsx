@@ -105,6 +105,17 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("MCP 요청 조회 안전성", () => {
+  it.each([
+    ["approval_required", "승인 필요"],
+    ["not_in_allowlist", "허용목록 외"],
+  ])("서버의 %s 상태를 한글로 표시한다", async (status, label) => {
+    setup({
+      [flowKey]: () => ({ ...flow, steps: [{ name: "governance_evaluation", status, detail: "현재 판단" }] }),
+    });
+    const dialog = await open();
+    expect(await within(dialog).findByText(label ?? "")).toBeVisible();
+    expect(within(dialog).queryByText(status ?? "")).not.toBeInTheDocument();
+  });
   it("관리자·변경 권한 없이 실제 조회 권한으로 목록과 상세를 연다", async () => {
     const { api } = setup();
     const dialog = await open();

@@ -55,7 +55,7 @@ async function install(page: Page) {
     system_status: { status: "healthy" },
     legacy_route_map: {},
   };
-  const state = { listError: 0, flowError: 0, agentError: 0, long: false };
+  const state = { listError: 0, flowError: 0, agentError: 0, long: false, stepStatus: "block" };
   const calls: string[] = [];
   const unexpected: string[] = [];
   await page.route("**/*", async (route) => {
@@ -100,7 +100,7 @@ async function install(page: Page) {
           steps: [
             {
               name: "policy_evaluation",
-              status: "block",
+              status: state.stepStatus,
               detail: state.long ? "긴공개정책설명".repeat(100) : "현재 정책",
             },
           ],
@@ -130,6 +130,19 @@ async function open(page: Page) {
   await page.goto("/app/mcp?tab=requests");
   await page.getByRole("button", { name: "public-request 처리 흐름 열기", exact: true }).click();
   return dialogFor(page);
+}
+
+for (const [status, label] of [
+  ["approval_required", "승인 필요"],
+  ["not_in_allowlist", "허용목록 외"],
+] as const) {
+  test(`서버 상태 ${status}의 한글 표시`, async ({ page }) => {
+    const fixture = await install(page);
+    fixture.state.stepStatus = status;
+    const dialog = await open(page);
+    await expect(dialog.getByText(label, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(status, { exact: true })).toHaveCount(0);
+  });
 }
 
 test("조회 권한만으로 상세를 열고 주소 새로고침·키보드 복귀를 지원한다", async ({ page }) => {
