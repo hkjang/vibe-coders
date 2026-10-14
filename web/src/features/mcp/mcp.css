@@ -69,3 +69,11 @@
   margin: var(--space-1) 0 0;
   white-space: pre-wrap;
 }
+.mcp-call-preview {
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}

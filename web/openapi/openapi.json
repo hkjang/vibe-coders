@@ -2228,6 +2228,173 @@
         ],
         "type": "object"
       },
+      "McpRouteExplainRequest": {
+        "properties": {
+          "api_key_id": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "McpRouteExplainResponse": {
+        "properties": {
+          "final": {
+            "properties": {
+              "decision": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "decision",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "input": {
+            "properties": {
+              "method": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "uri": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "name",
+              "uri"
+            ],
+            "type": "object"
+          },
+          "policy": {
+            "properties": {
+              "server_policy": {
+                "type": "string"
+              },
+              "tool_risk_action": {
+                "type": "string"
+              },
+              "tool_risk_configured": {
+                "type": "boolean"
+              },
+              "tool_risk_level": {
+                "type": "string"
+              },
+              "tool_risk_note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "server_policy",
+              "tool_risk_level",
+              "tool_risk_action",
+              "tool_risk_configured",
+              "tool_risk_note"
+            ],
+            "type": "object"
+          },
+          "route": {
+            "properties": {
+              "found": {
+                "type": "boolean"
+              },
+              "lookup": {
+                "type": "string"
+              },
+              "target_method": {
+                "type": "string"
+              },
+              "target_name": {
+                "type": "string"
+              },
+              "upstream_id": {
+                "type": "string"
+              },
+              "upstream_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "found"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "input",
+          "route",
+          "final"
+        ],
+        "type": "object"
+      },
+      "McpTestRequest": {
+        "properties": {
+          "arguments": {},
+          "method": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "upstream_id": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "McpTestResponse": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "method": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "response": {},
+          "response_preview": {
+            "type": "string"
+          },
+          "upstream_id": {
+            "type": "string"
+          },
+          "upstream_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream_id",
+          "upstream_name",
+          "method",
+          "latency_ms",
+          "ok"
+        ],
+        "type": "object"
+      },
       "McpTopologyEdge": {
         "properties": {
           "from": {
@@ -11806,10 +11973,68 @@
     },
     "/admin/mcp/route/explain": {
       "post": {
+        "description": "Existing administrator MCP operation requiring mcp:admin when authentication is enabled, including route explanation. Explanation uses discovery and current policy reads, not an atomic execution reservation. Test calls directly invoke an upstream; they do not enforce the normal gateway policy/approval pipeline, cost caps or per-operation audit. A test response with ok=false is still HTTP 200, and transport failure does not prove an external action was not executed.",
         "operationId": "post__admin_mcp_route_explain",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpRouteExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpRouteExplainResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -11863,10 +12088,78 @@
     },
     "/admin/mcp/test": {
       "post": {
+        "description": "Existing administrator MCP operation requiring mcp:admin when authentication is enabled, including route explanation. Explanation uses discovery and current policy reads, not an atomic execution reservation. Test calls directly invoke an upstream; they do not enforce the normal gateway policy/approval pipeline, cost caps or per-operation audit. A test response with ok=false is still HTTP 200, and transport failure does not prove an external action was not executed.",
         "operationId": "post__admin_mcp_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTestResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Upstream missing or disabled"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
