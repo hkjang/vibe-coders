@@ -392,25 +392,39 @@ export const mcpUpstreamFlowSchema = looseObject({
 
 /* ------------------------------------------------------------ explain / test */
 
-export const mcpRouteExplainSchema = looseObject({
-  input: looseObject({ method: text, name: text, uri: text }).optional(),
-  route: looseObject({
-    found: flag,
-    upstream_id: text,
-    upstream_name: text,
-    target_method: text,
-    target_name: text,
-    lookup: text,
-  }).optional(),
-  policy: looseObject({
-    server_policy: text,
-    tool_risk_level: text,
-    tool_risk_action: text,
-    tool_risk_configured: flag,
-    tool_risk_note: text,
-  }).optional(),
-  final: looseObject({ decision: text, reason: text }).optional(),
-});
+export const mcpRouteExplainSchema = z
+  .object({
+    input: z.object({ method: z.string(), name: z.string(), uri: z.string() }).passthrough(),
+    route: z
+      .object({
+        found: z.boolean(),
+        upstream_id: z.string().optional(),
+        upstream_name: z.string().optional(),
+        target_method: z.string().optional(),
+        target_name: z.string().optional(),
+        lookup: z.string().optional(),
+      })
+      .passthrough(),
+    policy: z
+      .object({
+        server_policy: z.string().min(1),
+        tool_risk_level: z.string().min(1),
+        tool_risk_action: z.string().min(1),
+        tool_risk_configured: z.boolean(),
+        tool_risk_note: z.string(),
+      })
+      .passthrough()
+      .optional(),
+    final: z.object({ decision: z.string().min(1), reason: z.string() }).passthrough(),
+  })
+  .passthrough()
+  .refine(
+    (value) =>
+      !value.route.found ||
+      Boolean(
+        value.route.upstream_id && value.route.upstream_name && value.route.target_method && value.policy,
+      ),
+  );
 
 export const mcpTestResultSchema = looseObject({
   upstream_id: text,

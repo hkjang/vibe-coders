@@ -1,6 +1,31 @@
 import { expect } from "@playwright/test";
 import { admin, login, test } from "./live-fixture";
 
+test("AUTH-LIVE-035 실제 MCP 호출 검토와 격리 업스트림 실행", async ({ page }) => {
+  await login(page, admin, "/app/mcp");
+  await page.getByLabel("노출 이름", { exact: true }).fill("browser-call__echo");
+  await page.getByLabel("JSON 인수", { exact: true }).fill('{"text":"browser reviewed"}');
+  await page.getByRole("button", { name: "적용 경로 확인", exact: true }).click();
+  const trigger = page.getByRole("button", { name: "테스트 호출 검토", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "실제 MCP 호출 검토", exact: true });
+  const submit = dialog.getByRole("button", { name: "검토한 호출 실행", exact: true });
+  await expect(submit).toBeDisabled();
+  await expect(dialog.getByText("호출 검증 서버", { exact: true })).toBeVisible();
+  await dialog.getByLabel("확인 문구", { exact: false }).fill("실제 호출");
+  const response = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/admin/mcp/test" && r.request().method() === "POST",
+  );
+  await submit.click();
+  expect((await response).status()).toBe(200);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("호출 성공", { exact: true })).toBeVisible();
+  await expect(trigger).toBeDisabled();
+  await page.getByText("응답 미리보기 열기", { exact: true }).click();
+  await expect(page.locator(".mcp-call-preview")).toContainText("called echo");
+  // Go verifies the exact invocation count and arguments without logging them.
+});
+
 test("AUTH-LIVE-034 실제 MCP 연결 구조와 상세 주소 복원", async ({ page }) => {
   await login(page, admin, "/app/mcp?tab=topology");
   await page.getByRole("button", { name: "검색검증 MCP 서버 목록 상세", exact: true }).click();

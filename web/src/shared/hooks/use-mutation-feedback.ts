@@ -19,7 +19,7 @@ interface MutationFeedbackOptions<Variables, Result> {
   errorFormatter?: typeof safeAppErrorMessage;
   onSuccess?: (result: Result, variables: Variables) => void;
   /** Optional screen/principal lifetime in addition to the authentication epoch. */
-  ownsResult?: () => boolean;
+  ownsResult?: (variables: Variables) => boolean;
 }
 
 /**
@@ -42,7 +42,7 @@ export function useMutationFeedback<Variables, Result>({
   type Submission = { variables: Variables; epoch: number };
   type PublicMutation = UseMutationResult<Result, Error, Variables>;
   const isCurrent = (submission: Submission): boolean =>
-    submission.epoch === tokenStore.getSessionEpoch() && (ownsResult?.() ?? true);
+    submission.epoch === tokenStore.getSessionEpoch() && (ownsResult?.(submission.variables) ?? true);
   const assertCurrent = (submission: Submission): void => {
     if (!isCurrent(submission)) {
       throw new AppError("화면 또는 인증 세션이 변경되었습니다.", {

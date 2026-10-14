@@ -42,6 +42,7 @@ type browserAuthHarness struct {
 	superPassword    string
 	childScratch     string
 	providerChunk    string
+	verifyMcpCall    func()
 }
 
 func browserFixtureConfig(idp *browserOIDCFixture) config.Config {
@@ -117,6 +118,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	seedBrowserUserFixture(t, db)
 	seedBrowserFinopsFixture(t, db)
 	seedBrowserMcpRiskFixture(t, db)
+	h.verifyMcpCall = seedBrowserMcpCallFixture(t, db)
 	seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
 	seedBrowserOperationsFixture(t, db, filepath.Join(scratch, "fallback.ndjson"))
 	logger.Start()
@@ -222,6 +224,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	}
 	assertBrowserMcpRisk(t, h.db)
 	assertBrowserMcpPolicy(t, h.db)
+	h.verifyMcpCall()
 	audits, err := h.db.ListAdminAudit(t.Context(), 1000)
 	if err != nil {
 		t.Fatal("browser emergency audit verification failed")

@@ -36,7 +36,9 @@ import type {
   PostAdminMcpOnboardingCheckData,
   PostAdminMcpPoliciesData,
   PostAdminMcpRouteExplainData,
+  PostAdminMcpRouteExplainResponse,
   PostAdminMcpTestData,
+  PostAdminMcpTestResponse,
   PostAdminMcpToolsData,
   PostAdminMcpUpstreamsIdProbeData,
   PostAdminMcpUpstreamsData,
@@ -377,12 +379,11 @@ export const mcpEndpoints = {
     mcpAgenticRunSchema,
     mcpAgenticQuerySchema,
   ),
-  routeExplain: operation<WithBody<PostAdminMcpRouteExplainData, McpRouteExplainBody>, unknown>()(
-    "POST",
-    "/admin/mcp/route/explain",
-    mcpRouteExplainSchema,
-  ),
-  test: operation<WithBody<PostAdminMcpTestData, McpTestBody>, unknown>()(
+  routeExplain: operation<
+    WithBody<PostAdminMcpRouteExplainData, McpRouteExplainBody>,
+    PostAdminMcpRouteExplainResponse
+  >()("POST", "/admin/mcp/route/explain", mcpRouteExplainSchema),
+  test: operation<WithBody<PostAdminMcpTestData, McpTestBody>, PostAdminMcpTestResponse>()(
     "POST",
     "/admin/mcp/test",
     mcpTestResultSchema,

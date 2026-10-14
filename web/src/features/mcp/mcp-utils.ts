@@ -11,7 +11,8 @@ const riskTones: Record<string, Tone> = {
 };
 
 export function riskTone(level: string): Tone {
-  return riskTones[level.toLowerCase()] ?? "muted";
+  const key = level.toLowerCase();
+  return Object.hasOwn(riskTones, key) ? (riskTones[key] ?? "muted") : "muted";
 }
 
 export function riskLabel(level: string): string {
@@ -31,7 +32,8 @@ const decisionTones: Record<string, Tone> = {
 };
 
 export function decisionTone(decision: string): Tone {
-  return decisionTones[decision.toLowerCase()] ?? "muted";
+  const key = decision.toLowerCase();
+  return Object.hasOwn(decisionTones, key) ? (decisionTones[key] ?? "muted") : "muted";
 }
 
 const statusTones: Record<string, Tone> = {
@@ -42,7 +44,8 @@ const statusTones: Record<string, Tone> = {
 };
 
 export function stepTone(status: string): Tone {
-  return statusTones[status.toLowerCase()] ?? "info";
+  const key = status.toLowerCase();
+  return Object.hasOwn(statusTones, key) ? (statusTones[key] ?? "info") : "info";
 }
 
 export const decisionLabels: Record<string, string> = {
@@ -55,7 +58,8 @@ export const decisionLabels: Record<string, string> = {
 };
 
 export function decisionLabel(decision: string): string {
-  return decisionLabels[decision.toLowerCase()] ?? (decision || "—");
+  const key = decision.toLowerCase();
+  return Object.hasOwn(decisionLabels, key) ? (decisionLabels[key] ?? (decision || "—")) : decision || "—";
 }
 
 /** "a, b" → ["a","b"]; blank entries are dropped so an empty field sends nothing. */

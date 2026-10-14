@@ -6,6 +6,8 @@ const permissionMessage = "이 작업을 수행할 권한이 없습니다.";
 const temporarilyUnavailable = (subject: string): string => `${subject}를 일시적으로 확인할 수 없습니다.`;
 
 const operationalMessages = {
+  mcp_call_in_progress: "다른 탭에서 MCP 호출이 진행 중입니다. 완료 후 다시 검토하세요.",
+  mcp_call_lock_unavailable: "탭 간 호출 잠금을 사용할 수 없습니다. HTTPS와 지원 브라우저를 확인하세요.",
   team_write_in_progress: "팀 변경을 처리 중입니다. 완료 후 다시 확인하세요.",
   team_catalog_unconfirmed: "최신 팀 목록을 확인한 뒤 다시 시도하세요.",
   team_already_exists: "이미 등록된 팀 ID입니다. 목록의 이름 수정 기능을 이용하세요.",

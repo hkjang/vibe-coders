@@ -638,6 +638,59 @@ export type MattermostTestResponse = {
     webhook_status: number;
 };
 
+export type McpRouteExplainRequest = {
+    api_key_id?: string;
+    method?: string;
+    name?: string;
+    uri?: string;
+};
+
+export type McpRouteExplainResponse = {
+    final: {
+        decision: string;
+        reason: string;
+    };
+    input: {
+        method: string;
+        name: string;
+        uri: string;
+    };
+    policy?: {
+        server_policy: string;
+        tool_risk_action: string;
+        tool_risk_configured: boolean;
+        tool_risk_level: string;
+        tool_risk_note: string;
+    };
+    route: {
+        found: boolean;
+        lookup?: string;
+        target_method?: string;
+        target_name?: string;
+        upstream_id?: string;
+        upstream_name?: string;
+    };
+};
+
+export type McpTestRequest = {
+    arguments?: unknown;
+    method?: string;
+    name?: string;
+    upstream_id?: string;
+    uri?: string;
+};
+
+export type McpTestResponse = {
+    error?: string;
+    latency_ms: number;
+    method: string;
+    ok: boolean;
+    response?: unknown;
+    response_preview?: string;
+    upstream_id: string;
+    upstream_name: string;
+};
+
 export type McpTopologyEdge = {
     from: string;
     label: string;
@@ -5356,18 +5409,41 @@ export type GetAdminMcpRequestsIdWaterfallResponses = {
 };
 
 export type PostAdminMcpRouteExplainData = {
-    body?: never;
+    body: McpRouteExplainRequest;
     path?: never;
     query?: never;
     url: '/admin/mcp/route/explain';
 };
 
+export type PostAdminMcpRouteExplainErrors = {
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    400: AppError;
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    401: AppError;
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    405: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMcpRouteExplainError = PostAdminMcpRouteExplainErrors[keyof PostAdminMcpRouteExplainErrors];
+
 export type PostAdminMcpRouteExplainResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpRouteExplainResponse;
 };
+
+export type PostAdminMcpRouteExplainResponse = PostAdminMcpRouteExplainResponses[keyof PostAdminMcpRouteExplainResponses];
 
 export type GetAdminMcpRoutesData = {
     body?: never;
@@ -5398,18 +5474,45 @@ export type GetAdminMcpServersResponses = {
 };
 
 export type PostAdminMcpTestData = {
-    body?: never;
+    body: McpTestRequest;
     path?: never;
     query?: never;
     url: '/admin/mcp/test';
 };
 
+export type PostAdminMcpTestErrors = {
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    400: AppError;
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    401: AppError;
+    /**
+     * Upstream missing or disabled
+     */
+    404: AppError;
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    405: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMcpTestError = PostAdminMcpTestErrors[keyof PostAdminMcpTestErrors];
+
 export type PostAdminMcpTestResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpTestResponse;
 };
+
+export type PostAdminMcpTestResponse = PostAdminMcpTestResponses[keyof PostAdminMcpTestResponses];
 
 export type GetAdminMcpToolsData = {
     body?: never;
