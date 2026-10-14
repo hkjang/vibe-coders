@@ -1,6 +1,20 @@
 import { expect } from "@playwright/test";
 import { admin, login, test } from "./live-fixture";
 
+test("AUTH-LIVE-034 실제 MCP 연결 구조와 상세 주소 복원", async ({ page }) => {
+  await login(page, admin, "/app/mcp?tab=topology");
+  await page.getByRole("button", { name: "검색검증 MCP 서버 목록 상세", exact: true }).click();
+  const detail = page.getByRole("dialog", { name: "MCP 연결 상세", exact: true });
+  await expect(detail.getByText("upstream:browser-search-mcp", { exact: true })).toBeVisible();
+  await expect(detail.getByText("중지", { exact: true })).toBeVisible();
+  await expect(detail.getByText("게이트웨이 통합", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(detail.getByText("upstream:browser-search-mcp", { exact: true })).toBeVisible();
+  await detail.getByRole("button", { name: "선택 해제", exact: true }).click();
+  await expect(detail).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.has("node")).toBe(false);
+});
+
 test("AUTH-LIVE-032 실제 MCP 도구 위험 설정 검토와 저장", async ({ page }) => {
   await login(page, admin, "/app/mcp?tab=tools&server=browser-risk-server&tool=write_record");
   await page
