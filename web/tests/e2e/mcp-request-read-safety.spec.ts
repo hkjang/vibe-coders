@@ -190,9 +190,11 @@ test("상세 403 뒤 이전 목록과 상세를 숨기고 확인 후 복구한�
   await expect(page.getByText("MCP 요청 조회 권한을 다시 확인하세요.", { exact: true })).toBeVisible();
   await expect(dialogFor(page)).toHaveCount(0);
   await expect(page.getByText("public-model", { exact: true })).toHaveCount(0);
-  fixture.state.flowError = 0;
   await page.getByRole("button", { name: "다시 시도", exact: true }).click();
-  await expect(dialogFor(page).getByText("public-trace", { exact: true })).toBeVisible();
+  await expect(page.getByText("public-model", { exact: true })).toBeVisible();
+  await expect(dialogFor(page)).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.has("request_id")).toBe(false);
+  expect(fixture.calls.filter((call) => call.includes("/waterfall"))).toHaveLength(1);
 });
 test("오류 필터 초기화가 화면·주소·요청에 일치한다", async ({ page }) => {
   const fixture = await install(page);

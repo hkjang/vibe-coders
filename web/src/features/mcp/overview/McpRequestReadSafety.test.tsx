@@ -201,20 +201,19 @@ describe("MCP 요청 조회 안전성", () => {
     expect(screen.getByText("public-model")).toBeVisible();
   });
   it.each([401, 403])("상세 %i는 목록과 상세를 폐기하고 수동 확인 후 복구한다", async (status) => {
-    let fail = true;
-    setup({
+    const { api } = setup({
       [flowKey]: () => {
-        if (fail) throw apiFailure("denied", status);
-        return flow;
+        throw apiFailure("denied", status);
       },
     });
     await userEvent.click(await screen.findByRole("button", { name: "public-request 처리 흐름 열기" }));
     expect(await screen.findByText("MCP 요청 조회 권한을 다시 확인하세요.")).toBeVisible();
     expect(screen.queryByText("public-model")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fail = false;
     await userEvent.click(screen.getByRole("button", { name: /다시/ }));
-    expect(await screen.findByText("public-trace")).toBeVisible();
+    expect(await screen.findByText("public-model")).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.calls.filter((call) => call.key === flowKey)).toHaveLength(1);
   });
   it.each(["id", "read", "permitted", "raw", "mounted"] as const)(
     "%s 변경 뒤 이전 보류 응답을 사용하지 않는다",

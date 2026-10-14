@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 
 import { QueryNotice } from "@/features/mcp/mcp-ui";
@@ -120,19 +120,27 @@ const invocationColumns = [
 ] as ReadonlyArray<DataTableColumn<ToolInvocationRow>>;
 
 export function McpRequestsTab(): React.JSX.Element {
+  const [params, updateParams] = useSearchState();
+  const [recoveryOwner, setRecoveryOwner] = useState<number>();
   const owner = useFeatureReadOwner(
     "mcp.overview",
     "mcp-requests",
     ["observability:read"],
     "observability:read",
   );
+  useEffect(() => {
+    if (recoveryOwner === owner.id && !params.has("request_id")) owner.restart();
+  }, [recoveryOwner, owner, params]);
   if (!owner.readable) return <PermissionDenied permission="observability:read" />;
   if (owner.denied)
     return (
       <ErrorState
         title="MCP 요청 조회 권한을 다시 확인하세요."
-        message="이전 목록과 상세 내용을 표시하지 않습니다."
-        onRetry={owner.restart}
+        message="이전 목록과 상세 내용을 표시하지 않습니다. 다시 시도하면 상세 선택을 해제하고 목록을 조회합니다."
+        onRetry={() => {
+          updateParams({ request_id: undefined });
+          setRecoveryOwner(owner.id);
+        }}
         showLegacy={false}
       />
     );
