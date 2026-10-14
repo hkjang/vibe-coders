@@ -71,6 +71,26 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 describe("업무 앱 조회·변경의 계정 경계", () => {
+  it("발행 후 열려 있는 현재 계정의 버전 이력을 갱신한다", async () => {
+    let version = 1;
+    const api = mockApi({
+      "GET /admin/apps": () => ({ apps: [first] }),
+      "GET /admin/apps/first/versions": () => ({ versions: [{ version, note: `발행 기록 ${version}` }] }),
+      "POST /admin/apps/first/publish": () => ({ version: ++version }),
+    });
+    const user = userEvent.setup();
+    setup();
+    await user.click(await screen.findByRole("button", { name: "첫 계정 앱 상세 열기" }));
+    const sheet = screen.getByRole("dialog", { name: first.title });
+    await user.click(within(sheet).getByRole("button", { name: "버전 이력" }));
+    await within(sheet).findByText("발행 기록 1");
+    await user.click(within(sheet).getByRole("button", { name: "발행" }));
+    const confirm = await screen.findByRole("dialog", { name: "업무 앱 발행" });
+    await user.type(within(confirm).getByRole("textbox"), "신규 정의 발행");
+    await user.click(within(confirm).getByRole("button", { name: "발행" }));
+    expect(await within(sheet).findByText("발행 기록 2")).toBeVisible();
+    expect(api.calls.filter((c) => c.key === "GET /admin/apps/first/versions")).toHaveLength(2);
+  });
   it("계정 변경 시 이전 목록을 재사용하지 않고 다시 조회한다", async () => {
     mockApi({
       "GET /admin/apps": () => ({

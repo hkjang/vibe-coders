@@ -86,5 +86,6 @@ export function useAppOperationAccess() {
       }
     },
     listKey: featureOwnedKey(appsKey, owner),
+    versionsKey: (id: string) => featureOwnedKey([...appsKey, id, "versions"], owner),
   };
 }

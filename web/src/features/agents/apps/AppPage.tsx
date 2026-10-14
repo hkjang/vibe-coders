@@ -70,6 +70,7 @@ export function AppPage(): React.JSX.Element {
 }
 
 function AppPageContent(): React.JSX.Element {
+  const client = useQueryClient();
   const auth = useAuth();
   const operations = useAppOperationAccess();
   const canWrite = operations.allowed;
@@ -192,13 +193,20 @@ function AppPageContent(): React.JSX.Element {
   const publish = useMutationFeedback({
     gcTime: 0,
     ownsResult: operations.ownsResult,
-    mutate: (variables: { id: string; note: string; force?: boolean }) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.apps.publish, { id: variables.id }), {
-        body: { note: variables.note },
-        retryUnauthorized: false,
-        ...(variables.force ? { query: { force: "1" as const } } : {}),
-        routeId: "agents.apps",
-      }),
+    mutate: async (variables: { id: string; note: string; force?: boolean }) => {
+      const result = await apiClient.request(
+        withPathParams(endpoints.domains.agents.apps.publish, { id: variables.id }),
+        {
+          body: { note: variables.note },
+          retryUnauthorized: false,
+          ...(variables.force ? { query: { force: "1" as const } } : {}),
+          routeId: "agents.apps",
+        },
+      );
+      operations.assertCurrent();
+      await client.invalidateQueries({ queryKey: operations.versionsKey(variables.id) });
+      return result;
+    },
     invalidates: [operations.listKey],
     successMessage: (result) =>
       result.version === undefined
@@ -670,3 +678,4 @@ function AppPageContent(): React.JSX.Element {
     </div>
   );
 }
+import { useQueryClient } from "@tanstack/react-query";
