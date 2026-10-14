@@ -33,6 +33,7 @@ const scenarios = new Set([
   "AUTH-LIVE-028",
   "AUTH-LIVE-029",
   "AUTH-LIVE-030",
+  "AUTH-LIVE-031",
 ]);
 const sourceFiles = new Set([
   "auth-live.spec.ts",
@@ -44,6 +45,7 @@ const sourceFiles = new Set([
   "me-key-rotation-live.spec.ts",
   "admin-key-revoke-live.spec.ts",
   "admin-key-edit-live.spec.ts",
+  "finops-live.spec.ts",
 ]);
 const testStatuses = new Set(["passed", "failed", "timedOut", "skipped", "interrupted"]);
 const runStatuses = new Set(["passed", "failed", "timedout", "interrupted"]);
