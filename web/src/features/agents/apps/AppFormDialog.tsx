@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, type RefObject } from "react";
+import { useAppOperationAccess } from "./app-scope";
 
 import {
   appComponentsExample,
@@ -41,6 +42,7 @@ export function AppFormDialog({
   owner,
   returnFocusRef,
 }: AppFormDialogProps): React.JSX.Element {
+  const access = useAppOperationAccess();
   const form = useZodForm<AppFormInput, AppFormOutput>(appFormSchema, appFormDefaults(app));
   const { reset } = form;
   useEffect(() => {
@@ -49,11 +51,18 @@ export function AppFormDialog({
   const errors = form.formState.errors;
 
   const onboarding = useMutation({
-    mutationFn: (values: AppFormOutput) =>
-      apiClient.request(endpoints.domains.agents.apps.onboardingCheck, {
+    gcTime: 0,
+    retry: false,
+    mutationFn: async (values: AppFormOutput) => {
+      access.assertCurrent();
+      const result = await apiClient.request(endpoints.domains.agents.apps.onboardingCheck, {
         body: appOnboardingBody(values, app?.owner ?? owner),
         routeId: "agents.apps",
-      }),
+        retryUnauthorized: false,
+      });
+      access.assertCurrent();
+      return result;
+    },
   });
 
   return (
@@ -68,8 +77,12 @@ export function AppFormDialog({
       open={open}
       returnFocusRef={returnFocusRef}
       submitLabel={app ? "수정 저장" : "앱 만들기"}
+      submitDisabled={!access.allowed}
       title={app ? "AI 업무 앱 수정" : "새 AI 업무 앱"}
     >
+      {!access.allowed ? (
+        <InlineNotice tone="warning">{access.reason} 초안은 유지됩니다.</InlineNotice>
+      ) : null}
       <FormField label="제목" required error={errors.title?.message}>
         {(control) => <Input {...control} {...form.register("title")} />}
       </FormField>
@@ -116,7 +129,7 @@ export function AppFormDialog({
         </Button>
         <Button
           size="small"
-          disabled={onboarding.isPending}
+          disabled={onboarding.isPending || !access.allowed}
           onClick={() => {
             void form.handleSubmit((values) => {
               onboarding.mutate(values);
@@ -131,7 +144,7 @@ export function AppFormDialog({
           {safeAppErrorMessage(onboarding.error, "준비도를 확인하지 못했습니다.")}
         </InlineNotice>
       ) : null}
-      {onboarding.data ? (
+      {onboarding.data && access.allowed ? (
         <>
           <InlineNotice tone={onboarding.data.ready ? "success" : "warning"}>
             {onboarding.data.ready

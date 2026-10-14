@@ -113,7 +113,9 @@ describe("앱 추가 접근 권한 초안 수명", () => {
     expect(dialog).toHaveTextContent("전체 접근을 금지하는 작업이 아닙니다");
     expect(dialog).toHaveTextContent("user_one");
     expect(api.calls.filter(({ key }) => key.startsWith("DELETE"))).toEqual([]);
-    act(() => client.setQueryData(permissionKey, { permissions: [{ ...row, subject_id: "other" }] }));
+    act(() =>
+      client.setQueriesData({ queryKey: permissionKey }, { permissions: [{ ...row, subject_id: "other" }] }),
+    );
     fireEvent.click(screen.getByText("외부 앱 변경"));
     await user.click(within(dialog).getByRole("button", { name: "권한 회수" }));
     await waitFor(() =>
@@ -133,7 +135,9 @@ describe("앱 추가 접근 권한 초안 수명", () => {
     await openPanel(user);
     await user.click(await screen.findByRole("button", { name: "user_one 권한 회수" }));
     const dialog = await screen.findByRole("dialog", { name: "앱 추가 접근 권한 회수" });
-    act(() => client.setQueryData(permissionKey, { permissions: [{ ...row, id: "refetched_row" }] }));
+    act(() =>
+      client.setQueriesData({ queryKey: permissionKey }, { permissions: [{ ...row, id: "refetched_row" }] }),
+    );
     await user.click(within(dialog).getByRole("button", { name: "취소" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "user_one 권한 회수" })).toHaveFocus());
     expect(api.calls.filter(({ key }) => key.startsWith("DELETE"))).toEqual([]);
@@ -205,6 +209,7 @@ describe("앱 추가 접근 권한 초안 수명", () => {
       await waitFor(() => expect(dialog).not.toBeInTheDocument());
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
       act(() => tokenStore.saveTokens({ access_token: "synthetic-new", refresh_token: "synthetic-refresh" }));
+      await openPanel(user);
       await user.click(screen.getByRole("button", { name: "접근 권한 추가" }));
       const current = await screen.findByRole("dialog", { name: "앱 접근 권한 추가" });
       await fillGrant(user, current, "current_subject");
@@ -229,6 +234,7 @@ describe("앱 추가 접근 권한 초안 수명", () => {
     await waitFor(() => expect(api.bodies(`POST ${path}`)).toHaveLength(1));
     act(() => tokenStore.saveTokens({ access_token: "synthetic-new", refresh_token: "synthetic-refresh" }));
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    await openPanel(user);
     await user.click(screen.getByRole("button", { name: "접근 권한 추가" }));
     const current = await screen.findByRole("dialog", { name: "앱 접근 권한 추가" });
     expect(within(current).getByRole("textbox")).toHaveValue("");
@@ -249,6 +255,7 @@ describe("앱 추가 접근 권한 초안 수명", () => {
     fireEvent.submit(dialogForm(oldDialog));
     await waitFor(() => expect(api.bodies(`POST ${path}`)).toHaveLength(1));
     act(() => tokenStore.saveTokens({ access_token: "synthetic-new", refresh_token: "synthetic-refresh" }));
+    await openPanel(user);
     await user.click(await screen.findByRole("button", { name: "접근 권한 추가" }));
     const newDialog = await screen.findByRole("dialog", { name: "앱 접근 권한 추가" });
     await fillGrant(user, newDialog, "current_subject");

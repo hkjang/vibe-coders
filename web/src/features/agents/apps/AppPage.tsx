@@ -1,9 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { AppScopeBoundary, appsKey, useAppRead, useAppOperationAccess } from "./app-scope";
 import { AppDetailSheet } from "@/features/agents/apps/AppDetailSheet";
 import { AppFormDialog } from "@/features/agents/apps/AppFormDialog";
 import { AppReceiptDialog } from "@/features/agents/apps/AppReceiptDialog";
@@ -41,27 +41,39 @@ import "@/features/agents/agents.css";
 
 const tabIds = ["apps", "templates", "runs"] as const;
 type TabId = (typeof tabIds)[number];
-const appsKey = ["agents", "apps"] as const;
-const writeDisabledReason = "AI 업무 앱을 변경하려면 admin:write 권한이 필요합니다.";
 const statusFilters = [
   { value: "all", label: "전체 상태" },
   { value: "active", label: "활성" },
   { value: "archived", label: "보관" },
 ];
 
-const publishGateSchema = z.object({ checks: z.array(onboardingCheckSchema).nullish() });
+const publishGateSchema = z.object({ checks: z.array(onboardingCheckSchema).min(1) });
 
 /** The publish gate answers 422 with the readiness checklist; surface it instead of a bare error. */
 function publishGateChecks(error: unknown): readonly OnboardingCheck[] | undefined {
   if (!isAppError(error) || error.status !== 422) return undefined;
   const parsed = publishGateSchema.safeParse(error.details);
-  if (!parsed.success) return [];
-  return parsed.data.checks ?? [];
+  if (
+    !parsed.success ||
+    !parsed.data.checks.some((check) => check.severity === "required" && check.ok === false)
+  )
+    return undefined;
+  return parsed.data.checks;
 }
 
 export function AppPage(): React.JSX.Element {
+  return (
+    <AppScopeBoundary>
+      <AppPageContent />
+    </AppScopeBoundary>
+  );
+}
+
+function AppPageContent(): React.JSX.Element {
   const auth = useAuth();
-  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
+  const operations = useAppOperationAccess();
+  const canWrite = operations.allowed;
+  const writeDisabledReason = operations.reason ?? "";
   const [tab, setTab] = useTabParam<TabId>([...tabIds]);
   const [params, updateSearch] = useSearchState();
   const refreshInterval = useRefreshInterval();
@@ -69,6 +81,10 @@ export function AppPage(): React.JSX.Element {
   const query = containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? "" : rawQuery;
   const status = params.get("status") ?? "all";
   const selectedId = params.get("app") ?? "";
+  const selection = useRef(selectedId);
+  useLayoutEffect(() => {
+    selection.current = selectedId;
+  }, [selectedId]);
   const [searchError, setSearchError] = useState<string | undefined>(
     containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? secretSearchMessage : undefined,
   );
@@ -85,22 +101,21 @@ export function AppPage(): React.JSX.Element {
   const rowTriggerRef = useRef<HTMLElement | null>(null);
   const dialogReturnRef = useRef<HTMLElement | null>(null);
 
-  const list = useQuery({
+  const list = useAppRead({
     queryKey: appsKey,
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.agents.apps.list, { signal, routeId: "agents.apps" }),
     refetchInterval: refreshInterval,
-    refetchIntervalInBackground: false,
   });
 
-  const templates = useQuery({
+  const templates = useAppRead({
     queryKey: [...appsKey, "templates"],
     enabled: tab === "templates",
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.agents.apps.templates, { signal, routeId: "agents.apps" }),
   });
 
-  const runs = useQuery({
+  const runs = useAppRead({
     queryKey: [...appsKey, "runs"],
     enabled: tab === "runs",
     queryFn: ({ signal }) =>
@@ -126,61 +141,82 @@ export function AppPage(): React.JSX.Element {
   }, [updateSearch]);
 
   const save = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: operations.ownsResult,
     mutate: (variables: { values: AppFormOutput; id?: string }) =>
       variables.id === undefined
         ? apiClient.request(endpoints.domains.agents.apps.create, {
             body: appWriteBody(variables.values),
+            retryUnauthorized: false,
             routeId: "agents.apps",
           })
         : apiClient.request(withPathParams(endpoints.domains.agents.apps.update, { id: variables.id }), {
             body: appWriteBody(variables.values),
+            retryUnauthorized: false,
             routeId: "agents.apps",
           }),
-    invalidates: [appsKey],
+    invalidates: [operations.listKey],
     successMessage: "AI 업무 앱을 저장했습니다.",
     errorMessage: "AI 업무 앱을 저장하지 못했습니다.",
   });
 
   const remove = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: operations.ownsResult,
     mutate: (id: string) =>
       apiClient.request(withPathParams(endpoints.domains.agents.apps.remove, { id }), {
+        retryUnauthorized: false,
         routeId: "agents.apps",
       }),
-    invalidates: [appsKey],
+    invalidates: [operations.listKey],
     successMessage: "AI 업무 앱을 삭제했습니다.",
     errorMessage: "AI 업무 앱을 삭제하지 못했습니다.",
-    onSuccess: () => closeSheet(),
+    onSuccess: (_, id) => {
+      if (selection.current === id) closeSheet();
+    },
   });
 
   const deprecate = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: operations.ownsResult,
     mutate: (id: string) =>
       apiClient.request(withPathParams(endpoints.domains.agents.apps.deprecate, { id }), {
+        retryUnauthorized: false,
         routeId: "agents.apps",
       }),
-    invalidates: [appsKey],
+    invalidates: [operations.listKey],
     successMessage: "AI 업무 앱을 지원 중단했습니다.",
     errorMessage: "AI 업무 앱을 지원 중단하지 못했습니다.",
   });
 
   const publish = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: operations.ownsResult,
     mutate: (variables: { id: string; note: string; force?: boolean }) =>
       apiClient.request(withPathParams(endpoints.domains.agents.apps.publish, { id: variables.id }), {
         body: { note: variables.note },
+        retryUnauthorized: false,
         ...(variables.force ? { query: { force: "1" as const } } : {}),
         routeId: "agents.apps",
       }),
-    invalidates: [appsKey],
-    successMessage: (result) => `AI 업무 앱을 발행했습니다. (v${formatNumber(result.version ?? 0)})`,
+    invalidates: [operations.listKey],
+    successMessage: (result) =>
+      result.version === undefined
+        ? "AI 업무 앱을 발행했습니다."
+        : `AI 업무 앱을 발행했습니다. (v${formatNumber(result.version)})`,
     errorMessage: "AI 업무 앱을 발행하지 못했습니다.",
   });
 
   const instantiate = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: operations.ownsResult,
     mutate: (variables: { key: string }) =>
       apiClient.request(endpoints.domains.agents.apps.instantiateTemplate, {
         body: { key: variables.key },
+        retryUnauthorized: false,
         routeId: "agents.apps",
       }),
-    invalidates: [appsKey],
+    invalidates: [operations.listKey],
     successMessage: "템플릿에서 AI 업무 앱을 만들었습니다.",
     errorMessage: "템플릿에서 앱을 만들지 못했습니다.",
     onSuccess: () => setTab("apps"),
@@ -529,6 +565,7 @@ export function AppPage(): React.JSX.Element {
       />
 
       <AppFormDialog
+        key={JSON.stringify([formOpen, editing?.id])}
         app={editing}
         onOpenChange={setFormOpen}
         onSubmit={async (values) => {
@@ -540,6 +577,7 @@ export function AppPage(): React.JSX.Element {
       />
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         title="업무 앱 발행"
         description={`'${publishTarget?.title ?? ""}' 앱의 현재 정의를 새 버전으로 발행합니다. 온보딩 필수 항목이 비어 있으면 차단됩니다.`}
         confirmLabel="발행"
@@ -553,6 +591,7 @@ export function AppPage(): React.JSX.Element {
           try {
             await publish.mutateAsync({ id: publishTarget.id, note: reason });
           } catch (error) {
+            operations.assertCurrent();
             const checks = publishGateChecks(error);
             if (checks) {
               setGateChecks(checks);
@@ -565,6 +604,7 @@ export function AppPage(): React.JSX.Element {
       />
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         title="온보딩 미충족 상태로 강제 발행"
         description={`'${forceTarget?.title ?? ""}' 앱은 온보딩 필수 항목을 충족하지 않았습니다. 그래도 발행하면 거버넌스 공백이 남습니다.`}
         confirmLabel="강제 발행"
@@ -583,6 +623,7 @@ export function AppPage(): React.JSX.Element {
       </ConfirmDialog>
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         title="업무 앱 지원 중단"
         description={`'${deprecateTarget?.title ?? ""}' 앱을 보관 상태로 바꿔 사용자에게 더 이상 노출하지 않습니다.`}
         confirmLabel="지원 중단"
@@ -597,6 +638,7 @@ export function AppPage(): React.JSX.Element {
       />
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         title="업무 앱 삭제"
         description={`'${deleteTarget?.title ?? ""}' 앱을 삭제합니다. 이 작업은 되돌릴 수 없습니다.`}
         confirmLabel="삭제"
@@ -612,6 +654,7 @@ export function AppPage(): React.JSX.Element {
       />
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         title="템플릿에서 앱 만들기"
         description={`'${templateTarget?.title ?? ""}' 템플릿으로 편집 가능한 업무 앱을 만듭니다. 생성 후 구성 요소의 ref를 환경에 맞게 수정하세요.`}
         confirmLabel="앱 생성"
