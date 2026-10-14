@@ -186,16 +186,16 @@ export type WorkApp = z.output<typeof workAppSchema>;
 export const workAppListSchema = looseObject({ apps: z.array(workAppSchema).nullish() });
 
 export const appValidationSchema = looseObject({
-  ok: optionalFlag,
+  ok: z.boolean(),
   checks: looseList({
-    kind: optionalText,
-    ref: optionalText,
-    label: optionalText,
-    resolved: optionalFlag,
-    detail: optionalText,
-  }).nullish(),
-  allowed_models: z.array(z.string()).nullish(),
-  warnings: z.array(z.string()).nullish(),
+    kind: z.string(),
+    ref: z.string(),
+    label: z.string(),
+    resolved: z.boolean(),
+    detail: z.string(),
+  }),
+  allowed_models: z.array(z.string()),
+  warnings: z.array(z.string()),
 });
 export type AppValidation = z.output<typeof appValidationSchema>;
 
@@ -255,20 +255,20 @@ export const appOnboardingSchema = looseObject({
 export type AppOnboarding = z.output<typeof appOnboardingSchema>;
 
 export const appRunPlanSchema = looseObject({
-  run_id: optionalText,
-  app_id: optionalText,
-  title: optionalText,
-  status: optionalText,
+  run_id: z.string().min(1),
+  app_id: z.string().min(1),
+  title: z.string(),
+  status: z.literal("planned"),
   plan: looseList({
-    kind: optionalText,
-    ref: optionalText,
-    label: optionalText,
-    action: optionalText,
+    kind: z.string(),
+    ref: z.string(),
+    label: z.string(),
+    action: z.string(),
     endpoint: optionalText,
     hint: optionalText,
-    resolved: optionalFlag,
-    detail: optionalText,
-  }).nullish(),
+    resolved: z.boolean(),
+    detail: z.string(),
+  }).min(1),
   note: optionalText,
 });
 export type AppRunPlan = z.output<typeof appRunPlanSchema>;

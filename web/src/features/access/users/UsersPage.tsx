@@ -58,36 +58,16 @@ export function UsersPage(): React.JSX.Element {
 
       <Tabs ariaLabel="접근 관리 영역" items={tabs} value={tab} onChange={setTab} panelIdPrefix="access" />
 
-      {tab === "users" ? (
-        <TabPanel id="users" panelIdPrefix="access">
-          <UsersTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
-        </TabPanel>
-      ) : null}
-      {tab === "teams" ? (
-        <TabPanel id="teams" panelIdPrefix="access">
-          <TeamsTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
-        </TabPanel>
-      ) : null}
-      {tab === "keys" ? (
-        <TabPanel id="keys" panelIdPrefix="access">
+      <TabPanel key={tab} id={tab} panelIdPrefix="access">
+        {tab === "users" ? <UsersTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
+        {tab === "teams" ? <TeamsTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
+        {tab === "keys" ? (
           <ApiKeysTab canWrite={canWrite} isSuperAdmin={isSuperAdmin} writeDeniedReason={writeDeniedReason} />
-        </TabPanel>
-      ) : null}
-      {tab === "ips" ? (
-        <TabPanel id="ips" panelIdPrefix="access">
-          <IpsTab />
-        </TabPanel>
-      ) : null}
-      {tab === "quotas" ? (
-        <TabPanel id="quotas" panelIdPrefix="access">
-          <QuotasTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
-        </TabPanel>
-      ) : null}
-      {tab === "roles" ? (
-        <TabPanel id="roles" panelIdPrefix="access">
-          <RolesTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
-        </TabPanel>
-      ) : null}
+        ) : null}
+        {tab === "ips" ? <IpsTab /> : null}
+        {tab === "quotas" ? <QuotasTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
+        {tab === "roles" ? <RolesTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
+      </TabPanel>
     </div>
   );
 }
