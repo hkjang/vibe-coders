@@ -56,10 +56,18 @@ export function currentMonth(now = new Date()): string {
   }).format(now);
 }
 
-export function severityTone(severity: string): "danger" | "warning" | "info" {
+export function severityTone(severity: string): "danger" | "warning" | "success" | "info" {
   if (severity === "critical") return "danger";
-  if (severity === "warning") return "warning";
+  if (severity === "warn" || severity === "warning") return "warning";
+  if (severity === "ok") return "success";
   return "info";
+}
+
+export function budgetSeverityLabel(severity: string): string {
+  if (severity === "critical") return "위험";
+  if (severity === "warn" || severity === "warning") return "경고";
+  if (severity === "ok") return "정상";
+  return "상태 미확인";
 }
 
 /**
