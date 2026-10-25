@@ -1,0 +1,28 @@
+.app-definition-review {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+.app-definition-review p {
+  margin: 0;
+}
+.app-definition-review-scroll {
+  overflow-x: auto;
+}
+.app-definition-review table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.app-definition-review th,
+.app-definition-review td {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.app-definition-review tr[data-changed="true"] th {
+  color: var(--color-primary);
+}

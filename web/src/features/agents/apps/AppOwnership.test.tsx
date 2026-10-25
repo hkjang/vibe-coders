@@ -129,6 +129,9 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
     await user.click(await screen.findByRole("button", { name: "새 업무 앱" }));
     const dialog = await screen.findByRole("dialog", { name: "새 AI 업무 앱" });
     await user.type(within(dialog).getByRole("textbox", { name: /제목/u }), "보존할 초안");
+    await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: "변경 내용과 적용 범위를 확인했습니다." }));
+    expect(within(dialog).getByRole("button", { name: "앱 만들기" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: action, hidden: true }));
     expect(within(dialog).getByRole("textbox", { name: /제목/u })).toHaveValue("보존할 초안");
     expect(within(dialog).getByRole("button", { name: "앱 만들기" })).toBeDisabled();
@@ -181,6 +184,10 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
       await user.click(await screen.findByRole("button", { name: "새 업무 앱" }));
       const dialog = await screen.findByRole("dialog", { name: "새 AI 업무 앱" });
       await user.type(within(dialog).getByRole("textbox", { name: /제목/u }), "저장할 초안");
+      await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
+      await user.click(
+        within(dialog).getByRole("checkbox", { name: "변경 내용과 적용 범위를 확인했습니다." }),
+      );
       await user.click(within(dialog).getByRole("button", { name: "앱 만들기" }));
       await waitFor(() => expect(api.bodies("POST /admin/apps")).toHaveLength(1));
       expect(api.spy.mock.calls.find(([endpoint]) => endpoint.method === "POST")?.[1]).toEqual(
