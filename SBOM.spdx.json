@@ -342,8 +342,8 @@
     },
     {
       "name": "stdlib",
-      "SPDXID": "SPDXRef-Package-go-stdlib-d1d766863629f955",
-      "versionInfo": "go1.26.9",
+      "SPDXID": "SPDXRef-Package-go-stdlib-b17fc195ed46e5b5",
+      "versionInfo": "go1.26.10",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
@@ -353,7 +353,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/stdlib@1.26.9"
+          "referenceLocator": "pkg:golang/stdlib@1.26.10"
         }
       ]
     },
@@ -2671,8 +2671,8 @@
     },
     {
       "name": "@vitest/expect",
-      "SPDXID": "SPDXRef-Package-npm-vitest-expect-3cfbfca9ca16cd34",
-      "versionInfo": "4.1.11",
+      "SPDXID": "SPDXRef-Package-npm-vitest-expect-08281b2c3076adbb",
+      "versionInfo": "4.1.12",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -2682,14 +2682,14 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/%40vitest/expect@4.1.11"
+          "referenceLocator": "pkg:npm/%40vitest/expect@4.1.12"
         }
       ]
     },
     {
       "name": "@vitest/mocker",
-      "SPDXID": "SPDXRef-Package-npm-vitest-mocker-4287dce8573e6939",
-      "versionInfo": "4.1.11",
+      "SPDXID": "SPDXRef-Package-npm-vitest-mocker-d14f646dbfdf2634",
+      "versionInfo": "4.1.12",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -2699,14 +2699,14 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/%40vitest/mocker@4.1.11"
+          "referenceLocator": "pkg:npm/%40vitest/mocker@4.1.12"
         }
       ]
     },
     {
       "name": "@vitest/pretty-format",
-      "SPDXID": "SPDXRef-Package-npm-vitest-pretty-format-02ccaca5cdeb3f95",
-      "versionInfo": "4.1.11",
+      "SPDXID": "SPDXRef-Package-npm-vitest-pretty-format-77c838932d3e6e43",
+      "versionInfo": "4.1.12",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -2716,14 +2716,14 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/%40vitest/pretty-format@4.1.11"
+          "referenceLocator": "pkg:npm/%40vitest/pretty-format@4.1.12"
         }
       ]
     },
     {
       "name": "@vitest/runner",
-      "SPDXID": "SPDXRef-Package-npm-vitest-runner-e0009cbd5b4a48b2",
-      "versionInfo": "4.1.11",
+      "SPDXID": "SPDXRef-Package-npm-vitest-runner-6dd102f5b133aecc",
+      "versionInfo": "4.1.12",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -2733,14 +2733,14 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/%40vitest/runner@4.1.11"
+          "referenceLocator": "pkg:npm/%40vitest/runner@4.1.12"
         }
       ]
     },
     {
       "name": "@vitest/snapshot",
-      "SPDXID": "SPDXRef-Package-npm-vitest-snapshot-8711c8366b453450",
-      "versionInfo": "4.1.11",
+      "SPDXID": "SPDXRef-Package-npm-vitest-snapshot-138893ce52859375",
+      "versionInfo": "4.1.12",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -2750,14 +2750,14 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/%40vitest/snapshot@4.1.11"
+          "referenceLocator": "pkg:npm/%40vitest/snapshot@4.1.12"
         }
       ]
     },
     {
       "name": "@vitest/spy",
-      "SPDXID": "SPDXRef-Package-npm-vitest-spy-189afe5d27406695",
-      "versionInfo": "4.1.11",
+      "SPDXID": "SPDXRef-Package-npm-vitest-spy-ab888213f4cafda9",
+      "versionInfo": "4.1.12",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -2767,14 +2767,14 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/%40vitest/spy@4.1.11"
+          "referenceLocator": "pkg:npm/%40vitest/spy@4.1.12"
         }
       ]
     },
     {
       "name": "@vitest/utils",
-      "SPDXID": "SPDXRef-Package-npm-vitest-utils-cdbfcdff9ac844c5",
-      "versionInfo": "4.1.11",
+      "SPDXID": "SPDXRef-Package-npm-vitest-utils-c2e6a2a173e86afe",
+      "versionInfo": "4.1.12",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -2784,7 +2784,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/%40vitest/utils@4.1.11"
+          "referenceLocator": "pkg:npm/%40vitest/utils@4.1.12"
         }
       ]
     },
@@ -6479,8 +6479,8 @@
     },
     {
       "name": "undici",
-      "SPDXID": "SPDXRef-Package-npm-undici-f2aab6e762a33362",
-      "versionInfo": "8.10.2",
+      "SPDXID": "SPDXRef-Package-npm-undici-3ba623e18713dead",
+      "versionInfo": "8.12.2",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -6490,7 +6490,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/undici@8.10.2"
+          "referenceLocator": "pkg:npm/undici@8.12.2"
         }
       ]
     },
@@ -6581,8 +6581,8 @@
     },
     {
       "name": "vite",
-      "SPDXID": "SPDXRef-Package-npm-vite-f35d61438345709f",
-      "versionInfo": "8.2.2",
+      "SPDXID": "SPDXRef-Package-npm-vite-cca1be140c777546",
+      "versionInfo": "8.2.4",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -6592,14 +6592,14 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/vite@8.2.2"
+          "referenceLocator": "pkg:npm/vite@8.2.4"
         }
       ]
     },
     {
       "name": "vitest",
-      "SPDXID": "SPDXRef-Package-npm-vitest-cfd23f40f4c71ca9",
-      "versionInfo": "4.1.11",
+      "SPDXID": "SPDXRef-Package-npm-vitest-8059666cc495d82f",
+      "versionInfo": "4.1.12",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -6609,7 +6609,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/vitest@4.1.11"
+          "referenceLocator": "pkg:npm/vitest@4.1.12"
         }
       ]
     },
@@ -6853,8 +6853,8 @@
     },
     {
       "name": "zod",
-      "SPDXID": "SPDXRef-Package-npm-zod-5125e329bf18e4e1",
-      "versionInfo": "4.5.4",
+      "SPDXID": "SPDXRef-Package-npm-zod-7b16b7676db0a904",
+      "versionInfo": "4.6.6",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -6864,7 +6864,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/zod@4.5.4"
+          "referenceLocator": "pkg:npm/zod@4.6.6"
         }
       ]
     },
@@ -6985,7 +6985,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-go-stdlib-d1d766863629f955"
+      "relatedSpdxElement": "SPDXRef-Package-go-stdlib-b17fc195ed46e5b5"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
@@ -7670,37 +7670,37 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-expect-3cfbfca9ca16cd34"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-expect-08281b2c3076adbb"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-mocker-4287dce8573e6939"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-mocker-d14f646dbfdf2634"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-pretty-format-02ccaca5cdeb3f95"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-pretty-format-77c838932d3e6e43"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-runner-e0009cbd5b4a48b2"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-runner-6dd102f5b133aecc"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-snapshot-8711c8366b453450"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-snapshot-138893ce52859375"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-spy-189afe5d27406695"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-spy-ab888213f4cafda9"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-utils-cdbfcdff9ac844c5"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-utils-c2e6a2a173e86afe"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
@@ -8790,7 +8790,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-undici-f2aab6e762a33362"
+      "relatedSpdxElement": "SPDXRef-Package-npm-undici-3ba623e18713dead"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
@@ -8820,12 +8820,12 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vite-f35d61438345709f"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vite-cca1be140c777546"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-cfd23f40f4c71ca9"
+      "relatedSpdxElement": "SPDXRef-Package-npm-vitest-8059666cc495d82f"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
@@ -8900,7 +8900,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-zod-5125e329bf18e4e1"
+      "relatedSpdxElement": "SPDXRef-Package-npm-zod-7b16b7676db0a904"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",

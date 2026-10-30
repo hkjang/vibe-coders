@@ -3,7 +3,7 @@ set -euo pipefail
 
 VERSION="${1:?usage: scripts/generate-source-sbom.sh VERSION}"
 SYFT_BIN="${SYFT_BIN:-syft}"
-GO_VERSION="${GO_VERSION:-1.26.9}"
+GO_VERSION="${GO_VERSION:-1.26.10}"
 
 if ! command -v "$SYFT_BIN" >/dev/null 2>&1; then
     echo "syft is required (validated with v1.51.0); set SYFT_BIN to its path" >&2

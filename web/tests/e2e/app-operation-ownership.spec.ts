@@ -51,6 +51,8 @@ test("저장의 401은 토큰 갱신 후 자동 재전송하지 않는다", asyn
   await page.getByRole("button", { name: "새 업무 앱", exact: true }).click();
   const form = page.getByRole("dialog", { name: "새 AI 업무 앱", exact: true });
   await form.getByRole("textbox", { name: "제목", exact: true }).fill("공개 테스트 초안");
+  await form.getByRole("button", { name: "변경 내용 검토", exact: true }).click();
+  await form.getByRole("checkbox", { name: "변경 내용과 적용 범위를 확인했습니다.", exact: true }).check();
   await form.getByRole("button", { name: "앱 만들기", exact: true }).click();
   await expect(form.getByRole("alert")).toBeVisible();
   expect(writes).toBe(1);
@@ -82,6 +84,10 @@ for (const status of [200, 503])
       await page.getByRole("button", { name: "새 업무 앱", exact: true }).click();
       const form = page.getByRole("dialog", { name: "새 AI 업무 앱", exact: true });
       await form.getByRole("textbox", { name: "제목", exact: true }).fill("이전 계정 초안");
+      await form.getByRole("button", { name: "변경 내용 검토", exact: true }).click();
+      await form
+        .getByRole("checkbox", { name: "변경 내용과 적용 범위를 확인했습니다.", exact: true })
+        .check();
       await form.getByRole("button", { name: "앱 만들기", exact: true }).click();
       await expect.poll(() => writes).toBe(1);
       await other.getByLabel("사용자 메뉴").click();
@@ -97,7 +103,8 @@ for (const status of [200, 503])
       release();
       await response;
       await expect(form.getByRole("textbox", { name: "제목", exact: true })).toHaveValue("새 계정 초안");
-      await expect(form.getByRole("button", { name: "앱 만들기", exact: true })).toBeEnabled();
+      await expect(form.getByRole("button", { name: "앱 만들기", exact: true })).toBeDisabled();
+      await expect(form.getByRole("textbox", { name: "제목", exact: true })).toBeEditable();
       await expect(form.getByRole("alert")).toHaveCount(0);
       await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
       expect(gateway.listReads()).toBe(reads);

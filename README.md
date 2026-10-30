@@ -21,7 +21,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 
 ## 독립 실행 및 심사 재현
 
-백엔드와 기존 `/admin`만 재현할 때는 Go 1.26.9 이상과 Git이 필요합니다. embedded
+백엔드와 기존 `/admin`만 재현할 때는 Go 1.26.10 이상과 Git이 필요합니다. embedded
 React `/app`까지 소스에서 직접 빌드하려면 Node.js 24와 저장소가 고정한 pnpm 11도
 필요합니다. Docker 빌드는 이 도구를 builder stage에 포함하므로 호스트에 Node.js가
 없어도 되며, 운영 이미지는 Go 바이너리 하나만 담습니다. 기본 SQLite 구성은 별도 DB
@@ -1153,7 +1153,7 @@ Python 3는 SPDX JSON과 container smoke의 `/auth/me` 버전을 검증하고, G
 Distroless 최종 이미지의 High·Critical CVE를 검사합니다. 호스트 Node.js와 jq는
 필요하지 않습니다.
 
-1. Node 24+pnpm frozen frontend build → Go 1.26.9 embed build → distroless nonroot의 3-stage 이미지 빌드
+1. Node 24+pnpm frozen frontend build → Go 1.26.10 embed build → distroless nonroot의 3-stage 이미지 빌드
 2. 최종 이미지에서 `/admin`, `/app` redirect/deep link, hashed asset, `/auth/me` build version smoke 검증
 3. 고정 버전 Grype로 최종 이미지의 High·Critical 취약점이 없는지 검증
 4. `docker save` 로 OCI tar 추출 후 `gzip -9` 압축
