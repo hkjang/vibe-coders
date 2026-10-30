@@ -439,7 +439,7 @@ API 응답·HTTP 헤더·네트워크·기기 성능을 측정하지 않는다. 
 프로덕션 이미지는 세 단계로 만든다.
 
 1. Node 24 builder가 고정된 pnpm lockfile로 `web/dist`를 생성한다.
-2. Go 1.26.9 builder가 해당 산출물을 `internal/appui/dist`에 복사하고 바이너리에 embed한다.
+2. Go 1.26.10 builder가 해당 산출물을 `internal/appui/dist`에 복사하고 바이너리에 embed한다.
 3. Distroless nonroot 런타임에는 단일 gateway 바이너리와 쓰기 가능한 `/data`만 남긴다.
 
 동일한 release version을 `VITE_UI_VERSION`과 `proxy.AppVersion`에 주입한다. frontend build, 비어 있는 index, asset 누락 중 하나라도 발생하면 release build는 실패한다.

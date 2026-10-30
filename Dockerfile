@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 ARG NODE_VERSION=24.20.0
-ARG GO_VERSION=1.26.9
+ARG GO_VERSION=1.26.10
 ARG VERSION=dev
 ARG VCS_REF=unknown
 
@@ -23,7 +23,7 @@ RUN pnpm build \
     && test -d dist/assets \
     && test -n "$(find dist/assets -type f -print -quit)"
 
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS go-build
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@sha256:27f2d3b83cfc5803c8078f8e730af0f7c431bf067afaec8f60a36fb763187cba AS go-build
 WORKDIR /src
 
 ENV CGO_ENABLED=0 \

@@ -25,7 +25,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `modernc.org/mathutil` | v1.6.0 | BSD-3-Clause |
 | `modernc.org/memory` | v1.8.0 | BSD-3-Clause |
 | `modernc.org/sqlite` | v1.34.5 | BSD-3-Clause |
-| `stdlib` | go1.26.9 | BSD-3-Clause |
+| `stdlib` | go1.26.10 | BSD-3-Clause |
 
 ## React / npm dependency graph
 
@@ -167,13 +167,13 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `@typescript-eslint/utils` | 8.69.0 | MIT | transitive |
 | `@typescript-eslint/visitor-keys` | 8.69.0 | MIT | transitive |
 | `@vitejs/plugin-react` | 6.1.1 | MIT | build/test direct |
-| `@vitest/expect` | 4.1.11 | MIT | transitive |
-| `@vitest/mocker` | 4.1.11 | MIT | transitive |
-| `@vitest/pretty-format` | 4.1.11 | MIT | transitive |
-| `@vitest/runner` | 4.1.11 | MIT | transitive |
-| `@vitest/snapshot` | 4.1.11 | MIT | transitive |
-| `@vitest/spy` | 4.1.11 | MIT | transitive |
-| `@vitest/utils` | 4.1.11 | MIT | transitive |
+| `@vitest/expect` | 4.1.12 | MIT | transitive |
+| `@vitest/mocker` | 4.1.12 | MIT | transitive |
+| `@vitest/pretty-format` | 4.1.12 | MIT | transitive |
+| `@vitest/runner` | 4.1.12 | MIT | transitive |
+| `@vitest/snapshot` | 4.1.12 | MIT | transitive |
+| `@vitest/spy` | 4.1.12 | MIT | transitive |
+| `@vitest/utils` | 4.1.12 | MIT | transitive |
 | `acorn-jsx` | 5.3.2 | MIT | transitive |
 | `acorn` | 8.18.0 | MIT | transitive |
 | `ajv` | 6.15.0 | MIT | transitive |
@@ -391,14 +391,14 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `typescript-eslint` | 8.69.0 | MIT | build/test direct |
 | `typescript` | 6.0.3 | Apache-2.0 | build/test direct |
 | `undici-types` | 7.18.2 | MIT | transitive |
-| `undici` | 8.10.2 | MIT | transitive |
+| `undici` | 8.12.2 | MIT | transitive |
 | `update-browserslist-db` | 1.3.2 | MIT | transitive |
 | `uri-js` | 4.4.1 | BSD-2-Clause | transitive |
 | `use-callback-ref` | 1.3.3 | MIT | transitive |
 | `use-sidecar` | 1.1.3 | MIT | transitive |
 | `use-sync-external-store` | 1.6.0 | MIT | transitive |
-| `vite` | 8.2.2 | MIT | build/test direct |
-| `vitest` | 4.1.11 | MIT | build/test direct |
+| `vite` | 8.2.4 | MIT | build/test direct |
+| `vitest` | 4.1.12 | MIT | build/test direct |
 | `w3c-xmlserializer` | 5.0.0 | MIT | transitive |
 | `webidl-conversions` | 8.0.1 | BSD-2-Clause | transitive |
 | `whatwg-mimetype` | 5.0.0 | MIT | transitive |
@@ -413,7 +413,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `yallist` | 3.1.1 | ISC | transitive |
 | `yocto-queue` | 0.1.0 | MIT | transitive |
 | `zod-validation-error` | 4.0.2 | MIT | transitive |
-| `zod` | 4.5.4 | MIT | runtime direct |
+| `zod` | 4.6.6 | MIT | runtime direct |
 | `zustand` | 5.0.15 | MIT | runtime direct |
 
 ## Scope and verification
