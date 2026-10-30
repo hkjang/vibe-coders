@@ -17,7 +17,7 @@ v42의 최초 인증 CI 실패와 별도 재현된 기존 관리자 갱신 경�
 
 | 항목 | 값 |
 | --- | --- |
-| Go 버전 | 1.26.9 (`go.mod` 기준) |
+| Go 버전 | 1.26.10 (`go.mod` 기준) |
 | OS | Linux / Windows / macOS |
 | DB | SQLite (기본) 또는 PostgreSQL |
 | 포트 | 기본 `:8080` (LISTEN_ADDR 로 변경 가능) |
@@ -99,7 +99,7 @@ docker run -d --name proxy-gateway --restart=always \
   ai-coding-proxy-gateway:v0.86.40
 ```
 
-Dockerfile은 Node 24+pnpm frozen frontend builder → Go 1.26.9 embed builder → distroless
+Dockerfile은 Node 24+pnpm frozen frontend builder → Go 1.26.10 embed builder → distroless
 nonroot의 3-stage 구조입니다. React 정적 에셋은 Go 바이너리에 포함되고 운영
 컨테이너에는 Node.js가 없습니다. `/app`은 기본 OFF이므로 Preview가 필요할 때만
 `UI_APP_ENABLED=true`를 지정합니다. `/admin`은 설정과 무관하게 계속 제공됩니다.
