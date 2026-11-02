@@ -1,48 +1,32 @@
-import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useRef, useState } from "react";
-import { z } from "zod";
+import { useState } from "react";
+import { useAuth } from "@/app/auth/AuthProvider";
 
 import { QueryNotice } from "@/features/mcp/mcp-ui";
 import { decisionLabel, decisionTone, riskLabel, riskTone } from "@/features/mcp/mcp-utils";
-import { apiClient } from "@/shared/api/client";
-import type { McpPolicyBody } from "@/shared/api/domains/mcp";
 import type { McpPolicy } from "@/shared/api/domains/mcp.schemas";
-import { withPathParams } from "@/shared/api/endpoint-factory";
-import { endpoints } from "@/shared/api/endpoints";
-import { FormDialog } from "@/shared/components/form/FormDialog";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { Input } from "@/shared/components/ui/Input";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Select } from "@/shared/components/ui/Select";
-import { Switch } from "@/shared/components/ui/Switch";
-import { Textarea } from "@/shared/components/ui/Textarea";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
-const routeId = "mcp.overview";
+import { ErrorState, PermissionDenied } from "@/shared/components/state/PageStates";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
+import { useFeatureReadOwner, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
+import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
+import { PolicyFormDialog, PolicyConfirmDialog } from "./PolicyReviewDialogs";
+import { type PolicySnapshot, type PolicyCommand } from "./mcp-policy-review";
+import { useMcpPolicyData } from "./use-mcp-policy-data";
 
-const modeOptions = [
-  { value: "allow", label: decisionLabel("allow") },
-  { value: "warn", label: decisionLabel("warn") },
-  { value: "block", label: decisionLabel("block") },
-];
-
-const policyFormSchema = z.object({
-  server_label: z.string().trim().min(1, "서버 라벨을 입력하세요."),
-  mode: z.enum(["allow", "warn", "block"]),
-  note: z.string(),
-});
-type PolicyFormValues = z.infer<typeof policyFormSchema>;
+type Review =
+  { kind: "save"; before: PolicySnapshot; original?: McpPolicy } | Exclude<PolicyCommand, { kind: "save" }>;
 
 const policyColumn = createDataTableColumnHelper<McpPolicy>();
 
@@ -74,55 +58,45 @@ const loopColumns = [
 ] as ReadonlyArray<DataTableColumn<LoopRow>>;
 
 export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
-  const [formOpen, setFormOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<McpPolicy | undefined>();
-  const [lookup, setLookup] = useState<{ server: string; tool: string }>({ server: "", tool: "" });
-  const [submitted, setSubmitted] = useState<{ server: string; tool: string } | undefined>();
-  const createButtonRef = useRef<HTMLButtonElement>(null);
-  const tableRef = useRef<HTMLElement>(null);
-
-  const form = useZodForm(policyFormSchema, { server_label: "", mode: "allow", note: "" });
-
-  const policies = useQuery({
-    queryKey: ["mcp", "policies"],
-    queryFn: ({ signal }) => apiClient.request(endpoints.domains.mcp.policies, { signal, routeId }),
-  });
-  const loops = useQuery({
-    queryKey: ["mcp", "loops"],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.mcp.loops, {
-        query: { window: "24h", threshold: 10, limit: 50 },
-        signal,
-        routeId,
-      }),
-  });
-  const effective = useQuery({
-    queryKey: ["mcp", "effective-policy", submitted?.server, submitted?.tool],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.mcp.effectivePolicy, {
-        query: {
-          server: submitted?.server ?? "",
-          ...(submitted?.tool ? { tool: submitted.tool } : {}),
-        },
-        signal,
-        routeId,
-      }),
-    enabled: Boolean(submitted?.server),
-  });
-
-  const savePolicy = useMutationFeedback({
-    mutate: (body: McpPolicyBody) => apiClient.request(endpoints.domains.mcp.savePolicy, { body, routeId }),
-    invalidates: [["mcp"]],
-    successMessage: "정책을 저장했습니다.",
-    errorMessage: "정책을 저장하지 못했습니다.",
-  });
-  const removePolicy = useMutationFeedback({
-    mutate: (server: string) =>
-      apiClient.request(withPathParams(endpoints.domains.mcp.deletePolicy, { server }), { routeId }),
-    invalidates: [["mcp"]],
-    successMessage: "정책을 삭제했습니다.",
-    errorMessage: "정책을 삭제하지 못했습니다.",
-  });
+  const owner = useFeatureReadOwner(
+    "mcp.overview",
+    "mcp-policy",
+    ["observability:read"],
+    "observability:read",
+  );
+  if (!owner.readable) return <PermissionDenied permission="observability:read" />;
+  if (owner.denied)
+    return (
+      <ErrorState
+        title="MCP 정책 조회 권한을 다시 확인하세요."
+        message="이전 정책과 입력 내용을 표시하지 않습니다."
+        onRetry={owner.restart}
+        showLegacy={false}
+      />
+    );
+  return <McpPolicyContent key={owner.id} owner={owner} canWrite={canWrite} />;
+}
+function McpPolicyContent({ owner, canWrite }: { owner: FeatureReadOwner; canWrite: boolean }) {
+  const auth = useAuth();
+  const write = useFeatureMutationAccess(
+    ["mcp.overview"],
+    canWrite && auth.user?.scopes.includes("mcp:admin") === true,
+    "MCP 관리 권한(mcp:admin)이 필요합니다.",
+  );
+  const [review, setReview] = useState<Review>();
+  const { returnFocusRef, remember } = useReturnFocus();
+  const [lookup, setLookup] = useState({ server: "", tool: "" });
+  const [submitted, setSubmitted] = useState<typeof lookup>();
+  const [lookupError, setLookupError] = useState<string>();
+  const { policies, loops, effective } = useMcpPolicyData(owner, submitted);
+  const editable = write.allowed && policies.isSuccess && !policies.isFetching;
+  const lookupChanged =
+    submitted && (lookup.server.trim() !== submitted.server || lookup.tool.trim() !== submitted.tool);
+  const showReview = (value: Review, event: { currentTarget: HTMLElement }) => {
+    if (!editable) return;
+    remember(event);
+    setReview(value);
+  };
 
   const policyColumns = [
     policyColumn.accessor((row) => row.server_label, {
@@ -143,20 +117,35 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
       id: "actions",
       header: "작업",
       cell: (info) => (
-        <Button
-          size="small"
-          variant="danger"
-          disabled={!canWrite}
-          title={canWrite ? undefined : "mcp:admin 권한이 필요합니다."}
-          onClick={() => setDeleteTarget(info.row.original)}
-        >
-          삭제
-        </Button>
+        <div className="mcp-row-actions">
+          <Button
+            size="small"
+            disabled={!editable}
+            aria-label={info.row.original.server_label + " 정책 편집"}
+            onClick={(event) => {
+              if (policies.data)
+                showReview({ kind: "save", before: policies.data, original: info.row.original }, event);
+            }}
+          >
+            편집
+          </Button>
+          <Button
+            size="small"
+            variant="danger"
+            disabled={!editable}
+            aria-label={info.row.original.server_label + " 정책 삭제"}
+            onClick={(event) => {
+              if (policies.data)
+                showReview({ kind: "delete", before: policies.data, original: info.row.original }, event);
+            }}
+          >
+            삭제
+          </Button>
+        </div>
       ),
     }),
   ] as ReadonlyArray<DataTableColumn<McpPolicy>>;
 
-  const allowlistEnabled = policies.data?.allowlist_enabled ?? false;
   const effectivePolicy = effective.data?.policy;
   const effectiveFinal = effective.data?.final;
 
@@ -179,29 +168,37 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
             label="정책 작업"
             end={
               <Button
-                ref={createButtonRef}
                 variant="primary"
-                disabled={!canWrite}
-                title={canWrite ? undefined : "mcp:admin 권한이 필요합니다."}
-                onClick={() => {
-                  form.reset({ server_label: "", mode: "allow", note: "" });
-                  setFormOpen(true);
+                disabled={!editable}
+                title={write.reason}
+                onClick={(event) => {
+                  if (policies.data) showReview({ kind: "save", before: policies.data }, event);
                 }}
               >
                 <Plus aria-hidden="true" /> 정책 추가
               </Button>
             }
           >
-            <Switch
-              checked={allowlistEnabled}
-              disabled={!canWrite || savePolicy.isPending}
-              label="허용목록 모드 (등록된 서버만 허용)"
-              onCheckedChange={(checked) => savePolicy.mutate({ allowlist_enabled: checked })}
-            />
+            <span>
+              허용목록: {policies.data ? (policies.data.allowlist_enabled ? "사용" : "미사용") : "확인 중"}
+            </span>
+            <Button
+              disabled={!editable}
+              title={write.reason}
+              onClick={(event) => {
+                if (policies.data)
+                  showReview(
+                    { kind: "allowlist", before: policies.data, enabled: !policies.data.allowlist_enabled },
+                    event,
+                  );
+              }}
+            >
+              허용목록 변경 검토
+            </Button>
           </Toolbar>
         }
       >
-        {!policies.isPending && (policies.data?.policies.length ?? 0) === 0 ? (
+        {policies.isSuccess && policies.data.policies.length === 0 ? (
           <EmptyState
             title="등록된 서버 정책이 없습니다."
             description="정책을 추가하면 해당 서버의 도구 호출을 차단하거나 경고로 표시할 수 있습니다."
@@ -212,6 +209,7 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
             columns={policyColumns}
             data={policies.data?.policies ?? []}
             loading={policies.isPending}
+            error={policies.isError && !policies.data ? "서버 정책을 불러오지 못했습니다." : undefined}
             getRowId={(row) => row.server_label}
           />
         )}
@@ -225,8 +223,18 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
           className="mcp-inline-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (lookup.server.trim() === "") return;
-            setSubmitted({ server: lookup.server.trim(), tool: lookup.tool.trim() });
+            const value = { server: lookup.server.trim(), tool: lookup.tool.trim() };
+            if (!value.server || effective.isFetching) return;
+            if (
+              containsPotentialSecret(value.server, auth.credentialPrefixes) ||
+              containsPotentialSecret(value.tool, auth.credentialPrefixes)
+            ) {
+              setLookupError(secretSearchMessage);
+              return;
+            }
+            setLookupError(undefined);
+            if (submitted?.server === value.server && submitted.tool === value.tool) void effective.refetch();
+            else setSubmitted(value);
           }}
         >
           <label htmlFor="mcp-eff-server">
@@ -250,10 +258,21 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
             {effective.isFetching ? "조회 중" : "조회"}
           </Button>
         </form>
+        {lookupError ? (
+          <p className="form-error" role="alert">
+            {lookupError}
+          </p>
+        ) : null}
+        {submitted ? (
+          <p>
+            조회 기준: {submitted.server} / {submitted.tool || "서버 전체"}
+            {lookupChanged ? " · 입력한 변경은 아직 조회하지 않았습니다." : ""}
+          </p>
+        ) : null}
         {effective.isError ? (
           <QueryNotice
             error={effective.error}
-            hasData={false}
+            hasData={Boolean(effective.data)}
             label="실효 정책"
             onRetry={() => void effective.refetch()}
           />
@@ -294,7 +313,7 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
 
       <SectionCard
         title="에이전트 루프 의심"
-        description="최근 24시간 동안 한 세션에서 같은 도구를 10회 이상 호출한 사례입니다."
+        description="최근 24시간 동안 한 세션에서 같은 도구를 10회 이상 호출한 사례를 최대 50개 조회합니다."
       >
         {loops.isError ? (
           <QueryNotice
@@ -309,53 +328,31 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
           columns={loopColumns}
           data={loops.data?.loops ?? []}
           loading={loops.isPending}
+          error={loops.isError && !loops.data ? "에이전트 루프를 불러오지 못했습니다." : undefined}
           getRowId={(row, index) => `${row.session_id}:${row.tool_name}:${index}`}
           emptyMessage="루프로 의심되는 호출이 없습니다."
         />
       </SectionCard>
 
-      <FormDialog
-        form={form}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        returnFocusRef={createButtonRef}
-        title="MCP 서버 정책 추가"
-        description="서버 라벨 단위로 도구 호출 정책을 저장합니다."
-        onSubmit={async (values: PolicyFormValues) => {
-          await savePolicy.mutateAsync({
-            server_label: values.server_label,
-            mode: values.mode,
-            note: values.note.trim(),
-          });
-        }}
-      >
-        <FormField label="서버 라벨" required error={form.formState.errors.server_label?.message}>
-          {(control) => <Input {...control} {...form.register("server_label")} />}
-        </FormField>
-        <FormField label="모드" required error={form.formState.errors.mode?.message}>
-          {(control) => <Select {...control} {...form.register("mode")} options={modeOptions} />}
-        </FormField>
-        <FormField label="메모" error={form.formState.errors.note?.message}>
-          {(control) => <Textarea {...control} {...form.register("note")} rows={2} />}
-        </FormField>
-      </FormDialog>
-
-      <ConfirmDialog
-        open={deleteTarget !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(undefined);
-        }}
-        returnFocusRef={tableRef}
-        tone="danger"
-        title="정책을 삭제할까요?"
-        description={`${deleteTarget?.server_label ?? ""} 서버 정책이 사라지고 기본 규칙이 적용됩니다.`}
-        confirmLabel="삭제"
-        onConfirm={async () => {
-          if (!deleteTarget) return;
-          await removePolicy.mutateAsync(deleteTarget.server_label);
-          setDeleteTarget(undefined);
-        }}
-      />
+      {review?.kind === "save" ? (
+        <PolicyFormDialog
+          before={review.before}
+          original={review.original}
+          owner={owner}
+          canWrite={canWrite}
+          returnFocusRef={returnFocusRef}
+          onClose={() => setReview(undefined)}
+        />
+      ) : null}
+      {review && review.kind !== "save" ? (
+        <PolicyConfirmDialog
+          command={review}
+          owner={owner}
+          canWrite={canWrite}
+          returnFocusRef={returnFocusRef}
+          onClose={() => setReview(undefined)}
+        />
+      ) : null}
     </div>
   );
 }

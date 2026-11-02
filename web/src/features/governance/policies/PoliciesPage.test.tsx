@@ -4,6 +4,8 @@ import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PoliciesPage } from "@/features/governance/policies/PoliciesPage";
+import { PolicyAdvisorPage } from "./PolicyAdvisorPage";
+import { Route, Routes } from "react-router";
 import { apiFailure, mockApi } from "@/test/api";
 import { FeatureAccessHarness } from "@/test/feature-access";
 import { renderScreen } from "@/test/render";
@@ -317,9 +319,12 @@ afterEach(() => {
 function render(route = "/governance/policies") {
   return renderScreen(
     <FeatureAccessHarness featureId="governance.policies">
-      <PoliciesPage />
+      <Routes>
+        <Route index element={<PoliciesPage />} />
+        <Route path="advisor" element={<PolicyAdvisorPage />} />
+      </Routes>
     </FeatureAccessHarness>,
-    { route, path: "/governance/policies" },
+    { route, path: "/governance/policies/*" },
   );
 }
 
@@ -561,7 +566,7 @@ describe("PoliciesPage", () => {
     render("/governance/policies?tab=advisor");
 
     expect(await screen.findByText("민감정보 차단 정책 추가")).toBeInTheDocument();
-    const canaryTable = screen.getByRole("table", { name: "canary 정책 현황" });
+    const canaryTable = screen.getByRole("table", { name: "정책 단계 적용 현황" });
     expect(within(canaryTable).getByText("75%")).toBeInTheDocument();
   });
 

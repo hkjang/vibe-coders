@@ -15,6 +15,28 @@ function encoded(value: string, passes: number): string {
 }
 
 describe("app route query security", () => {
+  it("모델 다중 정렬의 순서는 보존하고 중복 열·중복 매개변수·다른 화면은 거절한다", () => {
+    const query = "?sort=quality_desc%2Cinput_price_asc&page=2";
+    expect(sanitizeAppRouteSearch("/app/gateway/models", query).search).toBe(query);
+    expect(sanitizeAppRouteSearch("/app/models", query).search).toBe(query);
+    for (const bad of [
+      "?sort=quality_desc,quality_asc",
+      "?sort=model_asc&sort=quality_desc",
+      "?sort=model_asc,unknown_desc",
+    ])
+      expect(sanitizeAppRouteSearch("/app/gateway/models", bad).search).toBe("");
+    expect(sanitizeAppRouteSearch("/app/gateway/providers", query).search).toBe("?page=2");
+  });
+  it("preserves policy selection on its independent detail route but removes credentials", () => {
+    expect(
+      sanitizeAppRouteSearch("/app/governance/policies/detail", "?policy=policy-one&tab=safety&token=private")
+        .search,
+    ).toBe("?policy=policy-one&tab=safety");
+    expect(
+      sanitizeAppRouteSearch("/app/governance/policies/detail", `?policy=corp_${"x".repeat(43)}`, ["corp_"])
+        .search,
+    ).toBe("");
+  });
   const initialURL = window.location.href;
   const cursor = `djE6dGVzdA.${"c".repeat(43)}`;
   const selectedRef = `req_${"a".repeat(22)}.${"b".repeat(21)}`;
@@ -353,6 +375,18 @@ describe("app route query security", () => {
     });
     expect(JSON.stringify(state)).not.toContain("private-value");
   });
+
+  it("preserves only the boolean policy tab focus instruction", () => {
+    expect(locationStateWithSensitiveRejections({ policyTabFocus: true, raw: "private-value" }, [])).toEqual({
+      policyTabFocus: true,
+    });
+  });
+  it.each([false, "private-value", { raw: "private-value" }, [true]])(
+    "rejects non-true policy focus state %j",
+    (value) => {
+      expect(locationStateWithSensitiveRejections({ policyTabFocus: value }, [])).toBeNull();
+    },
+  );
 
   it("preserves rejection markers only as an exact true boolean", () => {
     expect(

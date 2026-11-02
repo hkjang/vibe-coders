@@ -1,11 +1,14 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { FinopsReadBoundary } from "./FinopsReadBoundary";
+import { useFinopsReadQuery } from "./use-finops-read-query";
+import { useChargebackExport } from "./use-chargeback-export";
+import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
+import { LoadingState } from "@/shared/components/state/PageStates";
 import { Download } from "lucide-react";
 import { useState } from "react";
 
 import {
   currentMonth,
   dimensionLabels,
-  downloadChargebackCsv,
   finopsChargebackQueryKey,
   monthPattern,
 } from "@/features/finops/overview/finops-shared";
@@ -13,7 +16,6 @@ import { CostQueryFailure } from "@/features/finops/overview/finops-ui";
 import { apiClient } from "@/shared/api/client";
 import type { CostAllocationRow } from "@/shared/api/domains/finops";
 import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
 import { FormField } from "@/shared/components/form/FormField";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
@@ -24,7 +26,6 @@ import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useSearchState } from "@/shared/hooks/use-search-state";
-import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
 
 function packColumns(): ReadonlyArray<DataTableColumn<CostAllocationRow>> {
@@ -59,24 +60,38 @@ function packColumns(): ReadonlyArray<DataTableColumn<CostAllocationRow>> {
 }
 
 export function ChargebackTab(): React.JSX.Element {
-  const [searchParams, updateSearch] = useSearchState();
-  const requestedMonth = searchParams.get("month") ?? "";
-  const month = monthPattern.test(requestedMonth) ? requestedMonth : "";
-  const [monthInput, setMonthInput] = useState(month || currentMonth());
-  const [monthError, setMonthError] = useState<string>();
-  const [downloadError, setDownloadError] = useState<string>();
-  const [downloading, setDownloading] = useState(false);
+  return (
+    <FinopsReadBoundary scope="chargeback">
+      {(owner) => <ChargebackPeriod owner={owner} />}
+    </FinopsReadBoundary>
+  );
+}
+function ChargebackPeriod({ owner }: { owner: FeatureReadOwner }): React.JSX.Element {
+  const [searchParams] = useSearchState();
+  const month = searchParams.get("month") || currentMonth();
+  return <ChargebackContent key={month} owner={owner} month={month} />;
+}
+function ChargebackContent({ owner, month }: { owner: FeatureReadOwner; month: string }): React.JSX.Element {
+  const [, updateSearch] = useSearchState();
+  const invalidMonth = !monthPattern.test(month);
+  const [monthInput, setMonthInput] = useState(month);
+  const [monthError, setMonthError] = useState<string | undefined>(
+    invalidMonth ? "YYYY-MM 형식으로 입력하세요." : undefined,
+  );
+  const { download, downloading, downloadError } = useChargebackExport(owner, month);
 
-  const pack = useQuery({
-    queryKey: [...finopsChargebackQueryKey, month],
-    queryFn: ({ signal }) =>
+  const pack = useFinopsReadQuery(
+    owner,
+    [...finopsChargebackQueryKey, month],
+    (signal) =>
       apiClient.request(endpoints.domains.finops.chargebackPack, {
-        query: month === "" ? undefined : { month },
+        query: { month },
         signal,
         routeId: "finops.overview",
       }),
-    placeholderData: keepPreviousData,
-  });
+    false,
+    !invalidMonth,
+  );
 
   const dimensions = pack.data?.dimensions ?? [];
   const totalCost = dimensions[0]?.total_cost_krw ?? 0;
@@ -90,22 +105,8 @@ export function ChargebackTab(): React.JSX.Element {
       return;
     }
     setMonthError(undefined);
+    setMonthInput(next || currentMonth());
     updateSearch({ month: next || undefined });
-  };
-
-  const download = async (): Promise<void> => {
-    setDownloading(true);
-    setDownloadError(undefined);
-    try {
-      await downloadChargebackCsv(month || currentMonth());
-    } catch (cause) {
-      const requestId = isAppError(cause) ? cause.requestId : undefined;
-      setDownloadError(
-        `${safeAppErrorMessage(cause, "CSV를 내려받지 못했습니다.")}${requestId ? ` 요청 ID: ${requestId}` : ""}`,
-      );
-    } finally {
-      setDownloading(false);
-    }
   };
 
   return (
@@ -116,14 +117,24 @@ export function ChargebackTab(): React.JSX.Element {
         actions={
           <div className="finops-form">
             <Button onClick={applyMonth}>조회</Button>
-            <Button variant="primary" disabled={downloading} onClick={() => void download()}>
+            <Button
+              variant="primary"
+              disabled={
+                downloading || pack.isFetching || pack.isError || !pack.data || monthInput.trim() !== month
+              }
+              onClick={() => void download()}
+            >
               <Download aria-hidden="true" /> {downloading ? "내려받는 중" : "CSV 다운로드"}
             </Button>
           </div>
         }
       >
         <div className="finops-form">
-          <FormField label="정산 월" description="비우면 이번 달(KST 기준)을 조회합니다." error={monthError}>
+          <FormField
+            label="정산 월"
+            description="비우면 이번 달(KST 기준)입니다. 입력 후 조회를 눌러 적용하세요. CSV는 적용한 월만 내려받습니다."
+            error={monthError}
+          >
             {(control) => (
               <Input
                 {...control}
@@ -158,7 +169,8 @@ export function ChargebackTab(): React.JSX.Element {
         </StatGrid>
       </SectionCard>
 
-      {dimensions.length === 0 && !pack.isPending ? (
+      {pack.isPending && !invalidMonth ? <LoadingState label="비용 배부 팩을 불러오는 중입니다." /> : null}
+      {dimensions.length === 0 && pack.data ? (
         <EmptyState
           title="배부할 비용이 없습니다."
           description="해당 월에 집계된 요청이 없거나 비용 메타데이터가 없습니다."

@@ -6,7 +6,40 @@ export type ClientOptions = {
 
 export type AdminKeyCatalog = {
     api_keys: Array<MeKeyPublic>;
+    edit_review_supported: boolean;
     revoke_review_supported: boolean;
+};
+
+export type AdminKeyEditReview = {
+    /**
+     * Exact catalog snapshot revision.
+     */
+    expected_revision: string;
+    /**
+     * Trimmed nonblank audit reason.
+     */
+    reason: string;
+};
+
+export type AdminKeyLegacyUpdateRequest = {
+    name?: string | null;
+    owner?: string | null;
+    review?: AdminKeyEditReview;
+    role?: string | null;
+    scopes?: Array<string> | null;
+    status?: 'active' | 'disabled' | null;
+    team?: string | null;
+    [key: string]: unknown;
+} | null;
+
+export type AdminKeyReviewedUpdateRequest = {
+    name?: string | null;
+    owner?: string | null;
+    review: AdminKeyEditReview;
+    role?: string | null;
+    scopes?: Array<string> | null;
+    status?: 'active' | 'disabled' | null;
+    team?: string | null;
 };
 
 export type AdminKeyRevokeRequest = {
@@ -20,6 +53,18 @@ export type AdminKeyRevokeRequest = {
      * Trimmed nonblank audit reason; must be paired with expected_revision. Body limit8192bytes; duplicates, nulls and unknown fields rejected.
      */
     reason: string;
+};
+
+export type AdminKeyUpdateRequest = AdminKeyLegacyUpdateRequest | AdminKeyReviewedUpdateRequest;
+
+export type AdminKeyUpdateResponse = {
+    id: string;
+    name: string;
+    owner: string;
+    role: string;
+    scopes: Array<string> | null;
+    status: string;
+    team: string;
 };
 
 export type AdminModel = {
@@ -299,6 +344,59 @@ export type AuthUser = {
     team_id?: string;
 };
 
+export type BillingBudgetStatus = {
+    budget?: {
+        created_at?: string;
+        id?: string;
+        monthly_krw?: number;
+        note?: string;
+        scope?: string;
+        scope_value?: string;
+    };
+    burn_ratio?: number;
+    days_elapsed?: number;
+    days_in_month?: number;
+    exhaustion_date?: string;
+    on_track?: boolean;
+    projected_krw?: number;
+    projected_ratio?: number;
+    spent_krw?: number;
+};
+
+export type BillingCostRow = {
+    cost_krw?: number;
+    error_requests?: number;
+    key?: string;
+    requests?: number;
+    tokens?: number;
+};
+
+export type BillingDashboardResponse = {
+    budgets: Array<BillingBudgetStatus> | null;
+    by_cost_center: Array<BillingCostRow> | null;
+    by_model: Array<BillingCostRow> | null;
+    estimated_savings_krw: number;
+    migration_candidates: Array<BillingMigrationCandidate> | null;
+    since: string;
+    total_cost_krw: number;
+    total_requests: number;
+    totals_scope?: 'all_retained_requests';
+    unavailable_sections?: Array<'by_cost_center' | 'by_model' | 'budgets' | 'migration_candidates'>;
+};
+
+export type BillingMigrationCandidate = {
+    current_avg_cost_krw?: number;
+    current_model?: string;
+    current_success_rate?: number;
+    estimated_savings_krw?: number;
+    fingerprint?: string;
+    recommended_avg_cost_krw?: number;
+    recommended_model?: string;
+    recommended_success_rate?: number;
+    requests?: number;
+    task_type?: string;
+};
+
 export type CategoryScore = {
     pass_rate: number;
     samples: number;
@@ -354,6 +452,36 @@ export type FallbackStats = {
     lines: number;
     modified_at: string;
     path: string;
+};
+
+export type GatewayMcpInfoResponse = {
+    contracts: Array<{
+        allowed_roles: string;
+        cost_policy: string;
+        executes: boolean;
+        name: string;
+        output_schema: string;
+        risk_level: string;
+        timeout_ms: number;
+    }>;
+    endpoint: string;
+    note: string;
+    prompts: Array<{
+        description?: string;
+        name: string;
+    }>;
+    protocol_version: string;
+    resources: Array<{
+        description?: string;
+        mimeType?: string;
+        name: string;
+        uri: string;
+    }>;
+    tools: Array<{
+        description?: string;
+        inputSchema?: unknown;
+        name: string;
+    }>;
 };
 
 export type GroupedStat = {
@@ -538,6 +666,148 @@ export type MattermostConfigResponse = {
 export type MattermostTestResponse = {
     status: 'sent';
     webhook_status: number;
+};
+
+export type McpContract = {
+    allowed_roles: string;
+    cost_policy: string;
+    created_at: string;
+    created_by: string;
+    description: string;
+    enabled: boolean;
+    id: string;
+    input_schema: string;
+    name: string;
+    namespace: string;
+    output_schema: string;
+    owner: string;
+    risk_level: string;
+    timeout_ms: number;
+    title: string;
+    updated_at: string;
+};
+
+export type McpContractDeletedResponse = {
+    ok: boolean;
+};
+
+export type McpContractListResponse = {
+    contracts: Array<McpContract>;
+};
+
+export type McpContractSavedResponse = {
+    id: string;
+    ok: boolean;
+};
+
+export type McpContractValidateRequest = {
+    contract_id?: string;
+    namespace?: string;
+};
+
+export type McpContractValidationResponse = {
+    checked: number;
+    drift_count: number;
+    missing_count: number;
+    note: string;
+    results: Array<{
+        contract_id: string;
+        declared_only?: Array<string>;
+        detail?: string;
+        live_only?: Array<string>;
+        name: string;
+        namespace: string;
+        risk_level: string;
+        status: string;
+    }>;
+};
+
+export type McpContractWriteRequest = {
+    allowed_roles?: string;
+    cost_policy?: string;
+    description?: string;
+    enabled?: boolean;
+    id?: string;
+    input_schema?: string;
+    name: string;
+    namespace?: string;
+    output_schema?: string;
+    owner?: string;
+    risk_level?: string;
+    timeout_ms?: number;
+    title?: string;
+};
+
+export type McpRouteExplainRequest = {
+    api_key_id?: string;
+    method?: string;
+    name?: string;
+    uri?: string;
+};
+
+export type McpRouteExplainResponse = {
+    final: {
+        decision: string;
+        reason: string;
+    };
+    input: {
+        method: string;
+        name: string;
+        uri: string;
+    };
+    policy?: {
+        server_policy: string;
+        tool_risk_action: string;
+        tool_risk_configured: boolean;
+        tool_risk_level: string;
+        tool_risk_note: string;
+    };
+    route: {
+        found: boolean;
+        lookup?: string;
+        target_method?: string;
+        target_name?: string;
+        upstream_id?: string;
+        upstream_name?: string;
+    };
+};
+
+export type McpTestRequest = {
+    arguments?: unknown;
+    method?: string;
+    name?: string;
+    upstream_id?: string;
+    uri?: string;
+};
+
+export type McpTestResponse = {
+    error?: string;
+    latency_ms: number;
+    method: string;
+    ok: boolean;
+    response?: unknown;
+    response_preview?: string;
+    upstream_id: string;
+    upstream_name: string;
+};
+
+export type McpTopologyEdge = {
+    from: string;
+    label: string;
+    to: string;
+};
+
+export type McpTopologyNode = {
+    decision?: string;
+    id: string;
+    kind: string;
+    label: string;
+    status?: string;
+};
+
+export type McpTopologyResponse = {
+    edges: Array<McpTopologyEdge>;
+    nodes: Array<McpTopologyNode>;
 };
 
 export type MeKeyCatalog = {
@@ -1368,7 +1638,7 @@ export type RequestNoteWriteRequest = {
 } | null;
 
 export type ResourceSearchRequest = {
-    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream'>;
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy'>;
     query: string;
 };
 
@@ -1376,10 +1646,10 @@ export type ResourceSearchResponse = {
     groups: Array<{
         items: Array<{
             id: string;
-            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream';
+            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy';
             title: string;
         }>;
-        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream';
+        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy';
         limited: boolean;
         status: 'ok' | 'forbidden' | 'unavailable';
     }>;
@@ -2579,7 +2849,7 @@ export type GetAdminApiKeysIdResponses = {
 };
 
 export type PatchAdminApiKeysIdData = {
-    body?: never;
+    body: AdminKeyUpdateRequest;
     path: {
         id: string;
     };
@@ -2587,12 +2857,51 @@ export type PatchAdminApiKeysIdData = {
     url: '/admin/api-keys/{id}';
 };
 
+export type PatchAdminApiKeysIdErrors = {
+    /**
+     * Invalid edit or review
+     */
+    400: AppError;
+    /**
+     * Authentication required
+     */
+    401: AppError;
+    /**
+     * Insufficient role, scope or team authority
+     */
+    403: AppError;
+    /**
+     * Key not found
+     */
+    404: AppError;
+    /**
+     * Key changed since review or authorization
+     */
+    409: AppError;
+    /**
+     * Update not confirmed; inspect current key and audit
+     */
+    500: AppError;
+    /**
+     * Review authority unavailable
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PatchAdminApiKeysIdError = PatchAdminApiKeysIdErrors[keyof PatchAdminApiKeysIdErrors];
+
 export type PatchAdminApiKeysIdResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: AdminKeyUpdateResponse;
 };
+
+export type PatchAdminApiKeysIdResponse = PatchAdminApiKeysIdResponses[keyof PatchAdminApiKeysIdResponses];
 
 export type GetAdminAppTemplatesData = {
     body?: never;
@@ -4367,12 +4676,39 @@ export type GetAdminGatewayMcpInfoData = {
     url: '/admin/gateway-mcp/info';
 };
 
+export type GetAdminGatewayMcpInfoErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminGatewayMcpInfoError = GetAdminGatewayMcpInfoErrors[keyof GetAdminGatewayMcpInfoErrors];
+
 export type GetAdminGatewayMcpInfoResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: GatewayMcpInfoResponse;
 };
+
+export type GetAdminGatewayMcpInfoResponse = GetAdminGatewayMcpInfoResponses[keyof GetAdminGatewayMcpInfoResponses];
 
 export type GetAdminGoldenPromptsData = {
     body?: never;
@@ -4945,58 +5281,178 @@ export type GetAdminMcpCatalogResponses = {
 export type DeleteAdminMcpContractsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query: {
+        id: string;
+    };
     url: '/admin/mcp/contracts';
 };
+
+export type DeleteAdminMcpContractsErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminMcpContractsError = DeleteAdminMcpContractsErrors[keyof DeleteAdminMcpContractsErrors];
 
 export type DeleteAdminMcpContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpContractDeletedResponse;
 };
+
+export type DeleteAdminMcpContractsResponse = DeleteAdminMcpContractsResponses[keyof DeleteAdminMcpContractsResponses];
 
 export type GetAdminMcpContractsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        namespace?: string;
+        /**
+         * Exactly 1 selects enabled declarations.
+         */
+        enabled?: string;
+    };
     url: '/admin/mcp/contracts';
 };
+
+export type GetAdminMcpContractsErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminMcpContractsError = GetAdminMcpContractsErrors[keyof GetAdminMcpContractsErrors];
 
 export type GetAdminMcpContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpContractListResponse;
 };
 
+export type GetAdminMcpContractsResponse = GetAdminMcpContractsResponses[keyof GetAdminMcpContractsResponses];
+
 export type PostAdminMcpContractsData = {
-    body?: never;
+    body: McpContractWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/mcp/contracts';
 };
 
+export type PostAdminMcpContractsErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMcpContractsError = PostAdminMcpContractsErrors[keyof PostAdminMcpContractsErrors];
+
 export type PostAdminMcpContractsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpContractSavedResponse;
 };
 
+export type PostAdminMcpContractsResponse = PostAdminMcpContractsResponses[keyof PostAdminMcpContractsResponses];
+
 export type PostAdminMcpContractsValidateData = {
-    body?: never;
+    body: McpContractValidateRequest;
     path?: never;
     query?: never;
     url: '/admin/mcp/contracts/validate';
 };
 
+export type PostAdminMcpContractsValidateErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Explicit contract ID not found
+     */
+    404: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMcpContractsValidateError = PostAdminMcpContractsValidateErrors[keyof PostAdminMcpContractsValidateErrors];
+
 export type PostAdminMcpContractsValidateResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpContractValidationResponse;
 };
+
+export type PostAdminMcpContractsValidateResponse = PostAdminMcpContractsValidateResponses[keyof PostAdminMcpContractsValidateResponses];
 
 export type GetAdminMcpEffectivePolicyData = {
     body?: never;
@@ -5200,18 +5656,41 @@ export type GetAdminMcpRequestsIdWaterfallResponses = {
 };
 
 export type PostAdminMcpRouteExplainData = {
-    body?: never;
+    body: McpRouteExplainRequest;
     path?: never;
     query?: never;
     url: '/admin/mcp/route/explain';
 };
 
+export type PostAdminMcpRouteExplainErrors = {
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    400: AppError;
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    401: AppError;
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    405: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMcpRouteExplainError = PostAdminMcpRouteExplainErrors[keyof PostAdminMcpRouteExplainErrors];
+
 export type PostAdminMcpRouteExplainResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpRouteExplainResponse;
 };
+
+export type PostAdminMcpRouteExplainResponse = PostAdminMcpRouteExplainResponses[keyof PostAdminMcpRouteExplainResponses];
 
 export type GetAdminMcpRoutesData = {
     body?: never;
@@ -5242,18 +5721,45 @@ export type GetAdminMcpServersResponses = {
 };
 
 export type PostAdminMcpTestData = {
-    body?: never;
+    body: McpTestRequest;
     path?: never;
     query?: never;
     url: '/admin/mcp/test';
 };
 
+export type PostAdminMcpTestErrors = {
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    400: AppError;
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    401: AppError;
+    /**
+     * Upstream missing or disabled
+     */
+    404: AppError;
+    /**
+     * Invalid body, authentication/scope, or method
+     */
+    405: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMcpTestError = PostAdminMcpTestErrors[keyof PostAdminMcpTestErrors];
+
 export type PostAdminMcpTestResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpTestResponse;
 };
+
+export type PostAdminMcpTestResponse = PostAdminMcpTestResponses[keyof PostAdminMcpTestResponses];
 
 export type GetAdminMcpToolsData = {
     body?: never;
@@ -5290,12 +5796,35 @@ export type GetAdminMcpTopologyData = {
     url: '/admin/mcp/topology';
 };
 
+export type GetAdminMcpTopologyErrors = {
+    /**
+     * Invalid authentication or missing observability:read scope (existing admin authorization behavior)
+     */
+    401: AppError;
+    /**
+     * GET required
+     */
+    405: AppError;
+    /**
+     * MCP topology configuration unavailable
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminMcpTopologyError = GetAdminMcpTopologyErrors[keyof GetAdminMcpTopologyErrors];
+
 export type GetAdminMcpTopologyResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpTopologyResponse;
 };
+
+export type GetAdminMcpTopologyResponse = GetAdminMcpTopologyResponses[keyof GetAdminMcpTopologyResponses];
 
 export type GetAdminMcpTrustScoresData = {
     body?: never;
@@ -11702,16 +12231,44 @@ export type GetAuthSsoStatusResponse = GetAuthSsoStatusResponses[keyof GetAuthSs
 export type GetBillingDashboardData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Existing parseWindow rules: 1h, 6h, 24h/1d, 7d, 30d or a Go duration; omitted/invalid defaults to 30 days. No upper time bound or pagination.
+         */
+        window?: string;
+    };
     url: '/billing/dashboard';
 };
+
+export type GetBillingDashboardErrors = {
+    /**
+     * admin:read scope required
+     */
+    403: AppError;
+    /**
+     * GET required
+     */
+    405: AppError;
+    /**
+     * billing_dashboard_unavailable: totals cannot be read; no partial data or storage error details returned
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetBillingDashboardError = GetBillingDashboardErrors[keyof GetBillingDashboardErrors];
 
 export type GetBillingDashboardResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: BillingDashboardResponse;
 };
+
+export type GetBillingDashboardResponse = GetBillingDashboardResponses[keyof GetBillingDashboardResponses];
 
 export type GetFaviconIcoData = {
     body?: never;

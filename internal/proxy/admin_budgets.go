@@ -110,6 +110,10 @@ func (s *Server) handleBudgetProjection(w http.ResponseWriter, r *http.Request) 
 // summary to Mattermost (?notify=1). Thresholds are tunable via ?warn= and ?critical=
 // (fractions of the monthly budget; defaults 0.8 / 1.0).
 // GET /admin/budgets/alerts?warn=&critical=&notify=&all=
+func budgetAlertsNotifyRequested(r *http.Request) bool {
+	return strings.TrimSpace(r.URL.Query().Get("notify")) == "1"
+}
+
 func (s *Server) handleBudgetAlerts(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -154,7 +158,7 @@ func (s *Server) handleBudgetAlerts(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("notify")), "1") && (warnN+critN) > 0 {
+	if budgetAlertsNotifyRequested(r) && (warnN+critN) > 0 {
 		lines := make([]string, 0, len(alerts))
 		for _, a := range alerts {
 			if a["severity"] == "ok" {

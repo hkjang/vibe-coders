@@ -5,7 +5,7 @@ import { containsPotentialSecret } from "@/shared/security/secrets";
  * keyboard surface — destinations, commands, and the records you were just looking at —
  * so an operator does not have to remember which menu holds which action.
  */
-export type CommandKind = "action" | "feature" | "jump" | "recent";
+export type CommandKind = "action" | "feature" | "jump" | "recent" | "recentAction";
 
 export interface CommandItem {
   id: string;

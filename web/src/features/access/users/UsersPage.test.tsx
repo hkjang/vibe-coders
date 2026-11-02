@@ -160,6 +160,7 @@ function handlers(overrides: Record<string, () => unknown> = {}) {
   return {
     "GET /admin/users": () => usersResponse,
     "GET /admin/benchmark/users": () => benchmark,
+    "GET /admin/roles": () => ({ roles: [{ role: "developer" }], all_scopes: [] }),
     ...overrides,
   };
 }
@@ -273,6 +274,22 @@ describe("UsersPage", () => {
 
     expect(await screen.findByText("IP 차단 기능은 서버에 없습니다.")).toBeVisible();
     expect(screen.getByRole("tab", { name: "IP" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps one labelled panel and remounts it when switching tabs", async () => {
+    const user = userEvent.setup();
+    mockApi({ ...handlers(), "GET /admin/ips": () => ({ ips: [] }), "GET /admin/roles": () => roles });
+    renderScreen(<UsersPage />, { path: "/access/users/*", route: "/access/users?tab=ips" });
+    const first = await screen.findByRole("tabpanel", { name: "IP" });
+    for (const name of ["역할", "IP"]) {
+      await user.click(screen.getByRole("tab", { name }));
+      const panel = await screen.findByRole("tabpanel", { name });
+      const tab = screen.getByRole("tab", { name });
+      expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
+      expect(tab).toHaveAttribute("aria-controls", panel.id);
+      expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+      expect(panel).not.toBe(first);
+    }
   });
 
   it("creates a quota with the documented scope values", async () => {

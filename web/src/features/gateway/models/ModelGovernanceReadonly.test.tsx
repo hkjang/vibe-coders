@@ -1,3 +1,4 @@
+import { ModelReadBoundary } from "./ModelReadBoundary";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -59,7 +60,9 @@ async function setup(
     return (
       <main id="main-content" tabIndex={-1}>
         <FeatureRoute feature={modelFeature}>
-          {kind === "contracts" ? <ModelContractsPanel /> : <ModelDeprecationsPanel />}
+          <ModelReadBoundary>
+            {kind === "contracts" ? <ModelContractsPanel /> : <ModelDeprecationsPanel />}
+          </ModelReadBoundary>
         </FeatureRoute>
       </main>
     );
@@ -155,7 +158,9 @@ describe("모델 관리 확정목록·readonly 초안", () => {
     current = { ...contractFixture, name: "재조회된 다른 이름", min_quality_score: 91 };
     await view.user.click(within(dialog).getByRole("button", { name: "계약 목록 다시 조회" }));
     await waitFor(() =>
-      expect(view.client.getQueryData(modelGovernanceKeys.contracts)).toEqual({ contracts: [current] }),
+      expect(view.client.getQueriesData({ queryKey: modelGovernanceKeys.contracts })[0]?.[1]).toEqual({
+        contracts: [current],
+      }),
     );
     await view.user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
     const table = await within(dialog).findByRole("table", { name: "모델 계약 변경 전후 비교" });

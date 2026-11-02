@@ -111,7 +111,7 @@ export function AppShell(): React.JSX.Element {
 
   return (
     <FeatureTelemetry feature={currentFeature}>
-      <div className="app-frame">
+      <div className="app-frame" inert={paletteOpen} aria-hidden={paletteOpen || undefined}>
         <a className="skip-link" href="#main-content">
           본문으로 건너뛰기
         </a>

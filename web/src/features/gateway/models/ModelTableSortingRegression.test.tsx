@@ -1,3 +1,4 @@
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -196,7 +197,9 @@ function mount(entry = "/gateway/models") {
             path="/gateway/models"
             element={
               <>
-                <ModelPage />
+                <FeatureAccessHarness featureId="gateway.models">
+                  <ModelPage />
+                </FeatureAccessHarness>
                 <LocationProbe />
               </>
             }
@@ -309,7 +312,12 @@ describe("independent ModelPage received-list ordering contract", () => {
     await loaded(calls);
     failCatalogue();
     await act(async () => {
-      await client.refetchQueries({ queryKey: ["admin", "models"], exact: true });
+      await client.refetchQueries({
+        predicate: (query) =>
+          query.queryKey[0] === "admin" &&
+          query.queryKey[1] === "models" &&
+          query.queryKey[2] === "model-read-owner",
+      });
     });
     expect(ids()).toEqual(ordinaryIds.slice(0, 10));
     expect(await screen.findByText(/마지막 정상 데이터를 표시합니다/)).toBeVisible();

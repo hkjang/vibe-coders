@@ -7,6 +7,8 @@ import { tokenStore } from "@/shared/auth/token-store";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 interface MutationFeedbackOptions<Variables, Result> {
+  /** Sensitive forms may discard detached mutation snapshots immediately. */
+  gcTime?: number;
   /** Server call. */
   mutate: (variables: Variables) => Promise<Result>;
   /** Query keys (prefixes) to invalidate after success. */
@@ -17,7 +19,7 @@ interface MutationFeedbackOptions<Variables, Result> {
   errorFormatter?: typeof safeAppErrorMessage;
   onSuccess?: (result: Result, variables: Variables) => void;
   /** Optional screen/principal lifetime in addition to the authentication epoch. */
-  ownsResult?: () => boolean;
+  ownsResult?: (variables: Variables) => boolean;
 }
 
 /**
@@ -26,6 +28,7 @@ interface MutationFeedbackOptions<Variables, Result> {
  * Callers that show errors inline (dialogs) can still read `error`.
  */
 export function useMutationFeedback<Variables, Result>({
+  gcTime,
   errorMessage = "작업을 완료하지 못했습니다.",
   errorFormatter = safeAppErrorMessage,
   invalidates = [],
@@ -39,7 +42,7 @@ export function useMutationFeedback<Variables, Result>({
   type Submission = { variables: Variables; epoch: number };
   type PublicMutation = UseMutationResult<Result, Error, Variables>;
   const isCurrent = (submission: Submission): boolean =>
-    submission.epoch === tokenStore.getSessionEpoch() && (ownsResult?.() ?? true);
+    submission.epoch === tokenStore.getSessionEpoch() && (ownsResult?.(submission.variables) ?? true);
   const assertCurrent = (submission: Submission): void => {
     if (!isCurrent(submission)) {
       throw new AppError("화면 또는 인증 세션이 변경되었습니다.", {
@@ -48,6 +51,7 @@ export function useMutationFeedback<Variables, Result>({
     }
   };
   const mutation = useMutation<Result, Error, Submission>({
+    gcTime,
     retry: false,
     mutationFn: async (submission) => {
       assertCurrent(submission);

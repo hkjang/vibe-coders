@@ -160,8 +160,18 @@ async function mount(entry = "/gateway/providers") {
     </QueryClientProvider>,
   );
   await waitFor(() => {
-    expect(client.getQueryState(["admin", "providers"])?.status).toBe("success");
-    expect(client.getQueryState(["admin", "providers", "slo", "24h"])?.status).toBe("success");
+    for (const prefix of [
+      ["admin", "providers"],
+      ["admin", "providers", "slo", "24h"],
+    ]) {
+      const queries = client.getQueryCache().findAll({
+        queryKey: prefix,
+        predicate: (query) =>
+          query.queryKey.length === prefix.length + 2 && query.queryKey.at(-2) === "provider-read-owner",
+      });
+      expect(queries).toHaveLength(1);
+      expect(queries[0]?.state.status).toBe("success");
+    }
     expect(client.isFetching()).toBe(0);
     expect(links().length).toBeGreaterThan(0);
   });
@@ -177,7 +187,10 @@ async function mount(entry = "/gateway/providers") {
     async refreshCatalogue(next: Provider[]) {
       providers = next;
       await act(async () => {
-        await client.refetchQueries({ queryKey: ["admin", "providers"], exact: true });
+        await client.refetchQueries({
+          queryKey: ["admin", "providers"],
+          predicate: (query) => query.queryKey.length === 4 && query.queryKey[2] === "provider-read-owner",
+        });
       });
     },
   };
@@ -308,6 +321,36 @@ describe("independent ProviderPage local table controls", () => {
     expect(params(router).get("page")).toBeNull();
     await sortOnce(user, "제한 시간", "desc");
     expect(names()[0]).toBe("a-late-slow");
+    expectReadOnlyTransport(calls);
+  });
+
+  it("applies a Korean multi-sort draft once, restores history and keeps header sorting single-column", async () => {
+    const user = userEvent.setup();
+    const { calls, router } = await mount("/gateway/providers?sort=name_desc&page_size=25&page=2");
+    const trigger = screen.getByRole("button", { name: "다중 정렬" });
+    await user.click(trigger);
+    await user.selectOptions(screen.getByRole("combobox", { name: "1순위 정렬 열" }), "failover");
+    await user.selectOptions(screen.getByRole("combobox", { name: "1순위 정렬 방향" }), "desc");
+    await user.click(screen.getByRole("button", { name: "정렬 기준 추가" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "2순위 정렬 열" }), "timeout");
+    await user.selectOptions(screen.getByRole("combobox", { name: "2순위 정렬 방향" }), "asc");
+    expect(params(router).get("sort")).toBe("name_desc");
+    await user.click(screen.getByRole("button", { name: "정렬 적용" }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(params(router).get("sort")).toBe("priority_desc,timeout_asc");
+    expect(params(router).get("page")).toBeNull();
+    expect(params(router).get("page_size")).toBe("25");
+    expect(names().slice(0, 2)).toEqual(["z-late-zero", "a-late-slow"]);
+    await act(async () => {
+      await router.navigate(-1);
+    });
+    expect(params(router).get("sort")).toBe("name_desc");
+    expect(params(router).get("page")).toBe("2");
+    await act(async () => {
+      await router.navigate(1);
+    });
+    await sortOnce(user, "우선순위", "asc");
+    expect(params(router).get("sort")).toBe("priority_asc");
     expectReadOnlyTransport(calls);
   });
 

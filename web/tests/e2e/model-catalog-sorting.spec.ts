@@ -66,14 +66,17 @@ test("explicit sort, size and page survive reload and browser Back/Forward", asy
   await size(page).selectOption("25");
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await expect.poll(() => params(page).get("page")).toBe("2");
-  const pageTwo = await links(page).allTextContents();
+  // History updates before React commits the new page. Assert the expected
+  // rows instead of capturing the previous page as a reload baseline.
+  const pageTwo = ordinaryIds.slice(24, 49);
+  await expect(links(page)).toHaveText(pageTwo);
   expect(modelGateway.reads).toHaveLength(4);
   await page.reload();
   await ready(page, 25);
   expect(params(page).get("sort")).toBe("input_price_asc");
   expect(params(page).get("page_size")).toBe("25");
   expect(params(page).get("page")).toBe("2");
-  expect(await links(page).allTextContents()).toEqual(pageTwo);
+  await expect(links(page)).toHaveText(pageTwo);
   expect(modelGateway.reads).toHaveLength(8);
   await page.goBack();
   await expect(links(page).first()).toHaveText("z-free");

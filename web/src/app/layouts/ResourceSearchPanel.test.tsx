@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ResourceSearchPanel from "./ResourceSearchPanel";
 import { migrationRegistry } from "@/config/migration-registry";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { resourceSearchPath } from "./resource-search-items";
+import { AppError } from "@/shared/api/error";
 
 const runtime = vi.hoisted(() => ({ id: "admin-a", hidden: false, scopes: ["admin:read"] }));
 vi.mock("@/app/auth/AuthProvider", () => ({
@@ -101,6 +102,38 @@ describe("permission-scoped resource search", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it("lets security-only readers search policy names without acquiring administrator search access", async () => {
+    runtime.scopes = ["security:read"];
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+      request_id: "policy-search-request",
+      groups: [
+        {
+          kind: "policy",
+          status: "ok",
+          limited: false,
+          items: [{ kind: "policy", id: "policy-one", title: "정산 안전 정책" }],
+        },
+      ],
+    });
+    const view = setup();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "정산" } });
+    expect(await screen.findByRole("option", { name: /정산 안전 정책/ })).toBeVisible();
+    expect(request).toHaveBeenCalledWith(
+      endpoints.admin.resourceSearch,
+      expect.objectContaining({
+        body: { query: "정산", kinds: ["policy"] },
+      }),
+    );
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    expect(view.go).toHaveBeenCalledWith("/governance/policies/detail?policy=policy-one&tab=safety");
+    runtime.scopes = ["admin:read"];
+    view.rerender(view.tree());
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "정산" } });
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+  });
+
   it("requires MCP list permission and opens the stored server detail tab", async () => {
     runtime.scopes = ["admin:read", "observability:read"];
     const request = vi.spyOn(apiClient, "request").mockResolvedValue({
@@ -185,6 +218,89 @@ describe("permission-scoped resource search", () => {
     expect(screen.getByRole("status")).toHaveTextContent("일부 종류");
     expect(screen.getByRole("status")).toHaveTextContent("더 구체적으로");
     expect(screen.getByRole("button", { name: "자원 검색 다시 시도" })).toBeEnabled();
+  });
+
+  it.each([401, 403, 503])(
+    "재조회 %i 오류 뒤에는 이전 결과와 요청 ID를 재사용하지 않는다",
+    async (status) => {
+      const request = vi
+        .spyOn(apiClient, "request")
+        .mockResolvedValueOnce(response)
+        .mockRejectedValueOnce(
+          new AppError("비공개 서버 오류", { kind: "http", status, requestId: "failed-request-id" }),
+        )
+        .mockResolvedValueOnce(response);
+      const { client, go } = setup();
+      const input = screen.getByRole("combobox");
+      fireEvent.change(input, { target: { value: "정산" } });
+      await screen.findByRole("option");
+      await act(async () => {
+        await client.refetchQueries({ queryKey: ["resource-search"] });
+      });
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("실패했습니다"));
+      expect(screen.queryByRole("option")).not.toBeInTheDocument();
+      expect(input).not.toHaveAttribute("aria-activedescendant");
+      expect(screen.getByText("요청 ID: failed-request-id")).toBeVisible();
+      expect(screen.queryByText(/safe-request-id/)).not.toBeInTheDocument();
+      expect(screen.queryByText("비공개 서버 오류")).not.toBeInTheDocument();
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(go).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "자원 검색 다시 시도" }));
+      expect(await screen.findByRole("option")).toBeVisible();
+      expect(request).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it("재조회 중에는 이전 결과로 이동하지 않고 새 응답만 표시한다", async () => {
+    let finish!: (value: typeof response) => void;
+    const held = new Promise<typeof response>((resolve) => {
+      finish = resolve;
+    });
+    vi.spyOn(apiClient, "request").mockResolvedValueOnce(response).mockReturnValueOnce(held);
+    const { client, go } = setup();
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "정산" } });
+    await screen.findByRole("option");
+    act(() => {
+      void client.refetchQueries({ queryKey: ["resource-search"] });
+    });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("검색하고 있습니다"));
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(go).not.toHaveBeenCalled();
+    await act(async () => {
+      finish({ ...response, groups: [] });
+      await held;
+    });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("0개의 자원"));
+  });
+
+  it("재시도 버튼이 사라져도 검색 입력에 포커스를 유지한다", async () => {
+    let finish!: (value: typeof response) => void;
+    const held = new Promise<typeof response>((resolve) => {
+      finish = resolve;
+    });
+    vi.spyOn(apiClient, "request")
+      .mockResolvedValueOnce({
+        ...response,
+        groups: [...response.groups, { kind: "app", status: "unavailable", limited: false, items: [] }],
+      })
+      .mockReturnValueOnce(held);
+    setup();
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "정산" } });
+    const retry = await screen.findByRole("button", { name: "자원 검색 다시 시도" });
+    retry.focus();
+    expect(retry).toHaveFocus();
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("검색하고 있습니다"));
+    expect(input).toHaveFocus();
+    await act(async () => {
+      finish(response);
+      await held;
+    });
+    expect(await screen.findByRole("option")).toBeVisible();
+    expect(input).toHaveFocus();
   });
 
   it("does not execute the selected resource during Korean composition", async () => {

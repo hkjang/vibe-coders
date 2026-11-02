@@ -108,15 +108,20 @@ export async function setupDraft(mode = "writable") {
     suggestions: () => unknown;
     apply: () => unknown;
     policies: () => unknown;
+    canary: () => unknown;
+    save: () => unknown;
   } = {
     rows: [structuredClone(advice)],
     suggestions: () => ({ suggestions: response.rows }),
     apply: () => acknowledgement,
     policies: () => ({ policies: [] }),
+    canary: () => ({ policies: [] }),
+    save: () => ({}),
   };
   const api = mockApi({
     "GET /admin/policy-advisor/suggestions": () => response.suggestions(),
-    "GET /admin/policies/canary-status": () => ({ policies: [] }),
+    "GET /admin/policies/canary-status": () => response.canary(),
+    "POST /admin/policies": () => response.save(),
     "GET /admin/policies": () => response.policies(),
     "POST /admin/policies/simulate": () => ({ evaluated: 0 }),
     [applyPath]: async () => {

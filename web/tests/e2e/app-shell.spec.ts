@@ -690,6 +690,98 @@ test("opens the command palette on a deep link without CSP or external asset err
   expect(assetRequests.filter((requestUrl) => new URL(requestUrl).origin !== appOrigin)).toEqual([]);
 });
 
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+  { width: 844, height: 390 },
+]) {
+  test(`최근 명령 재실행·지우기·비저장 (${viewport.width}×${viewport.height})`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+    await mockGateway(page);
+    await page.goto("overview");
+    const trigger = page.getByRole("button", { name: "명령 팔레트 열기" });
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "명령 팔레트" });
+    const search = dialog.getByRole("combobox", { name: "메뉴 검색" });
+    await search.fill("테마");
+    await search.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await trigger.click();
+    const recent = dialog.getByRole("option", { name: /테마 전환.*최근 명령/u });
+    await expect(dialog.getByRole("option").first()).toHaveAccessibleName(/테마 전환.*최근 명령/u);
+    await expect(recent).toBeInViewport();
+    await expect(dialog.getByRole("option", { name: /테마 전환/u })).toHaveCount(1);
+    expect(await axeViolations(page)).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath("recent-commands.png") });
+    await search.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await dialog.getByRole("button", { name: "최근 명령 지우기" }).click();
+    await expect(search).toBeFocused();
+    await expect(dialog.getByText("최근 명령", { exact: true })).toHaveCount(0);
+    await search.fill("저장하지 않는 공개 검색어");
+    expect(
+      await page.evaluate(() =>
+        JSON.stringify([localStorage, sessionStorage]).includes("저장하지 않는 공개 검색어"),
+      ),
+    ).toBe(false);
+    expect(
+      await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]).includes("action:theme")),
+    ).toBe(false);
+    await search.fill("테마");
+    await search.press("Enter");
+    await page.reload();
+    await trigger.click();
+    await expect(dialog.getByText("최근 명령", { exact: true })).toHaveCount(0);
+  });
+}
+
+test("팔레트를 연 채 뒤로 이동해도 새 본문은 접근성과 초점 탐색에서 제외한다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  await mockGateway(page);
+  await page.goto("overview");
+  await page.getByRole("button", { name: "탐색 메뉴 열기" }).click();
+  await page.getByRole("link", { name: /AI 공급자/u }).click();
+  await expect(page.getByRole("table", { name: "공급자 연결 설정과 운영 상태" })).toBeVisible();
+  await page.getByRole("button", { name: "명령 팔레트 열기" }).click();
+  const search = page.getByRole("combobox", { name: "메뉴 검색" });
+  await expect(search).toBeFocused();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "운영 개요", includeHidden: true })).toBeVisible();
+  await expect(page.locator(".app-frame")).toHaveAttribute("inert", "");
+  await expect(page.locator(".app-frame")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("link", { name: "기존 화면에서 열기", exact: true })).toHaveCount(0);
+  await page.locator('a[href="/admin#/dashboard"]').evaluate((node) => (node as HTMLElement).focus());
+  await expect(search).toBeFocused();
+  expect(await axeViolations(page)).toEqual([]);
+  await search.press("Escape");
+  await expect(page.getByRole("link", { name: "기존 화면에서 열기", exact: true })).toBeVisible();
+});
+
+test("계정 전환 후 원래 사용자로 돌아와도 최근 명령을 복원하지 않는다", async ({ page }) => {
+  const current = structuredClone(bootstrap);
+  await mockGateway(page, { bootstrapPayload: current });
+  await page.goto("overview");
+  const trigger = page.getByRole("button", { name: "명령 팔레트 열기" });
+  await trigger.click();
+  await page.getByRole("combobox", { name: "메뉴 검색" }).fill("테마");
+  await page.keyboard.press("Enter");
+  await trigger.click();
+  await expect(page.getByRole("option", { name: /테마 전환.*최근 명령/u })).toBeVisible();
+  for (const id of ["public-next-user", bootstrap.user.id]) {
+    current.user.id = id;
+    const reply = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+    );
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await (await reply).finished();
+    await expect(page.getByText("최근 명령", { exact: true })).toHaveCount(0);
+  }
+});
+
 test("keeps Korean composition in search and restores keyboard focus", async ({ page }) => {
   await mockGateway(page);
   await page.goto("overview");

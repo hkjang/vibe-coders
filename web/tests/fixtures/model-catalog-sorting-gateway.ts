@@ -177,6 +177,10 @@ function fixtures() {
 
 async function install(context: BrowserContext) {
   const data = fixtures();
+  const currentBootstrap = structuredClone(bootstrap);
+  let modelStatus = 200;
+  let pricingStatus = 200;
+  const holds = new Map<number, { promise: Promise<void>; release: () => void }>();
   const reads: Array<{ path: string; query: string }> = [];
   const writes: string[] = [];
   const unexpected: string[] = [];
@@ -200,13 +204,23 @@ async function install(context: BrowserContext) {
       writes.push(call);
       return json({ error: { message: "No writes in model catalogue exploration" } }, 501);
     }
-    if (url.pathname === "/admin/ui-bootstrap") return json(bootstrap);
+    if (url.pathname === "/admin/ui-bootstrap") return json(currentBootstrap);
+    if (url.pathname === "/admin/models/contracts") return json({ contracts: [] });
     if (url.pathname === "/health" || url.pathname === "/ready") return json({ status: "ok" });
     if (paths.includes(url.pathname)) {
       reads.push({ path: url.pathname, query: url.search });
-      if (url.pathname === "/admin/models") return json(data.catalogue);
+      if (url.pathname === "/admin/models") {
+        const sequence = reads.filter((item) => item.path === "/admin/models").length;
+        await holds.get(sequence)?.promise;
+        if (modelStatus !== 200)
+          return json({ error: { message: "Synthetic model read denied" } }, modelStatus);
+        return json(data.catalogue);
+      }
       if (url.pathname === "/admin/models/quality") return json(data.quality);
-      if (url.pathname === "/admin/pricing") return json(data.pricing);
+      if (url.pathname === "/admin/pricing")
+        return pricingStatus === 200
+          ? json(data.pricing)
+          : json({ error: { message: "Synthetic pricing unavailable" } }, pricingStatus);
       return json({ tags: [] });
     }
     if (/^\/(admin|auth|v1|mcp)(\/|$)/u.test(url.pathname)) {
@@ -219,6 +233,39 @@ async function install(context: BrowserContext) {
     reads,
     writes,
     unexpected,
+    prefixes(values: string[]) {
+      currentBootstrap.authentication.credential_prefixes = values;
+    },
+    owner(id: string) {
+      if (currentBootstrap.user) currentBootstrap.user.id = id;
+    },
+    readonly(value: boolean) {
+      const feature = currentBootstrap.migration_registry.find(
+        (item) => item.feature_id === "gateway.models",
+      );
+      if (!feature) throw new Error("Model fixture must register its feature");
+      feature.read_only = value;
+    },
+    scopes(scopes: string[]) {
+      currentBootstrap.permissions = scopes;
+      if (currentBootstrap.user) currentBootstrap.user.scopes = scopes;
+    },
+    status(value: number) {
+      modelStatus = value;
+    },
+    pricingStatus(value: number) {
+      pricingStatus = value;
+    },
+    holdModelRead(sequence: number) {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      holds.set(sequence, { promise, release });
+    },
+    releaseModelRead(sequence: number) {
+      holds.get(sequence)?.release();
+    },
     shrinkToOrdinary(count: number) {
       data.catalogue.models = data.catalogue.models.filter((item) =>
         ordinaryIds.slice(0, count).includes(item.id),

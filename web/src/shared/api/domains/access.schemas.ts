@@ -135,6 +135,20 @@ export const adminTeamsSchema = looseObject({
   auth_teams: orDefault(z.array(authTeamSchema), []),
 });
 
+export const teamAdministrationSchema = adminTeamsSchema.extend({
+  auth_teams: z
+    .array(
+      z.object({
+        // Existing server IDs are opaque TEXT, not the new-team form's input policy.
+        id: z.string().min(1),
+        name: z.string(),
+        created_at: z.string(),
+        updated_at: z.string(),
+      }),
+    )
+    .refine((teams) => new Set(teams.map((team) => team.id)).size === teams.length),
+});
+
 export const adminTeamMutationSchema = looseObject({ team: authTeamSchema.nullish() });
 
 export const adminTeamDetailSchema = looseObject({
@@ -349,6 +363,7 @@ export type ApiKeyPublic = z.output<typeof apiKeyPublicSchema>;
 
 export const adminApiKeysSchema = looseObject({
   api_keys: orDefault(z.array(apiKeyPublicSchema), []),
+  edit_review_supported: z.boolean().optional().default(false),
   revoke_review_supported: z.boolean().optional().default(false),
 });
 
@@ -412,6 +427,41 @@ export type RoleRow = z.output<typeof roleSchema>;
 export const adminRolesSchema = looseObject({
   roles: orDefault(z.array(roleSchema), []),
   all_scopes: stringList,
+});
+
+const matrixIdentifier = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine(
+    (value) =>
+      value.trim() === value && ![...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
+  );
+// Missing scopes are not evidence of no grants. Keep the legacy adapter above.
+export const roleMatrixSchema = z.object({
+  roles: z
+    .array(z.object({ role: matrixIdentifier, scopes: z.array(matrixIdentifier).nullable() }))
+    .refine((roles) => new Set(roles.map((row) => row.role)).size === roles.length),
+  all_scopes: z.array(matrixIdentifier),
+});
+
+export const roleAdminSchema = z.object({
+  roles: z
+    .array(
+      roleSchema.extend({
+        role: matrixIdentifier,
+        scopes: z
+          .array(matrixIdentifier)
+          .nullable()
+          .transform((scopes) => scopes ?? []),
+        description: z.string(),
+        default_home: z.string(),
+        is_system: z.boolean(),
+      }),
+    )
+    .min(1)
+    .refine((roles) => new Set(roles.map((row) => row.role)).size === roles.length),
+  all_scopes: z.array(matrixIdentifier).min(1),
 });
 
 export const roleSavedSchema = looseObject({ role: roleSchema.nullish() });

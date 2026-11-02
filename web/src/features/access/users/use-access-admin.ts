@@ -3,6 +3,11 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
+import {
+  assertFeatureRead,
+  featureOwnedKey,
+  type FeatureReadOwner,
+} from "@/shared/hooks/use-feature-read-owner";
 
 const routeId = "access.users";
 const access = endpoints.domains.access;
@@ -27,30 +32,39 @@ function useAccessQuery<Result>(
   queryKey: readonly unknown[],
   run: (signal: AbortSignal) => Promise<Result>,
   enabled = true,
+  owner?: FeatureReadOwner,
 ): UseQueryResult<Result> {
   const refetchInterval = useRefreshInterval();
   return useQuery({
-    queryKey,
-    queryFn: ({ signal }) => run(signal),
-    enabled,
+    queryKey: owner ? featureOwnedKey(queryKey, owner) : queryKey,
+    queryFn: async ({ signal }) => {
+      if (owner) assertFeatureRead(owner, signal);
+      const result = await run(signal);
+      if (owner) assertFeatureRead(owner, signal);
+      return result;
+    },
+    enabled: enabled && (!owner || (owner.readable && !owner.denied)),
+    gcTime: owner ? 0 : undefined,
     refetchInterval,
     refetchIntervalInBackground: false,
   });
 }
 
-export function useUsersQuery(enabled = true) {
+export function useUsersQuery(enabled = true, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.users,
     (signal) => apiClient.request(access.users.list, { signal, routeId }),
     enabled,
+    owner,
   );
 }
 
-export function useUserBenchmarkQuery(window: string, enabled: boolean) {
+export function useUserBenchmarkQuery(window: string, enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     [...accessKeys.usersBenchmark, window],
     (signal) => apiClient.request(access.users.benchmark, { query: { window, limit: 50 }, signal, routeId }),
     enabled,
+    owner,
   );
 }
 
@@ -62,19 +76,21 @@ export function useTeamsQuery(enabled = true) {
   );
 }
 
-export function useTeamBenchmarkQuery(window: string, enabled: boolean) {
+export function useTeamBenchmarkQuery(window: string, enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     [...accessKeys.teamsBenchmark, window],
     (signal) => apiClient.request(access.teams.benchmark, { query: { window }, signal, routeId }),
     enabled,
+    owner,
   );
 }
 
-export function useTeamScorecardQuery(window: string, enabled: boolean) {
+export function useTeamScorecardQuery(window: string, enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     [...accessKeys.teamsScorecard, window],
     (signal) => apiClient.request(access.teams.scorecard, { query: { window }, signal, routeId }),
     enabled,
+    owner,
   );
 }
 
@@ -86,27 +102,30 @@ export function useIpsQuery(enabled: boolean) {
   );
 }
 
-export function useQuotasQuery(enabled: boolean) {
+export function useQuotasQuery(enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.quotas,
     (signal) => apiClient.request(access.quotas.list, { signal, routeId }),
     enabled,
+    owner,
   );
 }
 
-export function useBudgetsQuery(enabled: boolean) {
+export function useBudgetsQuery(enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.budgets,
     (signal) => apiClient.request(access.budgets.list, { signal, routeId }),
     enabled,
+    owner,
   );
 }
 
-export function useBudgetProjectionQuery(enabled: boolean) {
+export function useBudgetProjectionQuery(enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.budgetProjection,
     (signal) => apiClient.request(access.budgets.projection, { signal, routeId }),
     enabled,
+    owner,
   );
 }
 

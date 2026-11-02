@@ -12,6 +12,8 @@ interface DialogProps {
   open: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
   title: string;
+  /** Opt-in bounded body scrolling with actions kept outside the scroll area. */
+  scrollBody?: boolean;
 }
 
 export function Dialog({
@@ -22,13 +24,14 @@ export function Dialog({
   open,
   returnFocusRef,
   title,
+  scrollBody = false,
 }: DialogProps): React.JSX.Element {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="dialog-overlay" />
         <DialogPrimitive.Content
-          className="dialog-content"
+          className={scrollBody ? "dialog-content dialog-content-scroll-body" : "dialog-content"}
           onCloseAutoFocus={(event) => {
             const requestedTarget = returnFocusRef.current;
             const returnTarget =

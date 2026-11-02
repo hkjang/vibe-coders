@@ -4,6 +4,8 @@ import type userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 
 import { AppDetailSheet } from "./AppDetailSheet";
+import { AppScopeBoundary } from "./app-scope";
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { appPermissionKey } from "./app-permission-form";
 import type { AppPermission, WorkApp } from "@/shared/api/domains/agents.schemas";
 import { mockApi, type ApiHandler } from "@/test/api";
@@ -41,14 +43,6 @@ function Host({ writable = true }: { writable?: boolean }) {
         onDeprecate={() => undefined}
         onEdit={() => undefined}
         onPublish={() => undefined}
-        onRun={() => undefined}
-        onValidate={() => undefined}
-        runError={null}
-        runPending={false}
-        runPlan={undefined}
-        validation={undefined}
-        validationError={null}
-        validationPending={false}
         writeDisabledReason="앱 변경에는 admin:write 권한이 필요합니다."
       />
     </main>
@@ -72,7 +66,16 @@ export function setup({
     [`DELETE ${path}`]: revoke,
     "GET /admin/apps/other_app/permissions": () => ({ permissions: [] }),
   });
-  return { api, ...renderScreen(<Host writable={writable} />) };
+  return {
+    api,
+    ...renderScreen(
+      <FeatureAccessHarness featureId="agents.apps">
+        <AppScopeBoundary>
+          <Host writable={writable} />
+        </AppScopeBoundary>
+      </FeatureAccessHarness>,
+    ),
+  };
 }
 
 export async function openPanel(user: ReturnType<typeof userEvent.setup>) {

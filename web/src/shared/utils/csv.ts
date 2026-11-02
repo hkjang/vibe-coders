@@ -6,8 +6,15 @@ export interface CsvColumn<Row> {
 function escapeCell(value: unknown): string {
   if (value === null || value === undefined) return "";
   let text = String(value);
-  // Neutralise spreadsheet formula injection before quoting.
-  if (/^[=+\-@\t\r]/u.test(text)) text = `'${text}`;
+  // Spreadsheet importers may ignore leading whitespace/control bytes before
+  // interpreting a formula. Inspect past them before applying CSV quoting.
+  let start = 0;
+  while (start < text.length) {
+    const code = text.charCodeAt(start);
+    if (code > 32 && code !== 127 && !/\s/u.test(text[start] ?? "")) break;
+    start += 1;
+  }
+  if (/^[=+\-@]/u.test(text.slice(start)) || /^[\t\r\n]/u.test(text)) text = "'" + text;
   return /[",\n\r]/u.test(text) ? `"${text.replace(/"/gu, '""')}"` : text;
 }
 

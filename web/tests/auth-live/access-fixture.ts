@@ -60,18 +60,32 @@ export function keyRow(page: Page, name: string): Locator {
 export async function editScopes(page: Page, name: string): Promise<Locator> {
   await keyRow(page, name).getByRole("button", { name: "권한 수정", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: scopeTitle, exact: true });
-  await expect(dialog.getByRole("button", { name: "권한 저장", exact: true })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "권한 저장", exact: true })).toBeDisabled();
   return dialog;
 }
 
 export async function saveScopes(page: Page, dialog: Locator, id: string, scopes: string[]): Promise<void> {
+  await confirmKeyEdit(
+    dialog,
+    scopes.length === 0 ? "browser-reviewed-scopes-clear" : "browser-reviewed-scopes-restore",
+  );
   const received = page.waitForResponse((response) => matches(response, "PATCH", `${keysPath}/${id}`));
   await dialog.getByRole("button", { name: "권한 저장", exact: true }).click();
   const response = await received;
   expect(response.status()).toBe(200);
-  const body: { scopes?: string[] } = response.request().postDataJSON();
+  const body: { scopes?: string[]; review?: { reason?: string; expected_revision?: string } } = response
+    .request()
+    .postDataJSON();
   expect(JSON.stringify(body.scopes) === JSON.stringify(scopes)).toBe(true);
+  expect(Boolean(body.review?.reason) && /^[a-f0-9]{64}$/.test(body.review?.expected_revision ?? "")).toBe(
+    true,
+  );
   await expect(dialog).toBeHidden();
+}
+
+export async function confirmKeyEdit(dialog: Locator, reason: string): Promise<void> {
+  await dialog.getByRole("textbox", { name: "변경 사유", exact: true }).fill(reason);
+  await dialog.getByRole("checkbox", { name: /변경 내용과 영향을 확인했습니다/ }).check();
 }
 
 export async function secretIsAbsent(page: Page, secret: string): Promise<boolean> {

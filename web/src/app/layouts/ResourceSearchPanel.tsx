@@ -22,7 +22,8 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const allowed = (Object.keys(resourceSearchTargets) as ResourceKind[]).filter((kind) => {
     const feature = auth.features.find((item) => item.featureId === resourceSearchTargets[kind].featureId);
-    if (!feature || !auth.user?.scopes.includes("admin:read")) return false;
+    if (!feature || !auth.user) return false;
+    if (kind !== "policy" && !auth.user.scopes.includes("admin:read")) return false;
     if (!auth.user.scopes.includes(resourceSearchReadScope(kind))) return false;
     const effective = resolveFeature(feature, auth.user, auth.backendVersion, {
       legacyFallback: auth.legacyFallback,
@@ -86,7 +87,9 @@ function ResourceSearchContent({
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
-  const groups = ready ? result.data?.groups : undefined;
+  // Query retains the last success during refetch and after refetch errors.
+  // Those rows are no longer current navigation authority (including 401/403).
+  const groups = ready && result.isSuccess && !result.isFetching ? result.data.groups : undefined;
   const items = useMemo(
     () =>
       (groups ?? []).flatMap((group) => {
@@ -108,10 +111,14 @@ function ResourceSearchContent({
   const pending = valid && allowed.length > 0 && (!ready || result.isFetching);
   const partial = groups?.some((group) => group.status !== "ok");
   const limited = groups?.some((group) => group.limited);
-  const rawRequestId =
-    result.data?.request_id ?? (isAppError(result.error) ? result.error.requestId : undefined);
+  const rawRequestId = result.isError
+    ? isAppError(result.error)
+      ? result.error.requestId
+      : undefined
+    : result.data?.request_id;
   const requestId =
     ready &&
+    !result.isFetching &&
     rawRequestId &&
     /^[A-Za-z0-9_-]{1,128}$/.test(rawRequestId) &&
     !containsPotentialSecret(rawRequestId, auth.credentialPrefixes)
@@ -120,8 +127,8 @@ function ResourceSearchContent({
   return (
     <>
       <p className="command-footer">
-        공급자·워크플로·업무 앱·스킬·MCP 서버의 이름을 검색합니다. 종류별 최대 10개이며 업무 본문은 검색하지
-        않습니다.
+        공급자·워크플로·업무 앱·스킬·MCP 서버·정책의 이름을 검색합니다. 종류별 최대 10개이며 업무 본문은
+        검색하지 않습니다.
       </p>
       <label className="command-search">
         <span className="sr-only">자원 이름 검색</span>
@@ -193,7 +200,14 @@ function ResourceSearchContent({
         {limited ? " 결과가 더 있습니다. 이름을 더 구체적으로 입력하세요." : ""}
       </div>
       {ready && (result.isError || partial) ? (
-        <Button variant="secondary" disabled={result.isFetching} onClick={() => void result.refetch()}>
+        <Button
+          variant="secondary"
+          disabled={result.isFetching}
+          onClick={() => {
+            inputRef.current?.focus();
+            void result.refetch();
+          }}
+        >
           자원 검색 다시 시도
         </Button>
       ) : null}

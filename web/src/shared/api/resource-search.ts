@@ -2,7 +2,7 @@ import { z } from "zod";
 import { operation } from "@/shared/api/endpoint-factory";
 import type { PostAdminResourceSearchData, PostAdminResourceSearchResponse } from "@/shared/api/generated";
 
-export const resourceKindSchema = z.enum(["provider", "workflow", "app", "skill", "mcp_upstream"]);
+export const resourceKindSchema = z.enum(["provider", "workflow", "app", "skill", "mcp_upstream", "policy"]);
 export type ResourceKind = z.infer<typeof resourceKindSchema>;
 const boundedText = (characters: number) =>
   z
@@ -29,7 +29,7 @@ export const resourceSearchSchema = z.strictObject({
           .max(10),
       }),
     )
-    .max(5),
+    .max(6),
 }) satisfies z.ZodType<PostAdminResourceSearchResponse>;
 
 export const resourceSearchEndpoint = operation<

@@ -6,6 +6,7 @@ import { isAppError } from "@/shared/api/error";
 import type { PolicySuggestion } from "@/shared/api/domains/governance";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import type { PolicyDraftAccess } from "./policy-draft-access";
+import { policyAdviceKey } from "./policy-catalog-key";
 import type { SimulationWindow } from "./policy-simulation-state";
 import {
   draftSourceReason,
@@ -32,7 +33,7 @@ interface Approval {
 }
 export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWindow) {
   const client = useQueryClient();
-  const key = ["governance", "advisor", window];
+  const key = policyAdviceKey(access.sessionKey, window);
   const source = useSyncExternalStore(
     useCallback((notify) => client.getQueryCache().subscribe(notify), [client]),
     () => client.getQueryState(key),
@@ -101,7 +102,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
   function sourceApproval(target: Selection): Approval {
     current();
     access.write.assertCurrent();
-    const state = client.getQueryState(["governance", "advisor", latest.current.window]);
+    const state = client.getQueryState(policyAdviceKey(access.sessionKey, latest.current.window));
     if (
       !latest.current.confirmed ||
       state?.status !== "success" ||
@@ -126,7 +127,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
       if (selected.current || flight.current) return;
       current();
       access.write.assertCurrent();
-      const now = client.getQueryState(["governance", "advisor", window]);
+      const now = client.getQueryState(key);
       if (
         now?.data !== source?.data ||
         now?.dataUpdatedAt !== source?.dataUpdatedAt ||
@@ -197,7 +198,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
         routeId: "governance.policies",
       });
       stillCurrent();
-      client.setQueryData(["governance", "advisor", requestedWindow], data);
+      client.setQueryData(policyAdviceKey(access.sessionKey, requestedWindow), data);
       setRefreshResult({ window: requestedWindow, status: "idle" });
     } catch {
       try {
@@ -277,7 +278,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
       committed.current = target;
       flight.current = undefined;
       setOutcome({ kind: "success", refreshFailed: false });
-      void client.invalidateQueries({ queryKey: ["governance", "policies"], refetchType: "none" });
+      void client.invalidateQueries({ queryKey: access.catalogKey, refetchType: "none" });
       void refreshCommitted(target);
     } catch (cause) {
       try {
@@ -313,7 +314,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
       });
       stillOpen();
       access.assertRead();
-      client.setQueryData(["governance", "policies"], policies);
+      client.setQueryData(access.catalogKey, policies);
       setOutcome({ kind: "success", refreshFailed: false });
     } catch {
       try {

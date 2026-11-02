@@ -148,10 +148,26 @@ export const mcpRouteListSchema = looseObject({
   errors: errorMap,
 });
 
-export const mcpTopologySchema = looseObject({
-  nodes: looseList({ id: text, label: text, kind: text, status: text, decision: text }),
-  edges: looseList({ from: text, to: text, label: text }),
+const mcpTopologyNodeSchema = looseObject({
+  id: z.string().min(1),
+  label: z.string(),
+  kind: z.string().min(1),
+  status: text,
+  decision: text,
 });
+const mcpTopologyEdgeSchema = looseObject({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  label: z.string(),
+});
+export const mcpTopologySchema = looseObject({
+  nodes: z.array(mcpTopologyNodeSchema),
+  edges: z.array(mcpTopologyEdgeSchema),
+}).refine((value) => new Set(value.nodes.map((node) => node.id)).size === value.nodes.length, {
+  message: "연결 구조의 노드 ID가 중복되어 대상을 구분할 수 없습니다.",
+});
+export type McpTopology = z.output<typeof mcpTopologySchema>;
+export type McpTopologyNode = z.output<typeof mcpTopologyNodeSchema>;
 
 /* -------------------------------------------------------------------- tools */
 
@@ -266,17 +282,19 @@ export const mcpTrustScoreSchema = looseObject({
 /* ----------------------------------------------------------------- policies */
 
 export const mcpPolicySchema = looseObject({
-  server_label: text,
-  mode: text,
-  note: text,
+  server_label: z.string().min(1),
+  mode: z.string().min(1),
+  note: z.string(),
   created_at: text,
   updated_at: text,
 });
 export type McpPolicy = z.output<typeof mcpPolicySchema>;
 
 export const mcpPolicyListSchema = looseObject({
-  policies: orDefault(z.array(mcpPolicySchema), [] as McpPolicy[]),
-  allowlist_enabled: flag,
+  policies: z.array(mcpPolicySchema),
+  allowlist_enabled: z.boolean(),
+}).refine((value) => new Set(value.policies.map((row) => row.server_label)).size === value.policies.length, {
+  message: "서버 정책의 고유한 대상을 확인할 수 없습니다.",
 });
 
 export const mcpPolicyWriteSchema = looseObject({
@@ -374,25 +392,39 @@ export const mcpUpstreamFlowSchema = looseObject({
 
 /* ------------------------------------------------------------ explain / test */
 
-export const mcpRouteExplainSchema = looseObject({
-  input: looseObject({ method: text, name: text, uri: text }).optional(),
-  route: looseObject({
-    found: flag,
-    upstream_id: text,
-    upstream_name: text,
-    target_method: text,
-    target_name: text,
-    lookup: text,
-  }).optional(),
-  policy: looseObject({
-    server_policy: text,
-    tool_risk_level: text,
-    tool_risk_action: text,
-    tool_risk_configured: flag,
-    tool_risk_note: text,
-  }).optional(),
-  final: looseObject({ decision: text, reason: text }).optional(),
-});
+export const mcpRouteExplainSchema = z
+  .object({
+    input: z.object({ method: z.string(), name: z.string(), uri: z.string() }).passthrough(),
+    route: z
+      .object({
+        found: z.boolean(),
+        upstream_id: z.string().optional(),
+        upstream_name: z.string().optional(),
+        target_method: z.string().optional(),
+        target_name: z.string().optional(),
+        lookup: z.string().optional(),
+      })
+      .passthrough(),
+    policy: z
+      .object({
+        server_policy: z.string().min(1),
+        tool_risk_level: z.string().min(1),
+        tool_risk_action: z.string().min(1),
+        tool_risk_configured: z.boolean(),
+        tool_risk_note: z.string(),
+      })
+      .passthrough()
+      .optional(),
+    final: z.object({ decision: z.string().min(1), reason: z.string() }).passthrough(),
+  })
+  .passthrough()
+  .refine(
+    (value) =>
+      !value.route.found ||
+      Boolean(
+        value.route.upstream_id && value.route.upstream_name && value.route.target_method && value.policy,
+      ),
+  );
 
 export const mcpTestResultSchema = looseObject({
   upstream_id: text,
@@ -408,64 +440,91 @@ export const mcpTestResultSchema = looseObject({
 /* ------------------------------------------------------------- gateway MCP */
 
 export const gatewayMcpInfoSchema = looseObject({
-  endpoint: text,
-  protocol_version: text,
-  note: text,
-  tools: looseList({ name: text, description: text, inputSchema: z.unknown().optional() }),
-  contracts: looseList({
-    name: text,
-    risk_level: text,
-    cost_policy: text,
-    timeout_ms: count,
-    allowed_roles: text,
-    executes: flag,
-    output_schema: text,
-  }),
-  resources: looseList({ uri: text, name: text, description: text, mimeType: text }),
-  prompts: looseList({ name: text, description: text }),
+  endpoint: z.string().min(1),
+  protocol_version: z.string().min(1),
+  note: z.string(),
+  tools: z.array(
+    looseObject({
+      name: z.string().min(1),
+      description: z.string().default(""),
+      inputSchema: z.unknown().optional(),
+    }),
+  ),
+  contracts: z.array(
+    looseObject({
+      name: z.string().min(1),
+      risk_level: z.string(),
+      cost_policy: z.string(),
+      timeout_ms: z.number().int().safe(),
+      allowed_roles: z.string(),
+      executes: z.boolean(),
+      output_schema: z.string(),
+    }),
+  ),
+  resources: z.array(
+    looseObject({
+      uri: z.string(),
+      name: z.string(),
+      description: z.string().default(""),
+      mimeType: z.string().default(""),
+    }),
+  ),
+  prompts: z.array(looseObject({ name: z.string(), description: z.string().default("") })),
 });
 
 export const mcpContractSchema = looseObject({
-  id: text,
-  namespace: text,
-  name: text,
-  title: text,
-  description: text,
-  input_schema: text,
-  output_schema: text,
-  risk_level: text,
-  timeout_ms: count,
-  allowed_roles: text,
-  cost_policy: text,
-  owner: text,
-  enabled: flag,
-  created_by: text,
-  updated_at: text,
+  id: z.string().min(1),
+  namespace: z.string(),
+  name: z.string(),
+  title: z.string(),
+  description: z.string(),
+  input_schema: z.string(),
+  output_schema: z.string(),
+  risk_level: z.string(),
+  timeout_ms: z.number().int().safe(),
+  allowed_roles: z.string(),
+  cost_policy: z.string(),
+  owner: z.string(),
+  enabled: z.boolean(),
+  created_by: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
 });
 export type McpContract = z.output<typeof mcpContractSchema>;
 
 export const mcpContractListSchema = looseObject({
-  contracts: orDefault(z.array(mcpContractSchema), [] as McpContract[]),
+  contracts: z
+    .array(mcpContractSchema)
+    .refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "Duplicate contract IDs"),
 });
 
-export const mcpContractWriteSchema = looseObject({ id: text, ok: flag });
+export const mcpContractWriteSchema = looseObject({ id: z.string().min(1), ok: z.literal(true) });
+export const mcpContractDeletedSchema = looseObject({ ok: z.literal(true) });
 
 export const mcpContractValidationSchema = looseObject({
-  checked: count,
-  drift_count: count,
-  missing_count: count,
-  note: text,
-  results: looseList({
-    contract_id: text,
-    namespace: text,
-    name: text,
-    risk_level: text,
-    status: text,
-    detail: text,
-    declared_only: textList,
-    live_only: textList,
-  }),
-});
+  checked: z.number().int().nonnegative(),
+  drift_count: z.number().int().nonnegative(),
+  missing_count: z.number().int().nonnegative(),
+  note: z.string(),
+  results: z.array(
+    looseObject({
+      contract_id: z.string(),
+      namespace: z.string(),
+      name: z.string(),
+      risk_level: z.string(),
+      status: z.string(),
+      detail: z.string().default(""),
+      declared_only: z.array(z.string()).default([]),
+      live_only: z.array(z.string()).default([]),
+    }),
+  ),
+}).refine(
+  (value) =>
+    value.checked === value.results.length &&
+    value.drift_count === value.results.filter((row) => row.status === "drift").length &&
+    value.missing_count === value.results.filter((row) => row.status === "missing").length,
+  "Inconsistent contract validation counts",
+);
 
 /* ------------------------------------------------------ agents / agent routes */
 

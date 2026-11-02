@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useAppRead } from "./app-scope";
 
 import { appPermissionDescription, appPermissionKey, appPermissionTarget } from "./app-permission-form";
 import type { AppPermissionEditor } from "./use-app-permission-draft";
@@ -29,7 +29,7 @@ export function AppPermissionPanel({
   editor,
   writeDisabledReason,
 }: AppPermissionPanelProps): React.JSX.Element {
-  const permissions = useQuery({
+  const permissions = useAppRead({
     queryKey: appPermissionKey(app.id),
     queryFn: ({ signal }) =>
       apiClient.request(withPathParams(endpoints.domains.agents.apps.permissions, { id: app.id }), {

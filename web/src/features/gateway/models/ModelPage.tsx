@@ -25,8 +25,14 @@ import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-r
 import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { containsPotentialSecret } from "@/shared/security/secrets";
-import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
-import { sortModelCatalogRows } from "./model-catalog-table-state";
+import {
+  readModelCatalogPageSize,
+  readModelCatalogSorting,
+  modelCatalogSortQuery,
+} from "@/shared/utils/model-catalog-query";
+import { defaultModelCatalogOrder, sortModelCatalogRows } from "./model-catalog-table-state";
+import { ModelExportControl } from "./ModelExportControl";
+import { ModelReadBoundary } from "./ModelReadBoundary";
 
 const defaultRange: HealthRange = "24h";
 
@@ -44,6 +50,14 @@ function positivePage(value: string | null): number {
 }
 
 export function ModelPage(): React.JSX.Element {
+  return (
+    <ModelReadBoundary>
+      <ModelPageContent />
+    </ModelReadBoundary>
+  );
+}
+
+function ModelPageContent(): React.JSX.Element {
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedRange = searchParams.get("range");
@@ -53,14 +67,18 @@ export function ModelPage(): React.JSX.Element {
   const requestedModelProvider = searchParams.get("model_provider")?.trim() ?? "";
   const requestedSource = searchParams.get("source");
   const requestedQuery = searchParams.get("q") ?? "";
-  const sort = readModelCatalogSort(searchParams.getAll("sort"));
+  const sortValue = searchParams.getAll("sort").join("\u0000");
+  const sort = useMemo(
+    () => readModelCatalogSorting(sortValue ? sortValue.split("\u0000") : []),
+    [sortValue],
+  );
   const parsedPageSize = readModelCatalogPageSize(searchParams.getAll("page_size"));
   const pageSize = parsedPageSize ?? 10;
   const invalidSort = searchParams.has("sort") && !sort;
   const invalidPageSize = searchParams.has("page_size") && !parsedPageSize;
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isModelStatusFilter(requestedStatus) ? requestedStatus : "all";
-  const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
+  const unsafeStoredQuery = containsPotentialSecret(requestedQuery, auth.credentialPrefixes);
   const query = unsafeStoredQuery ? "" : requestedQuery;
   const providerFilter = isProviderRef(requestedProviderFilter) ? requestedProviderFilter : "";
   const providerFilterInvalid = requestedProviderFilter !== "" && !isProviderRef(requestedProviderFilter);
@@ -85,9 +103,10 @@ export function ModelPage(): React.JSX.Element {
         if (value === undefined || value === "") next.delete(key);
         else next.set(key, value);
       }
+      if (containsPotentialSecret(next.get("q") ?? "", auth.credentialPrefixes)) next.delete("q");
       setSearchParams(next, { replace });
     },
-    [searchParams, setSearchParams],
+    [searchParams, setSearchParams, auth.credentialPrefixes],
   );
 
   useEffect(() => {
@@ -137,10 +156,7 @@ export function ModelPage(): React.JSX.Element {
     () =>
       models.data
         ? buildModelRows(models.data, quality.data, pricing.data, tags.data?.tags).sort(
-            (left, right) =>
-              left.providerLabel.localeCompare(right.providerLabel) ||
-              left.model.id.localeCompare(right.model.id) ||
-              left.model.source.localeCompare(right.model.source),
+            defaultModelCatalogOrder,
           )
         : [],
     [models.data, pricing.data, quality.data, tags.data?.tags],
@@ -220,12 +236,13 @@ export function ModelPage(): React.JSX.Element {
   const detailSearch = useCallback(
     (row: ModelCatalogRow): string => {
       const next = new URLSearchParams(searchParams);
+      if (containsPotentialSecret(next.get("q") ?? "", auth.credentialPrefixes)) next.delete("q");
       next.set("model", row.model.id);
       next.set("model_provider", row.model.provider_ref);
       next.set("source", row.model.source);
       return `?${next.toString()}`;
     },
-    [searchParams],
+    [searchParams, auth.credentialPrefixes],
   );
   const refreshAll = (): void => {
     void Promise.all([models.refetch(), quality.refetch(), pricing.refetch(), tags.refetch()]);
@@ -311,6 +328,10 @@ export function ModelPage(): React.JSX.Element {
               requestId={models.data?.request_id ?? ""}
             />
 
+            <ModelExportControl
+              filters={{ query, provider: providerFilter, status, range, sort }}
+              blocked={unsafeStoredQuery || providerFilterInvalid}
+            />
             <ModelTable
               allRowCount={allRows.length}
               catalogueAvailable={catalogueAvailable}
@@ -340,7 +361,9 @@ export function ModelPage(): React.JSX.Element {
                   updateSearch({ page_size: next === 10 ? undefined : String(next), page: undefined }, false);
               }}
               sort={sort}
-              onSortChange={(next) => updateSearch({ sort: next, page: undefined }, false)}
+              onSortChange={(next) =>
+                updateSearch({ sort: modelCatalogSortQuery(next), page: undefined }, false)
+              }
               rememberTrigger={rememberTrigger}
               rows={pageRows}
               updatedAt={updatedAt}

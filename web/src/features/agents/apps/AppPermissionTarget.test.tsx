@@ -85,7 +85,11 @@ describe("기존 앱 권한의 정확한 회수 대상", () => {
       function Wrapper({ children }: PropsWithChildren) {
         return (
           <QueryClientProvider client={client}>
-            <UnsavedChangesProvider>{children}</UnsavedChangesProvider>
+            <FeatureAccessHarness featureId="agents.apps">
+              <AppScopeBoundary>
+                <UnsavedChangesProvider>{children}</UnsavedChangesProvider>
+              </AppScopeBoundary>
+            </FeatureAccessHarness>
           </QueryClientProvider>
         );
       }
@@ -106,3 +110,5 @@ describe("기존 앱 권한의 정확한 회수 대상", () => {
     },
   );
 });
+import { AppScopeBoundary } from "./app-scope";
+import { FeatureAccessHarness } from "@/test/feature-access";

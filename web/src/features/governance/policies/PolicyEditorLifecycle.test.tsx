@@ -52,7 +52,6 @@ describe("현재 화면·원본·권한과 실제 단일 전송 경계", () => {
       await c.user.click(c.open());
       await c.editName();
       const old = c.captureSave();
-      const reads = c.api.bodies("GET /admin/policies").length;
       if (change === "epoch") act(() => tokenStore.clearAll());
       else
         c.update(
@@ -66,6 +65,9 @@ describe("현재 화면·원본·권한과 실제 단일 전송 경계", () => {
                   ? { owner: "gateway.providers" }
                   : { principal: "public_b" },
         );
+      // A new principal/session admits its own list read. The captured old
+      // action must not add any request to that independent transition.
+      const reads = c.api.bodies("GET /admin/policies").length;
       await act(async () => old());
       expect(c.api.bodies(savePath)).toEqual([]);
       expect(c.api.bodies("GET /admin/policies")).toHaveLength(reads);
@@ -194,9 +196,10 @@ describe("현재 화면·원본·권한과 실제 단일 전송 경계", () => {
     await c.user.click(c.save());
     await waitFor(() => expect(c.api.bodies(savePath)).toHaveLength(1));
     act(() => tokenStore.clearAll());
+    const readsAfterSessionChange = c.api.bodies("GET /admin/policies").length;
     await act(async () => held.resolve({ policy: c.api.bodies(savePath)[0] }));
     expect(screen.queryByText("비활성 정책을 저장했습니다.")).not.toBeInTheDocument();
-    expect(c.api.bodies("GET /admin/policies")).toHaveLength(2);
+    expect(c.api.bodies("GET /admin/policies")).toHaveLength(readsAfterSessionChange);
   });
   it("원본 조회 오류는 쓰기 없이 수동 복구하고 민감한 오류문을 노출하지 않는다", async () => {
     const c = await setupEditor();

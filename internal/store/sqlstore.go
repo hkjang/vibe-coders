@@ -2587,7 +2587,7 @@ func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
 			Scopes: key.Scopes, AllowedIPs: key.AllowedIPs, AllowedModels: key.AllowedModels, DeniedModels: key.DeniedModels,
 			AllowedProviders: key.AllowedProviders, DeniedProviders: key.DeniedProviders, BudgetLimitKRW: key.BudgetLimitKRW,
 			ExpiresAt: parseOptionalTime(key.ExpiresAt), RevokedAt: parseOptionalTime(key.RevokedAt), CreatedAt: parseOptionalTime(key.CreatedAt),
-		}, secret)
+		}, secret, key.ReplacedBy, key.GraceEndsAt)
 		if err != nil {
 			return nil, err
 		}

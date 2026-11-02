@@ -42,6 +42,7 @@ type browserAuthHarness struct {
 	superPassword    string
 	childScratch     string
 	providerChunk    string
+	verifyMcpCall    func()
 }
 
 func browserFixtureConfig(idp *browserOIDCFixture) config.Config {
@@ -114,6 +115,10 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	}
 	logger := store.NewAsyncLogger(db, 32, filepath.Join(scratch, "fallback.ndjson"))
 	seedBrowserChangeSetFixture(t, db)
+	seedBrowserUserFixture(t, db)
+	seedBrowserFinopsFixture(t, db)
+	seedBrowserMcpRiskFixture(t, db)
+	h.verifyMcpCall = seedBrowserMcpCallFixture(t, db)
 	seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
 	seedBrowserOperationsFixture(t, db, filepath.Join(scratch, "fallback.ndjson"))
 	logger.Start()
@@ -217,6 +222,10 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	if h.upstream.calls.Load() < 2 || h.upstream.deniedModelCalls.Load() != 0 {
 		t.Fatal("live key authorization did not reach the local model as expected, or a denied call reached it")
 	}
+	assertBrowserMcpRisk(t, h.db)
+	assertBrowserMcpPolicy(t, h.db)
+	h.verifyMcpCall()
+	assertBrowserMCPContract(t, h.db)
 	audits, err := h.db.ListAdminAudit(t.Context(), 1000)
 	if err != nil {
 		t.Fatal("browser emergency audit verification failed")
@@ -247,6 +256,9 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	verifyBrowserChangeSetFixture(t, h.db)
 	verifyBrowserOperationsFixture(t, h.db)
 	verifyBrowserAdminKeyRevocations(t, h.db)
+	verifyBrowserAdminKeyEdits(t, h.db)
+	verifyBrowserUserFixture(t, h.db)
+	verifyBrowserQuotaBudgetFixture(t, h.db)
 }
 
 func browserAuthWebDirectory(t *testing.T) string {

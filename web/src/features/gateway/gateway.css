@@ -135,3 +135,17 @@
   font-weight: 600;
   padding: var(--space-2) 0;
 }
+.provider-export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.provider-export > p {
+  flex: 1 1 20rem;
+  margin: 0;
+  color: var(--color-muted);
+}
+.provider-export-notice {
+  flex-basis: 100%;
+}

@@ -34,6 +34,7 @@ const user = {
 };
 
 interface PublicKey {
+  revision: string;
   id: string;
   name: string;
   owner: string;
@@ -45,6 +46,7 @@ interface PublicKey {
 
 function publicKey(id: string, name: string, scopes: string[]): PublicKey {
   return {
+    revision: "a".repeat(64),
     id,
     name,
     owner: "fixture-owner",
@@ -58,6 +60,12 @@ function publicKey(id: string, name: string, scopes: string[]): PublicKey {
 const alpha = publicKey("public-scope-key-alpha", "scope-draft-alpha", ["models:read", unknownScope]);
 const beta = publicKey("public-scope-key-beta", "scope-draft-beta", ["models:read"]);
 const emptyScopes = publicKey("public-scope-key-empty", "scope-draft-empty", []);
+const review = { reason: "운영 권한 정비", expected_revision: alpha.revision };
+
+async function confirmEdit(form: Locator) {
+  await form.getByRole("textbox", { name: "변경 사유", exact: true }).fill(review.reason);
+  await form.getByRole("checkbox", { name: /변경 내용과 영향을 확인했습니다/u }).check();
+}
 
 function bootstrap(authenticated: boolean): UiBootstrapResponse {
   return {
@@ -127,7 +135,7 @@ function bootstrap(authenticated: boolean): UiBootstrapResponse {
 async function installGateway(context: BrowserContext) {
   const sessions = new Map<string, string>();
   const unexpected: string[] = [];
-  const saves: { id: string; body: { scopes: string[] } }[] = [];
+  const saves: { id: string; body: { scopes: string[]; review: typeof review } }[] = [];
   let keys = structuredClone([alpha, beta, emptyScopes]);
   let reads = 0;
   let catalogScopes = [...knownScopes, unknownScope];
@@ -192,7 +200,7 @@ async function installGateway(context: BrowserContext) {
       }
       if (call === "GET /admin/api-keys") {
         reads += 1;
-        return json({ api_keys: keys });
+        return json({ api_keys: keys, edit_review_supported: true });
       }
       if (call === "GET /admin/roles") {
         catalogReads += 1;
@@ -215,10 +223,11 @@ async function installGateway(context: BrowserContext) {
 
       const id = path.match(/^\/admin\/api-keys\/([^/]+)$/u)?.[1];
       if (request.method() === "PATCH" && id) {
-        const body = request.postDataJSON() as { scopes: string[] };
+        const body = request.postDataJSON() as { scopes: string[]; review: typeof review };
         // Only public fixture IDs and permissions enter this suite; no key secret is issued.
         expect(keys.some((key) => key.id === id)).toBe(true);
-        expect(Object.keys(body)).toEqual(["scopes"]);
+        expect(Object.keys(body)).toEqual(["scopes", "review"]);
+        expect(body.review.reason).toBe(review.reason);
         expect(Array.isArray(body.scopes)).toBe(true);
         const snapshot = structuredClone({ id, body });
         saves.push(snapshot);
@@ -226,7 +235,11 @@ async function installGateway(context: BrowserContext) {
         if (saveGate) await saveGate;
         if (status !== 200)
           return json({ error: { message: "fixture scope save failed", code: "scope_save_failed" } }, status);
-        keys = keys.map((key) => (key.id === id ? { ...key, scopes: [...snapshot.body.scopes] } : key));
+        if (keys.find((key) => key.id === id)?.revision !== body.review.expected_revision)
+          return json({ error: { message: "key changed", code: "key_update_conflict" } }, 409);
+        keys = keys.map((key) =>
+          key.id === id ? { ...key, scopes: [...snapshot.body.scopes], revision: "b".repeat(64) } : key,
+        );
         return json(keys.find((key) => key.id === id));
       }
       unexpected.push(call);
@@ -316,6 +329,57 @@ async function login(page: Page) {
   await page.goto(`login?return_to=${encodeURIComponent(targetUrl)}`);
   await signIn(page);
 }
+
+test("키 정보 수정은 변경 전후와 사유를 검토한 필드만 보내고 입력 변경 시 확인을 해제한다", async ({
+  page,
+  gateway,
+}) => {
+  const writes: unknown[] = [];
+  await page.route(`**/admin/api-keys/${alpha.id}`, async (route) => {
+    expect(route.request().method()).toBe("PATCH");
+    writes.push(route.request().postDataJSON());
+    await route.fulfill({ json: { ...alpha, name: "검토한 새 이름" } });
+  });
+  await login(page);
+  const trigger = page
+    .getByRole("row")
+    .filter({ has: page.getByText(alpha.name, { exact: true }) })
+    .getByRole("button", { name: "수정", exact: true });
+  await trigger.click();
+  const form = page.getByRole("dialog", { name: "API 키 수정" });
+  const name = form.getByRole("textbox", { name: "이름", exact: true });
+  const save = form.getByRole("button", { name: "검토한 변경 저장" });
+  await expect(save).toBeDisabled();
+  await name.fill("검토한 새 이름");
+  await expect(form.getByRole("region", { name: "변경 전후 비교" })).toContainText(alpha.name);
+  await confirmEdit(form);
+  await name.fill("다른 이름");
+  await name.fill("검토한 새 이름");
+  await expect(form.getByRole("checkbox", { name: /변경 내용과 영향을 확인했습니다/u })).not.toBeChecked();
+  await save.click();
+  expect(writes).toEqual([]);
+  await confirmEdit(form);
+  await save.click();
+  await expect(form).toBeHidden();
+  expect(writes).toEqual([{ name: "검토한 새 이름", review }]);
+  expect(gateway.saves).toEqual([]);
+  await expect(trigger).toBeFocused();
+});
+
+test("검토 수정을 지원하지 않는 서버는 기존 관리자 안내와 저장 차단을 제공한다", async ({
+  page,
+  gateway,
+}) => {
+  await page.route("**/admin/api-keys", (route) => route.fulfill({ json: { api_keys: [alpha] } }));
+  await login(page);
+  await page.getByRole("button", { name: "수정", exact: true }).click();
+  const form = page.getByRole("dialog", { name: "API 키 수정" });
+  await form.getByRole("textbox", { name: "이름", exact: true }).fill("구버전 초안");
+  await expect(form).toContainText("구버전 서버에서는 기존 관리자 화면을 이용하세요");
+  await expect(form.getByRole("button", { name: "검토한 변경 저장" })).toBeDisabled();
+  await form.locator("form").evaluate((element) => (element as HTMLFormElement).requestSubmit());
+  expect(gateway.saves).toEqual([]);
+});
 
 for (const mode of ["open", "legacy_token"] as const) {
   test(`사용자 객체 없는 ${mode} 인증에서도 키 목록을 조회한다`, async ({ page, gateway }) => {
@@ -562,10 +626,11 @@ test("서버 권한 목록을 읽는 동안 제출을 차단하고 응답 후에
   expect(gateway.saves).toEqual([]);
   for (const id of ["chat:completion", unknownScope, "models:read"])
     await expect(scope(form, id)).toBeChecked();
+  await confirmEdit(form);
   await save.click();
   await expect(form).toBeHidden();
   expect(gateway.saves).toEqual([
-    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"] } },
+    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"], review } },
   ]);
 });
 
@@ -595,10 +660,11 @@ test("서버 권한 목록 조회 실패는 요청 ID와 재시도를 제공하�
   for (const id of ["chat:completion", unknownScope, "models:read"])
     await expect(scope(form, id)).toBeChecked();
   expect(gateway.saves).toEqual([]);
+  await confirmEdit(form);
   await save.click();
   await expect(form).toBeHidden();
   expect(gateway.saves).toEqual([
-    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"] } },
+    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"], review } },
   ]);
 });
 
@@ -634,9 +700,12 @@ test("서버가 지원하지 않는 기존 권한은 자동 제거하지 않고 
   await expect(save).toBeDisabled();
   expect(gateway.saves).toEqual([]);
   await scope(form, unknownScope).uncheck();
+  await confirmEdit(form);
   await save.click();
   await expect(form).toBeHidden();
-  expect(gateway.saves).toEqual([{ id: alpha.id, body: { scopes: ["chat:completion", "models:read"] } }]);
+  expect(gateway.saves).toEqual([
+    { id: alpha.id, body: { scopes: ["chat:completion", "models:read"], review } },
+  ]);
   await expect(scopeTrigger(page)).toBeFocused();
   const reopened = await openForm(page);
   await expect(scope(reopened, unknownScope)).toHaveCount(0);
@@ -673,7 +742,13 @@ test("변경하지 않거나 원복한 권한은 경고 없이 닫히며 전체 
     if (key === beta) await scope(form, "models:read").uncheck();
     await expect(form.locator('input[type="checkbox"]:checked')).toHaveCount(0);
     await expect(form).toContainText("현재 선택: 선택된 권한 없음");
-    await form.getByRole("button", { name: "권한 저장", exact: true }).click();
+    if (key === beta) {
+      await confirmEdit(form);
+      await form.getByRole("button", { name: "권한 저장", exact: true }).click();
+    } else {
+      await expect(form.getByRole("button", { name: "권한 저장", exact: true })).toBeDisabled();
+      await closeForm(page, form, "취소");
+    }
     await expect(form).toBeHidden();
     await expect(guard(page)).toBeHidden();
     await expect(scopeTrigger(page, key.name)).toBeFocused();
@@ -682,10 +757,7 @@ test("변경하지 않거나 원복한 권한은 경고 없이 닫히며 전체 
     await closeForm(page, reopened, "취소");
     await expect(reopened).toBeHidden();
   }
-  expect(gateway.saves).toEqual([
-    { id: beta.id, body: { scopes: [] } },
-    { id: emptyScopes.id, body: { scopes: [] } },
-  ]);
+  expect(gateway.saves).toEqual([{ id: beta.id, body: { scopes: [], review } }]);
 });
 
 test("목록이 갱신되고 행 순서가 바뀌어도 열린 키의 권한 스냅샷과 알 수 없는 권한을 보존한다", async ({
@@ -700,7 +772,12 @@ test("목록이 갱신되고 행 순서가 바뀌어도 열린 키의 권한 스
   await expect(form.getByRole("button", { name: "권한 저장", exact: true })).toBeEnabled();
   const reads = gateway.reads();
   const catalogReads = gateway.catalogReads();
-  const newerAlpha = { ...alpha, name: "scope-refetched-alpha", scopes: ["embeddings:create"] };
+  const newerAlpha = {
+    ...alpha,
+    name: "scope-refetched-alpha",
+    scopes: ["embeddings:create"],
+    revision: "b".repeat(64),
+  };
   gateway.replaceKeys([beta, emptyScopes, newerAlpha]);
   gateway.replaceCatalog([
     ...knownScopes.filter((id) => id !== "admin:write"),
@@ -715,20 +792,21 @@ test("목록이 갱신되고 행 순서가 바뀌어도 열린 키의 권한 스
   for (const id of ["models:read", unknownScope, "chat:completion"])
     await expect(scope(form, id)).toBeChecked();
   await expect(scope(form, "embeddings:create")).not.toBeChecked();
-  await form.getByRole("button", { name: "권한 저장", exact: true }).click();
+  await expect(form.getByRole("button", { name: "권한 저장", exact: true })).toBeDisabled();
+  await form.locator("form").evaluate((element) => (element as HTMLFormElement).requestSubmit());
+  expect(gateway.saves).toEqual([]);
+  await closeForm(page, form, "취소");
+  await guard(page).getByRole("button", { name: "변경 버리기" }).click();
   await expect(form).toBeHidden();
-  expect(gateway.saves).toEqual([
-    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"] } },
-  ]);
   await expect(scopeTrigger(page, newerAlpha.name)).toBeFocused();
   await expect(scopeTrigger(page, beta.name)).not.toBeFocused();
   const reopened = await openForm(page, newerAlpha.name);
   for (const id of ["models:read", unknownScope, "chat:completion"])
-    await expect(scope(reopened, id)).toBeChecked();
-  await expect(scope(reopened, "embeddings:create")).not.toBeChecked();
+    await expect(scope(reopened, id)).not.toBeChecked();
+  await expect(scope(reopened, "embeddings:create")).toBeChecked();
 });
 
-test("저장 실패는 요청 ID와 초안을 유지하고 재시도는 그 시점의 권한만 한 번 전송한다", async ({
+test("저장 실패는 요청 ID와 초안을 유지하고 결과가 불확실한 요청의 재전송을 막는다", async ({
   page,
   gateway,
 }) => {
@@ -736,6 +814,7 @@ test("저장 실패는 요청 ID와 초안을 유지하고 재시도는 그 시�
   gateway.failSaves();
   const form = await openForm(page);
   await scope(form, "chat:completion").check();
+  await confirmEdit(form);
   await form.getByRole("button", { name: "권한 저장", exact: true }).click();
   await expect(form.getByRole("alert")).toContainText("req-key-scope-draft");
   await expect(scope(form, "chat:completion")).toBeEnabled();
@@ -743,7 +822,7 @@ test("저장 실패는 요청 ID와 초안을 유지하고 재시도는 그 시�
   await expect(scope(form, unknownScope)).toBeChecked();
   const first = structuredClone(gateway.saves);
   expect(first).toEqual([
-    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"] } },
+    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"], review } },
   ]);
   await scope(form, "chat:completion").uncheck();
   await scope(form, "embeddings:create").check();
@@ -753,13 +832,9 @@ test("저장 실패는 요청 ID와 초안을 유지하고 재시도는 그 시�
   await expect(scope(form, "embeddings:create")).toBeChecked();
   expect(gateway.saves).toEqual(first);
   gateway.succeedSaves();
-  await form.getByRole("button", { name: "권한 저장", exact: true }).click();
-  await expect(form).toBeHidden();
-  expect(gateway.saves).toEqual([
-    ...first,
-    { id: alpha.id, body: { scopes: ["embeddings:create", unknownScope, "models:read"] } },
-  ]);
-  await expect(scopeTrigger(page)).toBeFocused();
+  await expect(form.getByRole("button", { name: "권한 저장", exact: true })).toBeDisabled();
+  await form.locator("form").evaluate((element) => (element as HTMLFormElement).requestSubmit());
+  expect(gateway.saves).toEqual(first);
 });
 
 test("저장 대기 중 체크박스와 취소를 잠그고 중복 제출과 모든 닫기 경로를 차단한다", async ({
@@ -770,11 +845,12 @@ test("저장 대기 중 체크박스와 취소를 잠그고 중복 제출과 모
   const form = await openForm(page);
   await scope(form, "chat:completion").check();
   gateway.holdSaves();
+  await confirmEdit(form);
   await clickTwice(form.getByRole("button", { name: "권한 저장", exact: true }));
   await expect.poll(() => gateway.saves.length).toBe(1);
   const submitted = structuredClone(gateway.saves);
   expect(submitted).toEqual([
-    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"] } },
+    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"], review } },
   ]);
   for (const checkbox of await form.getByRole("checkbox").all()) await expect(checkbox).toBeDisabled();
   await expect(form.getByRole("button", { name: "취소", exact: true })).toBeDisabled();
@@ -892,6 +968,7 @@ test("이전 세션의 늦은 저장 응답은 새 권한 초안을 닫거나 �
   const oldForm = await openForm(page);
   await scope(oldForm, "chat:completion").check();
   gateway.holdSaves();
+  await confirmEdit(oldForm);
   await oldForm.getByRole("button", { name: "권한 저장", exact: true }).click();
   await expect.poll(() => gateway.saves.length).toBe(1);
   const submitted = structuredClone(gateway.saves);
@@ -925,12 +1002,13 @@ test("이전 세션의 늦은 저장 응답은 새 권한 초안을 닫거나 �
   expect(gateway.reads()).toBe(freshReads);
   expect(gateway.saves).toEqual(submitted);
   await expectNoStoredDraft(page);
+  await confirmEdit(fresh);
   await fresh.getByRole("button", { name: "권한 저장", exact: true }).click();
-  await expect(fresh).toBeHidden();
-  await expect(scopeTrigger(page)).toBeFocused();
+  await expect(fresh.getByRole("alert")).toBeVisible();
+  await expect(fresh.getByRole("button", { name: "권한 저장", exact: true })).toBeDisabled();
   expect(gateway.saves).toEqual([
     ...submitted,
-    { id: alpha.id, body: { scopes: ["embeddings:create", unknownScope, "models:read"] } },
+    { id: alpha.id, body: { scopes: ["embeddings:create", unknownScope, "models:read"], review } },
   ]);
 });
 

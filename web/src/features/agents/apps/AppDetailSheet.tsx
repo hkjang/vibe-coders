@@ -1,13 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
+import { useAppRead } from "./app-scope";
 import { useRef, useState, type RefObject } from "react";
 
 import { appComponentKindLabels } from "@/features/agents/apps/app-form";
+import { AppInspectionPanel } from "./AppInspectionPanel";
 import { AppPermissionDialog } from "@/features/agents/apps/AppPermissionDialog";
 import { AppPermissionPanel } from "@/features/agents/apps/AppPermissionPanel";
 import { useAppPermissionDraft } from "@/features/agents/apps/use-app-permission-draft";
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { apiClient } from "@/shared/api/client";
-import type { AppRunPlan, AppValidation, WorkApp } from "@/shared/api/domains/agents.schemas";
+import type { WorkApp } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -29,16 +30,8 @@ interface AppDetailSheetProps {
   onEdit: () => void;
   onOpenChange: (open: boolean) => void;
   onPublish: () => void;
-  onRun: () => void;
-  onValidate: () => void;
   open: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
-  runError: Error | null;
-  runPending: boolean;
-  runPlan: AppRunPlan | undefined;
-  validation: AppValidation | undefined;
-  validationError: Error | null;
-  validationPending: boolean;
   writeDisabledReason: string;
 }
 
@@ -61,16 +54,8 @@ function AppDetailSheetContent({
   onEdit,
   onOpenChange,
   onPublish,
-  onRun,
-  onValidate,
   open,
   returnFocusRef,
-  runError,
-  runPending,
-  runPlan,
-  validation,
-  validationError,
-  validationPending,
   writeDisabledReason,
 }: AppDetailSheetProps): React.JSX.Element {
   const permissionEditor = useAppPermissionDraft(canWrite);
@@ -81,7 +66,7 @@ function AppDetailSheetContent({
   const [showPermissions, setShowPermissions] = useState(false);
   const permissionsButtonRef = useRef<HTMLButtonElement>(null);
   const appId = app?.id ?? "";
-  const versions = useQuery({
+  const versions = useAppRead({
     queryKey: ["agents", "apps", appId, "versions"],
     enabled: open && showVersions && appId !== "",
     queryFn: ({ signal }) =>
@@ -134,12 +119,6 @@ function AppDetailSheetContent({
           />
 
           <div className="agents-detail-actions">
-            <Button variant="primary" onClick={onValidate} disabled={validationPending || permissionOpen}>
-              {validationPending ? "검증 중" : "검증"}
-            </Button>
-            <Button onClick={onRun} disabled={runPending || permissionOpen}>
-              {runPending ? "실행 계획 생성 중" : "실행(플랜)"}
-            </Button>
             <Button
               onClick={onPublish}
               disabled={!canWrite || permissionOpen}
@@ -233,73 +212,7 @@ function AppDetailSheetContent({
             )}
           </SectionCard>
 
-          {validationError ? (
-            <InlineNotice tone="danger" title="검증에 실패했습니다.">
-              {safeAppErrorMessage(validationError, "검증을 실행하지 못했습니다.")}
-            </InlineNotice>
-          ) : null}
-          {validation ? (
-            <SectionCard title="검증 결과" headingLevel={3}>
-              <InlineNotice tone={validation.ok ? "success" : "warning"}>
-                {validation.ok ? "모든 구성 요소를 확인했습니다." : "확인되지 않은 구성 요소가 있습니다."}
-              </InlineNotice>
-              <ul className="agents-checklist">
-                {(validation.checks ?? []).map((check, index) => (
-                  <li key={`${check.kind ?? ""}-${index}`} data-ok={String(check.resolved !== false)}>
-                    <span className="agents-checklist-copy">
-                      <strong>{check.label || check.ref || check.kind || "구성 요소"}</strong>
-                      <small>
-                        {check.kind ?? "—"}
-                        {check.detail ? ` · ${check.detail}` : ""}
-                      </small>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              {(validation.warnings ?? []).length > 0 ? (
-                <InlineNotice tone="warning" title="경고">
-                  {(validation.warnings ?? []).join(" · ")}
-                </InlineNotice>
-              ) : null}
-              {(validation.allowed_models ?? []).length > 0 ? (
-                <p>허용 모델: {(validation.allowed_models ?? []).join(", ")}</p>
-              ) : null}
-            </SectionCard>
-          ) : null}
-
-          {runError ? (
-            <InlineNotice tone="danger" title="실행 계획을 만들지 못했습니다.">
-              {safeAppErrorMessage(runError, "실행 계획을 만들지 못했습니다.")}
-            </InlineNotice>
-          ) : null}
-          {runPlan ? (
-            <SectionCard title="실행 계획" headingLevel={3} description={runPlan.note ?? undefined}>
-              <KeyValueList
-                columns={3}
-                items={[
-                  { label: "실행 ID", value: runPlan.run_id, mono: true },
-                  { label: "상태", value: runPlan.status },
-                  { label: "단계", value: formatNumber(runPlan.plan?.length ?? 0) },
-                ]}
-              />
-              <ul className="agents-checklist">
-                {(runPlan.plan ?? []).map((step, index) => (
-                  <li key={`${step.kind ?? ""}-${index}`} data-ok={String(step.resolved !== false)}>
-                    <span className="agents-checklist-copy">
-                      <strong>
-                        {index + 1}. {step.label || step.ref || step.kind || "단계"}
-                      </strong>
-                      <small>
-                        {step.action ?? "—"}
-                        {step.endpoint ? ` · ${step.endpoint}` : ""}
-                        {step.hint ? ` · ${step.hint}` : ""}
-                      </small>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </SectionCard>
-          ) : null}
+          <AppInspectionPanel app={app} disabled={permissionOpen} />
 
           {showVersions ? (
             <SectionCard title="버전 이력" headingLevel={3}>

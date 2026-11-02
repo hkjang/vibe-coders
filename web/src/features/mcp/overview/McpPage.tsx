@@ -1,5 +1,7 @@
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { lazy, Suspense } from "react";
+import { LoadingState } from "@/shared/components/state/PageStates";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import "@/features/mcp/mcp.css";
@@ -14,7 +16,8 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Tabs, TabPanel } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 
-const tabIds = ["overview", "upstreams", "tools", "policy", "requests"] as const;
+const McpTopologyTab = lazy(() => import("./McpTopologyTab"));
+const tabIds = ["overview", "upstreams", "tools", "policy", "requests", "topology"] as const;
 type McpTabId = (typeof tabIds)[number];
 
 const tabItems: ReadonlyArray<{ id: McpTabId; label: string }> = [
@@ -23,6 +26,7 @@ const tabItems: ReadonlyArray<{ id: McpTabId; label: string }> = [
   { id: "tools", label: "도구" },
   { id: "policy", label: "정책" },
   { id: "requests", label: "요청 로그" },
+  { id: "topology", label: "연결 구조" },
 ];
 
 export const mcpWriteScope = "mcp:admin";
@@ -62,6 +66,11 @@ export function McpPage(): React.JSX.Element {
         {tab === "tools" ? <McpToolsTab canWrite={canWrite} /> : null}
         {tab === "policy" ? <McpPolicyTab canWrite={canWrite} /> : null}
         {tab === "requests" ? <McpRequestsTab /> : null}
+        {tab === "topology" ? (
+          <Suspense fallback={<LoadingState />}>
+            <McpTopologyTab />
+          </Suspense>
+        ) : null}
       </TabPanel>
     </div>
   );

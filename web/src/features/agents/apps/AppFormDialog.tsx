@@ -1,19 +1,20 @@
-import { useMutation } from "@tanstack/react-query";
 import { useEffect, type RefObject } from "react";
+import { useAppOperationAccess } from "./app-scope";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { AppDefinitionReview } from "./AppDefinitionReview";
+import { AppOnboardingReview } from "./AppOnboardingReview";
+import { useAppDefinitionReview } from "./use-app-definition-review";
+import { Checkbox } from "@/shared/components/ui/Checkbox";
 
 import {
   appComponentsExample,
   appFormDefaults,
   appFormSchema,
-  appOnboardingBody,
   appStatusOptions,
   type AppFormInput,
   type AppFormOutput,
 } from "@/features/agents/apps/app-form";
-import { OnboardingChecklist } from "@/features/agents/apps/OnboardingChecklist";
-import { apiClient } from "@/shared/api/client";
 import type { WorkApp } from "@/shared/api/domains/agents.schemas";
-import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
@@ -22,7 +23,6 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
-import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 interface AppFormDialogProps {
   app?: WorkApp;
@@ -41,35 +41,37 @@ export function AppFormDialog({
   owner,
   returnFocusRef,
 }: AppFormDialogProps): React.JSX.Element {
+  const access = useAppOperationAccess();
+  const auth = useAuth();
   const form = useZodForm<AppFormInput, AppFormOutput>(appFormSchema, appFormDefaults(app));
+  const review = useAppDefinitionReview(form);
   const { reset } = form;
   useEffect(() => {
     if (open) reset(appFormDefaults(app));
   }, [app, open, reset]);
   const errors = form.formState.errors;
 
-  const onboarding = useMutation({
-    mutationFn: (values: AppFormOutput) =>
-      apiClient.request(endpoints.domains.agents.apps.onboardingCheck, {
-        body: appOnboardingBody(values, app?.owner ?? owner),
-        routeId: "agents.apps",
-      }),
-  });
-
   return (
     <FormDialog
       description="AI 업무 앱의 기본 정보와 구성 요소(JSON)를 입력합니다. 발행 전에 온보딩 준비도를 확인할 수 있습니다."
       form={form}
-      onOpenChange={(next) => {
-        if (!next) onboarding.reset();
-        onOpenChange(next);
+      onOpenChange={onOpenChange}
+      onSubmit={async (values) => {
+        review.assertReviewed(values);
+        access.assertCurrent();
+        await onSubmit(values);
       }}
-      onSubmit={onSubmit}
       open={open}
       returnFocusRef={returnFocusRef}
       submitLabel={app ? "수정 저장" : "앱 만들기"}
+      submitDisabled={!access.allowed || !review.confirmed}
+      scrollBody
+      scrollHint="검토 내용은 위아래로 스크롤해 확인할 수 있습니다."
       title={app ? "AI 업무 앱 수정" : "새 AI 업무 앱"}
     >
+      {!access.allowed ? (
+        <InlineNotice tone="warning">{access.reason} 초안은 유지됩니다.</InlineNotice>
+      ) : null}
       <FormField label="제목" required error={errors.title?.message}>
         {(control) => <Input {...control} {...form.register("title")} />}
       </FormField>
@@ -114,33 +116,24 @@ export function AppFormDialog({
         >
           예시 채우기
         </Button>
-        <Button
-          size="small"
-          disabled={onboarding.isPending}
-          onClick={() => {
-            void form.handleSubmit((values) => {
-              onboarding.mutate(values);
-            })();
-          }}
-        >
-          {onboarding.isPending ? "확인 중" : "온보딩 준비도 확인"}
+        <Button size="small" onClick={() => void review.review()}>
+          변경 내용 검토
         </Button>
       </div>
-      {onboarding.isError ? (
-        <InlineNotice tone="danger" title="준비도를 확인하지 못했습니다.">
-          {safeAppErrorMessage(onboarding.error, "준비도를 확인하지 못했습니다.")}
-        </InlineNotice>
-      ) : null}
-      {onboarding.data ? (
+      {review.values ? (
         <>
-          <InlineNotice tone={onboarding.data.ready ? "success" : "warning"}>
-            {onboarding.data.ready
-              ? "필수 항목을 모두 충족했습니다. 발행할 수 있습니다."
-              : "필수 항목이 충족되지 않아 발행이 차단됩니다."}
-          </InlineNotice>
-          <OnboardingChecklist checks={onboarding.data.checks ?? []} label="온보딩 준비도 점검 결과" />
+          <AppDefinitionReview app={app} values={review.values} prefixes={auth.credentialPrefixes} />
+          <Checkbox
+            checked={review.confirmed}
+            onChange={(event) => review.confirm(event.currentTarget.checked)}
+            label="변경 내용과 적용 범위를 확인했습니다."
+            disabled={!access.allowed}
+          />
         </>
-      ) : null}
+      ) : (
+        <p role="status">저장 전에 변경 내용을 검토하고 적용 범위를 확인하세요.</p>
+      )}
+      <AppOnboardingReview form={form} owner={app?.owner ?? owner} />
     </FormDialog>
   );
 }
