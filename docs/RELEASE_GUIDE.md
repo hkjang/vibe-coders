@@ -4,9 +4,13 @@ AI 코딩 프록시 게이트웨이의 빌드·태깅·GitHub 릴리즈·오프�
 
 현재 일반 명령 예시는 게시된 `v0.86.40`과 그 직전 릴리즈 `v0.86.39`의 절차를 따릅니다.
 이 예시로 게시된 태그를 다시 만들거나 후보 소스를 이전 버전으로 포장하지 마세요.
-최신 확인 출고는 [`v0.86.52`](https://github.com/hkjang/vibe-coders/releases/tag/v0.86.52)입니다.
-정확한 메인 CI·태그·최종 이미지와 공개 파일 검증을 마쳤습니다. 후보 버전 파일 변경만으로
-게시 완료를 판단하지 않으며 이미 게시된 태그를 다시 만들지 않습니다.
+최신 공개 릴리스는 [`v0.86.60`](https://github.com/hkjang/vibe-coders/releases/tag/v0.86.60)입니다.
+`v0.86.61`은 PR #91로 메인에 병합됐지만 문서 배포가 대기 중이며 아직 게시하지 않았습니다.
+2026-10-26 재검사에서 Go 표준 라이브러리와 프런트엔드 의존성 보안 게이트가 실패해
+Go 1.26.10 및 Vite·Zod·Undici·Vitest 수정 버전을 별도 보완 후보로 검증하고 있습니다.
+이전 소스의 CI 통과만으로 출고하지 않으며 보안 보완 후 실제 병합 소스의 전체 출고 검사를
+다시 통과해야 합니다. 후보 버전 파일 변경만으로 게시 완료를 판단하지 않으며 이미 게시된
+태그를 다시 만들지 않습니다. 현재 검증 근거는 [인수 검증표](APP_UI_ACCEPTANCE.md)를 확인하세요.
 
 `v0.86.46`의 LLM 조회 격리·초안 복구 보완은 PR #76·메인 `d653b94e`의 CI·정식 태그 이미지·
 공개 7종 검증을 마쳤습니다. 후속 v47도 두 UI 변경 호출 지점의 현재 권한 확인·401 자동 재전송
@@ -814,7 +818,7 @@ pwsh -File scripts/release.ps1 -Version v0.86.40
 
 | 단계 | 설명 |
 |------|------|
-| **[1/5] docker build** | Node 24+pnpm frozen → Go 1.26.9 embed → distroless nonroot 3-stage 이미지 생성 |
+| **[1/5] docker build** | Node 24+pnpm frozen → Go 1.26.10 embed → distroless nonroot 3-stage 이미지 생성 |
 | **[verify] container smoke** | `/admin`, `/app` 308/deep link, hashed asset cache, `/auth/me` build version, root 소유 볼륨의 진단·`repair-data-dir` 복구·재기동 검증 |
 | **[verify] image CVE** | Grype 0.117.0으로 최종 이미지의 High·Critical 취약점 차단 |
 | **[2/5] docker save** | OCI tar 파일 추출 |
