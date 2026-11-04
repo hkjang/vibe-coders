@@ -25,9 +25,11 @@ import (
 //  3. Restart the container with GATEWAY_SECRET=<new_secret> so the next
 //     process startup also builds the correct cipher from the env variable.
 //
-// The operation is atomic at the DB layer (single transaction) and the cipher
-// pointer is swapped only after a successful commit, so no request window sees
-// a half-rotated state.
+// The database update is one transaction; the in-process cipher pointer is
+// swapped after commit. Operators must drain other requests and secret writers
+// and stop other gateway instances before rotation. secretsMu serializes only
+// rotation calls on this Server; it does not make the DB/cipher switch atomic
+// with other requests, background work, or processes.
 func (s *Server) handleSecretsRotate(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")

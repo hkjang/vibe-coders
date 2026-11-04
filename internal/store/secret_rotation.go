@@ -2,18 +2,22 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
 // RotateEncryptedColumns re-encrypts every secret column in the database from
 // the old cipher to a new cipher. All updates run inside a single transaction
 // so the rotation is all-or-nothing. Returns a per-table count of rotated rows.
+// Callers must quiesce other secret readers/writers for the database update and
+// cipher switch; this transaction does not coordinate gateway instances.
 //
 // Tables covered:
 //   - provider_configs.encrypted_api_key
 //   - mcp_upstreams.encrypted_auth
 //   - text2sql_exec_connections.encrypted_dsn
 //   - admin_settings.value_json (only rows where is_secret=1)
+//   - sso_provider_config.client_secret_enc
 func (s *SQLStore) RotateEncryptedColumns(
 	ctx context.Context,
 	decrypt func(string) (string, error),
@@ -156,20 +160,70 @@ func (s *SQLStore) RotateEncryptedColumns(
 			return nil, err
 		}
 		for _, item := range items {
-			plain, err := decrypt(item.enc)
+			// Settings written by the admin API contain a JSON string. Older
+			// rows may contain the ciphertext directly; preserve either format.
+			ciphertext := item.enc
+			var decoded *string
+			jsonString := json.Unmarshal([]byte(item.enc), &decoded) == nil && decoded != nil
+			if jsonString {
+				ciphertext = *decoded
+			}
+			plain, err := decrypt(ciphertext)
 			if err != nil {
-				// Non-secret rows may slip through the is_secret=1 filter if value is plain JSON —
-				// skip rows that fail decryption rather than aborting the whole rotation.
-				continue
+				return nil, fmt.Errorf("admin_settings %q: decrypt: %w", item.key, err)
 			}
 			newEnc, err := encrypt(plain)
 			if err != nil {
 				return nil, fmt.Errorf("admin_settings %q: encrypt: %w", item.key, err)
 			}
-			if _, err := tx.ExecContext(ctx, s.bind(`UPDATE admin_settings SET value_json=? WHERE key=?`), newEnc, item.key); err != nil {
+			if jsonString {
+				encoded, err := json.Marshal(newEnc)
+				if err != nil {
+					return nil, fmt.Errorf("admin_settings %q: encode: %w", item.key, err)
+				}
+				newEnc = string(encoded)
+			}
+			if _, err := tx.ExecContext(ctx, s.bind(`UPDATE admin_settings SET value_json=?, version=version+1 WHERE key=?`), newEnc, item.key); err != nil {
 				return nil, fmt.Errorf("admin_settings %q: update: %w", item.key, err)
 			}
 			counts["admin_settings"]++
+		}
+	}
+
+	// SSO secrets share the gateway cipher. Bump the configuration version so
+	// an editor that read the old ciphertext cannot restore it after rotation.
+	{
+		rows, err := tx.QueryContext(ctx, `SELECT provider, client_secret_enc FROM sso_provider_config WHERE client_secret_enc != ''`)
+		if err != nil {
+			return nil, fmt.Errorf("sso_provider_config select: %w", err)
+		}
+		type row struct{ provider, enc string }
+		var items []row
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.provider, &r.enc); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			items = append(items, r)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			plain, err := decrypt(item.enc)
+			if err != nil {
+				return nil, fmt.Errorf("sso_provider_config %q: decrypt: %w", item.provider, err)
+			}
+			newEnc, err := encrypt(plain)
+			if err != nil {
+				return nil, fmt.Errorf("sso_provider_config %q: encrypt: %w", item.provider, err)
+			}
+			if _, err := tx.ExecContext(ctx, s.bind(`UPDATE sso_provider_config SET client_secret_enc=?, version=version+1 WHERE provider=?`), newEnc, item.provider); err != nil {
+				return nil, fmt.Errorf("sso_provider_config %q: update: %w", item.provider, err)
+			}
+			counts["sso_provider_config"]++
 		}
 	}
 
