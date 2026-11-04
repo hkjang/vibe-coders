@@ -9,13 +9,130 @@
             },
             "type": "array"
           },
+          "edit_review_supported": {
+            "type": "boolean"
+          },
           "revoke_review_supported": {
             "type": "boolean"
           }
         },
         "required": [
           "api_keys",
-          "revoke_review_supported"
+          "revoke_review_supported",
+          "edit_review_supported"
+        ],
+        "type": "object"
+      },
+      "AdminKeyEditReview": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "description": "Exact catalog snapshot revision.",
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Trimmed nonblank audit reason.",
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "expected_revision"
+        ],
+        "type": "object"
+      },
+      "AdminKeyLegacyUpdateRequest": {
+        "additionalProperties": true,
+        "not": {
+          "required": [
+            "review"
+          ],
+          "type": "object"
+        },
+        "nullable": true,
+        "properties": {
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "owner": {
+            "nullable": true,
+            "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/AdminKeyEditReview"
+          },
+          "role": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "disabled",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "team": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AdminKeyReviewedUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "owner": {
+            "nullable": true,
+            "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/AdminKeyEditReview"
+          },
+          "role": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "disabled",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "team": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "review"
         ],
         "type": "object"
       },
@@ -50,6 +167,55 @@
             "type": "object"
           }
         ]
+      },
+      "AdminKeyUpdateRequest": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AdminKeyLegacyUpdateRequest"
+          },
+          {
+            "$ref": "#/components/schemas/AdminKeyReviewedUpdateRequest"
+          }
+        ]
+      },
+      "AdminKeyUpdateResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "owner",
+          "team",
+          "role",
+          "scopes",
+          "status"
+        ],
+        "type": "object"
       },
       "AdminModel": {
         "additionalProperties": false,
@@ -1178,6 +1344,187 @@
         ],
         "type": "object"
       },
+      "BillingBudgetStatus": {
+        "properties": {
+          "budget": {
+            "properties": {
+              "created_at": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "monthly_krw": {
+                "type": "number"
+              },
+              "note": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "scope_value": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "burn_ratio": {
+            "type": "number"
+          },
+          "days_elapsed": {
+            "type": "number"
+          },
+          "days_in_month": {
+            "type": "number"
+          },
+          "exhaustion_date": {
+            "type": "string"
+          },
+          "on_track": {
+            "type": "boolean"
+          },
+          "projected_krw": {
+            "type": "number"
+          },
+          "projected_ratio": {
+            "type": "number"
+          },
+          "spent_krw": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "BillingCostRow": {
+        "properties": {
+          "cost_krw": {
+            "type": "number"
+          },
+          "error_requests": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "BillingDashboardResponse": {
+        "properties": {
+          "budgets": {
+            "items": {
+              "$ref": "#/components/schemas/BillingBudgetStatus"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "by_cost_center": {
+            "items": {
+              "$ref": "#/components/schemas/BillingCostRow"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/BillingCostRow"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "estimated_savings_krw": {
+            "type": "number"
+          },
+          "migration_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/BillingMigrationCandidate"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "total_cost_krw": {
+            "type": "number"
+          },
+          "total_requests": {
+            "type": "integer"
+          },
+          "totals_scope": {
+            "enum": [
+              "all_retained_requests"
+            ],
+            "type": "string"
+          },
+          "unavailable_sections": {
+            "items": {
+              "enum": [
+                "by_cost_center",
+                "by_model",
+                "budgets",
+                "migration_candidates"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "since",
+          "total_cost_krw",
+          "total_requests",
+          "by_cost_center",
+          "by_model",
+          "budgets",
+          "migration_candidates",
+          "estimated_savings_krw"
+        ],
+        "type": "object"
+      },
+      "BillingMigrationCandidate": {
+        "properties": {
+          "current_avg_cost_krw": {
+            "type": "number"
+          },
+          "current_model": {
+            "type": "string"
+          },
+          "current_success_rate": {
+            "type": "number"
+          },
+          "estimated_savings_krw": {
+            "type": "number"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "recommended_avg_cost_krw": {
+            "type": "number"
+          },
+          "recommended_model": {
+            "type": "string"
+          },
+          "recommended_success_rate": {
+            "type": "number"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "task_type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CategoryScore": {
         "additionalProperties": false,
         "properties": {
@@ -1354,6 +1701,127 @@
           "bytes",
           "lines",
           "modified_at"
+        ],
+        "type": "object"
+      },
+      "GatewayMcpInfoResponse": {
+        "properties": {
+          "contracts": {
+            "items": {
+              "properties": {
+                "allowed_roles": {
+                  "type": "string"
+                },
+                "cost_policy": {
+                  "type": "string"
+                },
+                "executes": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "output_schema": {
+                  "type": "string"
+                },
+                "risk_level": {
+                  "type": "string"
+                },
+                "timeout_ms": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "risk_level",
+                "cost_policy",
+                "timeout_ms",
+                "allowed_roles",
+                "executes",
+                "output_schema"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "prompts": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "resources": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "mimeType": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "uri": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "uri",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "inputSchema": {},
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "endpoint",
+          "protocol_version",
+          "note",
+          "tools",
+          "contracts",
+          "resources",
+          "prompts"
         ],
         "type": "object"
       },
@@ -1878,6 +2346,485 @@
         "required": [
           "status",
           "webhook_status"
+        ],
+        "type": "object"
+      },
+      "McpContract": {
+        "properties": {
+          "allowed_roles": {
+            "type": "string"
+          },
+          "cost_policy": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "output_schema": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "risk_level": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "namespace",
+          "name",
+          "title",
+          "description",
+          "input_schema",
+          "output_schema",
+          "risk_level",
+          "timeout_ms",
+          "allowed_roles",
+          "cost_policy",
+          "owner",
+          "enabled",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "McpContractDeletedResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "McpContractListResponse": {
+        "properties": {
+          "contracts": {
+            "items": {
+              "$ref": "#/components/schemas/McpContract"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "contracts"
+        ],
+        "type": "object"
+      },
+      "McpContractSavedResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "ok"
+        ],
+        "type": "object"
+      },
+      "McpContractValidateRequest": {
+        "properties": {
+          "contract_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "McpContractValidationResponse": {
+        "properties": {
+          "checked": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "drift_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "missing_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "properties": {
+                "contract_id": {
+                  "type": "string"
+                },
+                "declared_only": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "live_only": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "risk_level": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "contract_id",
+                "namespace",
+                "name",
+                "risk_level",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "checked",
+          "drift_count",
+          "missing_count",
+          "note",
+          "results"
+        ],
+        "type": "object"
+      },
+      "McpContractWriteRequest": {
+        "properties": {
+          "allowed_roles": {
+            "type": "string"
+          },
+          "cost_policy": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "output_schema": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "risk_level": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "McpRouteExplainRequest": {
+        "properties": {
+          "api_key_id": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "McpRouteExplainResponse": {
+        "properties": {
+          "final": {
+            "properties": {
+              "decision": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "decision",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "input": {
+            "properties": {
+              "method": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "uri": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "name",
+              "uri"
+            ],
+            "type": "object"
+          },
+          "policy": {
+            "properties": {
+              "server_policy": {
+                "type": "string"
+              },
+              "tool_risk_action": {
+                "type": "string"
+              },
+              "tool_risk_configured": {
+                "type": "boolean"
+              },
+              "tool_risk_level": {
+                "type": "string"
+              },
+              "tool_risk_note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "server_policy",
+              "tool_risk_level",
+              "tool_risk_action",
+              "tool_risk_configured",
+              "tool_risk_note"
+            ],
+            "type": "object"
+          },
+          "route": {
+            "properties": {
+              "found": {
+                "type": "boolean"
+              },
+              "lookup": {
+                "type": "string"
+              },
+              "target_method": {
+                "type": "string"
+              },
+              "target_name": {
+                "type": "string"
+              },
+              "upstream_id": {
+                "type": "string"
+              },
+              "upstream_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "found"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "input",
+          "route",
+          "final"
+        ],
+        "type": "object"
+      },
+      "McpTestRequest": {
+        "properties": {
+          "arguments": {},
+          "method": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "upstream_id": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "McpTestResponse": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "method": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "response": {},
+          "response_preview": {
+            "type": "string"
+          },
+          "upstream_id": {
+            "type": "string"
+          },
+          "upstream_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream_id",
+          "upstream_name",
+          "method",
+          "latency_ms",
+          "ok"
+        ],
+        "type": "object"
+      },
+      "McpTopologyEdge": {
+        "properties": {
+          "from": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "to": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "label"
+        ],
+        "type": "object"
+      },
+      "McpTopologyNode": {
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "McpTopologyResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/McpTopologyEdge"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/McpTopologyNode"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
         ],
         "type": "object"
       },
@@ -4629,11 +5576,12 @@
                 "workflow",
                 "app",
                 "skill",
-                "mcp_upstream"
+                "mcp_upstream",
+                "policy"
               ],
               "type": "string"
             },
-            "maxItems": 5,
+            "maxItems": 6,
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
@@ -4672,7 +5620,8 @@
                           "workflow",
                           "app",
                           "skill",
-                          "mcp_upstream"
+                          "mcp_upstream",
+                          "policy"
                         ],
                         "type": "string"
                       },
@@ -4698,7 +5647,8 @@
                     "workflow",
                     "app",
                     "skill",
-                    "mcp_upstream"
+                    "mcp_upstream",
+                    "policy"
                   ],
                   "type": "string"
                 },
@@ -4722,7 +5672,7 @@
               ],
               "type": "object"
             },
-            "maxItems": 5,
+            "maxItems": 6,
             "type": "array"
           },
           "request_id": {
@@ -6568,7 +7518,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.61"
+    "version": "v0.86.62"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -7212,6 +8162,7 @@
         ]
       },
       "patch": {
+        "description": "Partially updates key metadata or explicit scopes. Omitted or null fields keep their existing values; scopes=[] clears grants. Optional review requires both reason and expected_revision. All PATCH decoding is bounded to 8192 input bytes before buffering the first JSON value, including legacy calls; oversized first values are rejected. Legacy field and first-value semantics remain without review (extensions and trailing values are ignored). Reviewed requests additionally require a complete body of at most 8192 bytes and reject stale snapshots, duplicate/unknown fields and no-op updates. Current role/scope/team authority is enforced; the authorized row snapshot and edit/audit commit atomically. Reviewed edits bind replacement/grace lineage and recheck it after acquiring the key row lock. Catalog edit_review_supported identifies support on the responding server; upgrade all pods before reviewed writes and reopen old review dialogs. This is snapshot comparison, not an ever-increasing revision counter.",
         "operationId": "patch__admin_api_keys_id",
         "parameters": [
           {
@@ -7223,9 +8174,106 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminKeyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminKeyUpdateResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid edit or review"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Insufficient role, scope or team authority"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Key not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Key changed since review or authorization"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Update not confirmed; inspect current key and audit"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review authority unavailable"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -10073,10 +11121,68 @@
     },
     "/admin/gateway-mcp/info": {
       "get": {
+        "description": "Existing built-in gateway MCP information requiring admin:read. Published implementation contracts are distinct from stored registry declarations. This is not an upstream health check.",
         "operationId": "get__admin_gateway_mcp_info",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayMcpInfoResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -10919,10 +12025,79 @@
     },
     "/admin/mcp/contracts": {
       "delete": {
+        "description": "Existing MCP declaration registry. GET requires observability:read; POST and DELETE require mcp:admin when authentication is enabled. Editing replaces all fields by ID, including both schema strings; omission does not preserve a schema. Namespace/name are not a unique key. No revision/CAS or transactional audit guarantee. Declarations do not reconfigure the actual gateway tools.",
         "operationId": "delete__admin_mcp_contracts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpContractDeletedResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -10936,10 +12111,85 @@
         ]
       },
       "get": {
+        "description": "Existing MCP declaration registry. GET requires observability:read; POST and DELETE require mcp:admin when authentication is enabled. Editing replaces all fields by ID, including both schema strings; omission does not preserve a schema. Namespace/name are not a unique key. No revision/CAS or transactional audit guarantee. Declarations do not reconfigure the actual gateway tools.",
         "operationId": "get__admin_mcp_contracts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "namespace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exactly 1 selects enabled declarations.",
+            "in": "query",
+            "name": "enabled",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpContractListResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -10953,10 +12203,78 @@
         ]
       },
       "post": {
+        "description": "Existing MCP declaration registry. GET requires observability:read; POST and DELETE require mcp:admin when authentication is enabled. Editing replaces all fields by ID, including both schema strings; omission does not preserve a schema. Namespace/name are not a unique key. No revision/CAS or transactional audit guarantee. Declarations do not reconfigure the actual gateway tools.",
         "operationId": "post__admin_mcp_contracts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpContractWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpContractSavedResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -10972,10 +12290,88 @@
     },
     "/admin/mcp/contracts/validate": {
       "post": {
+        "description": "Read-only local comparison requiring mcp:admin. Includes disabled declarations. Compares only top-level input properties names against built-in gateway tools, not nested types, output, permissions, cost, timeout or an upstream execution. Non-gateway namespaces are not_checkable. Malformed/empty JSON body currently falls back to all contracts. No writes or external calls.",
         "operationId": "post__admin_mcp_contracts_validate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpContractValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpContractValidationResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Explicit contract ID not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -11289,10 +12685,68 @@
     },
     "/admin/mcp/route/explain": {
       "post": {
+        "description": "Existing administrator MCP operation requiring mcp:admin when authentication is enabled, including route explanation. Explanation uses discovery and current policy reads, not an atomic execution reservation. Test calls directly invoke an upstream; they do not enforce the normal gateway policy/approval pipeline, cost caps or per-operation audit. A test response with ok=false is still HTTP 200, and transport failure does not prove an external action was not executed.",
         "operationId": "post__admin_mcp_route_explain",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpRouteExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpRouteExplainResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -11346,10 +12800,78 @@
     },
     "/admin/mcp/test": {
       "post": {
+        "description": "Existing administrator MCP operation requiring mcp:admin when authentication is enabled, including route explanation. Explanation uses discovery and current policy reads, not an atomic execution reservation. Test calls directly invoke an upstream; they do not enforce the normal gateway policy/approval pipeline, cost caps or per-operation audit. A test response with ok=false is still HTTP 200, and transport failure does not prove an external action was not executed.",
         "operationId": "post__admin_mcp_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTestResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Upstream missing or disabled"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid body, authentication/scope, or method"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -11401,10 +12923,58 @@
     },
     "/admin/mcp/topology": {
       "get": {
+        "description": "Read-only MCP topology requiring observability:read when authentication is enabled. Nodes describe the gateway, configured upstreams and cached discovered routes, not agent relationships or live calls. Configuration, discovery and current policy decisions are separate reads, not an atomic snapshot. Enabled/disabled is configuration, not health. Edges use from/to node IDs; cache/config timing can leave missing endpoints. Consumers must not silently invent endpoints or merge duplicate IDs. No server pagination. A configuration-read failure returns 503, not an empty topology.",
         "operationId": "get__admin_mcp_topology",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTopologyResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid authentication or missing observability:read scope (existing admin authorization behavior)"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "GET required"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "MCP topology configuration unavailable"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -16643,7 +18213,7 @@
     },
     "/admin/resource-search": {
       "post": {
-        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication, admin:read and available non-legacy feature access per kind (same sources as existing admin lists). MCP upstream search additionally requires observability:read (the existing MCP list permission), exposes only canonical slug IDs and safe display names, and never fetches discovery data. No admin:write required. Query is trimmed, 2–128 Unicode characters, literal name substring (ASCII case-insensitive; non-ASCII case behavior follows database collation). Five supported configuration kinds: provider, workflow, app, skill and mcp_upstream; no model/upstream calls or business execution. At most ten metadata rows per kind ordered by stored title then ID. Unsafe or oversized IDs/titles are omitted for every role. Definitions, instructions, credentials, URLs and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
+        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies; all other kinds require admin:read. MCP upstream search additionally requires observability:read, exposes only canonical slug IDs and safe display names, and never fetches discovery data. A security-only reader must request the policy kind; other groups remain forbidden. No admin:write required. Query is trimmed, 2–128 Unicode characters, literal name substring (ASCII case-insensitive; non-ASCII case behavior follows database collation). Six supported configuration kinds: provider, workflow, app, skill, mcp_upstream and policy; no model/upstream calls or business execution. At most ten metadata rows per kind ordered by stored title then ID. Unsafe or oversized IDs/titles are omitted for every role. Definitions, policy conditions/actions, instructions, credentials, URLs and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
         "operationId": "post__admin_resource_search",
         "requestBody": {
           "content": {
@@ -21859,10 +23429,69 @@
     },
     "/billing/dashboard": {
       "get": {
+        "description": "Read-only organization cost view requiring admin:read when authentication is enabled. Totals use the existing exact aggregate over retained request_logs since the requested window, including models outside the top-20 lists and requests without token usage. Retention removes records from these totals; this is not a complete billing ledger. Reads are separate, not an atomic snapshot. Cost-center and model lists each return at most 20 rows ordered by cost. Budgets always describe the current month, independently of window. Migration advice considers the 10 busiest prompt clusters with at least 20 requests; estimated savings sum only returned candidates, not guaranteed or organization-wide savings. A total-read failure returns 503 without data. Optional-section failures retain healthy sections, discard partial failed rows, and name failed fields in unavailable_sections; failed lists are null and failed migration savings are zero, not a confirmed zero. New servers emit totals_scope=all_retained_requests; its absence identifies older top-model-only totals.",
         "operationId": "get__billing_dashboard",
+        "parameters": [
+          {
+            "description": "Existing parseWindow rules: 1h, 6h, 24h/1d, 7d, 30d or a Go duration; omitted/invalid defaults to 30 days. No upper time bound or pagination.",
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "default": "30d",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingDashboardResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "admin:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "GET required"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "billing_dashboard_unavailable: totals cannot be read; no partial data or storage error details returned"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

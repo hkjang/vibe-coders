@@ -180,8 +180,12 @@ export function RequestDetailDialog({
           timeZone={timeZone}
         />
       ) : null}
-      {request?.request_filterable === true && request.request_id ? (
-        <RequestComparePanel requestId={request.request_id} />
+      {open && flowReady && request?.request_filterable === true && request.request_id ? (
+        <RequestComparePanel
+          key={JSON.stringify([request.request_ref, request.created_at, flowGeneration, flowSelection])}
+          request={request}
+          assertSelected={assertFlowSelection}
+        />
       ) : null}
     </Dialog>
   );

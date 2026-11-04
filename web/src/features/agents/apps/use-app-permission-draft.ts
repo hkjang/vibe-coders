@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { useAppOperationAccess, useAppScope } from "./app-scope";
+import { featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 
 import {
   appPermissionKey,
@@ -26,6 +28,8 @@ export interface AppPermissionDraft {
 
 /** A sheet-local bridge protects parent actions as well as the common form's own close path. */
 export function useAppPermissionDraft(canWrite: boolean) {
+  const access = useAppOperationAccess();
+  const owner = useAppScope();
   const coordinator = useUnsavedChanges();
   if (!coordinator) throw new Error("App permissions require an unsaved changes coordinator");
   const client = useQueryClient();
@@ -124,6 +128,7 @@ export function useAppPermissionDraft(canWrite: boolean) {
     coordinator.requestClose(guardId);
   };
   const submit = async (draft: AppPermissionDraft, values: AppPermissionValues): Promise<void> => {
+    access.assertCurrent();
     const isCurrent = (): boolean =>
       active.current?.instance === draft.instance && draft.epoch === tokenStore.getSessionEpoch();
     if (!isCurrent() || !writable.current) {
@@ -142,16 +147,20 @@ export function useAppPermissionDraft(canWrite: boolean) {
       if (draft.kind === "grant")
         await apiClient.request(
           withPathParams(endpoints.domains.agents.apps.grantPermission, { id: draft.app.id }),
-          { body: { ...tuple }, routeId: "agents.apps" },
+          { body: { ...tuple }, routeId: "agents.apps", retryUnauthorized: false },
         );
       else
         await apiClient.request(
           withPathParams(endpoints.domains.agents.apps.revokePermission, { id: draft.app.id }),
-          { query: { ...tuple }, routeId: "agents.apps" },
+          { query: { ...tuple }, routeId: "agents.apps", retryUnauthorized: false },
         );
       if (!isCurrent()) return;
-      await client.invalidateQueries({ queryKey: appPermissionKey(draft.app.id) });
-      if (isCurrent())
+      access.assertCurrent();
+      if (!writable.current) throw new AppError("앱 변경 권한이 변경되었습니다.", { kind: "permission" });
+      await client.invalidateQueries({ queryKey: featureOwnedKey(appPermissionKey(draft.app.id), owner) });
+      access.assertCurrent();
+      if (!writable.current) throw new AppError("앱 변경 권한이 변경되었습니다.", { kind: "permission" });
+      if (isCurrent() && writable.current)
         toast.success(
           draft.kind === "grant" ? "추가 접근 권한을 저장했습니다." : "추가 접근 권한을 회수했습니다.",
         );

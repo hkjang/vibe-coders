@@ -1,3 +1,7 @@
+.finops-budget-link {
+  text-decoration: underline;
+}
+
 .finops-bars {
   display: flex;
   flex-direction: column;

@@ -8,6 +8,7 @@ import type { Policy } from "@/shared/api/domains/governance";
 import { AppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import type * as ButtonModule from "@/shared/components/ui/Button";
+import type * as ConfirmModule from "@/shared/components/ui/ConfirmDialog";
 import { mockApi, type MockedRequestOptions } from "@/test/api";
 import { renderScreen } from "@/test/render";
 import { PolicyEngineSection } from "./PolicyEngineSection";
@@ -23,6 +24,8 @@ const runtime = vi.hoisted(() => ({
 const captured = vi.hoisted(() => ({
   save: undefined as ButtonModule.ButtonProps["onClick"],
   open: undefined as ButtonModule.ButtonProps["onClick"],
+  run: undefined as ButtonModule.ButtonProps["onClick"],
+  remove: undefined as Parameters<typeof ConfirmModule.ConfirmDialog>[0]["onConfirm"] | undefined,
 }));
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
@@ -54,7 +57,19 @@ vi.mock("@/shared/components/ui/Button", async (original) => {
     Button: (props: ButtonModule.ButtonProps) => {
       if (props.children === "검토한 내용 저장") captured.save = props.onClick;
       if (props.children === "초안 편집") captured.open = props.onClick;
+      if (Array.isArray(props.children) && props.children.includes(" 전체 회귀 실행"))
+        captured.run = props.onClick;
       return <module.Button {...props} />;
+    },
+  };
+});
+vi.mock("@/shared/components/ui/ConfirmDialog", async (original) => {
+  const module = await original<typeof ConfirmModule>();
+  return {
+    ...module,
+    ConfirmDialog: (props: Parameters<typeof module.ConfirmDialog>[0]) => {
+      if (props.open && props.title === "회귀 시나리오를 삭제할까요?") captured.remove = props.onConfirm;
+      return <module.ConfirmDialog {...props} />;
     },
   };
 });
@@ -109,26 +124,42 @@ beforeEach(() => {
   });
   captured.save = undefined;
   captured.open = undefined;
+  captured.run = undefined;
+  captured.remove = undefined;
   tokenStore.clearAll();
 });
 export async function setupEditor(initial: Policy = structuredClone(policy)) {
-  const response: { rows: Policy[]; list: () => unknown; save: (options: MockedRequestOptions) => unknown } =
-    {
-      rows: [initial],
-      list: () => ({ policies: structuredClone(response.rows) }),
-      save: (options) => {
-        const body = options.body as Policy;
-        const stored = {
-          ...structuredClone(body),
-          rules: body.rules?.map((rule, index) => ({ ...rule, id: rule.id ?? `public_created_${index}` })),
-        };
-        response.rows = [stored];
-        return { policy: stored };
-      },
-    };
+  const response: {
+    rows: Policy[];
+    list: () => unknown;
+    save: (options: MockedRequestOptions) => unknown;
+    cases: () => unknown;
+    saveCase: () => unknown;
+    removeCase: () => unknown;
+    run: () => unknown;
+  } = {
+    rows: [initial],
+    list: () => ({ policies: structuredClone(response.rows) }),
+    cases: () => ({ cases: [] }),
+    saveCase: () => ({ ok: true }),
+    removeCase: () => ({ ok: true }),
+    run: () => ({ passed: 1, failed: 0, results: [] }),
+    save: (options) => {
+      const body = options.body as Policy;
+      const stored = {
+        ...structuredClone(body),
+        rules: body.rules?.map((rule, index) => ({ ...rule, id: rule.id ?? `public_created_${index}` })),
+      };
+      response.rows = [stored];
+      return { policy: stored };
+    },
+  };
   const api = mockApi({
     "GET /admin/policies": () => response.list(),
-    "GET /admin/policies/regression/cases": () => ({ cases: [] }),
+    "GET /admin/policies/regression/cases": () => response.cases(),
+    "POST /admin/policies/regression/cases": () => response.saveCase(),
+    "DELETE /admin/policies/regression/cases": () => response.removeCase(),
+    "POST /admin/policies/regression/run": () => response.run(),
     [savePath]: async (options) => {
       const epoch = tokenStore.getSessionEpoch();
       const result = await response.save(options);
@@ -164,6 +195,17 @@ export async function setupEditor(initial: Policy = structuredClone(policy)) {
     update(change: Partial<typeof runtime>) {
       Object.assign(runtime, change);
       act(() => refresh());
+    },
+    captureRun() {
+      const click = captured.run;
+      if (!click) throw new Error("missing run callback");
+      const node = screen.getByRole("button", { name: "전체 회귀 실행" });
+      return () => click({ currentTarget: node } as MouseEvent<HTMLButtonElement>);
+    },
+    captureDelete() {
+      const submit = captured.remove;
+      if (!submit) throw new Error("missing delete callback");
+      return () => Promise.resolve(submit(""));
     },
     captureSave() {
       const click = captured.save;

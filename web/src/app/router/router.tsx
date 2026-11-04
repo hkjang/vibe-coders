@@ -16,8 +16,8 @@ function featureRoute(feature: MigrationFeature): RouteObject {
   const path = featurePath(feature).replace(/^\//, "");
   const module = featureModule(feature.featureId);
   if (!module) return { path, element: <FeatureRoute feature={feature} /> };
-  const lazy = async (): Promise<{ Component: ComponentType }> => {
-    const Screen = await module.load();
+  const load = (loader: () => Promise<ComponentType>) => async (): Promise<{ Component: ComponentType }> => {
+    const Screen = await loader();
     return {
       Component: () => (
         <FeatureRoute feature={feature}>
@@ -26,12 +26,14 @@ function featureRoute(feature: MigrationFeature): RouteObject {
       ),
     };
   };
+  const lazy = load(module.load);
   // Screens own their sub-paths (tabs, detail segments) and read them with
   // useParams/useLocation, so both the exact path and its descendants resolve here.
   return {
     path,
     children: [
       { index: true, lazy },
+      ...(module.subroutes ?? []).map((screen) => ({ path: screen.path, lazy: load(screen.load) })),
       { path: "*", lazy },
     ],
   };

@@ -16,6 +16,11 @@ export const mcpFeatureModules = defineFeatureModules([
       "tab",
       "tool",
       "upstream",
+      "node",
+      "kind",
+      "decision",
+      "topology_q",
+      "topology_page",
     ],
   },
   {

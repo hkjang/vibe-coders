@@ -20,7 +20,7 @@ describe("독립 실행의 기준·생명주기", () => {
       const old = current.capture();
       current.update({ principal: "usr_public_b" });
       current.response.simulate = () => b.promise;
-      await current.user.click(current.button());
+      await current.user.click(await screen.findByRole("button", { name: / 섀도우 영향 확인$/u }));
       await act(async () =>
         outcome === "success" ? a.resolve(simulationResult) : a.reject(new Error("public old error")),
       );

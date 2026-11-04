@@ -11,6 +11,8 @@ export interface FeatureModule {
   readonly featureId: FeatureId;
   /** Lazy screen import: `() => import("./UsersPage").then((m) => m.UsersPage)`. */
   readonly load: () => Promise<ComponentType>;
+  /** Independent deep-link screens, sharing this feature's permission guard. */
+  readonly subroutes?: readonly { path: string; load: () => Promise<ComponentType> }[];
   /**
    * Query parameter keys this screen (and its sub-paths) may carry in the URL.
    * Any other key is stripped by the route guard before the screen renders.

@@ -7,9 +7,12 @@ import {
   adminIpsSchema,
   adminQuotasSchema,
   adminRolesSchema,
+  roleMatrixSchema,
+  roleAdminSchema,
   adminTeamDetailSchema,
   adminTeamMutationSchema,
   adminTeamsSchema,
+  teamAdministrationSchema,
   adminUserDetailSchema,
   adminUserMutationSchema,
   adminUserReportSchema,
@@ -221,6 +224,7 @@ export interface CreateApiKeyBody {
   expires_at?: string;
 }
 export interface UpdateApiKeyBody {
+  review?: { reason: string; expected_revision: string };
   status?: "active" | "disabled";
   name?: string;
   owner?: string;
@@ -303,6 +307,7 @@ export const accessEndpoints = {
     ),
   },
   teams: {
+    administration: operation<GetAdminTeamsData, unknown>()("GET", "/admin/teams", teamAdministrationSchema),
     list: operation<GetAdminTeamsData, unknown>()("GET", "/admin/teams", adminTeamsSchema),
     create: operation<WithBody<PostAdminTeamsData, CreateTeamBody>, unknown>()(
       "POST",
@@ -393,6 +398,8 @@ export const accessEndpoints = {
   },
   roles: {
     list: operation<GetAdminRolesData, unknown>()("GET", "/admin/roles", adminRolesSchema),
+    matrix: operation<GetAdminRolesData, unknown>()("GET", "/admin/roles", roleMatrixSchema),
+    administration: operation<GetAdminRolesData, unknown>()("GET", "/admin/roles", roleAdminSchema),
     save: operation<WithBody<PostAdminRolesData, SaveRoleBody>, unknown>()(
       "POST",
       "/admin/roles",

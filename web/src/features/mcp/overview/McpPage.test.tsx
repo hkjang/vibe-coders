@@ -236,8 +236,9 @@ describe("McpPage", () => {
     const user = userEvent.setup();
     renderPage("/mcp?tab=policy");
 
-    await user.click(await screen.findByRole("button", { name: "삭제" }));
+    await user.click(await screen.findByRole("button", { name: "GitHub MCP 정책 삭제" }));
     const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/확인 문구/), "GitHub MCP");
     await user.click(within(dialog).getByRole("button", { name: "삭제" }));
 
     await waitFor(() => {
@@ -350,7 +351,7 @@ describe("McpPage", () => {
     await user.selectOptions(within(dialog).getByLabelText("위험 등급*"), "심각");
     await user.selectOptions(within(dialog).getByLabelText("조치*"), "차단");
     await user.type(within(dialog).getByLabelText("메모"), "쓰기 도구");
-    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+    await user.click(within(dialog).getByRole("button", { name: "검토한 변경 저장" }));
 
     await waitFor(() =>
       expect(api.bodies("POST /admin/mcp/tools")).toEqual([
@@ -368,8 +369,8 @@ describe("McpPage", () => {
     });
   });
 
-  it("권한이 없으면 도구 위험 등급 편집을 막는다", async () => {
-    authRuntime.scopes = ["admin:read"];
+  it("변경 권한이 없으면 도구 위험 등급 편집을 막는다", async () => {
+    authRuntime.scopes = ["admin:read", "observability:read"];
     mockApi({ ...baseHandlers, ...toolHandlers });
     renderPage("/mcp?tab=tools");
 

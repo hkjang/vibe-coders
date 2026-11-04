@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useAppRead } from "./app-scope";
 import type { RefObject } from "react";
 
 import { withPathParams } from "@/features/agents/endpoint-path";
@@ -23,7 +23,7 @@ export function AppReceiptDialog({
   returnFocusRef,
   runId,
 }: AppReceiptDialogProps): React.JSX.Element {
-  const receipt = useQuery({
+  const receipt = useAppRead({
     queryKey: ["agents", "apps", "receipt", runId],
     enabled: runId !== "",
     queryFn: ({ signal }) =>

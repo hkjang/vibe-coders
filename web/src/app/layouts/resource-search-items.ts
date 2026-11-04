@@ -18,9 +18,16 @@ export const resourceSearchTargets = {
   app: { featureId: "agents.apps", title: "AI 업무 앱", path: "/agents/apps", parameter: "app" },
   skill: { featureId: "agents.skills", title: "스킬", path: "/agents/skills", parameter: "skill" },
   mcp_upstream: { featureId: "mcp.overview", title: "MCP 서버", path: "/mcp", parameter: "upstream" },
+  policy: {
+    featureId: "governance.policies",
+    title: "정책",
+    path: "/governance/policies/detail",
+    parameter: "policy",
+  },
 } satisfies Record<ResourceKind, { featureId: string; title: string; path: string; parameter: string }>;
 
 export function resourceSearchReadScope(kind: ResourceKind): string {
+  if (kind === "policy") return "security:read";
   return kind === "mcp_upstream" ? "observability:read" : "admin:read";
 }
 
@@ -37,5 +44,6 @@ export function resourceSearchPath(
   // Skills have more than one tab; the detail belongs to the registry tab.
   if (kind === "skill") params.set("tab", "catalog");
   if (kind === "mcp_upstream") params.set("tab", "upstreams");
+  if (kind === "policy") params.set("tab", "safety");
   return `${target.path}?${params}`;
 }

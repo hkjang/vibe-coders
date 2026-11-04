@@ -1,8 +1,9 @@
-import { expect } from "@playwright/test";
+import { expect, type Request } from "@playwright/test";
 
 import {
   accessPath,
   closeSecret,
+  confirmKeyEdit,
   editScopes,
   issueKey,
   keyRow,
@@ -17,7 +18,312 @@ import {
   watchLateAccessReads,
   type IssuedKey,
 } from "./access-fixture";
-import { admin, currentRole, login, reader, sessionIsEmpty, signIn, signOut, test } from "./live-fixture";
+import {
+  admin,
+  currentRole,
+  login,
+  reader,
+  required,
+  sessionIsEmpty,
+  signIn,
+  signOut,
+  test,
+} from "./live-fixture";
+
+test("AUTH-LIVE-030 실제 할당량·예산 생성·수정·중지·삭제와 읽기 권한", async ({ page }) => {
+  const target = "browser-quota-budget-safety";
+  await login(page, admin, "/app/access/users?tab=quotas");
+  await page.getByRole("button", { name: "할당량 추가", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "할당량 추가", exact: true });
+  await dialog.getByRole("textbox", { name: "대상", exact: true }).fill(target);
+  await dialog.getByRole("spinbutton", { name: "토큰 한도", exact: true }).fill("500");
+  const created = page.waitForResponse((value) => matches(value, "POST", "/admin/quotas"));
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  expect((await created).status()).toBe(201);
+  await expect(dialog).toBeHidden();
+  const row = page
+    .getByRole("table", { name: "할당량과 사용량", exact: true })
+    .getByRole("row")
+    .filter({ hasText: target });
+  await row.getByRole("button", { name: "수정", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "할당량 수정", exact: true });
+  await dialog.getByRole("spinbutton", { name: "토큰 한도", exact: true }).fill("900");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(row).toContainText("900");
+  await row.getByRole("button", { name: "중지", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "할당량 중지", exact: true });
+  await dialog.getByRole("button", { name: "중지", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(row.getByRole("button", { name: "사용", exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "삭제", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "할당량 삭제", exact: true });
+  await dialog.getByRole("button", { name: "삭제", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(row).toHaveCount(0);
+  await page.getByRole("button", { name: "예산 추가", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "예산 추가", exact: true });
+  await dialog.getByRole("textbox", { name: "대상", exact: true }).fill(target);
+  await dialog.getByRole("spinbutton", { name: /월 예산/ }).fill("1000");
+  const budgetCreated = page.waitForResponse((value) => matches(value, "POST", "/admin/budgets"));
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  expect((await budgetCreated).status()).toBe(201);
+  await expect(dialog).toBeHidden();
+  const budgetRow = page
+    .getByRole("table", { name: "월 예산 소진 현황", exact: true })
+    .getByRole("row")
+    .filter({ hasText: target });
+  await budgetRow.getByRole("button", { name: "삭제", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "예산 삭제", exact: true });
+  await dialog.getByRole("button", { name: "삭제", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(budgetRow).toHaveCount(0);
+  await signOut(page);
+  await login(page, reader, "/app/access/users?tab=quotas");
+  await expect(page.getByRole("button", { name: "할당량 추가", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "예산 추가", exact: true })).toBeDisabled();
+});
+
+test("AUTH-LIVE-029 실제 사용자 상세·외부 키 등록·읽기 전용 계정 전환", async ({ page }) => {
+  await login(page, admin, "/app/access/users");
+  const row = page
+    .getByRole("table", { name: "프록시 키 사용량", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "브라우저 외부 사용자 키" });
+  await row.getByRole("button", { name: "브라우저 외부 사용자 키 상세 열기", exact: true }).click();
+  const detail = page.getByRole("dialog", { name: "브라우저 외부 사용자 키", exact: true });
+  await expect(detail.getByText("key_browser_external_user", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(detail).toBeHidden();
+  await row.getByRole("button", { name: "관리 키로 등록", exact: true }).click();
+  const confirm = page.getByRole("dialog", { name: "관리 키로 등록", exact: true });
+  const response = page.waitForResponse((value) =>
+    matches(value, "PATCH", "/admin/api-keys/key_browser_external_user"),
+  );
+  await confirm.getByRole("button", { name: "등록", exact: true }).click();
+  expect((await response).status()).toBe(200);
+  await expect(confirm).toBeHidden();
+  await expect(row.getByRole("button", { name: "관리 키로 등록", exact: true })).toHaveCount(0);
+  await signOut(page);
+  await login(page, reader, "/app/access/users");
+  await expect(page.getByRole("button", { name: "사용자 등록", exact: true })).toBeDisabled();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("AUTH-LIVE-028 실제 팀 생성·중복 방지·이름 수정과 팀 관리자 범위", async ({ page }) => {
+  const superAdmin = {
+    email: required("VIBE_AUTH_SUPER_EMAIL"),
+    password: required("VIBE_AUTH_SUPER_PASSWORD"),
+  };
+  const teamName = "브라우저 검증 팀";
+  await login(page, superAdmin, "/app/access/users?tab=teams");
+  // The existing API permits long opaque IDs. Seed through the actual API, then edit in the UI.
+  const longId = `legacy_team_${"x".repeat(1024)}`;
+  expect(
+    await page.evaluate(async (id) => {
+      const response = await fetch("/admin/teams", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionStorage.getItem("vibe.app.auth.access") ?? ""}`,
+        },
+        body: JSON.stringify({ id, name: "긴 ID 기존 팀" }),
+      });
+      return response.status;
+    }, longId),
+  ).toBe(201);
+  await page.reload();
+  const longRow = page
+    .getByRole("table", { name: "등록된 팀 목록", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "긴 ID 기존 팀" });
+  await longRow.getByRole("button", { name: "이름 수정" }).click();
+  const longEditor = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await expect(longEditor.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveValue(longId);
+  await longEditor.getByRole("textbox", { name: "팀 이름", exact: true }).fill("긴 ID 호환 수정");
+  await longEditor.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(longEditor).toBeHidden();
+  await expect(page.getByRole("row").filter({ hasText: "긴 ID 호환 수정" })).toContainText(longId);
+  await page.getByRole("button", { name: "팀 추가", exact: true }).click();
+  const create = page.getByRole("dialog", { name: "팀 추가", exact: true });
+  const teamId = await create.getByRole("textbox", { name: "팀 ID", exact: true }).inputValue();
+  expect(/^team_[a-f0-9]{32}$/u.test(teamId)).toBe(true);
+  await create.getByRole("textbox", { name: "팀 이름", exact: true }).fill(teamName);
+  await create.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(create).toBeHidden();
+  const table = page.getByRole("table", { name: "등록된 팀 목록", exact: true });
+  const row = table.getByRole("row").filter({ hasText: teamId });
+  await expect(row).toContainText(teamName);
+  await page.getByRole("button", { name: "팀 추가", exact: true }).click();
+  await create.getByRole("textbox", { name: "팀 ID", exact: true }).fill(teamId);
+  await create.getByRole("textbox", { name: "팀 이름", exact: true }).fill("덮어쓰면 안 되는 이름");
+  let writes = 0;
+  const countWrite = (request: Request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/admin/teams") writes++;
+  };
+  page.on("request", countWrite);
+  await create.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(
+    create.getByText("이미 등록된 팀 ID입니다. 목록의 이름 수정 기능을 이용하세요."),
+  ).toBeVisible();
+  expect(writes).toBe(0);
+  page.off("request", countWrite);
+  await create.getByRole("button", { name: "취소", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "변경 버리기" }).click();
+  await row.getByRole("button", { name: "이름 수정" }).click();
+  const edit = page.getByRole("dialog", { name: "팀 이름 수정" });
+  await expect(edit.getByRole("textbox", { name: "팀 ID", exact: true })).toHaveAttribute("readonly");
+  await edit.getByRole("textbox", { name: "팀 이름", exact: true }).fill("브라우저 팀 수정");
+  await edit.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(edit).toBeHidden();
+  await expect(row).toContainText("브라우저 팀 수정");
+  const account = {
+    email: "browser-team-admin@example.invalid",
+    password: `Synthetic-${crypto.randomUUID()}`,
+  };
+  await page.getByRole("tab", { name: "사용자", exact: true }).click();
+  await page.getByRole("button", { name: "사용자 등록", exact: true }).click();
+  const user = page.getByRole("dialog", { name: "사용자 등록" });
+  await user.getByRole("textbox", { name: "이메일", exact: true }).fill(account.email);
+  await user.getByLabel("비밀번호", { exact: false }).fill(account.password);
+  await user.getByRole("combobox", { name: "역할", exact: true }).selectOption("team_admin");
+  await user.getByRole("textbox", { name: "팀", exact: true }).fill(teamId);
+  await user.getByRole("button", { name: "등록", exact: true }).click();
+  await expect(user).toBeHidden();
+  await signOut(page);
+  await login(page, account, "/app/access/users?tab=teams");
+  await expect(page.getByRole("button", { name: "팀 추가", exact: true })).toBeDisabled();
+  await expect(table.getByRole("row")).toHaveCount(2);
+  await row.getByRole("button", { name: "이름 수정" }).click();
+  await edit.getByRole("textbox", { name: "팀 이름", exact: true }).fill("소속 팀 이름 수정");
+  await edit.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(edit).toBeHidden();
+  await expect(row).toContainText("소속 팀 이름 수정");
+});
+
+test("AUTH-LIVE-027 실제 사용자 정의 역할 등록·계정 부여·유지·변경", async ({ page }) => {
+  const superAdmin = {
+    email: required("VIBE_AUTH_SUPER_EMAIL"),
+    password: required("VIBE_AUTH_SUPER_PASSWORD"),
+  };
+  const role = "browser_account_custom_role";
+  const email = "browser-custom-account@example.invalid";
+  const password = `Synthetic-${crypto.randomUUID()}`;
+  await login(page, superAdmin, "/app/access/users?tab=roles");
+  await page.getByRole("button", { name: "역할 추가", exact: true }).click();
+  const roleDialog = page.getByRole("dialog", { name: "역할 추가", exact: true });
+  await roleDialog.getByRole("textbox", { name: "역할 이름", exact: true }).fill(role);
+  await roleDialog.getByRole("checkbox", { name: "모델 조회 (models:read)", exact: true }).check();
+  const roleReview = roleDialog.getByRole("region", { name: "역할 변경 전후 비교", exact: true });
+  await expect(roleReview.getByText("권한 추가 1개 · 제거 0개")).toBeVisible();
+  await expect(roleReview.getByRole("row", { name: "모델 조회 (models:read) 미부여 부여됨" })).toBeVisible();
+  const roleSaved = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/roles",
+  );
+  await roleDialog.getByRole("button", { name: "저장", exact: true }).click();
+  expect((await roleSaved).status()).toBe(201);
+  await expect(roleDialog).toBeHidden();
+  let duplicateRoleWrites = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/admin/roles")
+      duplicateRoleWrites++;
+  });
+  await page.getByRole("button", { name: "역할 추가", exact: true }).click();
+  await roleDialog.getByRole("textbox", { name: "역할 이름", exact: true }).fill(role);
+  await roleDialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(
+    roleDialog.getByText("이미 등록된 역할 이름입니다. 목록의 수정 기능을 이용하세요."),
+  ).toBeVisible();
+  expect(duplicateRoleWrites).toBe(0);
+  await roleDialog.getByRole("button", { name: "취소", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "변경 버리기", exact: true }).click();
+  await expect(roleDialog).toBeHidden();
+  // Compare the newly persisted custom role through the real roles API before
+  // assigning it. Displayed grants are not a substitute for auth/me below.
+  await page.getByRole("button", { name: "권한 비교", exact: true }).click();
+  const matrix = page.getByRole("dialog", { name: "역할별 권한 비교", exact: true });
+  await matrix.getByRole("combobox", { name: "비교 역할 1", exact: true }).selectOption(role);
+  await matrix.getByRole("combobox", { name: "비교 역할 2", exact: true }).selectOption("developer");
+  await expect(
+    matrix
+      .getByRole("row", { name: /models:read/ })
+      .getByRole("cell")
+      .first(),
+  ).toHaveText("부여됨");
+  await expect(
+    matrix
+      .getByRole("row", { name: /admin:write/ })
+      .getByRole("cell")
+      .first(),
+  ).toHaveText("미부여");
+  await matrix.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(matrix).toBeHidden();
+  await page.getByRole("tab", { name: "사용자", exact: true }).click();
+  await page.getByRole("button", { name: "사용자 등록", exact: true }).click();
+  const create = page.getByRole("dialog", { name: "사용자 등록", exact: true });
+  await create.getByRole("textbox", { name: "이메일", exact: true }).fill(email);
+  await create.getByLabel("비밀번호", { exact: false }).fill(password);
+  await create.getByRole("combobox", { name: "역할", exact: true }).selectOption(role);
+  const created = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/users",
+  );
+  await create.getByRole("button", { name: "등록", exact: true }).click();
+  expect((await created).status()).toBe(201);
+  await expect(create).toBeHidden();
+  const row = () =>
+    page.getByRole("table", { name: "로그인 계정 목록" }).getByRole("row").filter({ hasText: email });
+  await expect(row().getByText(role, { exact: true })).toBeVisible();
+  await page.reload();
+  await row().getByRole("button", { name: "역할·상태 변경", exact: true }).click();
+  let edit = page.getByRole("dialog", { name: "사용자 변경", exact: true });
+  await expect(edit.getByRole("combobox", { name: "역할", exact: true })).toHaveValue(role);
+  const preserved = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname.startsWith("/admin/users/usr_"),
+  );
+  await edit.getByRole("button", { name: "저장", exact: true }).click();
+  expect((await preserved).status()).toBe(200);
+  await expect(edit).toBeHidden();
+  // Keep tokens and the random password inside browser memory; expose only a
+  // boolean proving the assigned custom role's effective scope on real login.
+  expect(
+    await page.evaluate(
+      async ({ email, password, role }) => {
+        const signedIn = await fetch("/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const tokens: { access_token?: string } = await signedIn.json();
+        if (!signedIn.ok || !tokens.access_token) return false;
+        const me = await fetch("/auth/me", { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+        const current: { user?: { role?: string; scopes?: string[] } } = await me.json();
+        return (
+          me.ok &&
+          current.user?.role === role &&
+          JSON.stringify(current.user.scopes) === JSON.stringify(["models:read"])
+        );
+      },
+      { email, password, role },
+    ),
+  ).toBe(true);
+  await row().getByRole("button", { name: "역할·상태 변경", exact: true }).click();
+  edit = page.getByRole("dialog", { name: "사용자 변경", exact: true });
+  await edit.getByRole("combobox", { name: "역할", exact: true }).selectOption("viewer");
+  const changed = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname.startsWith("/admin/users/usr_"),
+  );
+  await edit.getByRole("button", { name: "저장", exact: true }).click();
+  expect((await changed).status()).toBe(200);
+  await expect(edit).toBeHidden();
+  await page.reload();
+  await expect(row().getByText("조회자", { exact: true })).toBeVisible();
+});
 
 test("AUTH-LIVE-012 실제 Text2SQL 중지·재개와 읽기 전용 서버 거부", async ({ page }) => {
   const path = "/admin/text2sql/kill-switch";
@@ -286,6 +592,7 @@ test("AUTH-LIVE-010 실제 권한 저장 완료의 늦은 응답과 이전 계�
   try {
     const dialog = await editScopes(page, name);
     await dialog.getByRole("checkbox", { name: /chat:completion/ }).check();
+    await confirmKeyEdit(dialog, "browser-reviewed-scopes-late");
     await dialog.getByRole("button", { name: "권한 저장", exact: true }).click();
     await expect.poll(() => ready).toBe(true);
     await expect(dialog.getByRole("checkbox", { name: /chat:completion/ })).toBeDisabled();

@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
-import type { PropsWithChildren } from "react";
+import { useLayoutEffect, type PropsWithChildren } from "react";
+import { ModelReadBoundary } from "./ModelReadBoundary";
+import { modelOwnedKey, useModelReadOwner } from "./model-read-owner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { modelGovernanceKeys, useModelGovernanceMutations } from "./use-model-governance";
 import { tokenStore } from "@/shared/auth/token-store";
@@ -56,8 +58,14 @@ function setup() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: false } },
   });
-  for (const kind of ["contracts", "deprecations"] as const)
-    client.setQueryData(modelGovernanceKeys[kind], { [kind]: [] });
+  function Prerequisites({ children }: PropsWithChildren) {
+    const owner = useModelReadOwner();
+    useLayoutEffect(() => {
+      for (const kind of ["contracts", "deprecations"] as const)
+        client.setQueryData(modelOwnedKey(modelGovernanceKeys[kind], owner), { [kind]: [] });
+    }, [owner]);
+    return children;
+  }
   function Wrapper({ children }: PropsWithChildren) {
     return (
       <QueryClientProvider client={client}>
@@ -68,7 +76,9 @@ function setup() {
               : { featureId: current.owner, readOnly: current.readOnly, permitted: true }
           }
         >
-          {children}
+          <ModelReadBoundary>
+            <Prerequisites>{children}</Prerequisites>
+          </ModelReadBoundary>
         </FeatureAccessContext.Provider>
       </QueryClientProvider>
     );
@@ -102,7 +112,7 @@ describe("모델 관리 실제 mutation callback 경계", () => {
           act(() =>
             view.client
               .getQueryCache()
-              .find({ queryKey: modelGovernanceKeys[kind] })
+              .find({ queryKey: modelGovernanceKeys[kind], exact: false })
               ?.setState(
                 boundary === "fetching"
                   ? { fetchStatus: "fetching" }
@@ -116,7 +126,7 @@ describe("모델 관리 실제 mutation callback 경계", () => {
         act(() =>
           view.client
             .getQueryCache()
-            .find({ queryKey: modelGovernanceKeys[kind] })
+            .find({ queryKey: modelGovernanceKeys[kind], exact: false })
             ?.setState({ status: "success", error: null, fetchStatus: "idle", isInvalidated: false }),
         );
         view.rerender();

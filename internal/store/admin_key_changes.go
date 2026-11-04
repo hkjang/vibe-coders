@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"time"
 )
@@ -26,17 +27,20 @@ func (s *SQLStore) RevokeAdminAPIKey(ctx context.Context, expected APIKeyRecord,
 
 // PatchAdminAPIKey never upserts an old record. A concurrent revoke/delete,
 // ownership change or rotation therefore cannot be undone by a stale editor.
-func (s *SQLStore) PatchAdminAPIKey(ctx context.Context, expected, updated APIKeyRecord, audit AdminAuditLog, event *AuthEvent) error {
+func (s *SQLStore) PatchAdminAPIKey(ctx context.Context, expected, updated APIKeyRecord, audit AdminAuditLog, event *AuthEvent, review ...string) error {
+	if len(review) > 1 {
+		return errors.New("ambiguous key review")
+	}
 	if updated.ID != expected.ID || audit.Action != "api_key.update" ||
 		event != nil && (event.ID == "" || event.APIKeyID != expected.ID || event.EventType != "role_changed") {
 		return errors.New("invalid key update audit")
 	}
 	return s.applyAdminAPIKeyChange(ctx, expected,
 		"UPDATE api_keys SET name = ?, owner = ?, team = ?, role = ?, status = ?, scopes = ? WHERE ",
-		[]any{updated.Name, updated.Owner, updated.Team, updated.Role, updated.Status, encodeStringList(updated.Scopes)}, audit, event)
+		[]any{updated.Name, updated.Owner, updated.Team, updated.Role, updated.Status, encodeStringList(updated.Scopes)}, audit, event, review...)
 }
 
-func (s *SQLStore) applyAdminAPIKeyChange(ctx context.Context, expected APIKeyRecord, statement string, params []any, audit AdminAuditLog, event *AuthEvent) error {
+func (s *SQLStore) applyAdminAPIKeyChange(ctx context.Context, expected APIKeyRecord, statement string, params []any, audit AdminAuditLog, event *AuthEvent, review ...string) error {
 	if expected.ID == "" || audit.ID == "" || audit.AdminID == "" {
 		return errors.New("missing key snapshot or audit")
 	}
@@ -61,6 +65,20 @@ func (s *SQLStore) applyAdminAPIKeyChange(ctx context.Context, expected APIKeyRe
 	}
 	if affected != 1 {
 		return ErrAPIKeyConflict
+	}
+	if len(review) == 1 && review[0] != "" {
+		// The UPDATE holds the key row lock. A new READ COMMITTED statement
+		// now sees lineage committed by a rotation we may have waited behind,
+		// even when expiry-capped grace left every original row field unchanged.
+		// Use the authorized pre-edit values; this transaction's update is not
+		// part of the browser snapshot. Any mismatch rolls it and audits back.
+		current, err := s.apiKeyRevisionWithReader(ctx, tx, expected)
+		if err != nil {
+			return err
+		}
+		if subtle.ConstantTimeCompare([]byte(current), []byte(review[0])) != 1 {
+			return ErrAPIKeyConflict
+		}
 	}
 	if err = s.insertAdminAudit(ctx, tx, audit); err != nil {
 		return err

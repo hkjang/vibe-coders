@@ -15,11 +15,16 @@ import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
+import { DataTableSortControls } from "@/shared/data-table/DataTableSortControls";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { healthStatusLabels } from "@/config/ui-labels";
 import type { useProviderCatalogQueries } from "@/features/gateway/providers/use-provider-catalog";
 import { defaultCredentialPrefixes } from "@/shared/security/secrets";
-import { providerCatalogPageSizes, type ProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
+import {
+  providerCatalogPageSizes,
+  providerCatalogSortList,
+  type ProviderCatalogSortOrder,
+} from "@/shared/utils/provider-catalog-query";
 import {
   providerCatalogSortFromColumn,
   providerCatalogSortLabel,
@@ -242,8 +247,8 @@ interface ProviderTableProps {
   pageIndex: number;
   pageSize: number;
   onPageSizeChange: (size: number) => void;
-  sort?: ProviderCatalogSort;
-  onSortChange: (sort: ProviderCatalogSort | undefined) => void;
+  sort?: ProviderCatalogSortOrder;
+  onSortChange: (sort: ProviderCatalogSortOrder | undefined) => void;
   providerUnavailable: boolean;
   rememberTrigger: (trigger: HTMLElement, provider: string) => void;
   /** Per-row administration controls; omitted when the operator may only read. */
@@ -295,6 +300,21 @@ export function ProviderTable({
       </header>
       <div className="provider-catalog-sort-summary">
         <span role="status">정렬: {providerCatalogSortLabel(sort)}</span>
+        <DataTableSortControls
+          columns={providerTableSortColumns}
+          value={providerCatalogSortList(sort).flatMap((criterion) => {
+            const value = providerCatalogSortState(criterion);
+            return value ? [value] : [];
+          })}
+          onChange={(criteria) =>
+            onSortChange(
+              criteria.flatMap(({ columnId, direction }) => {
+                const criterion = providerCatalogSortFromColumn(columnId, direction);
+                return criterion ? [criterion] : [];
+              }),
+            )
+          }
+        />
         {sort ? (
           <Button size="small" variant="ghost" onClick={() => onSortChange(undefined)}>
             기본 순서
@@ -303,7 +323,8 @@ export function ProviderTable({
       </div>
       <p className="provider-enrichment-note">
         현재 받은 공급자 연결 설정 목록 안에서 정렬합니다. 화면 정렬은 라우팅 우선순위 설정을 변경하지
-        않습니다.
+        않습니다. 다중 정렬에서는 같은 값끼리 다음 기준을 비교하며, 기준값이 없는 항목은 마지막에 표시합니다.
+        머리글 정렬은 해당 열 하나로 바뀝니다.
       </p>
       {providerUnavailable ? (
         <div className="provider-list-unavailable">
@@ -331,7 +352,7 @@ export function ProviderTable({
           pageIndex={pageIndex}
           sorting={{
             columns: providerTableSortColumns,
-            value: providerCatalogSortState(sort),
+            value: providerCatalogSortState(providerCatalogSortList(sort)[0]),
             onChange: ({ columnId, direction }) =>
               onSortChange(providerCatalogSortFromColumn(columnId, direction)),
           }}

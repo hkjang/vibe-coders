@@ -32,6 +32,9 @@ func seedBrowserResourceSearchFixture(t *testing.T, db *store.SQLStore, upstream
 	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{ID: "browser-search-mcp", Name: "검색검증 MCP 서버", URL: upstream, Enabled: false}); err != nil {
 		t.Fatal("synthetic resource search MCP server could not be prepared")
 	}
+	if err := db.UpsertPolicyWithRules(ctx, store.Policy{ID: "browser-search-policy", Name: "검색검증 정책", Priority: 100, RolloutPercent: 25}, nil); err != nil {
+		t.Fatal("synthetic resource search policy could not be prepared")
+	}
 }
 
 func TestResourceSearchRequiresSameSessionAsAdminLists(t *testing.T) {

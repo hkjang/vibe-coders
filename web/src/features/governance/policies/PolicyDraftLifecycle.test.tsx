@@ -177,11 +177,15 @@ describe("응답·중복·후속 조회의 별도 수명", () => {
       c.response.apply = () => held.promise;
       await c.user.click(c.button());
       await c.user.click(c.confirm());
-      const gets = c.api.calls.filter(({ key }) => key === "GET /admin/policies").length;
       if (change === "principal") c.update({ principal: "usr_public_b" });
       if (change === "owner") c.update({ owner: "gateway.providers" });
       if (change === "epoch") act(() => tokenStore.clearAll());
       if (change === "unmount") c.view.unmount();
+      if (change === "principal" || change === "epoch")
+        await screen.findByRole("button", { name: /초안 생성$/u });
+      // A new principal/session has its own legitimate list read. The old
+      // completion must not add another read or write into that new cache.
+      const gets = c.api.calls.filter(({ key }) => key === "GET /admin/policies").length;
       await act(async () => held.resolve(acknowledgement));
       expect(screen.queryByText("비활성 정책 초안을 생성했습니다.")).not.toBeInTheDocument();
       expect(c.api.calls.filter(({ key }) => key === "GET /admin/policies")).toHaveLength(gets);
@@ -194,10 +198,18 @@ describe("응답·중복·후속 조회의 별도 수명", () => {
     c.response.apply = () => a.promise;
     await c.user.click(c.button());
     await c.user.click(c.confirm());
+    const bSuggestions = deferred<{ suggestions: typeof c.response.rows }>();
+    c.response.suggestions = () => bSuggestions.promise;
     c.update({ principal: "usr_public_b" });
     c.response.apply = () => b.promise;
+    // A rendered action is not proof that B's owned source read has finished.
+    // Hold that read explicitly and wait for the real enablement boundary.
+    await act(async () => bSuggestions.resolve({ suggestions: c.response.rows }));
+    await waitFor(() => expect(c.button()).toBeEnabled());
     await c.user.click(c.button());
+    await screen.findByRole("dialog");
     await c.user.click(c.confirm());
+    await waitFor(() => expect(c.api.bodies(applyPath)).toHaveLength(2));
     await act(async () => a.resolve(acknowledgement));
     expect(within(c.dialog()).getByRole("button", { name: "생성 중" })).toHaveAttribute(
       "aria-disabled",

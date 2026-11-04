@@ -100,36 +100,10 @@ func (s *Server) handleBillingDashboard(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
-	ctx := r.Context()
-
-	// Cost by cost-center + by model; overall total.
-	byCostCenter, _ := s.db.CostAllocation(ctx, "cost_center", since, 20)
-	byModel, _ := s.db.CostAllocation(ctx, "model", since, 20)
-	var total float64
-	var totalReq int64
-	for _, row := range byModel {
-		total += row.CostKRW
-		totalReq += row.Requests
+	report, err := readBillingDashboard(r.Context(), s.db, since, time.Now().UTC())
+	if err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "billing totals unavailable", "server_error", "billing_dashboard_unavailable")
+		return
 	}
-
-	// Budget burn / forecast.
-	budgets, _ := s.db.BudgetStatuses(ctx, time.Now().UTC())
-
-	// Model migration savings candidates.
-	migration, _ := s.db.ModelMigrationAdvice(ctx, since, 10, 20)
-	var estSavings float64
-	for _, m := range migration {
-		estSavings += m.EstimatedSavingsKRW
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"since":                 since.UTC().Format(time.RFC3339),
-		"total_cost_krw":        total,
-		"total_requests":        totalReq,
-		"by_cost_center":        byCostCenter,
-		"by_model":              byModel,
-		"budgets":               budgets,
-		"migration_candidates":  migration,
-		"estimated_savings_krw": estSavings,
-	})
+	writeJSON(w, http.StatusOK, report)
 }

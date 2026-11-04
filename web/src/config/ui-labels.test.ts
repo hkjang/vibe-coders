@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { migrationStatusLabels, roleLabel } from "@/config/ui-labels";
+import { managedRoleLabel, migrationStatusLabels, roleLabel } from "@/config/ui-labels";
 
 describe("migrationStatusLabels", () => {
   it("distinguishes rollout status from the separate write restriction", () => {
@@ -33,5 +33,15 @@ describe("roleLabel", () => {
     expect(roleLabel(" ADMIN ")).toBe("관리자");
     expect(roleLabel("private_custom_role")).toBe("확인 불가");
     expect(roleLabel(undefined)).toBe("확인 불가");
+  });
+
+  it("preserves custom identifiers only in the explicit management formatter", () => {
+    expect(managedRoleLabel("ops_admin")).toBe("운영 관리자");
+    for (const role of ["custom_reviewer", "constructor", "__proto__", "toString"]) {
+      expect(managedRoleLabel(role)).toBe(role);
+      expect(roleLabel(role)).toBe("확인 불가");
+    }
+    expect(managedRoleLabel("")).toBe("—");
+    expect(["admin", "custom_reviewer"].map(roleLabel)).toEqual(["관리자", "확인 불가"]);
   });
 });

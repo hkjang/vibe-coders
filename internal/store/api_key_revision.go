@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -26,8 +27,16 @@ func (s *SQLStore) ensureAPIKeyRevisionSecret(ctx context.Context) error {
 }
 
 func (s *SQLStore) apiKeyRevisionSecret(ctx context.Context) ([]byte, error) {
+	return readAPIKeyRevisionSecret(ctx, s.db)
+}
+
+type apiKeyRevisionReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func readAPIKeyRevisionSecret(ctx context.Context, reader apiKeyRevisionReader) ([]byte, error) {
 	var encoded string
-	if err := s.db.QueryRowContext(ctx, `SELECT secret FROM api_key_revision_secret WHERE id = 1`).Scan(&encoded); err != nil {
+	if err := reader.QueryRowContext(ctx, `SELECT secret FROM api_key_revision_secret WHERE id = 1`).Scan(&encoded); err != nil {
 		return nil, errors.New("API key revision protection unavailable")
 	}
 	secret, err := hex.DecodeString(encoded)
@@ -41,21 +50,31 @@ func (s *SQLStore) apiKeyRevisionSecret(ctx context.Context) ([]byte, error) {
 // Using the credential hash as the HMAC key would make the public revision an
 // offline verifier for guessed low-entropy imported credentials.
 func (s *SQLStore) APIKeyRevision(ctx context.Context, key APIKeyRecord) (string, error) {
-	secret, err := s.apiKeyRevisionSecret(ctx)
+	return s.apiKeyRevisionWithReader(ctx, s.db, key)
+}
+
+func (s *SQLStore) apiKeyRevisionWithReader(ctx context.Context, reader apiKeyRevisionReader, key APIKeyRecord) (string, error) {
+	secret, err := readAPIKeyRevisionSecret(ctx, reader)
 	if err != nil {
 		return "", err
 	}
-	return apiKeyRevision(key, secret)
+	var replacement, grace string
+	err = reader.QueryRowContext(ctx, s.bind(`SELECT new_key_id, grace_ends_at FROM api_key_rotations WHERE old_key_id = ?`), key.ID).Scan(&replacement, &grace)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", errors.New("API key rotation review unavailable")
+	}
+	return apiKeyRevision(key, secret, replacement, grace)
 }
 
-func apiKeyRevision(key APIKeyRecord, secret []byte) (string, error) {
+func apiKeyRevision(key APIKeyRecord, secret []byte, replacement, grace string) (string, error) {
 	_, values := apiKeySnapshotPredicate(key)
+	values = append(values, replacement, grace)
 	encoded, err := json.Marshal(values)
 	if err != nil {
 		return "", errors.New("API key revision snapshot invalid")
 	}
 	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte("vibe-coders/api-key-revision/v1\x00"))
+	_, _ = mac.Write([]byte("vibe-coders/api-key-revision/v2\x00"))
 	_, _ = mac.Write(encoded)
 	return hex.EncodeToString(mac.Sum(nil)), nil
 }

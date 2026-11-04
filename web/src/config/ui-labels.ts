@@ -12,6 +12,9 @@ export const commandPaletteLabels = {
   empty: "검색 결과가 없습니다.",
   emptyHint: "다른 메뉴 이름이나 명령으로 검색해 보세요. 접근 가능한 기능만 표시됩니다.",
   clear: "검색어 지우기",
+  recentCommand: "최근 명령",
+  clearCommands: "최근 명령 지우기",
+  commandHistoryHint: "최근 명령 최대 5개를 이 탭에서만 기억합니다. 새로고침·사용자 변경 시 지워집니다.",
   keyboardHint: "↑↓ 선택 · Enter 실행 · Esc 닫기",
   results: (count: number): string => `검색 결과 ${count}개`,
 } as const;
@@ -76,10 +79,19 @@ const roleLabels = {
   legacy_admin: "기존 관리자",
 } as const;
 
-export function roleLabel(role: string | undefined): string {
+function translatedRoleLabel(role: string | undefined): string | undefined {
   const normalized = role?.trim().toLowerCase();
   if (!normalized || !Object.prototype.hasOwnProperty.call(roleLabels, normalized)) {
-    return "확인 불가";
+    return undefined;
   }
   return roleLabels[normalized as keyof typeof roleLabels];
+}
+
+export function roleLabel(role: string | undefined): string {
+  return translatedRoleLabel(role) ?? "확인 불가";
+}
+
+/** Only for management lists that already display custom role identifiers. */
+export function managedRoleLabel(role: string): string {
+  return translatedRoleLabel(role) ?? (role || "—");
 }

@@ -227,15 +227,15 @@ describe("정책 가져오기 현재 주체·승인·조회 수명", () => {
     await waitFor(() =>
       expect(h.api.calls.filter((call) => call.key === "GET /admin/policies")).toHaveLength(2),
     );
+    h.response.list = () => ({ policies: [] });
     h.update({ principal: "public_b" });
-    // Controlled new-owner cache sentinel; this does not claim the existing list's
-    // shared query key gained a new whole-page lifetime boundary.
-    act(() => h.view.client.setQueryData(["governance", "policies"], { policies: [] }));
+    // A sentinel in the new owner's actual mounted list, never a shared cache.
+    act(() => h.view.client.setQueryData(h.catalogKey(), { policies: [] }));
     await act(async () => {
       held.resolve({ policies: [{ ...h.response.row, name: "LATE_OLD_OWNER" }] });
       await held.promise;
     });
-    expect(h.view.client.getQueryData(["governance", "policies"])).toEqual({ policies: [] });
+    expect(h.view.client.getQueryData(h.catalogKey())).toEqual({ policies: [] });
     expect(screen.queryByText("LATE_OLD_OWNER")).not.toBeInTheDocument();
   });
   it("실제 기존 Query의 오래된 refetch가 import 후 새 목록을 덮어쓰지 않는다", async () => {
@@ -248,7 +248,7 @@ describe("정책 가져오기 현재 주체·승인·조회 수명", () => {
     const oldRows = structuredClone(h.response.rows);
     let reads = 0;
     h.response.list = () => (++reads === 1 ? old.promise : { policies: structuredClone(h.response.rows) });
-    const query = h.view.client.getQueryCache().find({ queryKey: ["governance", "policies"], exact: true });
+    const query = h.view.client.getQueryCache().find({ queryKey: h.catalogKey(), exact: true });
     if (!query) throw new Error("actual policy list query missing");
     // The actual mounted observer's queryFn and key; no invented query or mocked
     // cancellation. Simulates an already admitted ordinary list refetch.
@@ -266,7 +266,7 @@ describe("정책 가져오기 현재 주체·승인·조회 수명", () => {
     await h.user.click(screen.getByRole("button", { name: "검토한 정책 적용" }));
     await screen.findByText("정책 가져오기 적용 응답을 확인했습니다.");
     await h.idle();
-    expect(h.view.client.getQueryData(["governance", "policies"])).toMatchObject({
+    expect(h.view.client.getQueryData(h.catalogKey())).toMatchObject({
       policies: [{ name: "최신 저장 목록" }],
     });
     await act(async () => {
@@ -274,7 +274,7 @@ describe("정책 가져오기 현재 주체·승인·조회 수명", () => {
       await old.promise;
       await oldFlight;
     });
-    expect(h.view.client.getQueryData(["governance", "policies"])).toMatchObject({
+    expect(h.view.client.getQueryData(h.catalogKey())).toMatchObject({
       policies: [{ name: "최신 저장 목록" }],
     });
     expect(h.posts()).toHaveLength(2);

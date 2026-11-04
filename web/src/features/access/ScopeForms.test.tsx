@@ -39,11 +39,18 @@ const readHandlers: Record<string, ApiHandler> = {
   "GET /me/keys": () => ({ api_keys: [], role: "developer", grantable_scopes: scopeOptions }),
   "GET /me/sessions": () => ({ current_session_id: "", sessions: [] }),
 };
+function RoleFormHost() {
+  return (
+    <FeatureAccessContext.Provider value={{ featureId: "access.users", readOnly: false, permitted: true }}>
+      <RolesTab canWrite writeDeniedReason="" />
+    </FeatureAccessContext.Provider>
+  );
+}
 const forms = [
   {
     name: "역할 추가",
     trigger: "역할 추가",
-    render: () => <RolesTab canWrite writeDeniedReason="" />,
+    render: () => <RoleFormHost />,
     nameField: "역할 이름",
     submit: "저장",
     endpoint: "POST /admin/roles",
@@ -228,15 +235,10 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     const name = within(reopened).getByRole("textbox", { name: fixture.nameField });
     const scope = within(reopened).getByRole("checkbox", { name: /models:read/u });
     expect(name).toHaveValue("");
-    if (fixture.name === "키 발급" || fixture.name === "API 키 발급") {
-      // Personal/admin key queries and forms belong to the authenticated owner; a
-      // fresh owner does not wait for a disposed owner's pending mutation.
-      expect(name).toBeEnabled();
-      expect(scope).toBeEnabled();
-    } else {
-      expect(name).toBeDisabled();
-      expect(scope).toBeDisabled();
-    }
+    // Role and key forms belong to the authenticated session. A new session
+    // does not inherit the disposed session's pending mutation or draft.
+    expect(name).toBeEnabled();
+    expect(scope).toBeEnabled();
     expect(scope).not.toBeChecked();
     await act(async () => first.resolve(fixture.result));
     await waitFor(() => expect(name).toBeEnabled());
@@ -260,7 +262,7 @@ describe("역할 스코프 편집", () => {
   it("기존 scope 순서와 무관하게 원복을 인식하고 목록 밖 scope를 보존한다", async () => {
     const user = userEvent.setup();
     const api = mockApi({ ...readHandlers, "POST /admin/roles": () => ({ role: "reviewer" }) });
-    renderScreen(<RolesTab canWrite writeDeniedReason="" />);
+    renderScreen(<RoleFormHost />);
     await user.click(await screen.findByRole("button", { name: "수정" }));
     let dialog = await screen.findByRole("dialog", { name: "역할 수정" });
     await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
@@ -278,9 +280,16 @@ describe("역할 스코프 편집", () => {
     dialog = await screen.findByRole("dialog", { name: "역할 수정" });
     await user.click(within(dialog).getByRole("checkbox", { name: /models:read/u }));
     await user.click(within(dialog).getByRole("button", { name: "저장" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("목록에 없는 권한");
+    expect(within(dialog).getByRole("checkbox", { name: /future:scope/u })).toBeChecked();
+    expect(api.bodies("POST /admin/roles")).toEqual([]);
+    // The backend rejects unrecognized scopes. Keep them visible in the draft
+    // and require explicit removal, never silently drop them while saving.
+    await user.click(within(dialog).getByRole("checkbox", { name: /future:scope/u }));
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
     await waitFor(() =>
       expect(api.bodies("POST /admin/roles")).toEqual([
-        { role: "reviewer", description: "검토자", scopes: ["chat:completion", "future:scope"] },
+        { role: "reviewer", description: "검토자", scopes: ["chat:completion"] },
       ]),
     );
     expect(roles.roles[0]?.scopes).toEqual(["models:read", "future:scope", "chat:completion"]);

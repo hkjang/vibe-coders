@@ -5,42 +5,64 @@ import { refreshIntervalMs } from "@/features/health/health-utils";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { usePreferences } from "@/shared/stores/preferences";
+import { assertProviderRead, providerOwnedKey, useProviderReadScope } from "./provider-read-owner";
 
 const routeId = "gateway.providers";
 
 export function useProviderCatalogQueries(range: HealthRange, canReadRouting: boolean) {
+  const owner = useProviderReadScope();
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const providers = useQuery({
-    queryKey: ["admin", "providers"],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.providers.list, {
+    queryKey: providerOwnedKey(["admin", "providers"], owner),
+    queryFn: async ({ signal }) => {
+      assertProviderRead(owner, signal);
+      const result = await apiClient.request(endpoints.admin.providers.list, {
         signal,
         routeId,
-      }),
+      });
+      assertProviderRead(owner, signal);
+      return result;
+    },
+    enabled: owner.readable && !owner.denied,
+    gcTime: 0,
+    retry: false,
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
   const slo = useQuery({
-    queryKey: ["admin", "providers", "slo", range],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.providers.slo, {
+    queryKey: providerOwnedKey(["admin", "providers", "slo", range], owner),
+    queryFn: async ({ signal }) => {
+      assertProviderRead(owner, signal);
+      const result = await apiClient.request(endpoints.admin.providers.slo, {
         query: { window: range },
         signal,
         routeId,
-      }),
+      });
+      assertProviderRead(owner, signal);
+      return result;
+    },
+    enabled: owner.readable && !owner.denied,
+    gcTime: 0,
+    retry: false,
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
   const routing = useQuery({
-    queryKey: ["admin", "routing", "health", range],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.routing.health, {
+    queryKey: providerOwnedKey(["admin", "routing", "health", range], owner),
+    queryFn: async ({ signal }) => {
+      assertProviderRead(owner, signal);
+      const result = await apiClient.request(endpoints.admin.routing.health, {
         query: { window: range, threshold: 70 },
         signal,
         routeId,
-      }),
-    enabled: canReadRouting,
+      });
+      assertProviderRead(owner, signal);
+      return result;
+    },
+    enabled: canReadRouting && owner.readable && !owner.denied,
+    gcTime: 0,
+    retry: false,
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });

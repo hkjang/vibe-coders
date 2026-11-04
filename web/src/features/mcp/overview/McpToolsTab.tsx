@@ -1,33 +1,25 @@
-import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { z } from "zod";
-
 import { QueryNotice } from "@/features/mcp/mcp-ui";
+import { decisionLabel, riskLabel } from "@/features/mcp/mcp-utils";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
-import { decisionLabel, riskLabel, riskTone } from "@/features/mcp/mcp-utils";
-import { apiClient } from "@/shared/api/client";
-import type { McpToolQuery, McpToolRiskBody } from "@/shared/api/domains/mcp";
-import type { McpToolRisk, McpToolStat } from "@/shared/api/domains/mcp.schemas";
-import { endpoints } from "@/shared/api/endpoints";
-import { FormDialog } from "@/shared/components/form/FormDialog";
-import { FormField } from "@/shared/components/form/FormField";
-import { useZodForm } from "@/shared/components/form/use-zod-form";
-import { Badge } from "@/shared/components/ui/Badge";
+import type { McpToolQuery } from "@/shared/api/domains/mcp";
+import type { McpToolStat } from "@/shared/api/domains/mcp.schemas";
+import { ErrorState, PermissionDenied } from "@/shared/components/state/PageStates";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
-import { Textarea } from "@/shared/components/ui/Textarea";
-import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
+import { useFeatureReadOwner, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
-import { formatDateTime, formatNumber, formatPercent } from "@/shared/utils/format";
-
-const routeId = "mcp.overview";
+import { formatNumber } from "@/shared/utils/format";
+import { toolColumns, serverColumns, catalogColumns, trustColumns, type ToolRow } from "./mcp-tool-columns";
+import { useMcpToolData } from "./use-mcp-tool-data";
+import { ToolRiskDialog } from "./ToolRiskDialog";
 
 const riskOptions = [
   { value: "", label: "전체 위험도" },
@@ -48,216 +40,36 @@ const configuredOptions = [
   { value: "false", label: "기본값" },
 ];
 
-const riskLevelChoices = [
-  { value: "low", label: riskLabel("low") },
-  { value: "medium", label: riskLabel("medium") },
-  { value: "high", label: riskLabel("high") },
-  { value: "critical", label: riskLabel("critical") },
-];
-const actionChoices = [
-  { value: "allow", label: decisionLabel("allow") },
-  { value: "require_approval", label: decisionLabel("require_approval") },
-  { value: "block", label: decisionLabel("block") },
-];
-
-/** The server may answer with a level/action the form does not offer; fall back. */
-function parseRiskLevel(value: string): RiskFormValues["risk_level"] {
-  return riskLevelChoices.some((choice) => choice.value === value)
-    ? (value as RiskFormValues["risk_level"])
-    : "low";
-}
-
-function parseRiskAction(value: string): RiskFormValues["action"] {
-  return actionChoices.some((choice) => choice.value === value)
-    ? (value as RiskFormValues["action"])
-    : "allow";
-}
-
-const riskFormSchema = z.object({
-  risk_level: z.enum(["low", "medium", "high", "critical"]),
-  action: z.enum(["allow", "require_approval", "block"]),
-  note: z.string().trim().max(500, "메모는 500자까지 입력할 수 있습니다."),
-});
-type RiskFormValues = z.infer<typeof riskFormSchema>;
-
-interface ToolRow extends McpToolRisk {
-  calls: number;
-  errors: number;
-  errorRate: number;
-  lastSeen: string;
-}
-
-const toolColumn = createDataTableColumnHelper<ToolRow>();
-
-function toolColumns(
-  canWrite: boolean,
-  onEdit: (row: ToolRow, trigger: HTMLElement) => void,
-): ReadonlyArray<DataTableColumn<ToolRow>> {
-  return [
-    toolColumn.accessor((row) => row.server_label, { id: "server", header: "서버" }),
-    toolColumn.accessor((row) => row.tool_name, {
-      id: "tool",
-      header: "도구",
-      cell: (info) => <span className="mono">{info.getValue<string>()}</span>,
-    }),
-    toolColumn.accessor((row) => row.access_class, { id: "class", header: "접근 유형" }),
-    toolColumn.accessor((row) => row.risk_level, {
-      id: "risk",
-      header: "위험도",
-      cell: (info) => (
-        <Badge tone={riskTone(info.getValue<string>())}>{riskLabel(info.getValue<string>())}</Badge>
-      ),
-    }),
-    toolColumn.accessor((row) => row.action, {
-      id: "action",
-      header: "조치",
-      cell: (info) => (
-        <Badge tone={info.getValue<string>() === "block" ? "danger" : "muted"}>
-          {decisionLabel(info.getValue<string>())}
-        </Badge>
-      ),
-    }),
-    toolColumn.accessor((row) => (row.configured ? "설정됨" : "기본값"), {
-      id: "configured",
-      header: "설정 상태",
-    }),
-    toolColumn.accessor((row) => row.calls, {
-      id: "calls",
-      header: "호출",
-      cell: (info) => <span className="cell-number">{formatNumber(info.getValue<number>())}</span>,
-    }),
-    toolColumn.accessor((row) => row.errorRate, {
-      id: "errorRate",
-      header: "오류율",
-      cell: (info) => <span className="cell-number">{formatPercent(info.getValue<number>())}</span>,
-    }),
-    toolColumn.accessor((row) => row.lastSeen, {
-      id: "lastSeen",
-      header: "최근 호출",
-      cell: (info) => formatDateTime(info.getValue<string>()),
-    }),
-    toolColumn.display({
-      id: "actions",
-      header: "작업",
-      cell: (info) => (
-        <Button
-          size="small"
-          variant="ghost"
-          disabled={!canWrite}
-          title={canWrite ? undefined : "mcp:admin 권한이 필요합니다."}
-          aria-label={`${info.row.original.server_label} ${info.row.original.tool_name} 위험 등급 편집`}
-          onClick={(event) => onEdit(info.row.original, event.currentTarget)}
-        >
-          위험 등급 편집
-        </Button>
-      ),
-    }),
-  ] as ReadonlyArray<DataTableColumn<ToolRow>>;
-}
-
-interface ServerRow {
-  server_label: string;
-  is_mcp: boolean;
-  tools: number;
-  calls: number;
-  errors: number;
-  error_rate: number;
-  distinct_keys: number;
-  last_seen: string;
-}
-const serverColumn = createDataTableColumnHelper<ServerRow>();
-const serverColumns = [
-  serverColumn.accessor((row) => row.server_label, { id: "server", header: "서버" }),
-  serverColumn.accessor((row) => (row.is_mcp ? "MCP" : "일반 도구"), { id: "kind", header: "유형" }),
-  serverColumn.accessor((row) => formatNumber(row.tools), { id: "tools", header: "도구 수" }),
-  serverColumn.accessor((row) => formatNumber(row.calls), { id: "calls", header: "호출" }),
-  serverColumn.accessor((row) => formatNumber(row.errors), { id: "errors", header: "오류" }),
-  serverColumn.accessor((row) => formatPercent(row.error_rate), { id: "rate", header: "오류율" }),
-  serverColumn.accessor((row) => formatNumber(row.distinct_keys), { id: "keys", header: "사용 키" }),
-  serverColumn.accessor((row) => formatDateTime(row.last_seen), { id: "last", header: "최근" }),
-] as ReadonlyArray<DataTableColumn<ServerRow>>;
-
-interface CatalogRow {
-  server_label: string;
-  tool_name: string;
-  first_seen: string;
-  last_seen: string;
-  is_new: boolean;
-  is_stale: boolean;
-}
-const catalogColumn = createDataTableColumnHelper<CatalogRow>();
-const catalogColumns = [
-  catalogColumn.accessor((row) => row.server_label, { id: "server", header: "서버" }),
-  catalogColumn.accessor((row) => row.tool_name, {
-    id: "tool",
-    header: "도구",
-    cell: (info) => <span className="mono">{info.getValue<string>()}</span>,
-  }),
-  catalogColumn.accessor((row) => (row.is_new ? "신규" : row.is_stale ? "유휴" : "정상"), {
-    id: "state",
-    header: "상태",
-    cell: (info) => {
-      const label = info.getValue<string>();
-      return (
-        <Badge tone={label === "신규" ? "warning" : label === "유휴" ? "muted" : "success"}>{label}</Badge>
-      );
-    },
-  }),
-  catalogColumn.accessor((row) => formatDateTime(row.first_seen), { id: "first", header: "최초 관측" }),
-  catalogColumn.accessor((row) => formatDateTime(row.last_seen), { id: "last", header: "최근 관측" }),
-] as ReadonlyArray<DataTableColumn<CatalogRow>>;
-
-interface TrustRow {
-  ref: string;
-  trust_score: number;
-  grade: string;
-  risk_level: string;
-  calls: number;
-  error_rate_pct: number;
-  confidence: string;
-}
-const trustColumn = createDataTableColumnHelper<TrustRow>();
-const trustColumns = [
-  trustColumn.accessor((row) => row.ref, {
-    id: "ref",
-    header: "서버/도구",
-    cell: (info) => <span className="mono">{info.getValue<string>()}</span>,
-  }),
-  trustColumn.accessor((row) => row.trust_score, {
-    id: "score",
-    header: "신뢰 점수",
-    cell: (info) => <span className="cell-number">{formatNumber(info.getValue<number>(), 1)}</span>,
-  }),
-  trustColumn.accessor((row) => row.grade, {
-    id: "grade",
-    header: "등급",
-    cell: (info) => {
-      const grade = info.getValue<string>();
-      return <Badge tone={grade === "A" ? "success" : grade === "D" ? "danger" : "warning"}>{grade}</Badge>;
-    },
-  }),
-  trustColumn.accessor((row) => row.risk_level, {
-    id: "risk",
-    header: "위험도",
-    cell: (info) => riskLabel(info.getValue<string>()),
-  }),
-  trustColumn.accessor((row) => formatNumber(row.calls), { id: "calls", header: "호출" }),
-  trustColumn.accessor((row) => `${formatNumber(row.error_rate_pct, 1)}%`, {
-    id: "rate",
-    header: "오류율",
-  }),
-  trustColumn.accessor((row) => (row.confidence === "low" ? "표본 부족" : "충분"), {
-    id: "confidence",
-    header: "표본",
-  }),
-] as ReadonlyArray<DataTableColumn<TrustRow>>;
-
 export function McpToolsTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
+  const owner = useFeatureReadOwner(
+    "mcp.overview",
+    "mcp-tools",
+    ["observability:read"],
+    "observability:read",
+  );
+  if (!owner.readable) return <PermissionDenied permission="observability:read" />;
+  if (owner.denied)
+    return (
+      <ErrorState
+        title="MCP 도구 조회 권한을 다시 확인하세요."
+        message="이전 조회 결과와 편집 내용을 표시하지 않습니다."
+        onRetry={owner.restart}
+        showLegacy={false}
+      />
+    );
+  return <McpToolsContent key={owner.id} owner={owner} scopeCanWrite={canWrite} />;
+}
+function McpToolsContent({ owner, scopeCanWrite }: { owner: FeatureReadOwner; scopeCanWrite: boolean }) {
+  const mutationAccess = useFeatureMutationAccess(
+    ["mcp.overview"],
+    scopeCanWrite,
+    "MCP 관리 권한(mcp:admin)이 필요합니다.",
+  );
+  const canWrite = mutationAccess.allowed;
   const refetchInterval = useRefreshInterval();
   const [params, updateParams] = useSearchState();
   const [searchError, setSearchError] = useState<string | undefined>();
   const [editing, setEditing] = useState<ToolRow | undefined>();
-  const [formInstance, setFormInstance] = useState(0);
   const { remember: rememberTrigger, returnFocusRef: editTriggerRef } = useReturnFocus();
 
   const server = params.get("server") ?? "";
@@ -277,62 +89,15 @@ export function McpToolsTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
     limit: 200,
   };
 
-  const tools = useQuery({
-    queryKey: ["mcp", "tools", query],
-    queryFn: ({ signal }) => apiClient.request(endpoints.domains.mcp.tools, { query, signal, routeId }),
-    refetchInterval,
-    refetchIntervalInBackground: false,
-  });
-  const servers = useQuery({
-    queryKey: ["mcp", "servers", server, tool, mcpOnly],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.mcp.servers, {
-        query: {
-          ...(server ? { server } : {}),
-          ...(tool ? { tool } : {}),
-          ...(mcpOnly ? { mcp_only: "1" as const } : {}),
-          limit: 200,
-        },
-        signal,
-        routeId,
-      }),
-  });
-  const catalog = useQuery({
-    queryKey: ["mcp", "catalog", server],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.mcp.catalog, {
-        query: server ? { server } : {},
-        signal,
-        routeId,
-      }),
-  });
-  const trust = useQuery({
-    queryKey: ["mcp", "trust-scores"],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.mcp.trustScores, { query: { days: 30 }, signal, routeId }),
-  });
-
-  const saveRisk = useMutationFeedback({
-    mutate: (body: McpToolRiskBody) =>
-      apiClient.request(endpoints.domains.mcp.saveToolRisk, { body, routeId }),
-    invalidates: [["mcp"]],
-    successMessage: "도구 위험 등급을 저장했습니다.",
-    errorMessage: "도구 위험 등급을 저장하지 못했습니다.",
-  });
-
-  const riskForm = useZodForm<RiskFormValues, RiskFormValues>(riskFormSchema, {
-    risk_level: "low",
-    action: "allow",
-    note: "",
-  });
+  const { tools, servers, catalog, trust } = useMcpToolData(owner, query, refetchInterval);
 
   const toolRows = useMemo<ToolRow[]>(() => {
     const stats = new Map<string, McpToolStat>();
     for (const stat of tools.data?.tools ?? []) {
-      stats.set(`${stat.server_label} ${stat.tool_name}`, stat);
+      stats.set(JSON.stringify([stat.server_label, stat.tool_name]), stat);
     }
     return (tools.data?.tool_risk ?? []).map((risky) => {
-      const stat = stats.get(`${risky.server_label} ${risky.tool_name}`);
+      const stat = stats.get(JSON.stringify([risky.server_label, risky.tool_name]));
       return {
         ...risky,
         calls: stat?.calls ?? 0,
@@ -450,7 +215,7 @@ export function McpToolsTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
       ) : null}
 
       <SectionCard title="도구 위험 등급" description="MCP 도구별 위험 등급, 조치와 최근 호출 통계입니다.">
-        {!tools.isPending && toolRows.length === 0 ? (
+        {!tools.isPending && !tools.isError && toolRows.length === 0 ? (
           <EmptyState
             title="조건에 맞는 도구가 없습니다."
             description="MCP 도구가 한 번이라도 호출되면 여기에 나타납니다. 필터를 초기화해 보세요."
@@ -460,17 +225,13 @@ export function McpToolsTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
             caption="MCP 도구 위험 등급"
             columns={toolColumns(canWrite, (row, trigger) => {
               rememberTrigger(trigger);
-              riskForm.reset({
-                risk_level: parseRiskLevel(row.risk_level),
-                action: parseRiskAction(row.action),
-                note: row.note,
-              });
               setEditing(row);
-              setFormInstance((value) => value + 1);
             })}
             data={toolRows}
             loading={tools.isPending}
-            getRowId={(row) => `${row.server_label}/${row.tool_name}`}
+            error={tools.isError && !tools.data ? "도구 위험 등급을 불러오지 못했습니다." : undefined}
+            onRetry={() => void tools.refetch()}
+            getRowId={(row) => JSON.stringify([row.server_label, row.tool_name])}
           />
         )}
       </SectionCard>
@@ -489,6 +250,8 @@ export function McpToolsTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
           columns={serverColumns}
           data={servers.data?.servers ?? []}
           loading={servers.isPending}
+          error={servers.isError && !servers.data ? "서버 사용량을 불러오지 못했습니다." : undefined}
+          onRetry={() => void servers.refetch()}
           getRowId={(row) => row.server_label}
           emptyMessage="집계된 서버가 없습니다."
         />
@@ -503,81 +266,56 @@ export function McpToolsTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
           ) : null
         }
       >
+        {catalog.isError ? (
+          <QueryNotice
+            error={catalog.error}
+            hasData={Boolean(catalog.data)}
+            label="도구 카탈로그"
+            onRetry={() => void catalog.refetch()}
+          />
+        ) : null}
         <DataTable
           caption="MCP 도구 카탈로그"
           columns={catalogColumns}
           data={catalog.data?.catalog ?? []}
           loading={catalog.isPending}
-          getRowId={(row) => `${row.server_label}/${row.tool_name}`}
+          error={catalog.isError && !catalog.data ? "도구 카탈로그을 불러오지 못했습니다." : undefined}
+          onRetry={() => void catalog.refetch()}
+          getRowId={(row) => JSON.stringify([row.server_label, row.tool_name])}
           emptyMessage="관측된 도구가 없습니다."
         />
       </SectionCard>
 
       <SectionCard title="도구 신뢰 점수" description="최근 30일 오류율과 위험 등급으로 계산한 점수입니다.">
+        {trust.isError ? (
+          <QueryNotice
+            error={trust.error}
+            hasData={Boolean(trust.data)}
+            label="도구 신뢰 점수"
+            onRetry={() => void trust.refetch()}
+          />
+        ) : null}
         <DataTable
           caption="MCP 도구 신뢰 점수"
           columns={trustColumns}
           data={trust.data?.tools ?? []}
           loading={trust.isPending}
+          error={trust.isError && !trust.data ? "도구 신뢰 점수을 불러오지 못했습니다." : undefined}
+          onRetry={() => void trust.refetch()}
           getRowId={(row) => row.ref}
           emptyMessage="점수를 계산할 호출 기록이 없습니다."
         />
       </SectionCard>
 
-      <FormDialog
-        key={`tool-risk-${formInstance}`}
-        form={riskForm}
-        open={editing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setEditing(undefined);
-        }}
-        returnFocusRef={editTriggerRef}
-        title="도구 위험 등급"
-        description={
-          editing
-            ? `${editing.server_label} / ${editing.tool_name} 호출을 게이트웨이가 어떻게 다룰지 정합니다.`
-            : ""
-        }
-        submitLabel="저장"
-        onSubmit={async (values) => {
-          if (!editing) return;
-          await saveRisk.mutateAsync({
-            server_label: editing.server_label,
-            tool_name: editing.tool_name,
-            risk_level: values.risk_level,
-            action: values.action,
-            ...(values.note ? { note: values.note } : {}),
-          });
-          setEditing(undefined);
-        }}
-      >
-        {editing && !editing.configured ? (
-          <p>
-            지금은 접근 유형({editing.access_class || "미분류"})에서 추론한 기본값입니다. 저장하면 이 도구에
-            고정됩니다.
-          </p>
-        ) : null}
-        <FormField label="위험 등급" required error={riskForm.formState.errors.risk_level?.message}>
-          {(control) => (
-            <Select {...control} {...riskForm.register("risk_level")} options={riskLevelChoices} />
-          )}
-        </FormField>
-        <FormField
-          label="조치"
-          required
-          description={
-            editing?.recommended_action
-              ? `권장 조치: ${decisionLabel(editing.recommended_action)}`
-              : undefined
-          }
-          error={riskForm.formState.errors.action?.message}
-        >
-          {(control) => <Select {...control} {...riskForm.register("action")} options={actionChoices} />}
-        </FormField>
-        <FormField label="메모" error={riskForm.formState.errors.note?.message}>
-          {(control) => <Textarea {...control} rows={2} {...riskForm.register("note")} />}
-        </FormField>
-      </FormDialog>
+      {editing ? (
+        <ToolRiskDialog
+          baseline={editing}
+          owner={owner}
+          canWrite={scopeCanWrite}
+          onClose={() => setEditing(undefined)}
+          returnFocusRef={editTriggerRef}
+        />
+      ) : null}
     </div>
   );
 }

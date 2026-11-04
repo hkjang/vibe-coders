@@ -19,6 +19,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const row = apiKeyPublicSchema.parse({
   id: "key_scope",
+  revision: "a".repeat(64),
   name: "검토용 키",
   role: "developer",
   status: "active",
@@ -29,7 +30,7 @@ const catalog = { roles: [], all_scopes: [...allApiKeyScopes, "future:scope"] };
 
 function setup(update: ApiHandler = () => ({}), canWrite = true, loadCatalog: ApiHandler = () => catalog) {
   const api = mockApi({
-    "GET /admin/api-keys": () => ({ api_keys: [row] }),
+    "GET /admin/api-keys": () => ({ api_keys: [row], edit_review_supported: true }),
     "GET /admin/roles": loadCatalog,
     [endpoint]: update,
   });
@@ -54,6 +55,14 @@ async function openEditor(user: ReturnType<typeof userEvent.setup>) {
 
 function scope(dialog: HTMLElement, value: string) {
   return within(dialog).getByRole("checkbox", { name: new RegExp(value) });
+}
+
+const review = { reason: "운영 권한 정비", expected_revision: row.revision };
+async function confirmReview(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "변경 사유" }), {
+    target: { value: review.reason },
+  });
+  await user.click(within(dialog).getByRole("checkbox", { name: /변경 내용과 영향을 확인했습니다/ }));
 }
 
 function deferred() {
@@ -126,9 +135,10 @@ describe("API 키 권한 초안", () => {
     expect(scope(dialog, "future:scope")).toBeChecked();
     expect(within(dialog).getByRole("button", { name: "권한 저장" })).toBeDisabled();
     await user.click(scope(dialog, "future:scope"));
+    await confirmReview(user, dialog);
     await user.click(within(dialog).getByRole("button", { name: "권한 저장" }));
     await waitFor(() =>
-      expect(api.bodies(endpoint)).toEqual([{ scopes: ["chat:completion", "models:read"] }]),
+      expect(api.bodies(endpoint)).toEqual([{ scopes: ["chat:completion", "models:read"], review }]),
     );
   });
 
@@ -144,9 +154,14 @@ describe("API 키 권한 초안", () => {
     expect(scope(dialog, "future:new")).toBeChecked();
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "권한 저장" })).toBeDisabled());
     await user.click(scope(dialog, "future:new"));
+    expect(within(dialog).getByRole("button", { name: "권한 저장" })).toBeDisabled();
+    await user.click(scope(dialog, "models:read"));
     expect(within(dialog).getByRole("button", { name: "권한 저장" })).toBeEnabled();
+    await confirmReview(user, dialog);
     await user.click(within(dialog).getByRole("button", { name: "권한 저장" }));
-    await waitFor(() => expect(api.bodies(endpoint)).toEqual([{ scopes: [...row.scopes].sort() }]));
+    await waitFor(() =>
+      expect(api.bodies(endpoint)).toEqual([{ scopes: ["chat:completion", "future:scope"], review }]),
+    );
   });
 
   it.each(["changed", "fetching", "error"])(
@@ -159,6 +174,8 @@ describe("API 키 권한 초안", () => {
         ++reads === 1 ? catalog : catalogPending.promise,
       );
       const dialog = await openEditor(user);
+      await user.click(scope(dialog, "models:read"));
+      await confirmReview(user, dialog);
       await waitFor(() => expect(within(dialog).getByRole("button", { name: "권한 저장" })).toBeEnabled());
       const form = dialog.querySelector("form");
       if (!form) throw new Error("missing scope form");
@@ -191,7 +208,7 @@ describe("API 키 권한 초안", () => {
     const dialog = await openEditor(user);
     expect(scope(dialog, "chat:completion")).toHaveAccessibleName(/대화 생성/);
     expect(scope(dialog, "future:scope")).toBeChecked();
-    expect(dialog).toHaveTextContent("다른 관리자의 동시 변경을 막지는 않습니다");
+    expect(dialog).toHaveTextContent("검토한 키 정보가 바뀌면 서버가 저장을 거부합니다");
     await user.click(scope(dialog, "chat:completion"));
     await user.keyboard("{Escape}");
     const guard = await screen.findByRole("alertdialog");
@@ -224,9 +241,10 @@ describe("API 키 권한 초안", () => {
     const dialog = await openEditor(user);
     expect(dialog).toHaveTextContent("허용 여부는 서버가 검증합니다");
     await user.click(scope(dialog, "models:read"));
+    await confirmReview(user, dialog);
     await user.click(within(dialog).getByRole("button", { name: "권한 저장" }));
     await waitFor(() =>
-      expect(api.bodies(endpoint)).toEqual([{ scopes: ["chat:completion", "future:scope"] }]),
+      expect(api.bodies(endpoint)).toEqual([{ scopes: ["chat:completion", "future:scope"], review }]),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
@@ -240,8 +258,9 @@ describe("API 키 권한 초안", () => {
     expect(dialog).toHaveTextContent("역할 권한을 자동 상속하지 않습니다");
     expect(dialog).toHaveTextContent("필요한 권한이 없는 호출이 거부됩니다");
     expect(dialog).toHaveTextContent("키 사용을 중단하려면 별도의 ‘중지’ 작업");
+    await confirmReview(user, dialog);
     await user.click(within(dialog).getByRole("button", { name: "권한 저장" }));
-    await waitFor(() => expect(api.bodies(endpoint)).toEqual([{ scopes: [] }]));
+    await waitFor(() => expect(api.bodies(endpoint)).toEqual([{ scopes: [], review }]));
   });
 
   it("기존 키의 빈 권한은 목록에서도 상속으로 표시하지 않는다", async () => {
@@ -261,10 +280,11 @@ describe("API 키 권한 초안", () => {
     });
     const dialog = await openEditor(user);
     await user.click(scope(dialog, "models:read"));
+    await confirmReview(user, dialog);
     await user.click(within(dialog).getByRole("button", { name: "권한 저장" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("req-scope-validation");
     expect(scope(dialog, "future:scope")).toBeChecked();
-    expect(api.bodies(endpoint)).toEqual([{ scopes: ["chat:completion", "future:scope"] }]);
+    expect(api.bodies(endpoint)).toEqual([{ scopes: ["chat:completion", "future:scope"], review }]);
   });
 
   it("목록 갱신은 열린 초안과 기준을 바꾸지 않고 동일 키의 새 버튼으로 포커스를 돌린다", async () => {
@@ -307,13 +327,14 @@ describe("API 키 권한 초안", () => {
     const { api } = setup(() => (++calls === 1 ? pending.promise : {}));
     const dialog = await openEditor(user);
     await user.click(scope(dialog, "models:read"));
+    await confirmReview(user, dialog);
     const form = dialog.querySelector("form");
     if (!form) throw new Error("missing scope form");
     act(() => {
       fireEvent.submit(form);
       fireEvent.submit(form);
     });
-    const first = { scopes: ["chat:completion", "future:scope"] };
+    const first = { scopes: ["chat:completion", "future:scope"], review };
     await waitFor(() => expect(api.bodies(endpoint)).toEqual([first]));
     expect(scope(dialog, "chat:completion")).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "취소" })).toBeDisabled();
@@ -329,7 +350,8 @@ describe("API 키 권한 초안", () => {
     await user.click(scope(dialog, "chat:completion"));
     expect(api.bodies(endpoint)).toEqual([first]);
     await user.click(within(dialog).getByRole("button", { name: "권한 저장" }));
-    await waitFor(() => expect(api.bodies(endpoint)).toEqual([first, { scopes: ["future:scope"] }]));
+    expect(within(dialog).getByRole("button", { name: "권한 저장" })).toBeDisabled();
+    expect(api.bodies(endpoint)).toEqual([first]);
   });
 
   it.each([
@@ -345,6 +367,7 @@ describe("API 키 권한 초안", () => {
       const { api, client } = setup(() => pending.promise);
       const dialog = await openEditor(user);
       await user.click(scope(dialog, "models:read"));
+      await confirmReview(user, dialog);
       await user.click(within(dialog).getByRole("button", { name: "권한 저장" }));
       await waitFor(() => expect(api.bodies(endpoint)).toHaveLength(1));
       act(() => {
@@ -378,6 +401,7 @@ describe("API 키 권한 초안", () => {
     const { api } = setup();
     const dialog = await openEditor(user);
     await user.click(scope(dialog, "models:read"));
+    await confirmReview(user, dialog);
     const form = dialog.querySelector("form");
     if (!form) throw new Error("missing scope form");
     await act(async () => {

@@ -1,5 +1,6 @@
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,11 +19,16 @@ import type {
 } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 
-const authRuntime = vi.hoisted(() => ({ legacyFallback: true, scopes: ["admin:read"] }));
+const authRuntime = vi.hoisted(() => ({
+  legacyFallback: true,
+  scopes: ["admin:read"],
+  prefixes: ["vc_sk_", "vc_sa_"],
+}));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     authenticationMode: "session",
+    credentialPrefixes: authRuntime.prefixes,
     legacyFallback: authRuntime.legacyFallback,
     mode: "authenticated",
     user: {
@@ -204,7 +210,9 @@ function renderPage(
             path="/gateway/models"
             element={
               <>
-                <ModelPage />
+                <FeatureAccessHarness featureId="gateway.models">
+                  <ModelPage />
+                </FeatureAccessHarness>
                 <LocationProbe />
               </>
             }
@@ -255,6 +263,7 @@ describe("ModelPage", () => {
   beforeEach(() => {
     authRuntime.legacyFallback = true;
     authRuntime.scopes = ["admin:read"];
+    authRuntime.prefixes = ["vc_sk_", "vc_sa_"];
     usePreferences.setState({ refreshInterval: 0 });
     vi.restoreAllMocks();
   });
@@ -544,9 +553,12 @@ describe("ModelPage", () => {
 
   it("keeps enrichment last-known-good data visible inside the modal", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(["admin", "models", "quality", "24h"], qualityResponse);
-    client.setQueryData(["admin", "pricing"], pricingResponse);
-    client.setQueryData(["admin", "model-tags"], tagsResponse);
+    mockApi();
+    renderPage(`/gateway/models?provider=${providerRef("openai")}&model=gpt-5&source=live`, client);
+    const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
+    await within(dialog).findByText("91점");
+    await within(dialog).findByText("₩1,000");
+    await within(dialog).findByText("coding, analysis");
     mockApi({
       pricingError: new AppError("가격 갱신 실패", {
         kind: "network",
@@ -564,9 +576,9 @@ describe("ModelPage", () => {
         retryable: true,
       }),
     });
-    renderPage(`/gateway/models?provider=${providerRef("openai")}&model=gpt-5&source=live`, client);
-
-    const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
+    await act(async () => {
+      await client.refetchQueries();
+    });
     expect(await within(dialog).findByText("요청 ID: req-quality-lkg")).toBeVisible();
     expect(within(dialog).getByText("요청 ID: req-pricing-lkg")).toBeVisible();
     expect(within(dialog).getByText("요청 ID: req-tags-lkg")).toBeVisible();
@@ -753,6 +765,21 @@ describe("ModelPage", () => {
     expect(screen.getByTestId("location")).not.toHaveTextContent("private");
   });
 
+  it("사용자 지정 접두사 검색을 깊은 링크와 후속 상세 링크에 남기지 않는다", async () => {
+    authRuntime.prefixes = ["corp_"];
+    const candidate = "corp_" + "a".repeat(32);
+    mockApi();
+    renderPage(`/gateway/models?q=${candidate}`);
+    const input = screen.getByRole("textbox", { name: "모델 검색" });
+    expect(input).toHaveValue("");
+    expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent(candidate));
+    await screen.findByRole("link", { name: "gpt-5" });
+    for (const link of screen.getAllByRole("link"))
+      expect(link.getAttribute("href")).not.toContain(candidate);
+    expect(input).toHaveFocus();
+  });
+
   it("scrubs a secret-like legacy model_provider and renders a generic not-found state", async () => {
     mockApi();
     const unsafeProvider = "Bearer provider-private-value";
@@ -768,9 +795,8 @@ describe("ModelPage", () => {
   it("shows last-known-good rows after catalogue refresh failure", async () => {
     const user = userEvent.setup();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(
-      ["admin", "models"],
-      {
+    mockApi({
+      models: {
         ...modelResponse,
         partial_failures: [
           {
@@ -782,8 +808,13 @@ describe("ModelPage", () => {
         ],
         request_id: "req-model-cached-response",
       },
-      { updatedAt: Date.now() - 30_000 },
+    });
+    renderPage(
+      `/gateway/models?model=shared-model&model_provider=${providerRef("anthropic")}&source=live`,
+      client,
     );
+    const dialog = await screen.findByRole("dialog", { name: "shared-model" });
+    await within(dialog).findByText("요청 ID: req-model-cached-response");
     const request = mockApi({
       modelError: new AppError("Model 목록 갱신 실패", {
         kind: "network",
@@ -791,12 +822,14 @@ describe("ModelPage", () => {
         retryable: true,
       }),
     });
-    renderPage(
-      `/gateway/models?model=shared-model&model_provider=${providerRef("anthropic")}&source=live`,
-      client,
-    );
-
-    const dialog = await screen.findByRole("dialog", { name: "shared-model" });
+    await act(async () => {
+      await client.refetchQueries({
+        predicate: (query) =>
+          query.queryKey[0] === "admin" &&
+          query.queryKey[1] === "models" &&
+          query.queryKey[2] === "model-read-owner",
+      });
+    });
     expect(
       await within(dialog).findByText("모델 카탈로그 갱신에 실패해 마지막 정상 데이터를 표시합니다."),
     ).toBeVisible();
@@ -808,12 +841,15 @@ describe("ModelPage", () => {
     expect(within(dialog).getAllByRole("alert")).toHaveLength(1);
     expect(within(dialog).getByText("카탈로그")).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "모델 카탈로그 상세 재시도" }));
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(6));
   });
 
   it("shows catalogue refresh progress inside an open detail dialog", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(["admin", "models"], modelResponse, { updatedAt: Date.now() - 30_000 });
+    mockApi();
+    renderPage(`/gateway/models?model=gpt-5&model_provider=${providerRef("openai")}&source=live`, client);
+    const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
+    await within(dialog).findByText("카탈로그");
     let resolveModels: ((value: AdminModelsResponse) => void) | undefined;
     const pendingModels = new Promise<AdminModelsResponse>((resolve) => {
       resolveModels = resolve;
@@ -825,9 +861,14 @@ describe("ModelPage", () => {
       if (endpoint.path === endpoints.admin.models.tags.path) return tagsResponse as never;
       throw new Error(`Unexpected endpoint: ${endpoint.path}`);
     });
-    renderPage(`/gateway/models?model=gpt-5&model_provider=${providerRef("openai")}&source=live`, client);
-
-    const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
+    act(() => {
+      void client.refetchQueries({
+        predicate: (query) =>
+          query.queryKey[0] === "admin" &&
+          query.queryKey[1] === "models" &&
+          query.queryKey[2] === "model-read-owner",
+      });
+    });
     expect(await within(dialog).findByText("모델 카탈로그 정보를 갱신하고 있습니다.")).toBeVisible();
     expect(within(dialog).getByText("카탈로그")).toBeVisible();
 

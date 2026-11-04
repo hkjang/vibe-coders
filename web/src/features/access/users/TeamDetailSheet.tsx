@@ -14,11 +14,18 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
+import {
+  assertFeatureRead,
+  featureOwnedKey,
+  type FeatureReadOwner,
+} from "@/shared/hooks/use-feature-read-owner";
+import { Button } from "@/shared/components/ui/Button";
 
 const access = endpoints.domains.access;
 const routeId = "access.users";
 
 interface TeamDetailSheetProps {
+  owner: FeatureReadOwner;
   team: string;
   onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -61,16 +68,27 @@ function Breakdown<Row extends { requests: number; cost_krw?: number }>({
   );
 }
 
-export function TeamDetailSheet({ team, onClose, returnFocusRef }: TeamDetailSheetProps): React.JSX.Element {
+export function TeamDetailSheet({
+  owner,
+  team,
+  onClose,
+  returnFocusRef,
+}: TeamDetailSheetProps): React.JSX.Element {
   const detail = useQuery({
-    queryKey: ["access", "teams", "detail", team],
-    enabled: team !== "",
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(access.teams.detail, { team }), {
+    queryKey: featureOwnedKey(["access", "teams", "detail", team], owner),
+    enabled: team !== "" && owner.readable && !owner.denied,
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(withPathParams(access.teams.detail, { team }), {
         query: { limit: 100 },
         signal,
         routeId,
-      }),
+      });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
   });
   const data = detail.data;
 
@@ -92,6 +110,9 @@ export function TeamDetailSheet({ team, onClose, returnFocusRef }: TeamDetailShe
           {isAppError(detail.error) && detail.error.requestId ? (
             <span className="request-id"> 요청 ID: {detail.error.requestId}</span>
           ) : null}
+          <Button onClick={() => void detail.refetch()} disabled={detail.isFetching}>
+            다시 조회
+          </Button>
         </InlineNotice>
       ) : null}
       {data ? (

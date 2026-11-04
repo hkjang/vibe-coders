@@ -4,6 +4,7 @@ import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppPage } from "@/features/agents/apps/AppPage";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { AppError } from "@/shared/api/error";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
@@ -35,7 +36,14 @@ const app = {
 const listHandler = () => ({ apps: [app] });
 
 function renderPage(route = "/agents/apps"): ReturnType<typeof renderScreen> {
-  return renderScreen(<AppPage />, { path: "/agents/apps", route });
+  return renderScreen(
+    <FeatureAccessContext.Provider
+      value={{ featureId: "agents.apps", permitted: true, readOnly: false, status: "preview" }}
+    >
+      <AppPage />
+    </FeatureAccessContext.Provider>,
+    { path: "/agents/apps", route },
+  );
 }
 
 describe("AppPage", () => {
@@ -93,7 +101,7 @@ describe("AppPage", () => {
             resolved: true,
             detail: "스킬 상태=production",
           },
-          { kind: "model", ref: "gpt-4o", label: "추천 모델", resolved: true, detail: "추천 모델" },
+          { kind: "model", ref: "gpt-4o", label: "추천 모델", resolved: false, detail: "추천 모델 미확인" },
         ],
         allowed_models: ["gpt-4o"],
         warnings: ["팀/역할 제한이 없어 모든 사용자에게 노출됩니다"],

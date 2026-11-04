@@ -1,3 +1,4 @@
+import { ModelReadBoundary } from "./ModelReadBoundary";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -51,7 +52,9 @@ async function setup(
     return (
       <main id="main-content" tabIndex={-1}>
         <FeatureAccessContext.Provider value={{ featureId: "gateway.models", permitted: true, readOnly }}>
-          {kind.startsWith("deprecation") ? <ModelDeprecationsPanel /> : <ModelContractsPanel />}
+          <ModelReadBoundary>
+            {kind.startsWith("deprecation") ? <ModelDeprecationsPanel /> : <ModelContractsPanel />}
+          </ModelReadBoundary>
         </FeatureAccessContext.Provider>
       </main>
     );

@@ -2,10 +2,10 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "vibe-coders-v0.86.61-integrated-source-sbom",
-  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.61",
+  "name": "vibe-coders-v0.86.62-integrated-source-sbom",
+  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.62",
   "creationInfo": {
-    "created": "2026-10-13T08:31:26Z",
+    "created": "2026-11-02T03:09:45Z",
     "creators": [
       "Tool: Syft-1.51.0",
       "Tool: scripts/merge-source-sbom.mjs",
@@ -20,8 +20,8 @@
     {
       "name": "vibe-coders",
       "SPDXID": "SPDXRef-Package-vibe-coders",
-      "versionInfo": "0.86.61",
-      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@v0.86.61",
+      "versionInfo": "0.86.62",
+      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@v0.86.62",
       "filesAnalyzed": false,
       "licenseConcluded": "AGPL-3.0-only",
       "licenseDeclared": "AGPL-3.0-only",
@@ -30,7 +30,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/vibe-coders@0.86.61"
+          "referenceLocator": "pkg:golang/vibe-coders@0.86.62"
         }
       ]
     },
@@ -1170,6 +1170,23 @@
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
           "referenceLocator": "pkg:npm/%40humanwhocodes/retry@0.4.3"
+        }
+      ]
+    },
+    {
+      "name": "@isaacs/nonrecursive-glob-match",
+      "SPDXID": "SPDXRef-Package-npm-isaacs-nonrecursive-glob-match-b6522c0b7a9a8c2e",
+      "versionInfo": "1.0.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BlueOak-1.0.0",
+      "licenseDeclared": "BlueOak-1.0.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40isaacs/nonrecursive-glob-match@1.0.3"
         }
       ]
     },
@@ -5221,8 +5238,8 @@
     },
     {
       "name": "minimatch",
-      "SPDXID": "SPDXRef-Package-npm-minimatch-389e652fd032c3e3",
-      "versionInfo": "10.2.6",
+      "SPDXID": "SPDXRef-Package-npm-minimatch-3bb18fd825139682",
+      "versionInfo": "11.0.1",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "BlueOak-1.0.0",
@@ -5232,7 +5249,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/minimatch@10.2.6"
+          "referenceLocator": "pkg:npm/minimatch@11.0.1"
         }
       ]
     },
@@ -7230,6 +7247,11 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-npm-isaacs-nonrecursive-glob-match-b6522c0b7a9a8c2e"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-vibe-coders",
+      "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-npm-jridgewell-gen-mapping-80b5ee1fab3a7dcc"
     },
     {
@@ -8420,7 +8442,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-minimatch-389e652fd032c3e3"
+      "relatedSpdxElement": "SPDXRef-Package-npm-minimatch-3bb18fd825139682"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",

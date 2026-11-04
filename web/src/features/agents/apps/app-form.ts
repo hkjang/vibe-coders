@@ -6,9 +6,9 @@ import type { AppOnboardingBody, WorkApp, WorkAppWriteBody } from "@/shared/api/
 export const appComponentKinds = ["skill", "prompt_product", "text2sql_report", "mcp_tool", "model"] as const;
 
 export const appComponentKindLabels: Record<(typeof appComponentKinds)[number], string> = {
-  skill: "Skill",
+  skill: "스킬",
   prompt_product: "프롬프트 상품",
-  text2sql_report: "Text2SQL 저장 리포트",
+  text2sql_report: "자연어 SQL 저장 리포트",
   mcp_tool: "MCP 도구",
   model: "추천 모델",
 };
@@ -26,7 +26,7 @@ const componentSchema = z.object({
 
 export const appComponentsExample = JSON.stringify(
   [
-    { kind: "skill", ref: "code-review", label: "코드 리뷰 Skill" },
+    { kind: "skill", ref: "code-review", label: "코드 리뷰 스킬" },
     { kind: "model", ref: "", label: "추천 모델(코딩 품질 상위)" },
   ],
   null,

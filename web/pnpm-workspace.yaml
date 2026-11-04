@@ -2,9 +2,11 @@ packages:
   - "."
 
 overrides:
-  # Build/test transitive dependencies: retain the patched compatible majors.
+  # Pin security fixes for the build/test dependency graph.
   brace-expansion: 5.0.12
   js-yaml: 4.3.2
+  # GHSA-g3hv-75wg-m249: bound glob expansion in ESLint/TypeScript analysis.
+  minimatch: 11.0.1
   # GHSA-68fv-2mgg-jv7q: validate indexed source-map offsets in build/test tools.
   source-map-js: 1.2.2
   # GHSA-xjj6-f33q-929c: handle rejected content-encoding response streams safely.

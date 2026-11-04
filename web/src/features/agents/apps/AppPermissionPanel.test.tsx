@@ -125,7 +125,12 @@ describe("앱 추가 접근 권한", () => {
     const { api, client } = setup();
     const dialog = await openGrant(user);
     await fillGrant(user, dialog);
-    act(() => client.setQueryData(permissionKey, { permissions: [{ ...row, subject_id: "changed" }] }));
+    act(() =>
+      client.setQueriesData(
+        { queryKey: permissionKey },
+        { permissions: [{ ...row, subject_id: "changed" }] },
+      ),
+    );
     fireEvent.click(screen.getByText("외부 앱 변경"));
     expect(dialog).toHaveTextContent("검토 도우미");
     expect(dialog).toHaveTextContent("app_review");

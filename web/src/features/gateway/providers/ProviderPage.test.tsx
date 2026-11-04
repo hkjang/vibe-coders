@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -476,7 +476,9 @@ describe("ProviderPage", () => {
 
   it("shows last-known-good rows after a provider refresh failure", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(["admin", "providers"], providerList, { updatedAt: Date.now() - 30_000 });
+    mockApi();
+    renderPage("/gateway/providers", client);
+    await screen.findByRole("link", { name: "openai" });
     mockApi({
       providerError: new AppError("Provider 목록 갱신 실패", {
         kind: "network",
@@ -484,7 +486,9 @@ describe("ProviderPage", () => {
         retryable: true,
       }),
     });
-    renderPage("/gateway/providers", client);
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["admin", "providers"] });
+    });
 
     const table = await screen.findByRole("table", { name: "공급자 연결 설정과 운영 상태" });
     expect(within(table).getByRole("link", { name: "openai" })).toBeVisible();
@@ -528,14 +532,18 @@ describe("ProviderPage", () => {
 
   it("shows provider last-known-good and request ID inside the dialog", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(["admin", "providers"], providerList, { updatedAt: Date.now() - 30_000 });
+    mockApi();
+    renderPage("/gateway/providers?provider=openai", client);
+    await screen.findByRole("dialog", { name: "openai" });
     mockApi({
       providerError: new AppError("Provider refresh failed", {
         kind: "network",
         requestId: "req-dialog-provider-lkg",
       }),
     });
-    renderPage("/gateway/providers?provider=openai", client);
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["admin", "providers"] });
+    });
 
     const dialog = await screen.findByRole("dialog", { name: "openai" });
     expect(
@@ -551,9 +559,9 @@ describe("ProviderPage", () => {
   it("removes credential searches from deep links and never writes submitted secrets to the URL", async () => {
     const user = userEvent.setup();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(["admin", "providers"], providerList);
     mockApi();
     renderPage("/gateway/providers?q=api_key%3Dprivate&status=enabled", client);
+    await screen.findByRole("link", { name: "openai" });
 
     const providerLink = screen.getByRole("link", { name: "openai" });
     expect(providerLink.getAttribute("href")).not.toContain("private");

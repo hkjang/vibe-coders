@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
+import { useAuth } from "@/app/auth/AuthProvider";
 
 import type { ModelProviderOption, ModelStatusFilter } from "@/features/gateway/models/model-catalog";
 import { modelStatusPresentation } from "@/features/gateway/models/model-presentation";
@@ -39,6 +40,7 @@ export function ModelToolbar({
   status,
   unsafeStoredQuery,
 }: ModelToolbarProps): React.JSX.Element {
+  const { credentialPrefixes } = useAuth();
   const location = useLocation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [searchError, setSearchError] = useState<string | undefined>(() =>
@@ -60,7 +62,7 @@ export function ModelToolbar({
           event.preventDefault();
           const submittedQuery = new FormData(event.currentTarget).get("q");
           const nextQuery = typeof submittedQuery === "string" ? submittedQuery.trim() : "";
-          if (containsPotentialSecret(nextQuery)) {
+          if (containsPotentialSecret(nextQuery, credentialPrefixes)) {
             setSearchError(secretSearchMessage);
             inputRef.current?.focus();
             return;

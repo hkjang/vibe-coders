@@ -1,7 +1,11 @@
 import { useCallback } from "react";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 
-import { containsPotentialSecret } from "@/shared/security/secrets";
+import { useAuth } from "@/app/auth/AuthProvider";
+import {
+  locationStateWithSensitiveRejections,
+  sanitizeAppRouteSearch,
+} from "@/shared/security/app-route-query";
 
 export type SearchUpdates = Readonly<Record<string, string | number | undefined | null>>;
 
@@ -15,17 +19,25 @@ export function useSearchState(): [
   (updates: SearchUpdates, options?: { replace?: boolean; state?: unknown }) => void,
 ] {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { pathname } = useLocation();
+  const { credentialPrefixes } = useAuth();
   const update = useCallback(
     (updates: SearchUpdates, options: { replace?: boolean; state?: unknown } = {}): void => {
       const next = new URLSearchParams(searchParams);
       for (const [key, raw] of Object.entries(updates)) {
         const value = raw === undefined || raw === null ? "" : String(raw);
-        if (value === "" || containsPotentialSecret(value)) next.delete(key);
+        if (value === "") next.delete(key);
         else next.set(key, value);
       }
-      setSearchParams(next, { replace: options.replace ?? true, state: options.state });
+      // Apply the same route policy BEFORE history changes, including untouched
+      // parameters. RouteQueryGuard remains the boundary for inbound links.
+      const safe = sanitizeAppRouteSearch(pathname, next.toString(), credentialPrefixes);
+      setSearchParams(safe.search, {
+        replace: options.replace ?? true,
+        state: locationStateWithSensitiveRejections(options.state, safe.sensitiveKeys),
+      });
     },
-    [searchParams, setSearchParams],
+    [searchParams, setSearchParams, pathname, credentialPrefixes],
   );
   return [searchParams, update];
 }

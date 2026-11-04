@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { first, test } from "../fixtures/workflow-ownership-gateway";
+import { bootstrap, first, test } from "../fixtures/workflow-ownership-gateway";
 
 async function openSearch(page: Page) {
   await page.goto("agents/workflows");
@@ -58,6 +58,83 @@ test("일부 검색 실패는 재시도할 수 있고 한도 안내는 정상 �
   await expect(dialog.getByRole("status")).toContainText("더 구체적으로");
   expect(calls).toBe(2);
   expect(gateway.writes).toEqual([]);
+});
+
+test("검색 재조회와 실패 동안 이전 결과 이동을 차단하고 명시적 재시도로 복구한다", async ({
+  page,
+  gateway,
+}) => {
+  const state = bootstrap("writable");
+  const feature = state.migration_registry?.[0];
+  if (!feature || !state.user) throw new Error("missing synthetic feature");
+  state.user.features = { ...state.user.features, "agents.apps": true };
+  state.allowed_features = ["agents.workflows", "agents.apps"];
+  state.migration_registry = [
+    feature,
+    {
+      ...feature,
+      feature_id: "agents.apps",
+      title: "업무 앱",
+      app_path: "/app/agents/apps",
+    },
+  ];
+  await page.route("**/admin/ui-bootstrap", (route) => route.fulfill({ json: state }));
+  let calls = 0;
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/admin/resource-search", async (route) => {
+    calls += 1;
+    if (calls === 1) {
+      return route.fulfill({
+        json: {
+          ...result(),
+          groups: [...result().groups, { kind: "app", status: "unavailable", limited: false, items: [] }],
+        },
+      });
+    }
+    if (calls === 2) {
+      await held;
+      return route.fulfill({
+        status: 503,
+        headers: { "X-Request-ID": "search-failed-request" },
+        json: {
+          error: { message: "synthetic unavailable", type: "server_error", code: "search_unavailable" },
+        },
+      });
+    }
+    return route.fulfill({ json: result() });
+  });
+  try {
+    const dialog = await openSearch(page);
+    const input = dialog.getByRole("combobox");
+    await input.fill("첫 번째");
+    await expect(dialog.getByRole("option")).toBeVisible();
+    await dialog.getByRole("button", { name: "자원 검색 다시 시도" }).click();
+    await expect(dialog.getByRole("status")).toContainText("검색하고 있습니다");
+    await expect(input).toBeFocused();
+    await expect(dialog.getByRole("option")).toHaveCount(0);
+    await input.press("Enter");
+    await expect(dialog).toBeVisible();
+    release();
+    await expect(dialog.getByRole("status")).toContainText("실패했습니다");
+    await expect(input).toBeFocused();
+    await expect(dialog.getByRole("option")).toHaveCount(0);
+    await expect(dialog.getByText("요청 ID: search-failed-request", { exact: true })).toBeVisible();
+    await expect(dialog.getByText(/synthetic-search-request/)).toHaveCount(0);
+    await input.press("Enter");
+    await expect(page).not.toHaveURL(/workflow=/);
+    await dialog.getByRole("button", { name: "자원 검색 다시 시도" }).click();
+    await expect(dialog.getByRole("option")).toBeVisible();
+    await expect(input).toBeFocused();
+    await input.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`workflow=${first.id}`));
+    expect(calls).toBe(3);
+    expect(gateway.writes).toEqual([]);
+  } finally {
+    release();
+  }
 });
 
 test("모바일 자원 검색은 넘침 없이 포커스와 접근성을 유지한다", async ({ page, gateway }, info) => {

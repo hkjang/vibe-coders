@@ -5,13 +5,7 @@ import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
 import { ApiKeyCreateFields } from "@/features/access/users/ApiKeyCreateFields";
 import { ApiKeyScopesDialog } from "@/features/access/users/ApiKeyScopesDialog";
 import { apiKeyColumns } from "@/features/access/users/api-key-columns";
-import {
-  createKeySchema,
-  editKeySchema,
-  splitList,
-  type CreateKeyForm,
-  type EditKeyForm,
-} from "@/features/access/users/api-key-form";
+import { createKeySchema, splitList, type CreateKeyForm } from "@/features/access/users/api-key-form";
 import { accessKeys, useApiKeysQuery } from "@/features/access/users/use-access-admin";
 import { useApiKeyScopeDraft } from "@/features/access/users/use-api-key-scope-draft";
 import { useKeyRowFocus } from "./use-key-row-focus";
@@ -24,7 +18,7 @@ import { endpoints } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { FormDialog } from "@/shared/components/form/FormDialog";
-import { ApiKeyEditFields } from "./ApiKeyEditFields";
+import { ApiKeyEditDialog } from "./ApiKeyEditDialog";
 import { useAdminKeyLifetime } from "./use-admin-key-lifetime";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { LoadingState } from "@/shared/components/state/PageStates";
@@ -96,13 +90,6 @@ export function OwnedApiKeysPanel({
     budget_limit_krw: "",
     expires_at: "",
     scopes: [],
-  });
-  const editForm = useZodForm<EditKeyForm, EditKeyForm>(editKeySchema, {
-    name: "",
-    owner: "",
-    team: "",
-    role: "",
-    status: "active",
   });
 
   const createKey = useMutationFeedback({
@@ -253,13 +240,6 @@ export function OwnedApiKeysPanel({
           columns={apiKeyColumns(
             (row, trigger) => {
               rememberRowTrigger(row.id, "edit", trigger);
-              editForm.reset({
-                name: row.name,
-                owner: row.owner,
-                team: row.team,
-                role: row.role,
-                status: row.status === "disabled" ? "disabled" : "active",
-              });
               setEditing(row);
             },
             openScopes,
@@ -310,33 +290,19 @@ export function OwnedApiKeysPanel({
         <ApiKeyCreateFields form={createForm} />
       </FormDialog>
 
-      <FormDialog
-        form={editForm}
-        open={editing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setEditing(undefined);
-        }}
-        returnFocusRef={rowTrigger}
-        title="API 키 수정"
-        submitDisabled={!writeAccess.allowed}
-        description="이름, 소유자, 팀, 역할과 사용 상태를 변경합니다. 폐기 상태로는 바꿀 수 없습니다."
-        onSubmit={async (values) => {
-          if (!editing) return;
-          await updateKey.mutateAsync({
-            id: editing.id,
-            body: {
-              name: values.name,
-              owner: values.owner,
-              team: values.team,
-              role: values.role,
-              status: values.status,
-            },
-          });
-        }}
-      >
-        {!writeAccess.allowed ? <InlineNotice tone="warning">{writeAccess.reason}</InlineNotice> : null}
-        <ApiKeyEditFields form={editForm} />
-      </FormDialog>
+      {editing ? (
+        <ApiKeyEditDialog
+          key={editing.id}
+          owner={owner}
+          target={editing}
+          canWrite={writeAccess.allowed}
+          onOpenChange={(open) => {
+            if (!open) setEditing(undefined);
+          }}
+          returnFocusRef={rowTrigger}
+          onSubmit={(id, body) => updateKey.mutateAsync({ id, body })}
+        />
+      ) : null}
 
       {scopeTarget ? (
         <ApiKeyScopesDialog
@@ -348,11 +314,11 @@ export function OwnedApiKeysPanel({
           }}
           returnFocusRef={scopeReturnFocus}
           writeDisabled={!writeAccess.allowed}
-          onSubmit={(id, scopes) => {
+          onSubmit={(id, scopes, review) => {
             if (scopeTarget.epoch !== tokenStore.getSessionEpoch()) {
               throw new AppError("인증 세션이 변경되어 이전 권한 초안을 취소했습니다.", { kind: "aborted" });
             }
-            return updateKey.mutateAsync({ id, body: { scopes } });
+            return updateKey.mutateAsync({ id, body: { scopes, review } });
           }}
         />
       ) : null}

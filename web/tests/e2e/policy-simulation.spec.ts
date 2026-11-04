@@ -98,7 +98,7 @@ test("다른 탭을 다녀오면 이전 요청이 새 화면에 결과를 다시
   await trigger(page).click();
   await expect.poll(() => gateway.simulations.length).toBe(1);
   await page.getByRole("tab", { name: "모델 일몰", exact: true }).click();
-  await page.getByRole("tab", { name: "정책 어드바이저", exact: true }).click();
+  await page.getByRole("tab", { name: "정책 추천", exact: true }).click();
   await expect(trigger(page)).toBeEnabled();
   gateway.release(1);
   await expect.poll(() => gateway.finished.includes(1)).toBe(true);

@@ -57,12 +57,19 @@ async function installGateway(context: BrowserContext, origin: string) {
   const finished: number[] = [];
   const unexpected: string[] = [];
   const otherWrites: string[] = [];
+  let regressionEnabled = false;
+  let alertsEnabled = false;
+  let alertRows: Record<string, unknown>[] = [];
+  let alertReadFailure = false;
+  const alertOperations: Array<{ call: string; body?: unknown }> = [];
+  let cases: Record<string, unknown>[] = [];
+  const operations: Array<{ call: string; body?: unknown; id?: string }> = [];
   const sessions = new Set<string>();
   const holds = new Map<string, Hold>();
   const replies = new Map<number, Reply>();
   const failedReads = new Set<number>();
   let failReadsAfterSave = false;
-  function hold(kind: "read" | "save", sequence: number) {
+  function hold(kind: "read" | "save" | "run" | "alert-write", sequence: number) {
     let release!: () => void;
     const promise = new Promise<void>((resolve) => {
       release = resolve;
@@ -127,12 +134,42 @@ async function installGateway(context: BrowserContext, origin: string) {
     // Count before authentication. The transport does not enforce readonly,
     // current revision, active/disabled state or duplicate guards for the UI.
     let save = 0;
+    const alertWrite =
+      alertsEnabled &&
+      (call === "POST /admin/alerts" ||
+        (["PATCH", "DELETE"].includes(request.method()) && /^\/admin\/alerts\/[^/]+$/u.test(url.pathname)));
+    if (alertWrite)
+      alertOperations.push({
+        call,
+        ...(request.postData() ? { body: request.postDataJSON() as unknown } : {}),
+      });
+    const regressionWrite =
+      regressionEnabled &&
+      [
+        "POST /admin/policies/regression/cases",
+        "DELETE /admin/policies/regression/cases",
+        "POST /admin/policies/regression/run",
+      ].includes(call);
+    if (regressionWrite)
+      operations.push({
+        call,
+        ...(request.method() === "POST" && request.postData()
+          ? { body: request.postDataJSON() as unknown }
+          : {}),
+        ...(request.method() === "DELETE" ? { id: url.searchParams.get("id") ?? "" } : {}),
+      });
     if (call === "POST /admin/policies") {
       const body: unknown = request.postDataJSON();
       if (!object(body)) throw new Error("Expected object policy body");
       saves.push(body);
       save = saves.length;
-    } else if (url.pathname.startsWith("/admin/") && request.method() !== "GET") otherWrites.push(call);
+    } else if (
+      !regressionWrite &&
+      !alertWrite &&
+      url.pathname.startsWith("/admin/") &&
+      request.method() !== "GET"
+    )
+      otherWrites.push(call);
     const json = (body: unknown, responseStatus = 200, requestId = "req-public-policy-editor") =>
       route.fulfill({
         status: responseStatus,
@@ -169,13 +206,14 @@ async function installGateway(context: BrowserContext, origin: string) {
         await holds.get(`save:${save}`)?.promise;
         const decodedAt = `2026-02-01T00:00:${String(save).padStart(2, "0")}Z`;
         const { rules: submittedRules, ...submittedPolicy } = structuredClone(body);
+        submittedPolicy.id ??= `public-created-policy-${save}`;
         const decodedRules = Array.isArray(submittedRules)
           ? submittedRules.map((rule: unknown, index: number) => {
               if (!object(rule)) throw new Error("Expected rule object");
               return {
                 ...structuredClone(rule),
                 id: rule.id ?? `public-new-rule-${save}-${index}`,
-                policy_id: body.id,
+                policy_id: submittedPolicy.id,
                 created_at: decodedAt,
                 updated_at: "0001-01-01T00:00:00Z",
               };
@@ -190,7 +228,7 @@ async function installGateway(context: BrowserContext, origin: string) {
         };
         // The actual endpoint ACK is its decoded submission, not a storage
         // reload. Keep its metadata distinct from the subsequent list result.
-        const previous = rows.find((row) => object(row) && row.id === body.id);
+        const previous = rows.find((row) => object(row) && row.id === submittedPolicy.id);
         const updated = {
           ...decoded,
           created_at: object(previous) ? previous.created_at : decodedAt,
@@ -206,6 +244,38 @@ async function installGateway(context: BrowserContext, origin: string) {
         finished.push(save);
         return;
       }
+      if (regressionWrite) {
+        if (call === "POST /admin/policies/regression/run") {
+          await holds.get(`run:${operations.filter((row) => row.call === call).length}`)?.promise;
+          return json({ passed: 1, failed: 0, results: [] });
+        }
+        if (request.method() === "POST") {
+          const body: unknown = request.postDataJSON();
+          if (!object(body)) throw new Error("Expected case object");
+          const id = `public-case-${operations.length}`;
+          cases.push({ ...body, id });
+          return json({ id, ok: true });
+        }
+        cases = cases.filter((row) => row.id !== url.searchParams.get("id"));
+        return json({ ok: true });
+      }
+      if (alertWrite) {
+        await holds.get(`alert-write:${alertOperations.length}`)?.promise;
+        const id = url.pathname.split("/").at(-1);
+        if (request.method() === "DELETE") alertRows = alertRows.filter((row) => row.id !== id);
+        else {
+          const body: unknown = request.postDataJSON();
+          if (!object(body)) throw new Error("Expected alert object");
+          if (request.method() === "POST")
+            alertRows.push({ ...body, id: `public-alert-${alertOperations.length}`, enabled: true });
+          else alertRows = alertRows.map((row) => (row.id === id ? { ...row, ...body } : row));
+        }
+        return json({ ok: true });
+      }
+      if (alertsEnabled && call === "GET /admin/alerts")
+        return alertReadFailure
+          ? json({ error: { message: "public alert read unavailable" } }, 503)
+          : json({ rules: alertRows, events: [{ id: "public-alert-event", rule_name: "공개 알림 발생" }] });
       if (call === "GET /admin/policies") {
         reads += 1;
         const sequence = reads;
@@ -216,10 +286,20 @@ async function installGateway(context: BrowserContext, origin: string) {
           ? json({ error: { message: "public policy read unavailable" } }, 503)
           : json({ policies: result });
       }
+      if (call === "GET /admin/policies/canary-status")
+        return json({
+          policies: rows.filter(object).map((row) => ({
+            policy_id: row.id,
+            name: row.name,
+            rollout_percent: row.rollout_percent,
+            suggested_next: 50,
+          })),
+        });
       const empty: Record<string, unknown> = {
+        "GET /admin/policy-advisor/suggestions": { suggestions: [] },
         "GET /admin/kill-switch": { disabled: false },
         "GET /admin/incidents": { incidents: [] },
-        "GET /admin/policies/regression/cases": { cases: [] },
+        "GET /admin/policies/regression/cases": { cases },
         "GET /admin/policies/decisions": { policy_decisions: [] },
         "GET /admin/approvals": { approvals: [] },
         "GET /admin/security/secrets": { secret_events: [] },
@@ -239,6 +319,23 @@ async function installGateway(context: BrowserContext, origin: string) {
     finished,
     unexpected,
     otherWrites,
+    operations,
+    alertOperations,
+    alerts: (next: Record<string, unknown>[]) => {
+      alertsEnabled = true;
+      alertRows = structuredClone(next);
+    },
+    failAlertRead: (failed: boolean) => {
+      alertReadFailure = failed;
+    },
+    holdAlertWrite: (sequence: number) => hold("alert-write", sequence),
+    releaseAlertWrite: (sequence: number) => holds.get(`alert-write:${sequence}`)?.release(),
+    regression: (next: Record<string, unknown>[]) => {
+      regressionEnabled = true;
+      cases = structuredClone(next);
+    },
+    holdRun: (sequence: number) => hold("run", sequence),
+    releaseRun: (sequence: number) => holds.get(`run:${sequence}`)?.release(),
     reads: () => reads,
     policies: (next: unknown[]) => {
       rows = structuredClone(next);

@@ -10,8 +10,11 @@ import { isOpaqueAppRequestCursor, isValidRequestQueryField } from "@/shared/uti
 import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
 import { domainDecisionRequestIDError } from "@/shared/utils/domain-decision-filters";
-import { readModelCatalogPageSize, readModelCatalogSort } from "@/shared/utils/model-catalog-query";
-import { readProviderCatalogPageSize, readProviderCatalogSort } from "@/shared/utils/provider-catalog-query";
+import { readModelCatalogPageSize, readModelCatalogSorting } from "@/shared/utils/model-catalog-query";
+import {
+  readProviderCatalogPageSize,
+  readProviderCatalogSorting,
+} from "@/shared/utils/provider-catalog-query";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   // Screens declare their own query keys next to their route registration; this
@@ -35,7 +38,11 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
 
 export const sensitiveQueryRejectionStateKey = "appSensitiveQueryKeys";
 const preservedRejectionKeys = new Set(["q"]);
-const preservedBooleanStateKeys = ["providerDetailRejected", "providerSearchRejected"] as const;
+const preservedBooleanStateKeys = [
+  "providerDetailRejected",
+  "providerSearchRejected",
+  "policyTabFocus",
+] as const;
 
 export interface SanitizedAppRouteSearch {
   rejectedKeys: readonly string[];
@@ -105,7 +112,7 @@ export function sanitizeAppRouteSearch(
     const exactCatalogueRoute = route === "/providers" || route === "/gateway/providers";
     if (
       parameters.has("sort") &&
-      (!exactCatalogueRoute || !readProviderCatalogSort(parameters.getAll("sort")))
+      (!exactCatalogueRoute || !readProviderCatalogSorting(parameters.getAll("sort")))
     )
       invalidOperationalKeys.add("sort");
     if (
@@ -116,7 +123,10 @@ export function sanitizeAppRouteSearch(
   }
   if (route === "/models" || route === "/gateway/models" || route.startsWith("/gateway/models/")) {
     const exactCatalogueRoute = route === "/models" || route === "/gateway/models";
-    if (parameters.has("sort") && (!exactCatalogueRoute || !readModelCatalogSort(parameters.getAll("sort"))))
+    if (
+      parameters.has("sort") &&
+      (!exactCatalogueRoute || !readModelCatalogSorting(parameters.getAll("sort")))
+    )
       invalidOperationalKeys.add("sort");
     if (
       parameters.has("page_size") &&

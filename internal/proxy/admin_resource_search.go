@@ -15,6 +15,7 @@ var resourceSearchFeatures = map[string]string{
 	"provider": "gateway.providers", "workflow": "agents.workflows",
 	"app": "agents.apps", "skill": "agents.skills",
 	"mcp_upstream": "mcp.overview",
+	"policy":       "governance.policies",
 }
 
 type resourceSearchItem struct {
@@ -45,7 +46,9 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, 401, "authentication required", "invalid_request_error", "invalid_access_token")
 		return
 	}
-	if !hasScope(user.Scopes, "admin:read") {
+	adminRead := hasScope(user.Scopes, "admin:read")
+	securityRead := hasScope(user.Scopes, "security:read")
+	if !adminRead && !securityRead {
 		writeOpenAIError(w, 403, "resource search permission required", "invalid_request_error", "permission_denied")
 		return
 	}
@@ -55,6 +58,11 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 	// lists do not: SSO users must first exchange them for a gateway session.
 	readRequest := r.Clone(r.Context())
 	readRequest.Method = http.MethodGet
+	// A policy-only reader is authorized by the same session and scope boundary
+	// as GET /admin/policies, without gaining access to other metadata kinds.
+	if !adminRead {
+		readRequest.URL.Path = "/admin/policies"
+	}
 	if !s.authorizeAdmin(readRequest) {
 		writeOpenAIError(w, 401, "authentication required", "invalid_request_error", "invalid_access_token")
 		return
@@ -82,6 +90,10 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 		}
 		seen[kind] = true
 	}
+	if !adminRead && !seen["policy"] {
+		writeOpenAIError(w, 403, "resource search permission required", "invalid_request_error", "permission_denied")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	stored, err := s.loadStoredSettings(r.WithContext(ctx))
@@ -99,7 +111,10 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 		group := resourceSearchGroup{Kind: kind, Items: []resourceSearchItem{}, Status: "forbidden"}
 		// MCP lists require observability:read as well as the console feature's
 		// admin:read permission. Search must not bypass that existing API boundary.
-		canRead := kind != "mcp_upstream" || hasScope(user.Scopes, "observability:read")
+		canRead := adminRead && (kind != "mcp_upstream" || hasScope(user.Scopes, "observability:read"))
+		if kind == "policy" {
+			canRead = securityRead
+		}
 		if allowed[resourceSearchFeatures[kind]] && canRead {
 			rows, more, err := s.db.SearchResourceMetadata(ctx, kind, input.Query, 10)
 			group.Status = "ok"

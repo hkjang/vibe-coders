@@ -17,15 +17,25 @@ import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Button } from "@/shared/components/ui/Button";
+import { Input } from "@/shared/components/ui/Input";
+import { FormField } from "@/shared/components/form/FormField";
+import { KeyEditReview } from "./KeyEditReview";
+import { keyEditError } from "./key-edit-error";
+import { keyEditReasonSchema, useKeyEditReview } from "./use-key-edit-review";
+import type { UpdateApiKeyBody } from "@/shared/api/domains/access";
 
-const schema = z.object({ scopes: z.array(z.string()) });
+const schema = z.object({ scopes: z.array(z.string()), reason: keyEditReasonSchema });
 type ScopeForm = z.infer<typeof schema>;
 
 interface Props {
   owner?: string;
-  target: Pick<ApiKeyPublic, "id" | "name" | "scopes">;
+  target: Pick<ApiKeyPublic, "id" | "name" | "scopes" | "revision">;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (id: string, scopes: string[]) => Promise<unknown>;
+  onSubmit: (
+    id: string,
+    scopes: string[],
+    review: NonNullable<UpdateApiKeyBody["review"]>,
+  ) => Promise<unknown>;
   returnFocusRef: RefObject<HTMLElement | null>;
   writeDisabled?: boolean;
 }
@@ -46,15 +56,20 @@ export function ApiKeyScopesDialog({
   const [baseline] = useState(() => ({
     id: target.id,
     name: target.name,
+    revision: target.revision,
     scopes: [...target.scopes].sort(),
   }));
-  const form = useZodForm<ScopeForm, ScopeForm>(schema, { scopes: [...baseline.scopes] });
+  const review = useKeyEditReview(baseline, owner);
+  const form = useZodForm<ScopeForm, ScopeForm>(schema, { scopes: [...baseline.scopes], reason: "" });
+  const signature = JSON.stringify(form.watch());
   const selected = form.watch("scopes");
   const catalog = confirmedScopeCatalog(roles);
   const unsupported = catalog ? unsupportedSelectedScopes(selected, catalog) : [];
+  const changed = JSON.stringify([...selected].sort()) !== JSON.stringify(baseline.scopes);
 
   return (
     <FormDialog
+      errorFormatter={keyEditError}
       open
       form={form}
       onOpenChange={onOpenChange}
@@ -62,7 +77,9 @@ export function ApiKeyScopesDialog({
       title="API 키 권한 수정"
       description={`${baseline.name || "이름 없는 키"} 키가 사용할 권한을 선택합니다.`}
       submitLabel="권한 저장"
-      submitDisabled={writeDisabled || !catalog || unsupported.length > 0}
+      submitDisabled={
+        writeDisabled || !catalog || unsupported.length > 0 || !changed || !review.ready || review.attempted
+      }
       onSubmit={(values) => {
         // Validation can yield while a refetch, error or catalog update arrives.
         // Read live query state at the actual PATCH boundary, not the render closure.
@@ -70,7 +87,14 @@ export function ApiKeyScopesDialog({
         if (!latest || unsupportedSelectedScopes(values.scopes, latest).length > 0) {
           throw new AppError("서버 허용 권한을 다시 확인한 뒤 저장하세요.", { kind: "contract" });
         }
-        return onSubmit(baseline.id, [...values.scopes]);
+        return onSubmit(
+          baseline.id,
+          [...values.scopes],
+          review.begin(
+            values.reason,
+            !writeDisabled && changed && JSON.stringify(form.getValues()) === signature,
+          ),
+        );
       }}
     >
       {writeDisabled ? (
@@ -84,7 +108,7 @@ export function ApiKeyScopesDialog({
         사용하세요.
       </InlineNotice>
       <p className="access-note">
-        열린 뒤 목록이 갱신되어도 이 초안은 바뀌지 않습니다. 다른 관리자의 동시 변경을 막지는 않습니다.
+        열린 뒤 목록이 갱신되어도 초안은 유지됩니다. 검토한 키 정보가 바뀌면 서버가 저장을 거부합니다.
       </p>
       {roles.isError ? (
         <QueryNotice
@@ -148,6 +172,32 @@ export function ApiKeyScopesDialog({
           )}
         </div>
       </fieldset>
+      <FormField
+        label="변경 사유"
+        required
+        error={form.formState.errors.reason?.message}
+        description="감사 이력에 기록됩니다. 비밀값이나 개인정보는 입력하지 마세요."
+      >
+        {(control) => <Input {...control} {...form.register("reason")} />}
+      </FormField>
+      <KeyEditReview
+        changes={
+          changed
+            ? [
+                {
+                  label: "허용 권한",
+                  before: baseline.scopes.join(", ") || "선택된 권한 없음",
+                  after: [...selected].sort().join(", ") || "선택된 권한 없음",
+                },
+              ]
+            : []
+        }
+        signature={signature}
+        confirmation={review.confirmation}
+        ready={review.ready && !!catalog && unsupported.length === 0}
+        attempted={review.attempted}
+        canWrite={!writeDisabled}
+      />
     </FormDialog>
   );
 }

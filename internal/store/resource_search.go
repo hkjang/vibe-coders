@@ -31,6 +31,8 @@ func (s *SQLStore) SearchResourceMetadata(ctx context.Context, kind, query strin
 		table, id, title = "skills", "name", "name"
 	case "mcp_upstream":
 		table, id, title = "mcp_upstreams", "id", "name"
+	case "policy":
+		table, id, title = "policies", "id", "name"
 	default:
 		return nil, false, errors.New("unsupported resource kind")
 	}

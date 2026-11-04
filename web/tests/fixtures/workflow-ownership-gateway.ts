@@ -12,7 +12,7 @@ export const second = { ...first, id: "wf_second", name: "두 번째 업무" };
 export type Mode = "writable" | "read_only" | "preview_read_only";
 const appPath = "/app/agents/workflows";
 
-function bootstrap(mode: Mode): UiBootstrapResponse {
+export function bootstrap(mode: Mode): UiBootstrapResponse {
   const user = {
     id: "workflow-fixture",
     email: "workflow@example.invalid",

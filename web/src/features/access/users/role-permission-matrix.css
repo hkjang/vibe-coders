@@ -1,0 +1,50 @@
+.role-matrix {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.role-matrix-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.role-matrix label:not(.checkbox) {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.role-matrix select {
+  min-width: 0;
+  width: 100%;
+}
+.role-matrix-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.role-matrix table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.875rem;
+}
+.role-matrix caption {
+  text-align: left;
+  padding-block: var(--space-2);
+}
+.role-matrix th,
+.role-matrix td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  min-width: 9rem;
+  overflow-wrap: anywhere;
+}
+.role-matrix small {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: normal;
+}
+.role-matrix thead {
+  position: sticky;
+  top: 0;
+  background: var(--color-card);
+}

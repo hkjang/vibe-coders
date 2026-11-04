@@ -156,7 +156,11 @@ func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "teams_failed")
 			return
 		}
-		authTeams, _ := s.db.ListAuthTeams(r.Context())
+		authTeams, err := s.db.ListAuthTeams(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "team catalog query failed", "server_error", "auth_teams_failed")
+			return
+		}
 		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
 			filteredTeams := teams[:0]
 			for _, team := range teams {

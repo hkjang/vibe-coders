@@ -36,6 +36,7 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
   const [error, setError] = useState<EditProblem>();
   const [unchanged, setUnchanged] = useState(false);
   const form = useRef<HTMLDivElement>(null);
+  const readNotice = useRef<HTMLDivElement>(null);
   const dirty = fingerprint(edit) !== fingerprint(initialEdit(baseline));
   const operation = usePolicyEditorOperation({
     baseline,
@@ -46,6 +47,11 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
   });
   const update = (next: PolicyEdit) => {
     if (operation.pending) return;
+    try {
+      access.assertRead();
+    } catch {
+      return;
+    }
     latestEdit.current = next;
     reviewRef.current = undefined;
     setReview(undefined);
@@ -78,11 +84,17 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
     }
   };
   useLayoutEffect(() => {
+    if (!access.read) {
+      // Removing the focused editor field must not leave keyboard focus on BODY.
+      // Keep a valid focus in another control/dialog if the operator already moved it.
+      if (document.activeElement === document.body) readNotice.current?.focus();
+      return;
+    }
     if (error) {
       const target = form.current?.querySelector<HTMLElement>(`[data-editor-field="${error.field}"]`);
       (target?.querySelector<HTMLElement>("input,textarea,button") ?? target)?.focus();
     } else if (review) form.current?.querySelector<HTMLElement>("[data-editor-review-heading]")?.focus();
-  }, [error, review]);
+  }, [access.read, error, review]);
   const validReview = review && review.prefixKey === access.prefixKey && review.approval === access.approval;
   const sourceProblem = policyProblem(baseline);
   const cause = operation.error?.cause;
@@ -104,7 +116,7 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
           </Button>
           {!operation.saved && review ? (
             <Button
-              disabled={operation.pending}
+              disabled={operation.pending || !access.read}
               onClick={() => {
                 reviewRef.current = undefined;
                 setReview(undefined);
@@ -148,12 +160,14 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
             {access.write.reason}
           </InlineNotice>
         ) : null}
-        {sourceProblem ? (
+        {access.read && sourceProblem ? (
           <InlineNotice tone="warning" title="원본 확인이 필요합니다.">
             {sourceProblem}
           </InlineNotice>
         ) : null}
-        {error?.field === "policy" ? <InlineNotice tone="danger">{error.message}</InlineNotice> : null}
+        {access.read && error?.field === "policy" ? (
+          <InlineNotice tone="danger">{error.message}</InlineNotice>
+        ) : null}
         {unchanged ? (
           <InlineNotice title="변경된 내용이 없습니다.">저장 요청을 보내지 않았습니다.</InlineNotice>
         ) : null}
@@ -169,7 +183,7 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
             재시도를 추가하지 않으며, 기존 인증 갱신 동작은 유지합니다.
           </InlineNotice>
         ) : null}
-        {operation.error ? (
+        {access.read && operation.error ? (
           <InlineNotice
             tone="warning"
             title={
@@ -186,7 +200,14 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
             {requestId ? <p>요청 ID: {editorText(requestId, access.prefixes)}</p> : null}
           </InlineNotice>
         ) : null}
-        {operation.saved ? (
+        {!access.read ? (
+          <div ref={readNotice} role="region" aria-label="정책 조회 권한 안내" tabIndex={-1}>
+            <InlineNotice tone="warning" title="정책 내용을 표시할 수 없습니다.">
+              조회 권한이 없어 원문·입력 필드·변경 비교를 화면에서 제거했습니다. 진행 중인 저장과 결과 확인
+              상태는 유지하며 자동으로 재전송하지 않습니다.
+            </InlineNotice>
+          </div>
+        ) : operation.saved ? (
           <InlineNotice tone="success" title="비활성 정책을 저장했습니다.">
             서버의 저장 응답을 확인했습니다. 활성화는 별도 작업입니다. 이후 다른 사용자가 정책을 바꿀 수
             있습니다.

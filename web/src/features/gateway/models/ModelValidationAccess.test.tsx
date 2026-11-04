@@ -1,3 +1,4 @@
+import { ModelReadBoundary } from "./ModelReadBoundary";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -48,7 +49,9 @@ async function setup() {
     readonly = update;
     return (
       <FeatureAccessContext.Provider value={{ featureId: "gateway.models", permitted: true, readOnly }}>
-        <ModelContractsPanel />
+        <ModelReadBoundary>
+          <ModelContractsPanel />
+        </ModelReadBoundary>
       </FeatureAccessContext.Provider>
     );
   }

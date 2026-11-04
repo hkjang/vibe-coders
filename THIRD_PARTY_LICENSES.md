@@ -1,6 +1,6 @@
 # Third-party licenses
 
-이 문서는 Vibe Coders v0.86.61의 Go 실행 바이너리와 pnpm 잠금 그래프를 기준으로 생성한 통합 의존성 목록입니다.
+이 문서는 Vibe Coders v0.86.62의 Go 실행 바이너리와 pnpm 잠금 그래프를 기준으로 생성한 통합 의존성 목록입니다.
 React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포함하며, 전체 라이선스 원문과 저작권 표시는 각 배포 패키지의 `LICENSE*` 파일을 따릅니다.
 
 ## Go gateway dependencies
@@ -79,6 +79,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `@humanfs/types` | 0.15.0 | Apache-2.0 | transitive |
 | `@humanwhocodes/module-importer` | 1.0.1 | Apache-2.0 | transitive |
 | `@humanwhocodes/retry` | 0.4.3 | Apache-2.0 | transitive |
+| `@isaacs/nonrecursive-glob-match` | 1.0.3 | BlueOak-1.0.0 | transitive |
 | `@jridgewell/gen-mapping` | 0.3.13 | MIT | transitive |
 | `@jridgewell/remapping` | 2.3.5 | MIT | transitive |
 | `@jridgewell/resolve-uri` | 3.1.2 | MIT | transitive |
@@ -317,7 +318,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `magic-string` | 0.30.21 | MIT | transitive |
 | `mdn-data` | 2.27.1 | CC0-1.0 | transitive |
 | `min-indent` | 1.0.1 | MIT | transitive |
-| `minimatch` | 10.2.6 | BlueOak-1.0.0 | transitive |
+| `minimatch` | 11.0.1 | BlueOak-1.0.0 | transitive |
 | `ms` | 2.1.3 | MIT | transitive |
 | `nanoid` | 3.3.18 | MIT | transitive |
 | `natural-compare` | 1.4.0 | MIT | transitive |
@@ -423,4 +424,4 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 - 최종 Distroless 이미지의 운영체제 구성요소는 릴리스 이미지 digest를 대상으로 별도 Syft 스캔해야 합니다.
 - `seed.sql`, `.gitframe/`, `output/`은 릴리스 및 커밋 범위에서 제외됩니다.
 
-재생성: `scripts/generate-source-sbom.sh v0.86.61`
+재생성: `scripts/generate-source-sbom.sh v0.86.62`
