@@ -51,6 +51,10 @@ func TestSecretsRotatePreservesRuntimeAndReloadedValues(t *testing.T) {
 			request.Header.Set("Authorization", "Bearer synthetic-admin-token")
 			response := httptest.NewRecorder()
 			s.handleSecretsRotate(response, request)
+			audits, auditErr := db.ListAdminAudit(t.Context(), 10)
+			if auditErr != nil {
+				t.Fatal("rotation audit must remain readable")
+			}
 			if corrupt {
 				if response.Code != http.StatusInternalServerError || s.secrets.Load() != oldCipher {
 					t.Fatal("failed rotation must return an error and retain the running cipher")
@@ -59,10 +63,16 @@ func TestSecretsRotatePreservesRuntimeAndReloadedValues(t *testing.T) {
 				if err != nil || loaded.ClientSecret != "synthetic-sso-secret" {
 					t.Fatal("failed rotation must retain decryptable SSO configuration")
 				}
+				if len(audits) != 0 {
+					t.Fatal("failed rotation must not commit a success audit")
+				}
 				return
 			}
 			if response.Code != http.StatusOK || s.secrets.Load() == oldCipher {
 				t.Fatal("successful rotation must publish the new cipher")
+			}
+			if len(audits) != 1 || audits[0].Action != "secrets.rotate" || audits[0].AdminID != adminID(request) {
+				t.Fatal("successful rotation must record exactly one audit with the existing legacy actor")
 			}
 			var result struct {
 				Status  string         `json:"status"`

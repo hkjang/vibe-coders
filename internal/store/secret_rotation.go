@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -23,7 +24,36 @@ func (s *SQLStore) RotateEncryptedColumns(
 	decrypt func(string) (string, error),
 	encrypt func(string) (string, error),
 ) (map[string]int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	return s.rotateEncryptedColumns(ctx, decrypt, encrypt, nil)
+}
+
+// RotateEncryptedColumnsWithAudit commits the rotation and its audit together.
+// Only the action, identity, ID and timestamp come from the caller; audit values
+// are built here from row counts so no credential can be included accidentally.
+func (s *SQLStore) RotateEncryptedColumnsWithAudit(
+	ctx context.Context,
+	decrypt func(string) (string, error),
+	encrypt func(string) (string, error),
+	audit AdminAuditLog,
+) (map[string]int, error) {
+	if audit.ID == "" || audit.AdminID == "" || audit.Action != "secrets.rotate" {
+		return nil, errors.New("invalid secret rotation audit")
+	}
+	return s.rotateEncryptedColumns(ctx, decrypt, encrypt, &audit)
+}
+
+func (s *SQLStore) rotateEncryptedColumns(
+	ctx context.Context,
+	decrypt func(string) (string, error),
+	encrypt func(string) (string, error),
+	audit *AdminAuditLog,
+) (map[string]int, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +257,20 @@ func (s *SQLStore) RotateEncryptedColumns(
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if audit != nil {
+		encoded, err := json.Marshal(map[string]any{"rotated": counts})
+		if err != nil {
+			return nil, fmt.Errorf("encode rotation audit: %w", err)
+		}
+		audit.BeforeValue = ""
+		audit.AfterValue = string(encoded)
+		if err := s.insertAdminAudit(ctx, tx, *audit); err != nil {
+			return nil, fmt.Errorf("write rotation audit: %w", err)
+		}
+	}
+	// Reuse the audited-key commit cleanup: a failed SQLite COMMIT can leave
+	// an open SQL transaction even though database/sql considers the Tx done.
+	if err := commitAPIKeyTransaction(ctx, conn, tx); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	// Rotation rewrites provider_configs.encrypted_api_key without going through
