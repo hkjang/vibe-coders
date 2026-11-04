@@ -7,6 +7,7 @@ import (
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/secret"
+	"vibe-coders/internal/store"
 )
 
 // handleSecretsRotate re-encrypts every secret column in the database from the
@@ -75,20 +76,21 @@ func (s *Server) handleSecretsRotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	counts, err := s.db.RotateEncryptedColumns(
+	counts, err := s.db.RotateEncryptedColumnsWithAudit(
 		r.Context(),
 		oldCipher.Decrypt,
 		newCipher.Encrypt,
+		store.AdminAuditLog{ID: newID("audit"), AdminID: s.adminKeyActor(r), Action: "secrets.rotate"},
 	)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, "rotation failed: "+err.Error(), "server_error", "rotation_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "rotation could not be confirmed; verify stored key state before retrying", "server_error", "rotation_failed")
 		return
 	}
 
 	// DB commit succeeded — swap the in-process cipher atomically.
 	s.secrets.Store(newCipher)
 
-	s.auditAdmin(r, "secrets.rotate", "", auditJSON(map[string]any{"rotated": counts}))
+	s.runAdminPostChange(r, "secrets.rotate", "", auditJSON(map[string]any{"rotated": counts}), "")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
 		"rotated": counts,
