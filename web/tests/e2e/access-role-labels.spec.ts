@@ -694,6 +694,9 @@ test("팀 생성·이름 수정은 모바일 변경 비교·중복 방지·초�
   );
   await expect(create.getByRole("button", { name: "저장", exact: true })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  // Editing the form re-enables the save button; axe must measure its settled colours, not
+  // the ones it passes through during the 120ms transition, which failed CI intermittently.
+  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; }" });
   expect(
     await page.evaluate(async () =>
       (
