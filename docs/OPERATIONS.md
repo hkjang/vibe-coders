@@ -30,7 +30,7 @@ GATEWAY_SECRET=<openssl rand -hex 32>     # provider key 암호화 키 — 운�
 ADMIN_TOKEN=<openssl rand -hex 32>        # 어드민 API/UI 접근 토큰
 ```
 
-`GATEWAY_SECRET` 은 한 번 정해지면 절대 바꾸면 안 됩니다(저장된 provider key 를 복호화 못 함). 운영 전에 반드시 안전한 값으로 고정하세요.
+`GATEWAY_SECRET` 을 환경 파일에서만 바꾸면 안 됩니다(저장된 provider key 를 복호화 못 함). 운영 전에 반드시 안전한 값으로 고정하세요. 교체가 필요하면 `/app/system/secrets` **비밀키 교체** 화면이나 `POST /admin/secrets/rotate`로 저장된 값을 먼저 다시 암호화합니다. 절차는 [게이트웨이 암호화 키 교체](RELEASE_GUIDE.md#게이트웨이-암호화-키-교체)를 따릅니다.
 
 ---
 

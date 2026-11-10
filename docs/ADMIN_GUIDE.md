@@ -190,7 +190,7 @@ curl -s https://<공개 주소>/admin/mcp/oauth -H "Authorization: Bearer <admin
 
 | 이름 | 기본값 | 설명 |
 | --- | --- | --- |
-| `LOG_RAW_PROMPTS` / `LOG_RAW_BODIES` / `LOG_RESPONSE_TEXT` | `false` | 원문 저장. 켜면 마스킹 전 본문이 DB 에 남습니다 |
+| `LOG_RAW_PROMPTS` / `LOG_RAW_BODIES` / `LOG_RESPONSE_TEXT` | `false` | `LOG_RAW_PROMPTS`·`LOG_RAW_BODIES`는 마스킹 전 입력 원문을 DB에 남깁니다. `LOG_RESPONSE_TEXT`는 응답 텍스트를 개인정보·비밀값을 마스킹해 저장하며, 꺼져 있으면 입출력 모니터의 출력에는 상태·종료 사유·도구 이름만 표시됩니다 |
 | `LOG_RESPONSE_MAX_BYTES` / `LOG_QUEUE_SIZE` | `1 MiB` / `4096` | 응답 저장 상한·비동기 로그 큐 |
 | `RETENTION_REQUEST_DAYS` / `_PROMPT_DAYS` / `_RESPONSE_DAYS` | `90` / `30` / `30` | 보존 일수 |
 | `RETENTION_TEXT2SQL_REPLAY_DAYS` / `_DOMAIN_EXAMPLE_DAYS` / `RETENTION_INTERVAL` | `30` / `365` / `1h` | 보존 일수·정리 주기 |
@@ -1818,6 +1818,9 @@ A. 현재 PATCH 는 status 만 받습니다. 이름을 바꾸려면 같은 키 I
 
 **Q. 프롬프트 원문도 보고 싶어요.**
 A. 운영 정책상 기본 OFF 입니다. 게이트웨이를 재기동할 때 `LOG_RAW_PROMPTS=true` 를 설정하면 이후 호출의 원문이 `prompt_logs.content_text` 컬럼에 저장됩니다(이전 호출은 hash 만). 동시에 `LOG_RAW_BODIES=true` 면 요청 재실행도 가능해집니다. 원문 저장은 PII / 보안 리스크가 있으니 디스크 암호화와 접근 제한을 먼저 확보하세요.
+
+**Q. 입력과 출력을 한눈에 보고 싶어요.**
+A. `/app/observability/io` 입출력 모니터를 씁니다. 입력은 마스킹본이 항상 저장되지만 출력은 `LOG_RESPONSE_TEXT=true`(시스템 설정의 `logging.response_text`)일 때만 저장되며, 켠 뒤의 요청부터 적용됩니다. 저장 크기는 `LOG_RESPONSE_MAX_BYTES`로 제한합니다. 응답도 입력과 같이 개인정보·비밀값을 마스킹한 뒤 저장하고, 화면은 다시 마스킹해 보여 줍니다. 원문 보기는 `LOG_RAW_PROMPTS`로 따로 보관한 입력 원문이나 이 변경 전에 저장된 응답이 있을 때만 의미가 있습니다. API는 `GET /admin/requests/io?ids=...`(목록 미리보기, 역할과 관계없이 마스킹)와 `GET /admin/requests/{id}/io`(전체, `?reveal=raw`는 원문 권한과 감사 기록 저장이 필요)입니다. `/v1/chat/completions`, `/v1/responses`, `/v1/completions`, `/v1/embeddings`의 입력을 수집합니다.
 
 **Q. quota 가 너무 빨리 트리거되어 사용자가 불편해해요.**
 A. 안전 탭의 알림 규칙으로 80% 도달 시 미리 통보하도록 해두면 한도를 미리 조정할 수 있습니다.
