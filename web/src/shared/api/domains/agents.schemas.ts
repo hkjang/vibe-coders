@@ -183,6 +183,23 @@ export const workAppSchema = looseObject({
 });
 export type WorkApp = z.output<typeof workAppSchema>;
 
+/** The existing GET /admin/apps/{id} returns every persisted definition field.
+ * Destructive review must not interpret a partial response as an empty value. */
+export const workAppDetailSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  description: z.string(),
+  icon: z.string(),
+  components: z.array(z.object({ kind: z.string(), ref: z.string(), label: z.string() })),
+  allowed_teams: z.string(),
+  allowed_roles: z.string(),
+  status: z.string(),
+  owner: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type WorkAppDetail = z.output<typeof workAppDetailSchema>;
+
 export const workAppListSchema = looseObject({ apps: z.array(workAppSchema).nullish() });
 
 export const appValidationSchema = looseObject({

@@ -207,13 +207,30 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
   it.each(["발행", "지원 중단", "삭제"])(
     "%s 확인 중 읽기 전용 전환은 요청을 보내지 않는다",
     async (action) => {
-      const api = mockApi({ "GET /admin/apps": () => ({ apps: [first] }) });
+      const api = mockApi({
+        "GET /admin/apps": () => ({ apps: [first] }),
+        "GET /admin/apps/first": () => ({
+          ...first,
+          description: "",
+          icon: "",
+          allowed_teams: "",
+          allowed_roles: "",
+          owner: "one",
+          created_at: "",
+          updated_at: "",
+        }),
+      });
       const user = userEvent.setup();
       setup();
       await user.click(await screen.findByRole("button", { name: "첫 계정 앱 상세 열기" }));
       const sheet = screen.getByRole("dialog", { name: first.title });
       await user.click(within(sheet).getByRole("button", { name: action }));
-      const confirm = await screen.findByRole("dialog", { name: `업무 앱 ${action}` });
+      await screen.findByRole("dialog", { name: `업무 앱 ${action}` });
+      if (action === "삭제") {
+        const target = await screen.findByRole("textbox", { name: /확인 문구/u });
+        await user.type(target, first.id);
+      }
+      const confirm = screen.getByRole("dialog", { name: `업무 앱 ${action}` });
       fireEvent.click(screen.getByRole("button", { name: "읽기 전용 전환", hidden: true }));
       expect(within(confirm).getByRole("button", { name: action })).toBeDisabled();
       fireEvent.click(within(confirm).getByRole("button", { name: action }));

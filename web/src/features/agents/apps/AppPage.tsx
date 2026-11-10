@@ -5,6 +5,7 @@ import { z } from "zod";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AppScopeBoundary, appsKey, useAppRead, useAppOperationAccess } from "./app-scope";
 import { AppDetailSheet } from "@/features/agents/apps/AppDetailSheet";
+import { AppDeleteDialog } from "@/features/agents/apps/AppDeleteDialog";
 import { AppFormDialog } from "@/features/agents/apps/AppFormDialog";
 import { AppReceiptDialog } from "@/features/agents/apps/AppReceiptDialog";
 import { appWriteBody, matchesAppQuery, type AppFormOutput } from "@/features/agents/apps/app-form";
@@ -100,6 +101,7 @@ function AppPageContent(): React.JSX.Element {
   const [receiptRunId, setReceiptRunId] = useState("");
   const createButtonRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
+  const deleteReturnRef = useRef<HTMLElement | null>(null);
   const dialogReturnRef = useRef<HTMLElement | null>(null);
 
   const list = useAppRead({
@@ -557,7 +559,11 @@ function AppPageContent(): React.JSX.Element {
       <AppDetailSheet
         app={selected}
         canWrite={canWrite}
-        onDelete={() => setDeleteTarget(selected)}
+        onDelete={() => {
+          deleteReturnRef.current =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          setDeleteTarget(selected);
+        }}
         onDeprecate={() => setDeprecateTarget(selected)}
         onEdit={() => {
           setEditing(selected);
@@ -645,21 +651,15 @@ function AppPageContent(): React.JSX.Element {
         returnFocusRef={rowTriggerRef}
       />
 
-      <ConfirmDialog
-        confirmDisabled={!canWrite}
-        title="업무 앱 삭제"
-        description={`'${deleteTarget?.title ?? ""}' 앱을 삭제합니다. 이 작업은 되돌릴 수 없습니다.`}
-        confirmLabel="삭제"
-        tone="danger"
-        open={deleteTarget !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(undefined);
-        }}
-        onConfirm={async () => {
-          if (deleteTarget) await remove.mutateAsync(deleteTarget.id);
-        }}
-        returnFocusRef={rowTriggerRef}
-      />
+      {deleteTarget ? (
+        <AppDeleteDialog
+          key={deleteTarget.id}
+          id={deleteTarget.id}
+          onClose={() => setDeleteTarget(undefined)}
+          onDelete={(id) => remove.mutateAsync(id)}
+          returnFocusRef={deleteReturnRef}
+        />
+      ) : null}
 
       <ConfirmDialog
         confirmDisabled={!canWrite}
