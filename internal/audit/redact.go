@@ -80,7 +80,7 @@ func Redact(text string) string {
 	if text == "" {
 		return text
 	}
-	redacted := text
+	redacted := redactQuotedSecrets(text)
 	for _, pattern := range redactPatterns {
 		if !containsAnyFoldASCII(redacted, pattern.mustContainAny) {
 			continue
@@ -88,6 +88,116 @@ func Redact(text string) string {
 		redacted = pattern.re.ReplaceAllString(redacted, pattern.replacement)
 	}
 	return redacted
+}
+
+// quotedSecretKey finds a credential key followed by its own closing quote, which the
+// key=value rules cannot see: they want the separator right after the keyword, and JSON,
+// Python reprs and tool-call argument strings put a quote there. The group holds that quote
+// with its escaping, because \"password\":\"x\" is what JSON inside a JSON string looks like.
+// A key that merely starts with a keyword, such as "token_type", is left alone, as is
+// max_tokens, whose keyword is not followed by the quote.
+var quotedSecretKey = regexp.MustCompile(`(?i)(?:api[_-]?key|access[_-]?key|secret[_-]?key|token|secret|password|passwd|client[_-]?secret|private[_-]?key)(\\*["'])\s*(?:=>|[:=])\s*`)
+
+// redactQuotedSecrets replaces the values of quoted credential keys. It is a scan rather
+// than a table entry because the value's end depends on how deeply it is escaped, which a
+// regular expression cannot compare with its opening quote. It runs first, so the value goes
+// as a whole rather than leaving what the token rules would not have recognized.
+func redactQuotedSecrets(text string) string {
+	if !containsAnyFoldASCII(text, []string{"key", "token", "secret", "password", "passwd"}) {
+		return text
+	}
+	matches := quotedSecretKey.FindAllStringSubmatchIndex(text, -1)
+	if matches == nil {
+		return text
+	}
+	var builder strings.Builder
+	copied := 0
+	for _, match := range matches {
+		start := match[1]
+		if start < copied {
+			continue // this key sits inside a value already replaced
+		}
+		end, replacement, ok := quotedSecretValue(text, start, text[match[2]:match[3]])
+		if !ok {
+			continue
+		}
+		builder.WriteString(text[copied:start])
+		builder.WriteString(replacement)
+		copied = end
+	}
+	if copied == 0 {
+		return text
+	}
+	builder.WriteString(text[copied:])
+	return builder.String()
+}
+
+// quotedSecretValue reads the value starting at start and returns where it ends and what
+// replaces it. An object, an array, null and booleans hold no secret themselves; that is also
+// what keeps a tool schema's "token":{"type":"string"} readable.
+func quotedSecretValue(text string, start int, keyQuote string) (int, string, bool) {
+	open := start
+	for open < len(text) && text[open] == '\\' {
+		open++
+	}
+	if open == len(text) {
+		return 0, "", false
+	}
+	if quote := text[open]; quote == '"' || quote == '\'' {
+		level := open - start
+		closeStart, end := closingQuote(text, open+1, quote, level)
+		if closeStart == open+1 {
+			return 0, "", false // an empty value has nothing to hide
+		}
+		return end, text[start:open+1] + redactedValue + text[closeStart:end], true
+	}
+	end := open
+	for end < len(text) && !strings.ContainsRune(" \t\r\n,}])\"'\\", rune(text[end])) {
+		end++
+	}
+	switch strings.ToLower(text[open:end]) {
+	case "", "null", "true", "false", "none":
+		return 0, "", false
+	}
+	if text[open] == '{' || text[open] == '[' {
+		return 0, "", false
+	}
+	return end, keyQuote + redactedValue + keyQuote, true
+}
+
+const redactedValue = "[REDACTED]"
+
+// closingQuote finds the quote ending a value opened at the given escape level (the number of
+// backslashes before its opening quote) and returns where that closing sequence starts and
+// ends. A value cut off by a capture limit runs to the end of its line, so a truncated secret
+// is still replaced.
+func closingQuote(text string, from int, quote byte, level int) (int, int) {
+	run := 0
+	for i := from; i < len(text); i++ {
+		switch text[i] {
+		case '\\':
+			run++
+			continue
+		case quote:
+			if quoteClosesValue(run, level) {
+				return i - min(run, level), i + 1
+			}
+		case '\n':
+			return i, i
+		}
+		run = 0
+	}
+	return len(text), len(text)
+}
+
+// quoteClosesValue undoes one level of escaping per pass, halving the backslashes before the
+// quote, and asks whether the quote is unescaped at the bottom: \\\" inside \"...\" is an escaped
+// quote that belongs to the value, while \\\\\" is a literal backslash and then the real end.
+func quoteClosesValue(run, level int) bool {
+	for ; level > 0; level /= 2 {
+		run /= 2
+	}
+	return run%2 == 0
 }
 
 // HashText returns the sha256 hex of the original text. Used so we can detect duplicate

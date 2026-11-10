@@ -350,7 +350,12 @@ func (s *Server) explainCost(d store.ExplainData) map[string]any {
 	// "list price" had nothing been cached: charge all prompt tokens at full input rate.
 	if price, ok := lookupModelPrice(d.Model, s.cfg.Pricing); ok {
 		full := float64(d.PromptTokens)*price.InputKRWPer1M/1_000_000 +
-			float64(d.CompletionTokens+d.ReasoningTokens)*price.OutputKRWPer1M/1_000_000
+			float64(audit.BilledOutputTokens(audit.Usage{
+				PromptTokens:     int(d.PromptTokens),
+				CompletionTokens: int(d.CompletionTokens),
+				TotalTokens:      int(d.TotalTokens),
+				ReasoningTokens:  int(d.ReasoningTokens),
+			}))*price.OutputKRWPer1M/1_000_000
 		out["list_krw"] = full
 		if full > d.EstimatedCost {
 			out["savings_krw"] = full - d.EstimatedCost

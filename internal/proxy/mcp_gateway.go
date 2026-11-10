@@ -509,6 +509,9 @@ func (s *Server) logMCPCall(r *http.Request, apiKeyID, serverName, toolName stri
 	}
 	s.metrics.ObserveToolInvocations(record.Tools)
 	s.enqueue(record)
+	// Nothing outside handleOpenAI takes an id back out of loggedRequests, so a long-lived
+	// gateway would otherwise keep one entry per MCP call for good.
+	s.loggedRequests.Delete(reqID)
 	return reqID
 }
 

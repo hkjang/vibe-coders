@@ -396,7 +396,13 @@ func (rc *requestPipeline) stepCost() bool {
 	s, r, w := rc.s, rc.r, rc.w
 
 	rc.estimatedCostKRW = 0.0
-	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {
+	if inferencePath(r.URL.Path) && r.Method == http.MethodPost {
+		// Chat checks the model it routed to in stepRouting; these have no routing plan.
+		if model := rc.meta.Request.Model; r.URL.Path != "/v1/chat/completions" && rc.authCtx != nil && !listAllows(model, rc.authCtx.AllowedModels, rc.authCtx.DeniedModels) {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: model, CreatedAt: time.Now().UTC()})
+			writeOpenAIError(w, http.StatusForbidden, "model is not allowed by auth policy", "permission_error", "model_denied")
+			return false
+		}
 		snap := s.costSnapshotCached(r.Context())
 		est := predictCost(rc.meta.Request.Model, promptTokenEstimate(rc.meta.Prompts), parseMaxTokens(rc.body), snap, s.pricingMap(r.Context()))
 		rc.estimatedCostKRW = est.CostKRW
@@ -773,13 +779,17 @@ func (rc *requestPipeline) stepUpstream() bool {
 		captureLimit = s.cacheConf().EmbeddingMaxBytes
 	}
 	isRedteam := r.Header.Get("X-Redteam") == "1" || meta.Request.CostCenter == "redteam" || strings.Contains(r.Header.Get("X-Session-ID"), "redteam:")
-	analyzer := NewResponseAnalyzer(stream, captureForCache || captureForChatCache || lc.ResponseText || isRedteam, captureLimit)
+	// A JSON body is not an event stream whatever the request asked for: an upstream that
+	// ignores stream:true, or refuses it with an error, answers in JSON.
+	parseAsStream := stream && !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "json")
+	analyzer := NewResponseAnalyzer(parseAsStream, captureForCache || captureForChatCache || lc.ResponseText || isRedteam, captureLimit)
 	firstChunkMS, firstChunkSeen, copyErr := s.copyResponse(w, responseBody, analyzer, stream, start)
 	if firstChunkSeen {
 		meta.Request.FirstChunkMS = firstChunkMS
 		s.metrics.ObserveFirstChunk(firstChunkMS)
 	}
-	if copyErr != nil && !errors.Is(copyErr, context.Canceled) {
+	clientGone := copyErr != nil && clientDisconnected(r, copyErr)
+	if copyErr != nil && !clientGone {
 		meta.Request.Error = copyErr.Error()
 		slog.Warn("downstream copy failed", "trace_id", traceID, "error", copyErr)
 	}
@@ -787,11 +797,17 @@ func (rc *requestPipeline) stepUpstream() bool {
 	s.metrics.ObserveLatency(meta.Request.LatencyMS)
 
 	analysis := analyzer.Finalize()
-	if captureForCache && analysis.Text != "" {
+	if failure := upstreamFailureText(resp.StatusCode, analysis); failure != "" {
+		meta.Request.Error = failure
+	}
+	// Only a whole body may be replayed. A capture the limit cut, or a copy that failed
+	// part way, would be served as a 200 to every later caller until the entry expired.
+	replayable := copyErr == nil && !analysis.Truncated
+	if captureForCache && replayable && analysis.Text != "" {
 		s.maybeStoreEmbeddingCache(r.Context(), body,
 			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
-	if captureForChatCache && analysis.Text != "" {
+	if captureForChatCache && replayable && analysis.Text != "" {
 		s.maybeStoreChatCache(r.Context(), rc.chatCacheKey, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 		s.maybeStoreChatSemantic(r.Context(), rc.body, rc.chatCacheScope, rc.chatSemanticVec, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
@@ -800,20 +816,22 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 	// Determine what to persist as response text.
 	// CompletionText is the clean extracted content (not raw SSE/JSON).
-	// Text (raw capture) is kept only for cache replay; never persisted to the log.
+	// Text (raw capture) is kept for cache replay; never persisted to the log as an answer.
 	responseText := ""
 	if lc.ResponseText || isRedteam {
-		if analysis.CompletionText != "" {
-			responseText = analysis.CompletionText
-		} else {
-			responseText = analysis.Text
-		}
+		responseText = persistedResponseText(analysis, resp.StatusCode, lc.ResponseMaxBytes)
+	}
+	finishReason := analysis.FinishReason
+	if clientGone && finishReason == "" {
+		// A client that left after the final chunk still got the whole answer, so only a
+		// response without a finish reason counts as abandoned.
+		finishReason = finishReasonClientDisconnected
 	}
 	meta.Response = &store.ResponseLog{
 		ID:                   newID("resp"),
 		RequestID:            meta.Request.ID,
 		StatusCode:           resp.StatusCode,
-		FinishReason:         analysis.FinishReason,
+		FinishReason:         finishReason,
 		ResponseHash:         analysis.Hash,
 		ResponseTextOptional: responseText,
 		CreatedAt:            time.Now().UTC(),
@@ -828,6 +846,10 @@ func (rc *requestPipeline) stepUpstream() bool {
 		}
 		meta.CodeVerify = buildCodeVerifyLog(meta.Request.ID, traceID, cvText)
 	}
+	// A client that hung up cancelled r.Context(), but what it consumed still has to be priced.
+	costCtx, cancelCost := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancelCost()
+	prices := s.pricingMap(costCtx)
 	if analysis.HasUsage {
 		meta.Usage = &store.TokenUsage{
 			ID:               newID("usage"),
@@ -837,7 +859,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			TotalTokens:      analysis.Usage.TotalTokens,
 			CachedTokens:     analysis.Usage.CachedTokens,
 			ReasoningTokens:  analysis.Usage.ReasoningTokens,
-			EstimatedCost:    audit.EstimateCostKRW(meta.Request.Model, analysis.Usage, s.pricingMap(r.Context())),
+			EstimatedCost:    audit.EstimateCostKRW(meta.Request.Model, analysis.Usage, prices),
 			Currency:         "KRW",
 			Source:           analysis.Usage.Source,
 			CreatedAt:        time.Now().UTC(),
@@ -855,7 +877,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			PromptTokens:     estimated.PromptTokens,
 			CompletionTokens: estimated.CompletionTokens,
 			TotalTokens:      estimated.TotalTokens,
-			EstimatedCost:    audit.EstimateCostKRW(meta.Request.Model, estimated, s.pricingMap(r.Context())),
+			EstimatedCost:    audit.EstimateCostKRW(meta.Request.Model, estimated, prices),
 			Currency:         "KRW",
 			Source:           estimated.Source,
 			CreatedAt:        time.Now().UTC(),

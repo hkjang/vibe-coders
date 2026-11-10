@@ -1477,6 +1477,9 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		s.writePolicyDecisionEvents(context.WithoutCancel(r.Context()), rc.policyEvents)
 
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && sw.statusCode == http.StatusOK {
+			// The catalogue path enqueued its own row, and nothing below will take the id
+			// back out, so every anonymous poll would otherwise grow the map for good.
+			s.loggedRequests.Delete(rc.meta.Request.ID)
 			return
 		}
 
@@ -1539,6 +1542,17 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// errDownstreamWrite marks a copy that failed writing to the client rather than reading
+// from the upstream, which is the difference between the client leaving and the provider
+// failing.
+var errDownstreamWrite = errors.New("downstream write failed")
+
+// clientDisconnected reports whether a failed copy was the client going away. A provider
+// timeout cancels only its own derived context, so it never reads as a disconnect.
+func clientDisconnected(r *http.Request, copyErr error) bool {
+	return errors.Is(copyErr, errDownstreamWrite) || errors.Is(copyErr, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled)
+}
+
 func (s *Server) copyResponse(w http.ResponseWriter, body io.Reader, analyzer *ResponseAnalyzer, flush bool, start time.Time) (int64, bool, error) {
 	flusher, _ := w.(http.Flusher)
 	buffer := make([]byte, 32*1024)
@@ -1554,7 +1568,7 @@ func (s *Server) copyResponse(w http.ResponseWriter, body io.Reader, analyzer *R
 			chunk := buffer[:n]
 			analyzer.Write(chunk)
 			if _, err := w.Write(chunk); err != nil {
-				return firstChunkMS, firstChunkSeen, err
+				return firstChunkMS, firstChunkSeen, fmt.Errorf("%w: %v", errDownstreamWrite, err)
 			}
 			if flush && flusher != nil {
 				flusher.Flush()
@@ -1819,6 +1833,12 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			upstreamReq.Header.Set("Accept", "application/json")
 		} else {
 			copyUpstreamHeaders(upstreamReq.Header, r.Header)
+			// The gateway reads the body to meter it and decodes only gzip, so the client's
+			// br or zstd must not reach the provider. Leaving the header unset makes the
+			// transport ask for gzip itself and decode it, which also keeps the context
+			// overflow sniff below reading plain text; the client gets identity, which
+			// every Accept-Encoding allows.
+			upstreamReq.Header.Del("Accept-Encoding")
 		}
 		upstreamReq.Header.Set("Authorization", "Bearer "+att.provider.APIKey)
 		upstreamReq.Header.Set("X-Request-ID", traceID)
@@ -2565,6 +2585,13 @@ func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, 
 	stream, _ := root["stream"].(bool)
 	texts := []string{}
 	prompts := []store.PromptLog{}
+	addPrompt := func(role, content string) {
+		if content == "" {
+			return
+		}
+		texts = append(texts, content)
+		prompts = append(prompts, promptLog(role, content, rawPrompts))
+	}
 
 	if endpoint == "/v1/chat/completions" {
 		if messages, ok := root["messages"].([]any); ok {
@@ -2575,25 +2602,42 @@ func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, 
 				if toolCalls, ok := message["tool_calls"]; ok {
 					content = strings.TrimSpace(content + "\n" + jsonString(toolCalls))
 				}
-				if content == "" {
-					continue
-				}
-				texts = append(texts, content)
-				prompts = append(prompts, promptLog(role, content, rawPrompts))
+				addPrompt(role, content)
 			}
 		}
 		if tools, ok := root["tools"]; ok {
-			content := jsonString(tools)
-			if content != "" {
-				texts = append(texts, content)
-				prompts = append(prompts, promptLog("tools", content, rawPrompts))
-			}
+			addPrompt("tools", jsonString(tools))
 		}
 	} else if endpoint == "/v1/embeddings" {
-		content := flattenContent(root["input"])
-		if content != "" {
-			texts = append(texts, content)
-			prompts = append(prompts, promptLog("input", content, rawPrompts))
+		addPrompt("input", flattenContent(root["input"]))
+	} else if endpoint == "/v1/completions" {
+		addPrompt("user", flattenContent(root["prompt"]))
+	} else if endpoint == "/v1/responses" {
+		if instructions, ok := root["instructions"].(string); ok {
+			addPrompt("system", instructions)
+		}
+		switch input := root["input"].(type) {
+		case string:
+			addPrompt("user", input)
+		case []any:
+			for _, item := range input {
+				addPrompt(responsesInputPrompt(item))
+			}
+		}
+		if tools, ok := root["tools"]; ok {
+			addPrompt("tools", jsonString(tools))
+		}
+	} else if endpoint == "/v1/messages" {
+		addPrompt("system", flattenContent(root["system"]))
+		if messages, ok := root["messages"].([]any); ok {
+			for _, item := range messages {
+				message, _ := item.(map[string]any)
+				role, _ := message["role"].(string)
+				addPrompt(role, flattenContent(message["content"]))
+			}
+		}
+		if tools, ok := root["tools"]; ok {
+			addPrompt("tools", jsonString(tools))
 		}
 	}
 
@@ -2606,6 +2650,35 @@ func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, 
 		prompts[i].LanguageHint = topLanguage
 	}
 	return model, stream, prompts, languages
+}
+
+// responsesInputPrompt reads one /v1/responses input item into a role and text. A tool's
+// result is the counterpart of a chat "tool" message, and a call the model made earlier is
+// the counterpart of an assistant message's tool_calls, so both are stored in those shapes.
+// A reasoning item or a reference to an earlier item carries nothing the caller wrote.
+func responsesInputPrompt(item any) (string, string) {
+	entry, ok := item.(map[string]any)
+	if !ok {
+		return "user", flattenContent(item)
+	}
+	kind, _ := entry["type"].(string)
+	switch {
+	case strings.HasSuffix(kind, "_call_output"):
+		return "tool", flattenContent(entry["output"])
+	case strings.HasSuffix(kind, "_call"):
+		name, _ := entry["name"].(string)
+		if name == "" {
+			return "", ""
+		}
+		return "assistant", jsonString([]any{map[string]any{
+			"type":     "function",
+			"function": map[string]any{"name": name, "arguments": argsString(entry["arguments"])},
+		}})
+	case kind == "reasoning" || kind == "item_reference":
+		return "", ""
+	}
+	role, _ := entry["role"].(string)
+	return firstNonEmpty(role, "user"), flattenContent(entry["content"])
 }
 
 func promptLog(role string, content string, rawPrompts bool) store.PromptLog {
@@ -2646,6 +2719,8 @@ func flattenContent(value any) string {
 					parts = append(parts, text)
 				} else if text, ok := typed["input_text"].(string); ok {
 					parts = append(parts, text)
+				} else if placeholder := mediaPlaceholder(typed); placeholder != "" {
+					parts = append(parts, placeholder)
 				} else {
 					parts = append(parts, jsonString(typed))
 				}
@@ -2654,9 +2729,37 @@ func flattenContent(value any) string {
 			}
 		}
 		return strings.Join(parts, "\n")
+	case map[string]any:
+		if placeholder := mediaPlaceholder(v); placeholder != "" {
+			return placeholder
+		}
+		return jsonString(v)
 	default:
 		return jsonString(v)
 	}
+}
+
+// mediaPlaceholder names an attachment instead of its bytes, or returns "" for anything
+// else. A data URL flattened as JSON put megabytes of base64 into redacted_text and counted
+// each four characters as a token, enough for one photo to trip the budget and cost guards.
+func mediaPlaceholder(part map[string]any) string {
+	kind, _ := part["type"].(string)
+	kind = strings.ToLower(kind)
+	has := func(key string) bool {
+		_, ok := part[key]
+		return ok
+	}
+	switch {
+	case strings.Contains(kind, "image") || has("image_url"):
+		return "[이미지 첨부]"
+	case strings.Contains(kind, "audio") || has("input_audio"):
+		return "[오디오 첨부]"
+	case strings.Contains(kind, "video") || has("video_url"):
+		return "[영상 첨부]"
+	case strings.Contains(kind, "file") || kind == "document" || has("file_data"):
+		return "[파일 첨부]"
+	}
+	return ""
 }
 
 func jsonString(value any) string {

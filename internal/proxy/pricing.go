@@ -24,17 +24,26 @@ type pricingSnapshot struct {
 // DB-managed pricing versions overlaid on top (DB wins, since it is the maintained
 // source). Cached on a short TTL.
 func (s *Server) pricingMap(ctx context.Context) map[string]config.ModelPrice {
-	if c := s.priceCache.Load(); c != nil && time.Since(c.fetchedAt) < pricingSnapshotTTL {
-		return c.prices
+	previous := s.priceCache.Load()
+	if previous != nil && time.Since(previous.fetchedAt) < pricingSnapshotTTL {
+		return previous.prices
 	}
 	merged := map[string]config.ModelPrice{}
 	for k, v := range s.cfg.Pricing {
 		merged[k] = v
 	}
-	if latest, err := s.db.LatestPricing(ctx); err == nil {
-		for k, v := range latest {
-			merged[k] = v
+	latest, err := s.db.LatestPricing(ctx)
+	if err != nil {
+		// A failed lookup (a blip, or a caller's cancelled context) says nothing about the
+		// prices. Caching the env-only map would misprice everyone until the TTL ran out;
+		// the last good snapshot is the better answer, and the next caller retries.
+		if previous != nil {
+			return previous.prices
 		}
+		return merged
+	}
+	for k, v := range latest {
+		merged[k] = v
 	}
 	s.priceCache.Store(&pricingSnapshot{prices: merged, fetchedAt: time.Now()})
 	return merged

@@ -293,10 +293,13 @@ func TestCachedAndReasoningTokensTrackedAndCostedSeparately(t *testing.T) {
 	// expected cost:
 	//   fresh prompt: 200 * 1 = 200
 	//   cached: 800 * 0.1 = 80
-	//   output: (100 + 50) * 2 = 300
-	//   total = 580 KRW
-	if got.EstimatedCost < 579 || got.EstimatedCost > 581 {
-		t.Fatalf("expected cost ~580, got %.4f", got.EstimatedCost)
+	//   output: 100 * 2 = 200
+	//   total = 480 KRW
+	// This used to pin output at (100 + 50) * 2 = 300, charging the reasoning tokens twice:
+	// total_tokens is 1100 = prompt + completion, so the provider's 50 reasoning tokens are
+	// already inside its 100 completion tokens. See audit.BilledOutputTokens.
+	if got.EstimatedCost < 479 || got.EstimatedCost > 481 {
+		t.Fatalf("expected cost ~480, got %.4f", got.EstimatedCost)
 	}
 }
 

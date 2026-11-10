@@ -36,9 +36,21 @@ func EstimateCostKRW(model string, usage Usage, pricing map[string]config.ModelP
 	}
 	input := float64(freshPrompt)*price.InputKRWPer1M/1_000_000 +
 		float64(cached)*cachedRate/1_000_000
-	// reasoning tokens are billed as output for OpenAI o-series / Anthropic thinking
-	output := float64(usage.CompletionTokens+usage.ReasoningTokens) * price.OutputKRWPer1M / 1_000_000
+	output := float64(BilledOutputTokens(usage)) * price.OutputKRWPer1M / 1_000_000
 	return input + output
+}
+
+// BilledOutputTokens returns the tokens charged at the output rate. Reasoning tokens are
+// billed as output, but OpenAI-compatible providers report them as a breakdown of
+// completion_tokens, so adding them again charges them twice. The total tells the two
+// reporting styles apart: only a total that counts reasoning on top of completion means the
+// provider reported it separately. No provider this gateway meters is known to do that
+// without a total, so a report with no total is read as included.
+func BilledOutputTokens(usage Usage) int {
+	if usage.ReasoningTokens > 0 && usage.TotalTokens == usage.PromptTokens+usage.CompletionTokens+usage.ReasoningTokens {
+		return usage.CompletionTokens + usage.ReasoningTokens
+	}
+	return usage.CompletionTokens
 }
 
 // ModelPriced reports whether the model (exact or prefix) has a price entry.

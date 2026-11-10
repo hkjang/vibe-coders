@@ -410,10 +410,22 @@ func (s *Server) enrichAuthContextTeam(ctx context.Context, authCtx *store.AuthC
 	authCtx.TeamName = team.Name
 }
 
+// inferencePath reports whether a path runs a model on a caller's prompt. A key's scope,
+// model list and budget describe what it may spend on models, so they apply to all of these
+// alike; which endpoint a caller picks must not decide whether the limits count.
+func inferencePath(path string) bool {
+	switch path {
+	case "/v1/chat/completions", "/v1/responses", "/v1/completions", "/v1/messages":
+		return true
+	}
+	return false
+}
+
 func apiScopeForRequest(r *http.Request) string {
-	switch r.URL.Path {
-	case "/v1/chat/completions":
+	if inferencePath(r.URL.Path) {
 		return "chat:completion"
+	}
+	switch r.URL.Path {
 	case "/v1/embeddings":
 		return "embeddings:create"
 	case "/v1/models":

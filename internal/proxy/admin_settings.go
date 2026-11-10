@@ -396,7 +396,7 @@ var settingDescriptions = map[string]string{
 	"limits.max_request_bytes": "chat 요청 본문 최대 바이트(0=비활성). 초과 시 413 payload_too_large로 거부. 비정상적으로 큰 프롬프트·남용 차단.",
 	"limits.max_messages":      "chat 요청 messages 배열 최대 개수(0=비활성). 초과 시 400 too_many_messages로 거부. 컨텍스트 스터핑·과도한 멀티턴 누적 차단.",
 	// Logging
-	"logging.response_text":      "AI 응답 본문 캡처 여부(LOG_RESPONSE_TEXT). true면 response_text_optional에 전체 응답 텍스트를 저장, 요청 상세에서 조회 가능. 저장 공간 증가 주의.",
+	"logging.response_text":      "AI 응답 본문 캡처 여부(LOG_RESPONSE_TEXT). true면 응답 텍스트를 개인정보·비밀값을 마스킹한 뒤 response_text_optional에 저장하고 입출력 모니터와 요청 상세에서 조회한다. 저장 공간 증가 주의.",
 	"logging.raw_prompts":        "프롬프트 원문 캡처 여부(LOG_RAW_PROMPTS). true면 content_text(원문)도 별도 저장. false면 redacted_text(리덕션)만 보관.",
 	"logging.raw_bodies":         "요청·응답 원시 바디 캡처 여부(LOG_RAW_BODIES). ⚠️ 켜면 프롬프트가 **마스킹 없이 그대로** 저장됩니다 — API 키·주민번호·카드번호가 본문에 있으면 평문으로 남고 retention 기간까지 유지됩니다. 재실행(replay)에는 원본 바이트가 필요하므로 마스킹할 수 없습니다. 디스크 암호화와 접근 제한을 먼저 확보하세요(docs/OPERATIONS.md). 저장 공간도 늘어납니다.",
 	"logging.response_max_bytes": "응답 캡처 최대 바이트(LOG_RESPONSE_MAX_BYTES). 초과 분 잘림. 기본 1MB.",

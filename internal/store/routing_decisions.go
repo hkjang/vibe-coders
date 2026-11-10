@@ -257,6 +257,11 @@ func isTimeoutHealthSignal(status int, text string) bool {
 	if status == 504 {
 		return true
 	}
+	// A 4xx is the caller's request refused, and its error now carries the provider's own
+	// words: a message that happens to mention a timeout parameter is not a slow provider.
+	if status >= 400 && status < 500 && status != 408 {
+		return false
+	}
 	lower := strings.ToLower(text)
 	return strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded")
 }
