@@ -9,6 +9,7 @@ import type {
   DeleteAdminSkillsByNameNameData,
   DeleteAdminWorkflowsData,
   GetAdminAppsData,
+  GetAdminAppsIdData,
   GetAdminAppsIdPermissionsData,
   GetAdminAppsIdVersionsData,
   GetAdminAppTemplatesData,
@@ -81,6 +82,7 @@ import {
   skillStudioCandidateListSchema,
   skillWriteSchema,
   workAppListSchema,
+  workAppDetailSchema,
   workAppSchema,
   workflowDryRunSchema,
   workflowListSchema,
@@ -161,6 +163,7 @@ export const agentsEndpoints = {
   },
   apps: {
     list: operation<GetAdminAppsData, unknown>()("GET", "/admin/apps", workAppListSchema),
+    get: operation<GetAdminAppsIdData, unknown>()("GET", "/admin/apps/{id}", workAppDetailSchema),
     create: operation<WithBody<PostAdminAppsData, WorkAppWriteBody>, unknown>()(
       "POST",
       "/admin/apps",
@@ -171,7 +174,11 @@ export const agentsEndpoints = {
       "/admin/apps/{id}",
       workAppSchema,
     ),
-    remove: operation<DeleteAdminAppsIdData, unknown>()("DELETE", "/admin/apps/{id}", acknowledgementSchema),
+    remove: operation<DeleteAdminAppsIdData, unknown>()(
+      "DELETE",
+      "/admin/apps/{id}",
+      z.object({ status: z.literal("deleted") }),
+    ),
     validate: operation<PostAdminAppsIdValidateData, unknown>()(
       "POST",
       "/admin/apps/{id}/validate",

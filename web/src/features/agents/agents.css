@@ -1,6 +1,27 @@
 /* Agent domain screens: workflows, AI work apps and skills. Tokens only so both
    themes stay correct. */
 
+.app-delete-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+
+.app-delete-summary dt {
+  color: var(--color-muted);
+}
+
+.app-delete-summary dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.app-delete-summary ~ .inline-notice {
+  margin-bottom: var(--space-4);
+}
+
 .agents-toolbar-field {
   display: flex;
   flex-direction: column;
