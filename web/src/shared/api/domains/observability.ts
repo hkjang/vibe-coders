@@ -23,6 +23,8 @@ import {
   podsResponseSchema,
   requestAnalysisSchema,
   requestExplainSchema,
+  requestIODetailSchema,
+  requestIOPreviewsResponseSchema,
   requestDiffSchema,
   requestLinksSchema,
   requestNoteDeletedSchema,
@@ -62,6 +64,8 @@ import type {
   GetAdminPodsData,
   GetAdminRequestsDiffData,
   GetAdminRequestsIdExplainData,
+  GetAdminRequestsIdIoData,
+  GetAdminRequestsIoData,
   GetAdminRequestsIdLinksData,
   GetAdminRequestsIdNoteData,
   GetAdminRequestsIdTraceData,
@@ -112,6 +116,16 @@ export interface JourneyProbeBody {
   proxy_key: string;
   clients?: string[];
 }
+
+const requestIOPreviewsQuerySchema = z
+  .object({
+    ids: z
+      .string()
+      .min(1)
+      .max(16 * 1024),
+  })
+  .strict();
+const requestIODetailQuerySchema = z.object({ reveal: z.literal("raw").optional() }).strict();
 
 /** Body of `PATCH /admin/requests/{id}/note` (see `handleRequestNote`). */
 export interface RequestNoteBody {
@@ -376,6 +390,18 @@ export const observabilityEndpoints = {
     ),
   },
   requests: {
+    ioPreviews: operation<GetAdminRequestsIoData, unknown>()(
+      "GET",
+      "/admin/requests/io",
+      requestIOPreviewsResponseSchema,
+      requestIOPreviewsQuerySchema,
+    ),
+    io: operation<GetAdminRequestsIdIoData, unknown>()(
+      "GET",
+      "/admin/requests/{id}/io",
+      requestIODetailSchema,
+      requestIODetailQuerySchema,
+    ),
     explain: operation<GetAdminRequestsIdExplainData, unknown>()(
       "GET",
       "/admin/requests/{id}/explain",

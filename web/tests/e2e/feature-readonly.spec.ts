@@ -25,6 +25,7 @@ const noteCard = (page: Page) =>
     .getByRole("heading", { name: "운영 메모·태그", exact: true, includeHidden: true })
     .locator("xpath=ancestor::section[1]");
 const views = (page: Page) => page.getByRole("group", { name: "저장된 뷰", exact: true });
+const openViews = (page: Page) => page.getByText("상세 필터와 저장된 뷰").click();
 const guard = (page: Page) => page.getByRole("alertdialog", { name: "저장하지 않은 변경사항이 있습니다" });
 async function signIn(page: Page, email = firstEmail) {
   await expect(page.getByRole("heading", { name: "관리자 로그인", exact: true })).toBeVisible();
@@ -208,6 +209,7 @@ async function prepareEditor(page: Page, editor: Editor) {
     };
   }
   if (editor === "저장 뷰") {
+    await openViews(page);
     await views(page).getByRole("button", { name: "새로 저장", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "현재 필터를 저장", exact: true });
     const input = dialog.getByRole("textbox", { name: "뷰 이름", exact: true });
@@ -306,6 +308,7 @@ test("읽기 전용의 저장 뷰는 조회·적용·링크 복사가 가능하�
   gateway.setMode("observability.xview", "preview_read_only");
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await login(page, xviewUrl);
+  await openViews(page);
   await views(page).getByRole("combobox", { name: "저장된 뷰", exact: true }).selectOption(viewId);
   await expect(page).toHaveURL(/models=fixture-model/u);
   for (const label of ["새로 저장", "덮어쓰기", "삭제"])
@@ -359,6 +362,7 @@ for (const action of ["시드", "추천 적용", "스킬 삭제", "승격", "재
       if (action === "승격")
         await dialog.getByRole("textbox", { name: "변경 사유", exact: true }).fill("공개 합성 검증 사유");
     } else if (action === "뷰 삭제") {
+      await openViews(page);
       await views(page).getByRole("combobox", { name: "저장된 뷰", exact: true }).selectOption(viewId);
       await views(page).getByRole("button", { name: "삭제", exact: true }).click();
       dialog = page.getByRole("dialog", { name: "저장된 뷰 삭제", exact: true });
@@ -479,6 +483,7 @@ test("readonly 해제는 기존 admin:write와 원문 보기 권한을 새로 �
 
 test("읽기 전용 복구는 외부 분석과 저장 뷰 덮어쓰기를 자동 실행하지 않는다", async ({ page, gateway }) => {
   await login(page, xviewUrl);
+  await openViews(page);
   await views(page).getByRole("combobox", { name: "저장된 뷰", exact: true }).selectOption(viewId);
   gateway.setMode("observability.xview", "read_only");
   await refreshRuntime(page);

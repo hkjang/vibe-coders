@@ -63,6 +63,7 @@ const delegatedPanels: ReadonlyArray<{ title: string; where: string; href: strin
     internal: true,
   },
   { title: "AI 코딩 작업 템플릿", where: "프롬프트 자산 화면", href: "/app/prompts/library", internal: true },
+  { title: "게이트웨이 비밀키 교체", where: "비밀키 교체 화면", href: "/app/system/secrets", internal: true },
   { title: "지식 캐시", where: "기존 관리자 화면", href: "/admin#/settings", internal: false },
 ];
 

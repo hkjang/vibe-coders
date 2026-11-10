@@ -1561,6 +1561,122 @@ export type ReadyResponse = {
     status: 'ready';
 };
 
+export type RequestIoDetail = {
+    api_key_id: string;
+    cached_tokens: number;
+    /**
+     * Current capture settings. They decide what new requests keep, not what older rows hold.
+     */
+    capture: {
+        raw_prompts: boolean;
+        response_max_bytes: number;
+        response_text: boolean;
+    };
+    client_ip: string;
+    completion_tokens: number;
+    created_at: string;
+    currency: string;
+    endpoint: string;
+    error: string;
+    estimated_cost: number;
+    failover: boolean;
+    fallback_from: string;
+    first_chunk_ms: number;
+    input: {
+        messages: Array<{
+            chars: number;
+            original_kept: boolean;
+            role: string;
+            text: string;
+            truncated: boolean;
+        }>;
+        omitted_messages: number;
+        /**
+         * not_captured: the call answered but its body was not kept (LOG_RESPONSE_TEXT off). missing: no record exists.
+         */
+        state: 'captured' | 'not_captured' | 'missing';
+        tool_definitions: string;
+    };
+    languages: Array<string>;
+    latency_ms: number;
+    masked: boolean;
+    method: string;
+    output: {
+        chars: number;
+        finish_reason: string;
+        kind: 'none' | 'text' | 'tool_calls' | 'error' | 'embedding' | 'image';
+        /**
+         * Only rows stored before responses were masked on write still hold an original.
+         */
+        original_kept: boolean;
+        /**
+         * not_captured: the call answered but its body was not kept (LOG_RESPONSE_TEXT off). missing: no record exists.
+         */
+        state: 'captured' | 'not_captured' | 'missing';
+        text: string;
+        tool_calls: Array<{
+            arguments: string;
+            name: string;
+        }>;
+        truncated: boolean;
+    };
+    prompt_tokens: number;
+    provider: string;
+    raw_allowed: boolean;
+    reasoning_tokens: number;
+    request_id: string;
+    requested_model: string;
+    resolved_model: string;
+    route_reason: string;
+    session_id: string;
+    status_code: number;
+    stream: boolean;
+    token_source: string;
+    total_tokens: number;
+    trace_id: string;
+    user_agent: string;
+};
+
+export type RequestIoPreview = {
+    input: {
+        chars: number;
+        message_count: number;
+        role: string;
+        /**
+         * not_captured: the call answered but its body was not kept (LOG_RESPONSE_TEXT off). missing: no record exists.
+         */
+        state: 'captured' | 'not_captured' | 'missing';
+        text: string;
+        truncated: boolean;
+    };
+    output: {
+        chars: number;
+        finish_reason: string;
+        kind: 'none' | 'text' | 'tool_calls' | 'error' | 'embedding' | 'image';
+        /**
+         * not_captured: the call answered but its body was not kept (LOG_RESPONSE_TEXT off). missing: no record exists.
+         */
+        state: 'captured' | 'not_captured' | 'missing';
+        text: string;
+        tool_names: Array<string>;
+        truncated: boolean;
+    };
+    request_id: string;
+};
+
+export type RequestIoPreviewsResponse = {
+    /**
+     * Current capture settings. They decide what new requests keep, not what older rows hold.
+     */
+    capture: {
+        raw_prompts: boolean;
+        response_max_bytes: number;
+        response_text: boolean;
+    };
+    generated_at: string;
+    previews: Array<RequestIoPreview>;
+};
+
 export type RequestNoteAppResponse = {
     /**
      * Existing last-writer audit identity (token hash label, or anonymous), not a user ID; subject to the caller's projection.
@@ -2352,7 +2468,7 @@ export type UiSystemStatus = {
 
 export type UiTelemetryEventRequest = {
     event: 'visit' | 'legacy_fallback';
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     /**
      * 128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.
      */
@@ -2360,7 +2476,7 @@ export type UiTelemetryEventRequest = {
 };
 
 export type UiTelemetryFeatureCount = {
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     legacy_opens: number;
     visits: number;
 };
@@ -8431,6 +8547,36 @@ export type GetAdminRequestsDiffResponses = {
     200: unknown;
 };
 
+export type GetAdminRequestsIoData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Comma-separated request IDs, at most 100.
+         */
+        ids: string;
+    };
+    url: '/admin/requests/io';
+};
+
+export type GetAdminRequestsIoErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRequestsIoError = GetAdminRequestsIoErrors[keyof GetAdminRequestsIoErrors];
+
+export type GetAdminRequestsIoResponses = {
+    /**
+     * OK
+     */
+    200: RequestIoPreviewsResponse;
+};
+
+export type GetAdminRequestsIoResponse = GetAdminRequestsIoResponses[keyof GetAdminRequestsIoResponses];
+
 export type GetAdminRequestsIdData = {
     body?: never;
     path: {
@@ -8526,6 +8672,35 @@ export type GetAdminRequestsIdHeadersResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminRequestsIdIoData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: {
+        reveal?: 'raw';
+    };
+    url: '/admin/requests/{id}/io';
+};
+
+export type GetAdminRequestsIdIoErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRequestsIdIoError = GetAdminRequestsIdIoErrors[keyof GetAdminRequestsIdIoErrors];
+
+export type GetAdminRequestsIdIoResponses = {
+    /**
+     * OK
+     */
+    200: RequestIoDetail;
+};
+
+export type GetAdminRequestsIdIoResponse = GetAdminRequestsIdIoResponses[keyof GetAdminRequestsIdIoResponses];
 
 export type GetAdminRequestsIdLinksData = {
     body?: never;

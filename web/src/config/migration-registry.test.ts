@@ -119,6 +119,7 @@ describe("migration registry", () => {
     ["observability.requests", "/app/observability/requests"],
     ["observability.traces", "/app/observability/traces"],
     ["observability.sessions", "/app/observability/sessions"],
+    ["observability.io", "/app/observability/io"],
     ["observability.xview", "/app/observability/xview"],
     ["observability.llm", "/app/observability/llm"],
     ["observability.probes", "/app/observability/probes"],
@@ -143,6 +144,7 @@ describe("migration registry", () => {
     ["security.redteam", "/app/redteam"],
     ["security.sandbox", "/app/sandbox"],
     ["system.health", "/app/system/health"],
+    ["system.secrets", "/app/system/secrets"],
     ["system.settings", "/app/system/settings"],
   ] as const;
 

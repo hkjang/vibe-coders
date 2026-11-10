@@ -35,7 +35,10 @@ export function useRequestDetailReadScope(owner: object, currentRead: () => bool
           queryKey[0] === "observability" &&
           queryKey[1] === "requests" &&
           typeof queryKey[2] === "string" &&
-          (queryKey[3] === "explain" || queryKey[3] === "trace" || queryKey[3] === "links") &&
+          (queryKey[3] === "explain" ||
+            queryKey[3] === "trace" ||
+            queryKey[3] === "links" ||
+            queryKey[3] === "io") &&
           queryKey[4] === "read-scope" &&
           queryKey[5] === scope.id,
       };
@@ -49,7 +52,7 @@ export function useRequestDetailReadScope(owner: object, currentRead: () => bool
 export function requestDetailQueryOptions<T>(
   scope: RequestDetailReadScope | undefined,
   requestId: string,
-  kind: "explain" | "trace" | "links",
+  kind: "explain" | "trace" | "links" | "io",
   request: (signal: AbortSignal) => Promise<T>,
 ) {
   return {

@@ -539,3 +539,9 @@ export type IndexHealthReport = z.output<typeof indexHealthSchema>;
 export type MigrationSqlReport = z.output<typeof migrationSqlSchema>;
 export type MigrationSqlStatement = MigrationSqlReport["statements"][number];
 export type KnowledgeSnippet = z.output<typeof knowledgeListSchema>["snippets"][number];
+
+/** `POST /admin/secrets/rotate`. Rows re-encrypted per store; never carries a secret value. */
+export const secretRotationResultSchema = looseObject({
+  status: z.literal("ok"),
+  rotated: z.record(z.string(), z.number()),
+});

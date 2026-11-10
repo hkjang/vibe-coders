@@ -683,6 +683,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/ops/status", s.handleOpsStatus)
 	mux.HandleFunc("/admin/ops/risk", s.handleOpsRisk)
 	mux.HandleFunc("/admin/requests/diff", s.handleRequestDiff)
+	mux.HandleFunc("/admin/requests/io", s.handleRequestIOPreviews)
 	mux.HandleFunc("/admin/suggest", s.handleSuggest)
 	mux.HandleFunc("/v1/chat/completions", s.handleOpenAI)
 	mux.HandleFunc("/v1/models", s.handleOpenAI)

@@ -43,6 +43,7 @@ import type {
   PostAdminNotificationsMattermostData,
   PostAdminNotificationsMattermostTestData,
   PostAdminRetentionData,
+  PostAdminSecretsRotateData,
   PostAdminSettingsRollbackData,
   PostAdminSettingsTestClickhouseData,
   PostAdminSettingsTestText2SqlExecData,
@@ -95,6 +96,7 @@ import {
   systemAcknowledgementSchema,
   systemErrorListSchema,
   systemErrorQuerySchema,
+  secretRotationResultSchema,
 } from "@/shared/api/domains/system.schemas";
 
 export interface SettingWriteBody {
@@ -163,6 +165,13 @@ export interface NotificationConfigBody {
 }
 
 export const systemEndpoints = {
+  secrets: {
+    rotate: operation<WithBody<PostAdminSecretsRotateData, { new_secret: string }>, unknown>()(
+      "POST",
+      "/admin/secrets/rotate",
+      secretRotationResultSchema,
+    ),
+  },
   settings: {
     effective: operation<GetAdminSettingsEffectiveData, unknown>()(
       "GET",

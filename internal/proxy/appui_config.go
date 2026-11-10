@@ -86,6 +86,7 @@ var appUIFeatures = []appUIFeature{
 	{FeatureID: "observability.requests", Title: "요청 탐색기", AppPath: "/app/observability/requests", LegacyPath: "/admin#/requests", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.83.0"},
 	{FeatureID: "observability.traces", Title: "추적 탐색기", AppPath: "/app/observability/traces", LegacyPath: "/admin#/llm", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.83.0"},
 	{FeatureID: "observability.sessions", Title: "세션 비행기록", AppPath: "/app/observability/sessions", LegacyPath: "/admin#/sessions", Status: "preview", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.84.0"},
+	{FeatureID: "observability.io", Title: "입출력 모니터", AppPath: "/app/observability/io", LegacyPath: "/admin#/requests", Status: "preview", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.86.62"},
 	{FeatureID: "observability.xview", Title: "XView 실시간", AppPath: "/app/observability/xview", LegacyPath: "/admin#/xview", Status: "preview", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.84.0"},
 	{FeatureID: "observability.llm", Title: "LLM 관측", AppPath: "/app/observability/llm", LegacyPath: "/admin#/llm", Status: "preview", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.84.0"},
 	{FeatureID: "observability.probes", Title: "진단 프로브", AppPath: "/app/observability/probes", LegacyPath: "/admin#/journey-probe", Status: "preview", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.84.0"},
@@ -110,6 +111,7 @@ var appUIFeatures = []appUIFeature{
 	{FeatureID: "security.redteam", Title: "레드팀 자동화", AppPath: "/app/redteam", LegacyPath: "/admin#/redteam", Status: "preview", RiskLevel: "high", RequiredPermission: "security:read", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.84.0"},
 	{FeatureID: "security.sandbox", Title: "민감 샌드박스", AppPath: "/app/sandbox", LegacyPath: "/admin#/sandbox", Status: "preview", RiskLevel: "high", RequiredPermission: "admin:read", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.84.0"},
 	{FeatureID: "system.health", Title: "시스템 상태", AppPath: "/app/system/health", LegacyPath: "/admin#/ops-home", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.81.0"},
+	{FeatureID: "system.secrets", Title: "비밀키 교체", AppPath: "/app/system/secrets", LegacyPath: "/admin#/settings", Status: "preview", RiskLevel: "critical", RequiredPermission: "admin:write", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: false, MinimumAPIVersion: "v0.86.62"},
 	{FeatureID: "system.settings", Title: "시스템 설정", AppPath: "/app/system/settings", LegacyPath: "/admin#/settings", Status: "preview", RiskLevel: "critical", RequiredPermission: "admin:read", ReadOnly: false, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.84.0"},
 }
 
@@ -128,6 +130,7 @@ var appUIImplementedFeatureIDs = map[string]struct{}{
 	"observability.requests": {},
 	"observability.traces":   {},
 	"observability.sessions": {},
+	"observability.io":       {},
 	"observability.xview":    {},
 	"observability.llm":      {},
 	"observability.probes":   {},
@@ -152,6 +155,7 @@ var appUIImplementedFeatureIDs = map[string]struct{}{
 	"security.redteam":       {},
 	"security.sandbox":       {},
 	"system.health":          {},
+	"system.secrets":         {},
 	"system.settings":        {},
 }
 

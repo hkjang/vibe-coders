@@ -1,4 +1,4 @@
-import { notifyManager, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hashKey, notifyManager, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
@@ -179,7 +179,15 @@ export function useXViewLive(filters: XViewFilters, live: boolean, owner?: XView
   });
   const receipt = snapshot.data;
   const queryState = useSyncExternalStore(
-    useCallback((listener) => client.getQueryCache().subscribe(listener), [client]),
+    // Only this query's events: another query built during a render notifies the cache
+    // synchronously, and reacting to it would set state on this component mid-render.
+    useCallback(
+      (listener) =>
+        client.getQueryCache().subscribe((event) => {
+          if (event.query.queryHash === hashKey(key)) listener();
+        }),
+      [client, key],
+    ),
     useCallback(
       () => client.getQueryCache().find<Receipt>({ queryKey: key, exact: true })?.state,
       [client, key],

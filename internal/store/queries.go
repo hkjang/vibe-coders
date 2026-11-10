@@ -1308,7 +1308,7 @@ func (s *SQLStore) promptDetailsForRequest(ctx context.Context, requestID string
 		SELECT id, request_id, role, content_hash, COALESCE(content_text, ''), COALESCE(redacted_text, ''), COALESCE(language_hint, ''), created_at
 		FROM prompt_logs
 		WHERE request_id = ?
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, `+s.insertionOrderColumn()+`
 	`), requestID)
 	if err != nil {
 		return nil, err

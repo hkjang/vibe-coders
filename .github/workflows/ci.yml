@@ -232,6 +232,8 @@ jobs:
         run: go test ./internal/store -run '^(TestAppRecentRequestsPostgresNaturalPlannerAtScale|TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys)$' -count=1 -timeout=5m
       - name: Verify PostgreSQL safe trace flow privacy, scope and natural query plans
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestAppRequestFlow' -count=1 -timeout=7m
+      - name: Verify PostgreSQL request input/output order, bounds and team scope
+        run: go test -race ./internal/store -run '^TestRequestIOSamples' -count=1 -timeout=5m
       - name: Verify PostgreSQL UI telemetry concurrency and retention
         run: go test -race ./internal/store -run '^TestAppUITelemetry' -count=1 -timeout=5m
       - name: Verify PostgreSQL startup lock waiters and concurrent migrations

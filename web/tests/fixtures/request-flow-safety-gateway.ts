@@ -153,6 +153,10 @@ async function install(context: BrowserContext) {
     },
     "GET /admin/llm/feedback": { feedback: [] },
     "GET /admin/saved-filters": { filters: [] },
+    "GET /admin/requests/io": {
+      previews: [],
+      capture: { response_text: true, raw_prompts: false, response_max_bytes: 1048576 },
+    },
     "GET /admin/scatter": {
       points: [],
       groups: [],

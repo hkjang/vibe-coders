@@ -89,6 +89,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/requests/{id}/headers", []string{"get"}, "admin", "Masked and grouped request/gateway/upstream headers", false},
 	{"/admin/requests/{id}/routing", []string{"get"}, "admin", "Routing, provider, fallback, policy and model resolution summary", false},
 	{"/admin/requests/{id}/body", []string{"get"}, "admin", "Masked request body summary and raw body evidence when retained", false},
+	{"/admin/requests/{id}/io", []string{"get"}, "admin", "Input and output of one request, masked unless originals are asked for and allowed", false},
 	{"/admin/requests/{id}/timeline", []string{"get"}, "admin", "Request processing timeline with spans/tool/Text2SQL overlays", false},
 	{"/admin/requests/{id}/export", []string{"post"}, "admin", "Masked request evidence export (?format=json|markdown)", false},
 	{"/admin/requests/{id}/links", []string{"get"}, "admin", "Request trace links across routing/MCP/Text2SQL/governance", false},
@@ -110,6 +111,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/sessions", []string{"get"}, "admin", "Recent coding sessions (flight-recorder index)", false},
 	{"/admin/sessions/{session_id}/flight-recorder", []string{"get"}, "admin", "Chronological flight recorder for one agent session", false},
 	{"/admin/requests/diff", []string{"get"}, "admin", "Diff two requests", false},
+	{"/admin/requests/io", []string{"get"}, "admin", "Masked input and output previews for a set of requests", false},
 	{"/admin/prompts", []string{"get"}, "admin", "Search prompts", false},
 	{"/admin/timeseries", []string{"get"}, "admin", "Usage timeseries", false},
 	{"/admin/heatmap", []string{"get"}, "admin", "Activity heatmap", false},
@@ -655,6 +657,10 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("HealthResponse")
 	case "get /admin/app/request-flow":
 		enrichAppRequestFlowOpenAPI(op, responses)
+	case "get /admin/requests/io":
+		enrichRequestIOPreviewsOpenAPI(op, responses)
+	case "get /admin/requests/{id}/io":
+		enrichRequestIOOpenAPI(op, responses)
 	case "get /admin/policies/export", "post /admin/policies/import":
 		enrichPolicyImportOpenAPI(route, op, responses)
 	case "get /admin/routing-rules", "patch /admin/routing-rules/{id}":
@@ -1107,6 +1113,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range providerConnectionOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range requestIOOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range appRequestFlowOpenAPISchemas() {

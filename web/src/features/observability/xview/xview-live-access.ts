@@ -12,13 +12,13 @@ export interface XViewReadOwner {
 }
 
 /** A read lifetime, not an authorization policy. Masked admin:read stays supported. */
-export function useXViewReadOwner(): XViewReadOwner {
+export function useXViewReadOwner(featureId = "observability.xview"): XViewReadOwner {
   const auth = useAuth();
   const context = useContext(FeatureAccessContext);
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const readable =
     (auth.mode === "authenticated" || auth.mode === "legacy" || auth.mode === "open") &&
-    context?.featureId === "observability.xview" &&
+    context?.featureId === featureId &&
     context.permitted &&
     (auth.mode !== "authenticated" || auth.user?.scopes.includes("admin:read") === true);
   const key = JSON.stringify([

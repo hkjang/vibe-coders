@@ -848,6 +848,17 @@ func TestTeamAdminIsolationAndRoleEscalationGuards(t *testing.T) {
 	if status, body := teamGet("/admin/ips/" + malformedClientIP); status != http.StatusBadRequest || strings.Contains(string(body), malformedClientIP) {
 		t.Fatalf("malformed IP detail was accepted or reflected: status=%d body=%s", status, body)
 	}
+	if status, body := teamGet("/admin/requests/io?ids=req-alpha-trace,req-beta-trace"); status != http.StatusOK ||
+		!strings.Contains(string(body), `"req-alpha-trace"`) || strings.Contains(string(body), `"req-beta-trace"`) {
+		t.Fatalf("team_admin io previews must omit another team's request: status=%d body=%s", status, body)
+	}
+	if status, body := teamGet("/admin/requests/req-alpha-trace/io"); status != http.StatusOK ||
+		!strings.Contains(string(body), `"masked":true`) || !strings.Contains(string(body), `"raw_allowed":false`) {
+		t.Fatalf("team_admin io detail must be masked without raw access: status=%d body=%s", status, body)
+	}
+	if status, body := teamGet("/admin/requests/req-alpha-trace/io?reveal=raw"); status != http.StatusForbidden {
+		t.Fatalf("team_admin must not reveal originals: status=%d body=%s", status, body)
+	}
 	if status, body := teamGet("/admin/requests/req-beta-trace/note"); status != http.StatusForbidden {
 		t.Fatalf("team_admin could read other-team request note: status=%d body=%s", status, body)
 	}
@@ -876,6 +887,8 @@ func TestTeamAdminIsolationAndRoleEscalationGuards(t *testing.T) {
 		"/admin/requests/req-beta-trace/trace",
 		"/admin/requests/req-beta-trace/explain",
 		"/admin/requests/req-beta-trace/links",
+		"/admin/requests/req-beta-trace/io",
+		"/admin/requests/req-beta-trace/io?reveal=raw",
 		"/admin/flow-map?request_id=req-beta-trace",
 		"/admin/llm/traces/req-beta-trace",
 		"/admin/requests/req-beta-only-trace/trace",

@@ -24,3 +24,174 @@
   flex-shrink: 0;
   white-space: nowrap;
 }
+
+.xview-live-page {
+  gap: var(--space-3);
+}
+
+.xview-controls {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.xview-more {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card);
+}
+
+.xview-more > summary {
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.xview-more > summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.xview-more-body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.xview-signals {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.xview-signals .stat-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.xview-signals .stat-card-label {
+  grid-column: 1;
+}
+
+.xview-signals .stat-card-value {
+  grid-column: 1;
+  font-size: 1.25rem;
+}
+
+.xview-signals .stat-card-hint {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.xview-feed-card {
+  margin-top: var(--space-3);
+}
+
+.xview-feed {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  list-style: none;
+}
+
+.xview-feed > li:last-child .io-row {
+  border-bottom: 0;
+}
+
+.xview-selection-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.xview-selection-summary > div {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+}
+
+.xview-selection-summary dt {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.xview-selection-summary dd {
+  margin: 0.125rem 0 0;
+  font-weight: 650;
+}
+
+.xview-selection-summary dd[data-tone="danger"] {
+  color: var(--color-danger);
+}
+
+.xview-selection-io {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 16rem;
+}
+
+.xview-selection-table th[scope="row"] {
+  min-width: 9rem;
+  max-width: 12rem;
+  font-weight: 500;
+}
+
+.xview-selection-id {
+  display: block;
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xview-selection-model {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.xview-selection-table .obs-row-actions {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  min-width: 5.5rem;
+}
+
+.xview-selection-table .obs-row-actions .button {
+  white-space: nowrap;
+}
+
+/* Phone: the plot is the point of this screen, so the signals stay two to a row. */
+@media (max-width: 48rem) {
+  .xview-signals .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .xview-signals .stat-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .xview-signals .stat-card-hint {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .xview-controls .toolbar-start {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .xview-controls .toolbar-start .input {
+    width: 100%;
+    min-width: 0;
+  }
+}

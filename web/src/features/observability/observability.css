@@ -55,6 +55,10 @@
   padding: var(--space-2);
 }
 
+.obs-scatter-shell svg {
+  user-select: none;
+}
+
 .obs-scatter-shell[data-selecting="true"] {
   cursor: crosshair;
 }
@@ -75,17 +79,114 @@
   stroke-width: 1;
 }
 
+.obs-scatter-band-label {
+  fill: var(--color-warning);
+}
+
+.obs-scatter-hover {
+  fill: none;
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.obs-scatter-fresh {
+  fill: none;
+  stroke-width: 1.5;
+  pointer-events: none;
+  animation: obs-scatter-arrive 1.6s ease-out forwards;
+}
+
+@keyframes obs-scatter-arrive {
+  from {
+    opacity: 0.9;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.2);
+  }
+}
+
+.obs-scatter-fresh {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .obs-scatter-fresh {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.obs-scatter-shell[data-hovering="true"] {
+  cursor: pointer;
+}
+
+.obs-scatter-tooltip {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 0.125rem;
+  min-width: 11rem;
+  max-width: 18rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-card-raised);
+  box-shadow: 0 6px 18px rgb(14 22 38 / 18%);
+  color: var(--color-foreground);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  transform: translate(12px, -50%);
+}
+
+.obs-scatter-tooltip[data-flip="left"] {
+  transform: translate(calc(-100% - 12px), -50%);
+}
+
+.obs-scatter-tooltip-hint {
+  color: var(--color-muted);
+}
+
 .obs-scatter-selection {
   fill: var(--color-primary-soft);
   stroke: var(--color-primary);
   stroke-width: 1;
 }
 
+.obs-legend-toggle {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.obs-legend-toggle[aria-pressed="false"] {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+
+.obs-legend-toggle[aria-pressed="false"] .obs-legend-swatch {
+  outline: 1px solid var(--color-border);
+}
+
+.obs-legend-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
 .obs-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-top: var(--space-2);
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
   font-size: 0.8125rem;
 }
 

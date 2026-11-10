@@ -49,9 +49,20 @@ export function RequestDetailDialog({
 
   return (
     <Dialog
-      description="프롬프트, 응답 본문, 원시 오류와 사용자 에이전트는 이 미리보기에서 제공하지 않습니다."
+      description="프롬프트, 응답 본문, 원시 오류와 사용자 에이전트는 이 미리보기에서 제공하지 않습니다. 내용은 입출력 모니터에서 권한에 맞게 확인합니다."
       footer={
         <>
+          {request?.request_filterable ? (
+            <Link
+              className="button button-secondary button-default"
+              to={{
+                pathname: "/observability/io",
+                search: new URLSearchParams({ request_id: request.request_id }).toString(),
+              }}
+            >
+              입력·출력 보기
+            </Link>
+          ) : null}
           {traceSearch ? (
             <Link
               className="button button-secondary button-default"

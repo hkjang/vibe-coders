@@ -550,7 +550,7 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		case "analyze":
 			s.handleRequestAnalyze(w, r)
 			return
-		case "headers", "routing", "body", "timeline", "export":
+		case "headers", "routing", "body", "timeline", "export", "io":
 			s.handleRequestReadableSubresource(w, r, rest)
 			return
 		}

@@ -8,6 +8,9 @@ import {
   canInspectRawRequest,
   canWriteRequestNote,
 } from "@/features/observability/request-insight/request-access";
+import { RequestIOPanel } from "@/features/observability/io/RequestIOPanel";
+import { inputSummary, outputSummary } from "@/features/observability/io/request-io-model";
+import { useRequestIOPreviews } from "@/features/observability/io/use-request-io-previews";
 import { RequestInsightPanel } from "@/features/observability/request-insight/RequestInsightPanel";
 import { useRequestDetailReadScope } from "@/features/observability/request-insight/request-detail-read-scope";
 import { ModelAggregatePanel } from "@/features/observability/xview/ModelAggregatePanel";
@@ -15,10 +18,16 @@ import { SavedViewBar } from "@/features/observability/xview/SavedViewBar";
 import { savedViewParamKeys } from "@/features/observability/xview/saved-view-params";
 import { ScatterPlot } from "@/features/observability/xview/ScatterPlot";
 import {
+  flowDecisionLabel,
+  flowStageLabel,
+  flowStatusLabel,
   metricValue,
   pointCategory,
+  scatterCategories,
   scatterMetrics,
   scatterViewModes,
+  summarizeSelection,
+  type ScatterCategory,
   type ScatterMetric,
   type ScatterScale,
   type ScatterViewMode,
@@ -55,7 +64,13 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
-import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
+import {
+  formatDateTime,
+  formatDuration,
+  formatKRW,
+  formatNumber,
+  formatPercent,
+} from "@/shared/utils/format";
 import "@/features/observability/observability.css";
 import "./xview-live.css";
 
@@ -63,6 +78,16 @@ const tabIds = ["scatter", "models", "waterfall"] as const;
 type TabId = (typeof tabIds)[number];
 
 const windows = ["5m", "15m", "1h", "6h", "24h"] as const;
+const windowMs: Record<(typeof windows)[number], number> = {
+  "5m": 300_000,
+  "15m": 900_000,
+  "1h": 3_600_000,
+  "6h": 21_600_000,
+  "24h": 86_400_000,
+};
+const noPoints: ReadonlyArray<ScatterPoint> = [];
+const selectionPageSize = 100;
+const liveFeedSize = 8;
 const timeZones = [
   "Asia/Seoul",
   "UTC",
@@ -73,6 +98,14 @@ const timeZones = [
 ];
 const defaultWindow = "1h";
 const defaultTimeZone = "Asia/Seoul";
+
+function categoryTone(point: ScatterPoint): "danger" | "info" | "success" | "warning" {
+  const category = pointCategory(point);
+  if (category === "error") return "danger";
+  if (category === "fallback") return "warning";
+  if (category === "governance") return "info";
+  return "success";
+}
 
 function pick<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
   return (allowed as readonly string[]).includes(value ?? "") ? (value as T) : fallback;
@@ -136,6 +169,26 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
   const live = params.get("live") !== "off";
   const savedViewId = params.get("view") ?? "";
   const sessionId = params.get("session_id") ?? "";
+  const hideParam = params.get("hide") ?? "";
+  const hiddenCategories = useMemo(
+    () =>
+      new Set(
+        hideParam
+          .split(",")
+          .filter((value): value is ScatterCategory =>
+            (scatterCategories as readonly string[]).includes(value),
+          ),
+      ),
+    [hideParam],
+  );
+  const toggleCategory = (category: ScatterCategory): void => {
+    const next = new Set(hiddenCategories);
+    if (next.has(category)) next.delete(category);
+    else next.add(category);
+    updateParams({ hide: [...next].join(",") || undefined });
+  };
+  const advancedFilters = [from, to, models, endpoint, savedViewId].filter(Boolean).length;
+  const [advancedOpen, setAdvancedOpen] = useState(advancedFilters > 0);
 
   const filters = useMemo<XViewFilters>(() => {
     const next: XViewFilters = { tz: timeZone };
@@ -161,7 +214,9 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
   const [selected, setSelected] = useState<{ owner: object; points: ReadonlyArray<ScatterPoint> }>();
   const [flow, setFlow] = useState<{ owner: object; id: string }>();
   const [insight, setInsight] = useState<{ owner: object; id: string }>();
-  const selection = selected?.owner === displayOwner ? selected.points : [];
+  const [io, setIo] = useState<{ owner: object; id: string }>();
+  const [selectionLimit, setSelectionLimit] = useState(selectionPageSize);
+  const selection = selected?.owner === displayOwner ? selected.points : noPoints;
   const flowRequestId = flow?.owner === displayOwner ? flow.id : "";
   const insightRequestId = insight?.owner === displayOwner ? insight.id : "";
   const noteRequestId =
@@ -169,16 +224,20 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
   const setSelection = (points: ReadonlyArray<ScatterPoint>) => setSelected({ owner: displayOwner, points });
   const setFlowRequestId = (id: string) => setFlow({ owner: displayOwner, id });
   const setInsightRequestId = (id: string) => setInsight({ owner: displayOwner, id });
+  const ioRequestId = io?.owner === displayOwner ? io.id : "";
+  const setIoRequestId = (id: string) => setIo({ owner: displayOwner, id });
   const selectionFocusRef = useRef<HTMLElement | null>(null);
   const flowFocusRef = useRef<HTMLElement | null>(null);
   const insightFocusRef = useRef<HTMLElement | null>(null);
+  const ioFocusRef = useRef<HTMLElement | null>(null);
   const refreshFocusRef = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
     if ((selected && selected.owner !== displayOwner) || live_.points.length === 0)
       selectionFocusRef.current = refreshFocusRef.current;
     if (flow && flow.owner !== displayOwner) flowFocusRef.current = refreshFocusRef.current;
     if (insight && insight.owner !== displayOwner) insightFocusRef.current = refreshFocusRef.current;
-  }, [displayOwner, flow, insight, live_.points.length, selected]);
+    if (io && io.owner !== displayOwner) ioFocusRef.current = refreshFocusRef.current;
+  }, [displayOwner, flow, insight, io, live_.points.length, selected]);
   const canInspectRaw = canInspectRawRequest(auth);
   const canWriteNote = canWriteRequestNote(auth);
 
@@ -196,17 +255,68 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
   });
 
   const signals = useMemo(() => summarizeXView(live_.points), [live_.points]);
+  // A live relative window slides with each server clock report, so requests visibly flow
+  // leftward even between arrivals. A fixed range keeps the bounds of what it received.
+  const liveClock = live_.clock;
+  const timeDomain = useMemo(() => {
+    if (from || to || !liveClock) return undefined;
+    return { from: liveClock.serverAt - windowMs[window_], to: liveClock.serverAt };
+  }, [from, liveClock, to, window_]);
   const scatterPlot = useMemo(
     () => (
       <ScatterPlot
+        hiddenCategories={hiddenCategories}
         points={live_.points}
         metric={metric}
         scale={scale}
+        timeDomain={timeDomain}
+        timeZone={timeZone}
         viewMode={viewMode}
-        onSelect={(points) => setSelected({ owner: displayOwner, points })}
+        onToggleCategory={toggleCategory}
+        onSelect={(points) => {
+          // One request goes straight to what it said; several are compared in a list.
+          if (points.length === 1 && points[0]) {
+            ioFocusRef.current = refreshFocusRef.current;
+            setIo({ owner: displayOwner, id: points[0].request_id });
+            return;
+          }
+          selectionFocusRef.current = refreshFocusRef.current;
+          setSelectionLimit(selectionPageSize);
+          setSelected({ owner: displayOwner, points });
+        }}
       />
     ),
-    [displayOwner, live_.points, metric, scale, viewMode],
+    // toggleCategory only reads the parameters already listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [displayOwner, hiddenCategories, live_.points, metric, scale, timeDomain, timeZone, viewMode],
+  );
+
+  const selectCategory = (category: ScatterCategory, trigger: HTMLElement): void => {
+    selectionFocusRef.current = trigger;
+    setSelectionLimit(selectionPageSize);
+    setSelection(live_.points.filter((point) => pointCategory(point) === category));
+  };
+  const selectionSummary = useMemo(() => summarizeSelection(selection), [selection]);
+  // Errors first, then the selected metric's largest values: the rows worth reading first.
+  const sortedSelection = useMemo(
+    () =>
+      [...selection].sort((left, right) => {
+        const problem = Number(right.status_code >= 400) - Number(left.status_code >= 400);
+        return problem !== 0 ? problem : metricValue(right, metric) - metricValue(left, metric);
+      }),
+    [metric, selection],
+  );
+  const shownSelection = sortedSelection.slice(0, selectionLimit);
+  const liveFeed = useMemo(() => live_.points.slice(-liveFeedSize).reverse(), [live_.points]);
+  const previewIds = useMemo(
+    () => [...new Set([...liveFeed, ...shownSelection].map((point) => point.request_id))],
+    [liveFeed, shownSelection],
+  );
+  const { previews, capture } = useRequestIOPreviews(
+    previewIds,
+    detailReadScope,
+    readOwner.readable && !live_.denied && tab === "scatter",
+    "observability.xview",
   );
 
   const currentSavedParams = useMemo(() => {
@@ -272,6 +382,7 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
       viewMode: undefined,
       tz: undefined,
       view: undefined,
+      hide: undefined,
     });
   };
 
@@ -297,28 +408,8 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
 
       <XViewLiveStatus state={live_} live={live} scatter={tab === "scatter"} fixedEnd={Boolean(to)} />
 
-      <SavedViewBar
-        canWrite={canWrite}
-        currentParams={currentSavedParams}
-        onApply={applySavedView}
-        selectedId={savedViewId}
-        writeDeniedReason={writeDeniedReason}
-      />
-
-      <form onSubmit={applyFilters}>
-        <Toolbar
-          label="XView 필터"
-          end={
-            <>
-              <Button type="submit" variant="primary">
-                필터 적용
-              </Button>
-              <Button type="button" onClick={resetFilters}>
-                초기화
-              </Button>
-            </>
-          }
-        >
+      <section className="xview-controls" aria-label="XView 조회 조건">
+        <Toolbar label="XView 표시 설정">
           <label>
             상대 조회 구간
             <Select
@@ -340,34 +431,6 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
             >
               {from || to ? <option value="">직접 지정</option> : null}
             </Select>
-          </label>
-          <label>
-            시작 일시
-            <Input
-              type="datetime-local"
-              value={draft.from}
-              onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))}
-            />
-          </label>
-          <label>
-            종료 일시
-            <Input
-              type="datetime-local"
-              value={draft.to}
-              onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))}
-            />
-          </label>
-          <label>
-            검색 시간대
-            <Select
-              value={timeZone}
-              onChange={(event) =>
-                updateParams({
-                  tz: event.target.value === defaultTimeZone ? undefined : event.target.value,
-                })
-              }
-              options={timeZones.map((zone) => ({ value: zone, label: zone }))}
-            />
           </label>
           <label>
             세로축 지표
@@ -404,24 +467,88 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
               options={scatterViewModes.map((item) => ({ value: item.value, label: item.label }))}
             />
           </label>
-          <label>
-            모델 (쉼표 구분)
-            <Input
-              value={draft.models}
-              onChange={(event) => setDraft((current) => ({ ...current, models: event.target.value }))}
-              placeholder="gpt-4.1,gpt-4.1-mini"
-            />
-          </label>
-          <label>
-            엔드포인트
-            <Input
-              value={draft.endpoint}
-              onChange={(event) => setDraft((current) => ({ ...current, endpoint: event.target.value }))}
-              placeholder="/v1/chat/completions"
-            />
-          </label>
         </Toolbar>
-      </form>
+        <details
+          className="xview-more"
+          open={advancedOpen}
+          onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+        >
+          <summary>
+            상세 필터와 저장된 뷰{advancedFilters > 0 ? ` (${formatNumber(advancedFilters)}개 적용 중)` : ""}
+          </summary>
+          <div className="xview-more-body">
+            <form onSubmit={applyFilters}>
+              <Toolbar
+                label="XView 필터"
+                end={
+                  <>
+                    <Button type="submit" variant="primary">
+                      필터 적용
+                    </Button>
+                    <Button type="button" onClick={resetFilters}>
+                      초기화
+                    </Button>
+                  </>
+                }
+              >
+                <label>
+                  시작 일시
+                  <Input
+                    type="datetime-local"
+                    value={draft.from}
+                    onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  종료 일시
+                  <Input
+                    type="datetime-local"
+                    value={draft.to}
+                    onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  검색 시간대
+                  <Select
+                    value={timeZone}
+                    onChange={(event) =>
+                      updateParams({
+                        tz: event.target.value === defaultTimeZone ? undefined : event.target.value,
+                      })
+                    }
+                    options={timeZones.map((zone) => ({ value: zone, label: zone }))}
+                  />
+                </label>
+                <label>
+                  모델 (쉼표 구분)
+                  <Input
+                    value={draft.models}
+                    onChange={(event) => setDraft((current) => ({ ...current, models: event.target.value }))}
+                    placeholder="gpt-4.1,gpt-4.1-mini"
+                  />
+                </label>
+                <label>
+                  엔드포인트
+                  <Input
+                    value={draft.endpoint}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, endpoint: event.target.value }))
+                    }
+                    placeholder="/v1/chat/completions"
+                  />
+                </label>
+              </Toolbar>
+            </form>
+            <SavedViewBar
+              canWrite={canWrite}
+              currentParams={currentSavedParams}
+              onApply={applySavedView}
+              selectedId={savedViewId}
+              writeDeniedReason={writeDeniedReason}
+            />
+          </div>
+        </details>
+      </section>
       {filterError ? (
         <p className="form-error" role="alert">
           {filterError}
@@ -439,26 +566,49 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
         </InlineNotice>
       ) : null}
 
-      <StatGrid label="지금 확인할 신호">
-        <StatCard label="분석 요청" value={formatNumber(signals.total)} />
-        <StatCard
-          label="오류"
-          value={formatNumber(signals.errors)}
-          tone={signals.errors > 0 ? "danger" : "default"}
-        />
-        <StatCard
-          label="폴백"
-          value={formatNumber(signals.fallbacks)}
-          tone={signals.fallbacks > 0 ? "warning" : "default"}
-        />
-        <StatCard label="정책 신호" value={formatNumber(signals.governance)} tone="info" />
-        <StatCard label="지연 P95" value={`${formatNumber(signals.p95)}ms`} />
-      </StatGrid>
-
-      <p className="obs-meta">
-        요약은 현재 표시한 요청 점 기준입니다. 조회와 주기적 보완은 전체 요청의 누락 없는 수집을 보장하지
-        않습니다.
-      </p>
+      <div className="xview-signals">
+        <StatGrid label="지금 확인할 신호">
+          <StatCard label="분석 요청" value={formatNumber(signals.total)} />
+          <StatCard
+            label="오류"
+            value={formatNumber(signals.errors)}
+            tone={signals.errors > 0 ? "danger" : "default"}
+            hint={
+              signals.errors > 0 ? (
+                <Button
+                  size="small"
+                  aria-label="오류 요청 보기"
+                  onClick={(event) => selectCategory("error", event.currentTarget)}
+                >
+                  {formatPercent(signals.errors / Math.max(1, signals.total))} · 보기
+                </Button>
+              ) : undefined
+            }
+          />
+          <StatCard
+            label="폴백"
+            value={formatNumber(signals.fallbacks)}
+            tone={signals.fallbacks > 0 ? "warning" : "default"}
+            hint={
+              signals.fallbacks > 0 ? (
+                <Button
+                  size="small"
+                  aria-label="폴백 요청 보기"
+                  onClick={(event) => selectCategory("fallback", event.currentTarget)}
+                >
+                  보기
+                </Button>
+              ) : undefined
+            }
+          />
+          <StatCard label="정책 신호" value={formatNumber(signals.governance)} tone="info" />
+          <StatCard label="지연 P95" value={`${formatNumber(signals.p95)}ms`} />
+        </StatGrid>
+        <p className="obs-meta">
+          요약은 현재 표시한 요청 점 기준입니다. 조회와 주기적 보완은 전체 요청의 누락 없는 수집을 보장하지
+          않습니다.
+        </p>
+      </div>
       {live_.truncated ? (
         <InlineNotice tone="warning" title="표본이 상한에 걸렸습니다.">
           조회 구간의 요청이 6,000건 상한을 넘어 최근 구간만 표시합니다. 구간을 좁혀 다시 확인하세요.
@@ -495,13 +645,14 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
           <SectionCard
             className="xview-distribution-card"
             title="요청 분포"
-            description="가로축은 시간, 세로축은 선택한 지표입니다. 그래프를 드래그하면 그 구간의 요청이 선택됩니다."
+            description="점을 누르면 그 요청의 입력과 출력을, 드래그하면 그 구간의 요청을 봅니다. 범례를 눌러 상태별로 켜고 끕니다."
             actions={
               <Button
                 size="small"
                 disabled={live_.points.length === 0}
                 onClick={(event) => {
                   selectionFocusRef.current = event.currentTarget;
+                  setSelectionLimit(selectionPageSize);
                   setSelection(live_.points.slice(-25).reverse());
                 }}
               >
@@ -525,6 +676,57 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
           </SectionCard>
         ) : null}
 
+        {tab === "scatter" && liveFeed.length > 0 ? (
+          <SectionCard
+            className="xview-feed-card"
+            title="방금 들어온 요청"
+            description="가장 최근 요청의 입력과 출력입니다. 내용은 마스킹되어 있고, 누르면 전체를 봅니다."
+          >
+            {capture && !capture.response_text ? (
+              <p className="obs-meta">
+                응답 본문 저장(LOG_RESPONSE_TEXT)이 꺼져 있어 출력 내용은 표시되지 않습니다.
+              </p>
+            ) : null}
+            <ul className="xview-feed">
+              {liveFeed.map((point) => {
+                const preview = previews.get(point.request_id) ?? undefined;
+                const input = inputSummary(preview);
+                const output = outputSummary(preview, point.status_code);
+                return (
+                  <li key={point.request_id}>
+                    <button
+                      type="button"
+                      className="io-row"
+                      aria-label={`${point.request_id} 입출력 열기`}
+                      onClick={(event) => {
+                        ioFocusRef.current = event.currentTarget;
+                        setIoRequestId(point.request_id);
+                      }}
+                    >
+                      <span className="io-row-meta">
+                        <Badge tone={categoryTone(point)}>{formatNumber(point.status_code)}</Badge>
+                        <strong>{point.model || "(미상)"}</strong>
+                        <span>{formatDateTime(point.created_at)}</span>
+                        <span>{formatDuration(point.latency_ms)}</span>
+                        <span>토큰 {formatNumber(point.total_tokens)}</span>
+                        <span>{formatKRW(point.cost_krw)}</span>
+                      </span>
+                      <span className="io-row-line" data-tone={input.tone}>
+                        <span>입력</span>
+                        <span>{input.text}</span>
+                      </span>
+                      <span className="io-row-line" data-tone={output.tone}>
+                        <span>출력</span>
+                        <span>{output.text}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </SectionCard>
+        ) : null}
+
         {tab === "models" ? <ModelAggregatePanel filters={filters} /> : null}
 
         {tab === "waterfall" ? (
@@ -543,92 +745,155 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
         returnFocusRef={selectionFocusRef}
         size="wide"
         title={`선택한 요청 ${formatNumber(selection.length)}건`}
-        description="선택 구간의 요청 목록입니다. 처리 흐름을 열어 어느 단계에서 시간이 들었는지 확인하세요."
+        description="선택 구간의 요청입니다. 입출력으로 내용을, 처리 흐름으로 시간이 든 단계를 확인하세요."
       >
+        <dl className="xview-selection-summary">
+          <div>
+            <dt>오류</dt>
+            <dd data-tone={selectionSummary.errors > 0 ? "danger" : undefined}>
+              {formatNumber(selectionSummary.errors)}건 (
+              {formatPercent(selectionSummary.errors / Math.max(1, selectionSummary.count))})
+            </dd>
+          </div>
+          <div>
+            <dt>폴백</dt>
+            <dd>{formatNumber(selectionSummary.fallbacks)}건</dd>
+          </div>
+          <div>
+            <dt>지연 P50 / P95</dt>
+            <dd>
+              {formatDuration(selectionSummary.p50)} / {formatDuration(selectionSummary.p95)}
+            </dd>
+          </div>
+          <div>
+            <dt>토큰</dt>
+            <dd>{formatNumber(selectionSummary.totalTokens)}</dd>
+          </div>
+          <div>
+            <dt>비용</dt>
+            <dd>{formatKRW(selectionSummary.totalCost)}</dd>
+          </div>
+        </dl>
+        <p className="obs-meta">오류를 먼저, 그다음 선택한 지표가 큰 순서로 보여 줍니다.</p>
         <div className="data-table-scroll" tabIndex={0} aria-label="선택한 요청 표 영역">
-          <table className="data-table">
+          <table className="data-table xview-selection-table">
             <caption className="sr-only">산점도에서 선택한 요청</caption>
             <thead>
               <tr>
-                <th scope="col">시각</th>
-                <th scope="col">요청 ID</th>
-                <th scope="col">모델</th>
-                <th scope="col">상태</th>
-                <th scope="col">지표</th>
-                <th scope="col">비용</th>
+                <th scope="col">요청</th>
+                <th scope="col">결과</th>
+                <th scope="col">지표·비용</th>
+                <th scope="col">입력 → 출력</th>
                 <th scope="col">작업</th>
               </tr>
             </thead>
             <tbody>
-              {selection.map((point, index) => (
-                <tr key={`${point.request_id}-${index}`}>
-                  <th scope="row">{formatDateTime(point.created_at)}</th>
-                  <td className="mono truncate">{point.request_id}</td>
-                  <td>{point.model || "(미상)"}</td>
-                  <td>
-                    <Badge
-                      tone={
-                        pointCategory(point) === "error"
-                          ? "danger"
-                          : pointCategory(point) === "fallback"
-                            ? "warning"
-                            : pointCategory(point) === "governance"
-                              ? "info"
-                              : "success"
-                      }
-                    >
-                      HTTP {formatNumber(point.status_code)}
-                    </Badge>
-                  </td>
-                  <td className="cell-number">{formatNumber(metricValue(point, metric))}</td>
-                  <td className="cell-number">{formatKRW(point.cost_krw)}</td>
-                  <td>
-                    <div className="obs-row-actions">
-                      <Button
-                        size="small"
-                        onClick={(event) => {
-                          flowFocusRef.current = event.currentTarget;
-                          setFlowRequestId(point.request_id);
-                        }}
-                        aria-label={`${point.request_id} 처리 흐름 열기`}
-                      >
-                        처리 흐름
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={(event) => {
-                          const trigger = event.currentTarget;
-                          if (
-                            noteEditor.retainedDraft?.target.requestId === point.request_id &&
-                            noteEditor.target?.retention?.owner === readOwner &&
-                            readOwner.isCurrent() &&
-                            !live_.denied &&
-                            !live_.initialError &&
-                            !live_.snapshotFetching &&
-                            !live_.snapshotInvalidated &&
-                            live_.points.some((current) => current.request_id === point.request_id)
-                          ) {
-                            // Only an explicit same-request action can restore the retired sheet.
-                            readOwner.resumeDraft?.();
-                            insightFocusRef.current = trigger;
-                            setInsightRequestId(point.request_id);
-                          }
-                          noteEditor.requestLeave(() => {
-                            insightFocusRef.current = trigger;
-                            setInsightRequestId(point.request_id);
-                          });
-                        }}
-                        aria-label={`${point.request_id} 원인 설명 열기`}
-                      >
-                        원인 설명
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {shownSelection.map((point, index) => {
+                const preview = previews.get(point.request_id) ?? undefined;
+                const input = inputSummary(preview);
+                const output = outputSummary(preview, point.status_code);
+                return (
+                  <tr key={`${point.request_id}-${index}`}>
+                    <th scope="row">
+                      {formatDateTime(point.created_at)}
+                      <span className="mono xview-selection-id">{point.request_id}</span>
+                    </th>
+                    <td>
+                      <Badge tone={categoryTone(point)}>HTTP {formatNumber(point.status_code)}</Badge>
+                      <span className="xview-selection-model">{point.model || "(미상)"}</span>
+                    </td>
+                    <td className="cell-number">
+                      {formatNumber(metricValue(point, metric))}
+                      <span className="xview-selection-model">{formatKRW(point.cost_krw)}</span>
+                    </td>
+                    <td>
+                      <div className="xview-selection-io">
+                        <span className="io-row-line" data-tone={input.tone}>
+                          <span>입력</span>
+                          <span>{input.text}</span>
+                        </span>
+                        <span className="io-row-line" data-tone={output.tone}>
+                          <span>출력</span>
+                          <span>{output.text}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="obs-row-actions">
+                        <Button
+                          size="small"
+                          onClick={(event) => {
+                            ioFocusRef.current = event.currentTarget;
+                            setIoRequestId(point.request_id);
+                          }}
+                          aria-label={`${point.request_id} 입출력 열기`}
+                        >
+                          입출력
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={(event) => {
+                            flowFocusRef.current = event.currentTarget;
+                            setFlowRequestId(point.request_id);
+                          }}
+                          aria-label={`${point.request_id} 처리 흐름 열기`}
+                        >
+                          처리 흐름
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={(event) => {
+                            const trigger = event.currentTarget;
+                            if (
+                              noteEditor.retainedDraft?.target.requestId === point.request_id &&
+                              noteEditor.target?.retention?.owner === readOwner &&
+                              readOwner.isCurrent() &&
+                              !live_.denied &&
+                              !live_.initialError &&
+                              !live_.snapshotFetching &&
+                              !live_.snapshotInvalidated &&
+                              live_.points.some((current) => current.request_id === point.request_id)
+                            ) {
+                              // Only an explicit same-request action can restore the retired sheet.
+                              readOwner.resumeDraft?.();
+                              insightFocusRef.current = trigger;
+                              setInsightRequestId(point.request_id);
+                            }
+                            noteEditor.requestLeave(() => {
+                              insightFocusRef.current = trigger;
+                              setInsightRequestId(point.request_id);
+                            });
+                          }}
+                          aria-label={`${point.request_id} 원인 설명 열기`}
+                        >
+                          원인 설명
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+        {sortedSelection.length > shownSelection.length ? (
+          <Button onClick={() => setSelectionLimit((current) => current + selectionPageSize)}>
+            {formatNumber(sortedSelection.length - shownSelection.length)}건 더 보기
+          </Button>
+        ) : null}
+      </Sheet>
+
+      <Sheet
+        open={ioRequestId !== ""}
+        onOpenChange={(next) => {
+          if (!next) setIoRequestId("");
+        }}
+        returnFocusRef={ioFocusRef}
+        size="wide"
+        title="요청 입력과 출력"
+        description="게이트웨이가 받은 입력과 돌려준 출력입니다. 내용은 기본으로 마스킹합니다."
+      >
+        {ioRequestId ? <RequestIOPanel requestId={ioRequestId} readScope={detailReadScope} /> : null}
       </Sheet>
 
       <Sheet
@@ -681,12 +946,12 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
                               : "success"
                       }
                     >
-                      {stage.status}
+                      {flowStatusLabel(stage.status)}
                     </Badge>
                   </div>
                   <div className="obs-timeline-body">
-                    <strong>{stage.stage}</strong>
-                    <div>{stage.decision || "—"}</div>
+                    <strong>{flowStageLabel(stage.stage)}</strong>
+                    <div>{flowDecisionLabel(stage.decision) || "—"}</div>
                     {stage.reason ? <div className="obs-meta">{stage.reason}</div> : null}
                   </div>
                 </li>

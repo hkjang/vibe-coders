@@ -10,6 +10,112 @@ import { looseList, looseObject, numberish, orDefault, unknownRecord } from "@/s
 const optionalText = orDefault(z.string(), "");
 const count = orDefault(numberish, 0);
 
+const requestIOState = z.enum(["captured", "not_captured", "missing"]).catch("missing");
+const requestIOKind = z.enum(["none", "text", "tool_calls", "error", "embedding", "image"]).catch("none");
+const requestIOFlag = orDefault(z.boolean(), false);
+
+/** Current capture settings; they decide what new requests keep, not what older rows hold. */
+export const requestIOCaptureSchema = looseObject({
+  response_text: requestIOFlag,
+  raw_prompts: requestIOFlag,
+  response_max_bytes: count,
+});
+export type RequestIOCapture = z.output<typeof requestIOCaptureSchema>;
+
+/** One row of `GET /admin/requests/io`. Text is masked for every role. */
+export const requestIOPreviewSchema = looseObject({
+  request_id: z.string(),
+  input: looseObject({
+    state: requestIOState,
+    role: optionalText,
+    text: optionalText,
+    truncated: requestIOFlag,
+    chars: count,
+    message_count: count,
+  }),
+  output: looseObject({
+    state: requestIOState,
+    kind: requestIOKind,
+    text: optionalText,
+    truncated: requestIOFlag,
+    chars: count,
+    tool_names: orDefault(z.array(z.string()), []),
+    finish_reason: optionalText,
+  }),
+});
+export type RequestIOPreview = z.output<typeof requestIOPreviewSchema>;
+
+export const requestIOPreviewsResponseSchema = looseObject({
+  previews: orDefault(z.array(requestIOPreviewSchema), []),
+  capture: requestIOCaptureSchema,
+  generated_at: optionalText,
+});
+
+/** `GET /admin/requests/{id}/io`. Masked unless originals were asked for and allowed. */
+export const requestIODetailSchema = looseObject({
+  request_id: optionalText,
+  created_at: optionalText,
+  method: optionalText,
+  endpoint: optionalText,
+  stream: requestIOFlag,
+  status_code: count,
+  error: optionalText,
+  requested_model: optionalText,
+  resolved_model: optionalText,
+  provider: optionalText,
+  route_reason: optionalText,
+  failover: requestIOFlag,
+  fallback_from: optionalText,
+  languages: orDefault(z.array(z.string()), []),
+  prompt_tokens: count,
+  completion_tokens: count,
+  total_tokens: count,
+  cached_tokens: count,
+  reasoning_tokens: count,
+  token_source: optionalText,
+  estimated_cost: count,
+  currency: optionalText,
+  latency_ms: count,
+  first_chunk_ms: count,
+  api_key_id: optionalText,
+  client_ip: optionalText,
+  user_agent: optionalText,
+  session_id: optionalText,
+  trace_id: optionalText,
+  input: looseObject({
+    state: requestIOState,
+    messages: orDefault(
+      z.array(
+        looseObject({
+          role: optionalText,
+          text: optionalText,
+          chars: count,
+          truncated: requestIOFlag,
+          original_kept: requestIOFlag,
+        }),
+      ),
+      [],
+    ),
+    omitted_messages: count,
+    tool_definitions: optionalText,
+  }),
+  output: looseObject({
+    state: requestIOState,
+    kind: requestIOKind,
+    text: optionalText,
+    chars: count,
+    truncated: requestIOFlag,
+    tool_calls: orDefault(z.array(looseObject({ name: optionalText, arguments: optionalText })), []),
+    finish_reason: optionalText,
+    original_kept: requestIOFlag,
+  }),
+  capture: requestIOCaptureSchema,
+  masked: orDefault(z.boolean(), true),
+  raw_allowed: requestIOFlag,
+});
+export type RequestIODetail = z.output<typeof requestIODetailSchema>;
+export type RequestIOMessage = RequestIODetail["input"]["messages"][number];
+
 /** store.ScatterPoint (internal/store/types.go). */
 export const scatterPointSchema = looseObject({
   request_id: optionalText,

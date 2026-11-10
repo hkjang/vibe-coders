@@ -147,6 +147,10 @@ async function installGateway(context: BrowserContext) {
     stream: true,
   }));
   const otherReads: Record<string, unknown> = {
+    "GET /admin/requests/io": {
+      previews: [],
+      capture: { response_text: true, raw_prompts: false, response_max_bytes: 1048576 },
+    },
     "GET /admin/llm/timeseries": { window: "24h", bucket: "hour", since: timestamp, points: [] },
     "GET /admin/llm/evaluations": {
       summary: [],

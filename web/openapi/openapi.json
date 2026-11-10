@@ -5384,6 +5384,460 @@
         ],
         "type": "object"
       },
+      "RequestIODetail": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "type": "string"
+          },
+          "cached_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "capture": {
+            "additionalProperties": false,
+            "description": "Current capture settings. They decide what new requests keep, not what older rows hold.",
+            "properties": {
+              "raw_prompts": {
+                "type": "boolean"
+              },
+              "response_max_bytes": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "response_text": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "response_text",
+              "raw_prompts",
+              "response_max_bytes"
+            ],
+            "type": "object"
+          },
+          "client_ip": {
+            "type": "string"
+          },
+          "completion_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "estimated_cost": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "failover": {
+            "type": "boolean"
+          },
+          "fallback_from": {
+            "type": "string"
+          },
+          "first_chunk_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input": {
+            "additionalProperties": false,
+            "properties": {
+              "messages": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "chars": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "original_kept": {
+                      "type": "boolean"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "role",
+                    "text",
+                    "chars",
+                    "truncated",
+                    "original_kept"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              "omitted_messages": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "state": {
+                "description": "not_captured: the call answered but its body was not kept (LOG_RESPONSE_TEXT off). missing: no record exists.",
+                "enum": [
+                  "captured",
+                  "not_captured",
+                  "missing"
+                ],
+                "type": "string"
+              },
+              "tool_definitions": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "messages",
+              "omitted_messages",
+              "tool_definitions"
+            ],
+            "type": "object"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "masked": {
+            "type": "boolean"
+          },
+          "method": {
+            "type": "string"
+          },
+          "output": {
+            "additionalProperties": false,
+            "properties": {
+              "chars": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "finish_reason": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "none",
+                  "text",
+                  "tool_calls",
+                  "error",
+                  "embedding",
+                  "image"
+                ],
+                "type": "string"
+              },
+              "original_kept": {
+                "description": "Only rows stored before responses were masked on write still hold an original.",
+                "type": "boolean"
+              },
+              "state": {
+                "description": "not_captured: the call answered but its body was not kept (LOG_RESPONSE_TEXT off). missing: no record exists.",
+                "enum": [
+                  "captured",
+                  "not_captured",
+                  "missing"
+                ],
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "tool_calls": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "arguments": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "arguments"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "state",
+              "kind",
+              "text",
+              "chars",
+              "truncated",
+              "tool_calls",
+              "finish_reason",
+              "original_kept"
+            ],
+            "type": "object"
+          },
+          "prompt_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "raw_allowed": {
+            "type": "boolean"
+          },
+          "reasoning_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "requested_model": {
+            "type": "string"
+          },
+          "resolved_model": {
+            "type": "string"
+          },
+          "route_reason": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status_code": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "token_source": {
+            "type": "string"
+          },
+          "total_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "user_agent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "created_at",
+          "method",
+          "endpoint",
+          "stream",
+          "status_code",
+          "error",
+          "requested_model",
+          "resolved_model",
+          "provider",
+          "route_reason",
+          "failover",
+          "fallback_from",
+          "languages",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "reasoning_tokens",
+          "token_source",
+          "estimated_cost",
+          "currency",
+          "latency_ms",
+          "first_chunk_ms",
+          "api_key_id",
+          "client_ip",
+          "user_agent",
+          "session_id",
+          "trace_id",
+          "input",
+          "output",
+          "capture",
+          "masked",
+          "raw_allowed"
+        ],
+        "type": "object"
+      },
+      "RequestIOPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "additionalProperties": false,
+            "properties": {
+              "chars": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "message_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "role": {
+                "type": "string"
+              },
+              "state": {
+                "description": "not_captured: the call answered but its body was not kept (LOG_RESPONSE_TEXT off). missing: no record exists.",
+                "enum": [
+                  "captured",
+                  "not_captured",
+                  "missing"
+                ],
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "state",
+              "role",
+              "text",
+              "truncated",
+              "chars",
+              "message_count"
+            ],
+            "type": "object"
+          },
+          "output": {
+            "additionalProperties": false,
+            "properties": {
+              "chars": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "finish_reason": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "none",
+                  "text",
+                  "tool_calls",
+                  "error",
+                  "embedding",
+                  "image"
+                ],
+                "type": "string"
+              },
+              "state": {
+                "description": "not_captured: the call answered but its body was not kept (LOG_RESPONSE_TEXT off). missing: no record exists.",
+                "enum": [
+                  "captured",
+                  "not_captured",
+                  "missing"
+                ],
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "tool_names": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "state",
+              "kind",
+              "text",
+              "truncated",
+              "chars",
+              "tool_names",
+              "finish_reason"
+            ],
+            "type": "object"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "input",
+          "output"
+        ],
+        "type": "object"
+      },
+      "RequestIOPreviewsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "capture": {
+            "additionalProperties": false,
+            "description": "Current capture settings. They decide what new requests keep, not what older rows hold.",
+            "properties": {
+              "raw_prompts": {
+                "type": "boolean"
+              },
+              "response_max_bytes": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "response_text": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "response_text",
+              "raw_prompts",
+              "response_max_bytes"
+            ],
+            "type": "object"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "previews": {
+            "items": {
+              "$ref": "#/components/schemas/RequestIOPreview"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "required": [
+          "previews",
+          "capture",
+          "generated_at"
+        ],
+        "type": "object"
+      },
       "RequestNoteAppResponse": {
         "additionalProperties": false,
         "properties": {
@@ -7298,6 +7752,7 @@
               "observability.requests",
               "observability.traces",
               "observability.sessions",
+              "observability.io",
               "observability.xview",
               "observability.llm",
               "observability.probes",
@@ -7322,6 +7777,7 @@
               "security.redteam",
               "security.sandbox",
               "system.health",
+              "system.secrets",
               "system.settings"
             ],
             "type": "string"
@@ -7357,6 +7813,7 @@
               "observability.requests",
               "observability.traces",
               "observability.sessions",
+              "observability.io",
               "observability.xview",
               "observability.llm",
               "observability.probes",
@@ -7381,6 +7838,7 @@
               "security.redteam",
               "security.sandbox",
               "system.health",
+              "system.secrets",
               "system.settings"
             ],
             "type": "string"
@@ -7420,7 +7878,7 @@
             "items": {
               "$ref": "#/components/schemas/UITelemetryFeatureCount"
             },
-            "maxItems": 36,
+            "maxItems": 38,
             "type": "array"
           },
           "from": {
@@ -17287,6 +17745,55 @@
         ]
       }
     },
+    "/admin/requests/io": {
+      "get": {
+        "description": "Masked input and output previews for at most 100 requests, for a listing that shows them at a glance. Text is masked for every role, and requests outside the caller's team scope are omitted rather than denied.",
+        "operationId": "get__admin_requests_io",
+        "parameters": [
+          {
+            "description": "Comma-separated request IDs, at most 100.",
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "maxLength": 16384,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestIOPreviewsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Masked input and output previews for a set of requests",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/requests/{id}": {
       "get": {
         "operationId": "get__admin_requests_id",
@@ -17456,6 +17963,72 @@
           }
         ],
         "summary": "Masked and grouped request/gateway/upstream headers",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/requests/{id}/io": {
+      "get": {
+        "description": "Full input and output of one request. Masked for every role by default. reveal=raw returns originals to roles allowed to see them and writes a request.raw_view audit entry first; a failed audit returns nothing.",
+        "operationId": "get__admin_requests_id_io",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reveal",
+            "required": false,
+            "schema": {
+              "enum": [
+                "raw"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestIODetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Input and output of one request, masked unless originals are asked for and allowed",
         "tags": [
           "admin"
         ]

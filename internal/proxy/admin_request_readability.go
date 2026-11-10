@@ -25,7 +25,7 @@ func (s *Server) handleRequestReadableSubresource(w http.ResponseWriter, r *http
 		return
 	}
 	switch sub {
-	case "headers", "routing", "body", "timeline":
+	case "headers", "routing", "body", "timeline", "io":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -53,6 +53,12 @@ func (s *Server) handleRequestReadableSubresource(w http.ResponseWriter, r *http
 	}
 	if !s.canViewRequestDetail(r, detail.Request) {
 		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	if sub == "io" {
+		// Reads the unmasked detail: output extraction has to parse the stored body before
+		// masking, and handleRequestIO masks every text it returns.
+		s.handleRequestIO(w, r, id, detail)
 		return
 	}
 	var legacyProviderIdentities []string
