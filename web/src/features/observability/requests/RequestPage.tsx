@@ -11,7 +11,7 @@ import { formatRequestDate } from "@/features/observability/requests/request-dat
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { FilterSuggestions } from "@/features/observability/requests/FilterSuggestions";
 import { isAppError } from "@/shared/api/error";
-import type { AppRequestsQuery } from "@/shared/api/schemas";
+import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
 import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "../traces/trace-safe-flow-access";
 import { requestSelectionIdentity, useRequestSafeFlowSelection } from "./request-safe-flow-selection";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
@@ -23,6 +23,7 @@ import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { usePreferences } from "@/shared/stores/preferences";
 import { httpStatusTone } from "@/shared/utils/http-status";
+import { downloadCsv, toCsv, type CsvColumn } from "@/shared/utils/csv";
 import { isValidIPAddress } from "@/shared/utils/ip-address";
 import { requestQueryFieldError } from "@/shared/utils/request-query-filters";
 import { isValidRequestTimeZone, validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
@@ -70,6 +71,33 @@ function queryFromSearch(search: URLSearchParams): AppRequestsQuery {
   const cursor = search.get("cursor");
   if (cursor && !requestQueryFieldError("cursor", cursor)) query.cursor = cursor;
   return query;
+}
+
+/** The rows this page already shows, through the same safe projection; never prompt content. */
+const requestCsvColumns: ReadonlyArray<CsvColumn<AppRequestSummary>> = [
+  { header: "시각", value: (row) => row.created_at },
+  { header: "상태", value: (row) => row.status_code },
+  { header: "요청 ID", value: (row) => row.request_id },
+  { header: "추적 ID", value: (row) => row.trace_id },
+  { header: "세션 ID", value: (row) => row.session_id },
+  { header: "API 키 ID", value: (row) => row.api_key_id },
+  { header: "클라이언트 IP", value: (row) => row.ip },
+  { header: "모델", value: (row) => row.model },
+  { header: "공급자", value: (row) => row.provider_display },
+  { header: "경로", value: (row) => row.endpoint },
+  { header: "스트리밍", value: (row) => (row.stream ? "사용" : "미사용") },
+  { header: "지연(ms)", value: (row) => row.latency_ms },
+  { header: "첫 청크(ms)", value: (row) => row.first_chunk_ms },
+  { header: "입력 토큰", value: (row) => row.prompt_tokens },
+  { header: "출력 토큰", value: (row) => row.completion_tokens },
+  { header: "전체 토큰", value: (row) => row.total_tokens },
+  { header: "추정 비용", value: (row) => row.estimated_cost },
+  { header: "통화", value: (row) => row.currency },
+  { header: "종료 사유", value: (row) => row.finish_reason },
+];
+
+function requestCsvFilename(generatedAt: string): string {
+  return `requests-${generatedAt.replace(/[^0-9]/gu, "").slice(0, 14)}.csv`;
 }
 
 function RequestIPFilter({ initialValue }: { initialValue: string }): React.JSX.Element {
@@ -554,6 +582,17 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
               "-"
             )}
           </span>
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={!data?.requests.length}
+            onClick={() => {
+              if (data)
+                downloadCsv(requestCsvFilename(data.generated_at), toCsv(data.requests, requestCsvColumns));
+            }}
+          >
+            현재 목록 CSV
+          </Button>
           <Button
             variant="secondary"
             size="small"

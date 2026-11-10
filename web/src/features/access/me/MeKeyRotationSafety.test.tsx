@@ -305,6 +305,7 @@ it("권한 저장 폼과 알림은 개인 키 오류 문구를 사용한다", as
     "키 정보가 변경되었습니다. 최신 목록에서 권한을 다시 검토하세요.",
     {
       description: "요청 ID: req-scope-conflict",
+      duration: Number.POSITIVE_INFINITY,
     },
   );
   expect(screen.queryByText("SYNTHETIC_PRIVATE_SERVER_MESSAGE")).not.toBeInTheDocument();

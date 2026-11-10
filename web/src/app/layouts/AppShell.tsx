@@ -15,9 +15,11 @@ import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { FeatureTelemetry } from "@/shared/telemetry/FeatureTelemetry";
+import { staleBundle } from "@/shared/utils/ui-version";
 import {
   usePreferences,
   type DensityPreference,
@@ -236,6 +238,21 @@ export function AppShell(): React.JSX.Element {
             </div>
           </header>
           <main className="app-main" id="main-content" tabIndex={-1}>
+            {staleBundle(__UI_VERSION__, auth.uiVersion) ? (
+              <InlineNotice
+                className="app-version-notice"
+                tone="warning"
+                title="새 버전이 배포되었습니다."
+                actions={
+                  <Button size="small" onClick={() => window.location.reload()}>
+                    새로고침
+                  </Button>
+                }
+              >
+                이 탭은 {__UI_VERSION__} 화면을 쓰고 있고 서버는 {auth.uiVersion}입니다. 새로고침하면 최신
+                화면으로 바뀝니다.
+              </InlineNotice>
+            ) : null}
             <Outlet />
           </main>
         </div>

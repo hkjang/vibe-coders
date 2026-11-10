@@ -477,6 +477,9 @@ kbd {
   padding: var(--space-6);
 }
 
+.app-version-notice {
+  margin-bottom: var(--space-4);
+}
 .page-stack {
   display: grid;
   gap: var(--space-6);

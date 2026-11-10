@@ -80,8 +80,11 @@ export function useMutationFeedback<Variables, Result>({
     onError: (error, submission) => {
       if (!isCurrent(submission)) return;
       const requestId = isAppError(error) ? error.requestId : undefined;
+      // A failure stays until dismissed: the operator may be looking elsewhere, and the
+      // request ID is what they need to quote afterward.
       toast.error(errorFormatter(error, errorMessage), {
         description: requestId ? `요청 ID: ${requestId}` : undefined,
+        duration: Number.POSITIVE_INFINITY,
       });
     },
   });
