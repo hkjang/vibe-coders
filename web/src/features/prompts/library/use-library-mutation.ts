@@ -110,7 +110,10 @@ export function useLibraryMutation<V = void, R = unknown>(options: Options<V, R>
         const result = await options.mutate(value);
         acknowledged = true;
         options.validate?.(result, value);
-        assertCurrent();
+        // A tab can remount while its write is pending. Refresh the still-current
+        // read owner even if the initiating component no longer exists. Keep
+        // component and write-access checks for callbacks and notifications.
+        assertFeatureRead(owner);
         const keys =
           typeof options.invalidates === "function" ? options.invalidates(value) : options.invalidates;
         await Promise.all(

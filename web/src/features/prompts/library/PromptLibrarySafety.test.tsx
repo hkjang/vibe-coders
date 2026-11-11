@@ -269,16 +269,36 @@ describe("프롬프트 보관함 권한과 변경 검증", () => {
     expect(screen.getByRole("button", { name: "복사 및 사용 기록 요청" })).toBeDisabled();
     expect(view.api.calls.every((call) => call.key.startsWith("GET"))).toBe(true);
   });
-  it("retains one pending write across tab remount and drops late success feedback", async () => {
+  it("refreshes the current owner after a pending write survives tab remount without late feedback", async () => {
     const pending = deferred<unknown>();
-    const view = setup({ "PATCH /admin/templates/public-asset": () => pending.promise });
+    let current = { ...asset };
+    const view = setup({
+      "GET /admin/prompt-assets": () => ({ assets: [current] }),
+      "PATCH /admin/templates/public-asset": () => pending.promise,
+    });
     await view.user.click(await screen.findByRole("switch", { name: "공개 자산 사용" }));
     await waitFor(() => expect(view.api.bodies("PATCH /admin/templates/public-asset")).toHaveLength(1));
     await view.user.click(screen.getByRole("button", { name: "검색 화면으로" }));
     await view.user.click(screen.getByRole("button", { name: "자산 목록으로" }));
     expect(await screen.findByRole("switch", { name: "공개 자산 사용" })).toBeDisabled();
-    await act(async () => pending.resolve({ template: { ...asset, enabled: false } }));
+    current = { ...current, enabled: false };
+    await act(async () => pending.resolve({ template: current }));
     await waitFor(() => expect(screen.getByRole("switch", { name: "공개 자산 사용" })).toBeEnabled());
+    expect(screen.getByRole("switch", { name: "공개 자산 사용" })).not.toBeChecked();
+    expect(notifications.success).not.toHaveBeenCalled();
+  });
+  it("does not invalidate the next account after the previous account's write completes", async () => {
+    const pending = deferred<unknown>();
+    const view = setup({ "PATCH /admin/templates/public-asset": () => pending.promise });
+    await view.user.click(await screen.findByRole("switch", { name: "공개 자산 사용" }));
+    await waitFor(() => expect(view.api.bodies("PATCH /admin/templates/public-asset")).toHaveLength(1));
+    runtime.id = "public-b";
+    view.update();
+    await screen.findByRole("switch", { name: "공개 자산 사용" });
+    const reads = view.api.calls.filter((call) => call.key === "GET /admin/prompt-assets").length;
+    await act(async () => pending.resolve({ template: { ...asset, enabled: false } }));
+    expect(view.api.calls.filter((call) => call.key === "GET /admin/prompt-assets")).toHaveLength(reads);
+    expect(screen.getByRole("switch", { name: "공개 자산 사용" })).toBeChecked();
     expect(notifications.success).not.toHaveBeenCalled();
   });
   it("does not replay a write after a 401 response", async () => {
