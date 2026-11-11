@@ -12,24 +12,39 @@ import (
 )
 
 func (s *Server) handleExportCSV(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "prompt export scope could not be resolved", "server_error", "prompt_scope_failed")
+		return
+	}
 	limit := exportLimit(r)
 	filter := store.PromptSearch{
-		Keyword:  strings.TrimSpace(r.URL.Query().Get("q")),
-		APIKeyID: strings.TrimSpace(r.URL.Query().Get("api_key_id")),
-		IP:       strings.TrimSpace(r.URL.Query().Get("ip")),
-		Language: strings.TrimSpace(r.URL.Query().Get("language")),
-		Since:    strings.TrimSpace(r.URL.Query().Get("since")),
-		Limit:    limit,
+		Keyword:            strings.TrimSpace(r.URL.Query().Get("q")),
+		APIKeyID:           strings.TrimSpace(r.URL.Query().Get("api_key_id")),
+		IP:                 strings.TrimSpace(r.URL.Query().Get("ip")),
+		Language:           strings.TrimSpace(r.URL.Query().Get("language")),
+		Since:              strings.TrimSpace(r.URL.Query().Get("since")),
+		Limit:              limit,
+		Teams:              teams,
+		TeamScoped:         teamScoped,
+		SearchRedactedOnly: !s.canViewRawPrompts(r),
 	}
 	rows, err := s.db.SearchPrompts(r.Context(), filter)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "export_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "prompt export could not be completed", "server_error", "export_failed")
 		return
 	}
+	s.maskRecentRequests(r, rows)
 
 	stamp := time.Now().UTC().Format("20060102-150405")
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -51,14 +66,14 @@ func (s *Server) handleExportCSV(w http.ResponseWriter, r *http.Request) {
 			languages = append(languages, l.Language)
 		}
 		_ = wr.Write([]string{
-			row.CreatedAt,
-			row.TraceID,
-			row.ID,
-			row.Endpoint,
-			row.Provider,
-			row.Model,
-			row.APIKeyID,
-			row.ClientIP,
+			csvTextCell(row.CreatedAt),
+			csvTextCell(row.TraceID),
+			csvTextCell(row.ID),
+			csvTextCell(row.Endpoint),
+			csvTextCell(row.Provider),
+			csvTextCell(row.Model),
+			csvTextCell(row.APIKeyID),
+			csvTextCell(row.ClientIP),
 			strconv.Itoa(row.StatusCode),
 			strconv.FormatInt(row.FirstChunkMS, 10),
 			strconv.FormatInt(row.LatencyMS, 10),
@@ -68,10 +83,10 @@ func (s *Server) handleExportCSV(w http.ResponseWriter, r *http.Request) {
 			strconv.Itoa(row.ReasoningTokens),
 			strconv.Itoa(row.TotalTokens),
 			strconv.FormatFloat(row.EstimatedCost, 'f', 2, 64),
-			row.TokenSource,
+			csvTextCell(row.TokenSource),
 			strconv.FormatBool(row.Stream),
-			strings.Join(languages, "|"),
-			row.Error,
+			csvTextCell(strings.Join(languages, "|")),
+			csvTextCell(row.Error),
 		})
 	}
 	wr.Flush()

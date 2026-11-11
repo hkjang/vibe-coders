@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 )
 
 var chargebackKST = time.FixedZone("KST", 9*3600)
@@ -100,17 +99,6 @@ func (s *Server) handleChargebackPack(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Spreadsheet applications may ignore leading whitespace/control characters
-// before interpreting a formula. Quoting alone does not neutralize formulas.
-func chargebackCSVKey(value string) string {
-	trimmed := strings.TrimLeftFunc(value, func(r rune) bool { return unicode.IsSpace(r) || r <= 32 || r == 127 || r == '\ufeff' })
-	if (len(trimmed) > 0 && strings.ContainsRune("=+-@", rune(trimmed[0]))) ||
-		(len(value) > 0 && strings.ContainsRune("\t\r\n", rune(value[0]))) {
-		return "'" + value
-	}
-	return value
-}
-
 func writeChargebackCSV(output io.Writer, month string, pack []chargebackDimension) error {
 	writer := csv.NewWriter(output)
 	if err := writer.Write([]string{"month", "dimension", "key", "requests", "tokens", "cost_krw", "errors"}); err != nil {
@@ -118,7 +106,7 @@ func writeChargebackCSV(output io.Writer, month string, pack []chargebackDimensi
 	}
 	for _, dimension := range pack {
 		for _, row := range dimension.Rows {
-			if err := writer.Write([]string{month, dimension.Dimension, chargebackCSVKey(row.Key),
+			if err := writer.Write([]string{month, dimension.Dimension, csvTextCell(row.Key),
 				strconv.FormatInt(row.Requests, 10), strconv.FormatInt(row.Tokens, 10),
 				strconv.FormatFloat(row.CostKRW, 'f', 1, 64), strconv.FormatInt(row.Errors, 10)}); err != nil {
 				return err

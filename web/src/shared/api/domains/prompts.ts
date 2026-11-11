@@ -11,6 +11,7 @@ import type {
   DeleteAdminTemplatesIdData,
   GetAdminPromptAssetsData,
   GetAdminPromptsData,
+  GetAdminExportCsvData,
   GetAdminPromptsDebtData,
   GetAdminPromptsFingerprintsData,
   GetAdminSavedFiltersData,
@@ -40,7 +41,7 @@ export type PromptSearchQuery = z.infer<typeof promptSearchQuerySchema>;
 
 // `/admin/prompts` reuses the recent-request row; only the fields the list renders
 // are declared. Prompt text arrives already redacted by the server.
-const promptSearchResponseSchema = looseObject({
+export const promptSearchResponseSchema = looseObject({
   requests: looseList({
     id: z.string(),
     created_at: z.string().optional(),
@@ -77,7 +78,7 @@ const fingerprintQuerySchema = z.object({
 });
 export type PromptFingerprintQuery = z.infer<typeof fingerprintQuerySchema>;
 
-const fingerprintResponseSchema = looseObject({
+export const fingerprintResponseSchema = looseObject({
   fingerprints: looseList({
     fingerprint: z.string().optional(),
     task_type: z.string().optional(),
@@ -103,7 +104,7 @@ const promptDebtQuerySchema = z.object({
 });
 export type PromptDebtQuery = z.infer<typeof promptDebtQuerySchema>;
 
-const promptDebtResponseSchema = looseObject({
+export const promptDebtResponseSchema = looseObject({
   since: z.string().optional(),
   count: numberish.optional(),
   total_debt_cost_krw: numberish.optional(),
@@ -135,7 +136,7 @@ const promptAssetQuerySchema = z.object({
 });
 export type PromptAssetQuery = z.infer<typeof promptAssetQuerySchema>;
 
-const promptAssetSchema = looseObject({
+export const promptAssetSchema = looseObject({
   id: z.string(),
   name: z.string().optional(),
   category: z.string().optional(),
@@ -160,7 +161,7 @@ export type PromptAsset = z.infer<typeof promptAssetSchema>;
 
 const labelledKeySchema = looseObject({ key: z.string(), label: z.string().optional() });
 
-const promptAssetListSchema = looseObject({
+export const promptAssetListSchema = looseObject({
   assets: z.array(promptAssetSchema).nullish(),
   stats: z.record(z.string(), numberish).nullish(),
   categories: z.array(labelledKeySchema).nullish(),
@@ -206,7 +207,7 @@ export interface PromptAssetRollbackBody {
 }
 
 /** `store.PromptTemplateHistory` — one entry of an asset's change log. */
-const promptAssetHistorySchema = looseObject({
+export const promptAssetHistorySchema = looseObject({
   id: z.string(),
   template_id: z.string().optional(),
   action: z.string().optional(),
@@ -230,7 +231,7 @@ const promptAssetHistoryListSchema = looseObject({
 });
 
 /** `store.PromptAssetUsageRow` — per-team usage over the last 90 days. */
-const promptAssetUsageSchema = looseObject({
+export const promptAssetUsageSchema = looseObject({
   team: z.string(),
   calls: numberish.optional(),
   errors: numberish.optional(),
@@ -263,7 +264,7 @@ const promptAssetRollbackSchema = looseObject({
 const savedFilterQuerySchema = z.object({ view: z.string().optional() });
 export type SavedFilterQuery = z.infer<typeof savedFilterQuerySchema>;
 
-const savedFilterSchema = looseObject({
+export const savedFilterSchema = looseObject({
   id: z.string(),
   name: z.string().optional(),
   view: z.string().optional(),
@@ -284,6 +285,12 @@ export interface SavedFilterCreateBody {
 }
 
 export const promptsEndpoints = {
+  exportCsv: operation<WithQuery<GetAdminExportCsvData, PromptSearchQuery>, unknown>()(
+    "GET",
+    "/admin/export.csv",
+    z.string(),
+    promptSearchQuerySchema,
+  ),
   golden: { ...goldenEndpoints, ...goldenRunEndpoints },
   search: operation<WithQuery<GetAdminPromptsData, PromptSearchQuery>, unknown>()(
     "GET",

@@ -6,6 +6,11 @@ const permissionMessage = "이 작업을 수행할 권한이 없습니다.";
 const temporarilyUnavailable = (subject: string): string => `${subject}를 일시적으로 확인할 수 없습니다.`;
 
 const operationalMessages = {
+  prompt_library_changed: "선택한 자산이 변경됐습니다. 최신 내용을 확인한 뒤 작업창을 다시 열어 주세요.",
+  prompt_library_unknown: "작업 결과를 확인하지 못했습니다. 자산과 변경 이력을 확인한 뒤 다시 작업하세요.",
+  prompt_library_busy: "진행 중인 보관함 작업이 있습니다. 완료 후 다시 확인하세요.",
+  prompt_library_invalid: "자산·필터 또는 응답 정보를 안전하게 확인할 수 없습니다.",
+  prompt_library_exists: "이미 등록된 자산 ID입니다. 목록의 편집 기능으로 수정하세요.",
   prompt_lab_changed: "실험 또는 테스트 케이스가 변경됐습니다. 최신 내용을 조회한 뒤 다시 작업하세요.",
   prompt_lab_unknown: "작업 결과를 확인할 수 없습니다. 저장 내용과 실행·감사 이력을 먼저 확인하세요.",
   prompt_lab_busy: "진행 중인 실험실 작업이 있습니다. 완료 후 다시 확인하세요.",

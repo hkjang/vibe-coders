@@ -637,6 +637,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "get /admin/export.csv":
+		enrichPromptExportOpenAPI(op, responses)
 	case "get /admin/golden-prompts", "get /admin/golden-workflows":
 		enrichGoldenReadOpenAPI(key, op, responses)
 	case "post /admin/golden-prompts", "post /admin/golden-workflows":

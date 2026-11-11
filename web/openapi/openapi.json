@@ -8694,7 +8694,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.68"
+    "version": "v0.86.69"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -12148,10 +12148,130 @@
     },
     "/admin/export.csv": {
       "get": {
+        "description": "Exports request metadata, not prompt bodies, as UTF-8 CSV with a BOM and 21 legacy columns. Requires admin read access and applies the same team scope and raw-prompt search permission as /admin/prompts. Empty team scope yields no rows; a scope lookup failure never falls back to a global export. Caller-visible metadata is masked before export. Text cells beginning with spreadsheet formulas are prefixed with an apostrophe; numeric cells retain their numeric representation. This is a bounded current query, not a paginated export or a snapshot shared with a prior search response.",
         "operationId": "get__admin_export_csv",
+        "parameters": [
+          {
+            "description": "Trimmed keyword or tag search. Raw prompt text is searchable only with raw-view permission; otherwise only redacted prompt text is searched.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional programming language filter.",
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional client IP filter; does not widen the caller's team scope.",
+            "in": "query",
+            "name": "ip",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional API key identifier filter; does not widen the caller's team scope.",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional lower timestamp bound. Clients should send an ISO 8601 timestamp with a timezone; the existing handler forwards the trimmed string without format validation.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional decimal row limit. Empty, non-integer or non-positive values use 1000; values above 10000 clamp to 10000. Independent of /admin/prompts, whose limit is capped at 200.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "CSV columns: created_at, trace_id, request_id, endpoint, provider, model, api_key_id, client_ip, status_code, first_chunk_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, total_tokens, cost_krw, token_source, stream, languages, error. Empty results contain only the header. Cost is KRW with two decimal places; languages are joined with |.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "Attachment filename requests-YYYYMMDD-HHMMSS.csv",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: admin read authentication is required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "method_not_allowed: only GET is supported; Allow: GET"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "prompt_scope_failed or export_failed: no successful export; the error does not expose database details"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
