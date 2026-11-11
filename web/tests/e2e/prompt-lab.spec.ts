@@ -89,6 +89,23 @@ test("서버 모델 변경 시 실행 전 차단", async ({ page }) => {
   expect(fixture.writes).toHaveLength(0);
   fixture.check();
 });
+test("선택한 실험을 보관·다시 진행한 뒤 즉시 실행", async ({ page }) => {
+  const fixture = await installPromptLab(page);
+  await page.goto("prompts/lab?exp=public_exp_1");
+  for (const label of ["보관", "다시 진행"]) {
+    await page.getByRole("button", { name: `요약 품질 비교 실험 ${label}` }).click();
+    const change = page.getByRole("dialog");
+    await change.getByRole("button", { name: label, exact: true }).click();
+    await expect(change).not.toBeVisible();
+    await page.getByRole("button", { name: "한글 요약 검사 테스트 케이스 실행" }).click();
+    const run = page.getByRole("dialog", { name: "테스트 케이스 실행", exact: true });
+    await run.getByRole("button", { name: "실행", exact: true }).click();
+    await expect(run).not.toBeVisible();
+    await expect(page.getByText(/최고 점수 모델 public-model-a/)).toBeVisible();
+  }
+  expect(fixture.writes.filter((row) => row.path.endsWith("/run"))).toHaveLength(2);
+  fixture.check();
+});
 test("읽기 전용·실행 이력 조회·기존 관리자 연결", async ({ page }) => {
   const fixture = await installPromptLab(page, true);
   await page.goto("prompts/lab?exp=public_exp_1");

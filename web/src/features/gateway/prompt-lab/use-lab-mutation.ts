@@ -20,7 +20,7 @@ interface Options<V, R> {
   prepare?: (value: V) => Promise<void>;
   mutate: (value: V) => Promise<R>;
   validate?: (result: R, value: V) => void;
-  invalidates: readonly QueryKey[];
+  invalidates: readonly QueryKey[] | ((value: V) => readonly QueryKey[]);
   successMessage: string | ((result: R, value: V) => string);
   errorMessage: string;
   onSuccess?: (result: R, value: V) => void;
@@ -80,7 +80,9 @@ export function useLabMutation<V, R>(owner: FeatureReadOwner, options: Options<V
         acknowledged = true;
         options.validate?.(result, value);
         assertCurrent();
-        await Promise.all(options.invalidates.map((queryKey) => client.invalidateQueries({ queryKey })));
+        const keys =
+          typeof options.invalidates === "function" ? options.invalidates(value) : options.invalidates;
+        await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
         assertCurrent();
         toast.success(
           typeof options.successMessage === "function"

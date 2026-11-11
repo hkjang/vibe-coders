@@ -221,7 +221,10 @@ export function usePromptLabController(owner: FeatureReadOwner) {
         routeId: promptLabRouteId,
         retryUnauthorized: false,
       }),
-    invalidates: [featureOwnedKey(promptLabKeys.experiments, owner)],
+    invalidates: ({ original }) => [
+      featureOwnedKey(promptLabKeys.experiments, owner),
+      featureOwnedKey(promptLabKeys.experiment(original.id), owner),
+    ],
     successMessage: (_result, variables) =>
       variables.status === "archived" ? "실험을 보관했습니다." : "실험을 다시 진행 중으로 바꿨습니다.",
     errorMessage: "실험 상태를 바꾸지 못했습니다.",

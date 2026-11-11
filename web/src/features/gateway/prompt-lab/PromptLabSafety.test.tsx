@@ -86,6 +86,38 @@ beforeEach(() => {
   success.mockClear();
 });
 describe("프롬프트 실험실 상태와 실행 경계", () => {
+  it.each(["active", "archived"])(
+    "refreshes selected detail after changing %s status before running a case",
+    async (status) => {
+      let current = { ...labExperiment, status };
+      const view = setup({
+        "GET /admin/prompt-lab/experiments": () => ({ experiments: [current] }),
+        "GET /admin/prompt-lab/experiments/public_exp_1": () => ({
+          experiment: current,
+          test_cases: [labCase],
+        }),
+        "PATCH /admin/prompt-lab/experiments/public_exp_1": () => {
+          current = {
+            ...current,
+            status: status === "active" ? "archived" : "active",
+            updated_at: "2030-01-04T00:00:00Z",
+          };
+          return { status: current.status };
+        },
+      });
+      const label = status === "active" ? "보관" : "다시 진행";
+      await screen.findByText(labCase.name);
+      await view.user.click(screen.getByRole("button", { name: `요약 품질 비교 실험 ${label}` }));
+      await view.user.click(within(screen.getByRole("dialog")).getByRole("button", { name: label }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const dialog = await openRun(view.user);
+      await view.user.click(dialog.getByRole("button", { name: "실행" }));
+      await waitFor(() =>
+        expect(view.api.bodies("POST /admin/prompt-lab/test-cases/public_case_1/run")).toHaveLength(1),
+      );
+      await screen.findByText(/최고 점수 모델 public-model-a/);
+    },
+  );
   it("preserves a draft when readonly changes and blocks submission", async () => {
     const view = setup();
     await view.user.click(await screen.findByRole("button", { name: "실험 만들기" }));

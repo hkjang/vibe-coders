@@ -109,7 +109,15 @@ export async function installPromptLab(page: Page, readOnly = false) {
       if (path === "contracts") return json(labContract);
       if (path === "rubrics") return json({ id: "public-rubric", name: "공개 평가 기준" });
       if (path === "test-cases") return json(labCase);
-      if (method === "PATCH") return json({ status: "archived" });
+      if (method === "PATCH") {
+        const body = request.postDataJSON() as { status: string };
+        const experiment = state.experiments.find((row) => path === `experiments/${row.id}`);
+        if (experiment) {
+          experiment.status = body.status;
+          experiment.updated_at = "2030-01-04T00:00:00Z";
+        }
+        return json({ status: body.status });
+      }
       if (method === "DELETE") return json({ status: "deleted" });
     }
     unexpected.push(`${method} ${url.pathname}`);
