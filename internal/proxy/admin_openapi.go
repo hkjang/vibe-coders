@@ -635,6 +635,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "get /admin/golden-prompts", "get /admin/golden-workflows":
+		enrichGoldenReadOpenAPI(key, op, responses)
 	case "get /admin/gateway-mcp/info", "get /admin/mcp/contracts", "post /admin/mcp/contracts", "delete /admin/mcp/contracts", "post /admin/mcp/contracts/validate":
 		enrichMCPContractsOpenAPI(key, op, responses)
 	case "post /admin/mcp/route/explain", "post /admin/mcp/test":
@@ -1063,6 +1065,9 @@ func appUIOpenAPISchemas() map[string]any {
 		}},
 		"UISystemStatus":      map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"healthy", "degraded"}}}},
 		"UIBootstrapResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"backend_version", "ui_version", "api_version", "ui", "authentication", "roles", "permissions", "capabilities", "allowed_features", "migration_registry", "system_status", "legacy_route_map"}, "properties": map[string]any{"backend_version": map[string]any{"type": "string"}, "ui_version": map[string]any{"type": "string"}, "api_version": map[string]any{"type": "string"}, "ui": schemaRef("UIRuntimeConfig"), "authentication": schemaRef("UIAuthentication"), "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}, "roles": stringArray, "permissions": stringArray, "capabilities": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"raw_prompt_view"}, "properties": map[string]any{"raw_prompt_view": map[string]any{"type": "boolean"}}}, "allowed_features": stringArray, "migration_registry": map[string]any{"type": "array", "items": schemaRef("MigrationFeature")}, "system_status": schemaRef("UISystemStatus"), "legacy_route_map": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}},
+	}
+	for name, schema := range goldenReadOpenAPISchemas() {
+		schemas[name] = schema
 	}
 	for name, schema := range billingDashboardOpenAPISchemas() {
 		schemas[name] = schema

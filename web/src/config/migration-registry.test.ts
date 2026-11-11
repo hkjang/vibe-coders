@@ -125,6 +125,7 @@ describe("migration registry", () => {
     ["observability.probes", "/app/observability/probes"],
     ["prompts.lab", "/app/prompts/lab"],
     ["prompts.library", "/app/prompts/library"],
+    ["prompts.regression", "/app/prompts/regression"],
     ["access.users", "/app/access/users"],
     ["governance.policies", "/app/governance/policies"],
     ["governance.remediation", "/app/governance/remediation"],

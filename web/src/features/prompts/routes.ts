@@ -3,6 +3,11 @@ import { defineFeatureModules } from "@/features/feature-module";
 // Screens owned by the prompts domain. Register each implemented feature here.
 export const promptsFeatureModules = defineFeatureModules([
   {
+    featureId: "prompts.regression",
+    load: () => import("./regression/RegressionPage").then((module) => module.RegressionPage),
+    queryKeys: ["tab", "page", "limit", "outcome", "selection"],
+  },
+  {
     featureId: "prompts.library",
     load: () =>
       import("@/features/prompts/library/PromptLibraryPage").then((module) => module.PromptLibraryPage),
