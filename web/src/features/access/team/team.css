@@ -1,0 +1,62 @@
+.team-scope-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+}
+.team-scope-controls > .form-field:first-child {
+  flex: 1 1 16rem;
+}
+.team-scope-summary,
+.team-scope-name {
+  margin: 0;
+  color: var(--color-muted);
+}
+.team-scope-summary strong,
+.team-scope-name strong {
+  color: var(--color-foreground);
+  overflow-wrap: anywhere;
+}
+.team-table {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.team-table-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-2);
+}
+.team-table-controls .form-field {
+  flex: 1 1 12rem;
+}
+.team-table-summary {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+.team-report-review {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.team-report-review pre {
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  padding: var(--space-3);
+  background: var(--color-muted-soft);
+  border-radius: var(--radius-medium);
+}
+.team-report-review pre:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+@media (max-width: 767px) {
+  .team-scope-controls > .form-field {
+    flex-basis: 100%;
+  }
+}

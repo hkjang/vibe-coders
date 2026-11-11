@@ -1,10 +1,13 @@
 package proxy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"vibe-coders/internal/store"
 )
@@ -18,41 +21,15 @@ func (s *Server) handleTeamDashboard(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	var teamID string
-	if s.cfg.Auth.Enabled {
-		claims, ok := s.currentAccessClaims(r)
-		if !ok {
-			writeOpenAIError(w, http.StatusUnauthorized, "invalid access token", "invalid_request_error", "invalid_access_token")
-			return
-		}
-		if !hasScope(claims.Scopes, "team:read") {
-			writeOpenAIError(w, http.StatusForbidden, "team:read scope required", "invalid_request_error", "forbidden")
-			return
-		}
-		teamID = claims.TeamID
-		// Admins may inspect any team for support/oversight.
-		if override := strings.TrimSpace(r.URL.Query().Get("team")); override != "" && hasScope(claims.Scopes, "admin:read") {
-			teamID = override
-		}
-	} else {
-		// Legacy admin-token mode: no JWT team; require an explicit ?team=.
-		teamID = strings.TrimSpace(r.URL.Query().Get("team"))
-	}
-	if teamID == "" {
-		writeOpenAIError(w, http.StatusBadRequest, "no team associated with the caller", "invalid_request_error", "no_team")
+	teamID, keys, ok := s.resolveTeamScope(w, r)
+	if !ok {
 		return
-	}
-
-	// A team is stored on api_keys.team as either its id or name — match both.
-	keys := []string{teamID}
-	if team, found, _ := s.db.AuthTeamByIDOrName(r.Context(), teamID); found {
-		keys = uniqueNonEmpty(teamID, team.ID, team.Name)
 	}
 
 	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
 	data, err := s.db.TeamDashboardSince(r.Context(), keys, since, 10)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "team data unavailable", "server_error", "team_dashboard_failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -66,6 +43,7 @@ func (s *Server) handleTeamDashboard(w http.ResponseWriter, r *http.Request) {
 // match (id + name). Requires team:read; admins may target any team via ?team=. Writes the
 // HTTP error itself and returns ok=false on failure.
 func (s *Server) resolveTeamScope(w http.ResponseWriter, r *http.Request) (teamID string, keys []string, ok bool) {
+	w.Header().Set("Cache-Control", "no-store")
 	if s.cfg.Auth.Enabled {
 		claims, authed := s.currentAccessClaims(r)
 		if !authed {
@@ -88,7 +66,12 @@ func (s *Server) resolveTeamScope(w http.ResponseWriter, r *http.Request) (teamI
 		return "", nil, false
 	}
 	keys = []string{teamID}
-	if team, found, _ := s.db.AuthTeamByIDOrName(r.Context(), teamID); found {
+	team, found, err := s.db.AuthTeamByIDOrName(r.Context(), teamID)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "team scope unavailable", "server_error", "team_scope_failed")
+		return "", nil, false
+	}
+	if found {
 		keys = uniqueNonEmpty(teamID, team.ID, team.Name)
 	}
 	return teamID, keys, true
@@ -108,7 +91,7 @@ func (s *Server) handleTeamPopularSkills(w http.ResponseWriter, r *http.Request)
 	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
 	skills, err := s.db.TeamPopularSkills(r.Context(), keys, since, 10)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_skills_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "team data unavailable", "server_error", "team_skills_failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"team_id": teamID, "since": since.UTC().Format(time.RFC3339), "skills": skills})
@@ -129,7 +112,7 @@ func (s *Server) handleTeamTemplateCandidates(w http.ResponseWriter, r *http.Req
 	minCount := intQuery(r, "min_count", 3)
 	cands, err := s.db.TeamTemplateCandidates(r.Context(), keys, since, minCount, 15)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_template_candidates_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "team data unavailable", "server_error", "team_template_candidates_failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"team_id": teamID, "since": since.UTC().Format(time.RFC3339), "candidates": cands})
@@ -165,8 +148,11 @@ func (s *Server) handleTeamRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cur, _ := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{TeamID: teamID, Since: window, Limit: 5000})
-	wide, _ := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{TeamID: teamID, Since: prior, Limit: 5000})
+	failures := teamPartialFailures{}
+	cur, curErr := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{TeamID: teamID, Since: window, Limit: 5000})
+	wide, wideErr := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{TeamID: teamID, Since: prior, Limit: 5000})
+	failures.add("policy_current", curErr)
+	failures.add("policy_prior", wideErr)
 	curBlocked, curWarned := countBlocked(cur)
 	wideBlocked, _ := countBlocked(wide)
 	priorBlocked := wideBlocked - curBlocked
@@ -174,14 +160,16 @@ func (s *Server) handleTeamRisk(w http.ResponseWriter, r *http.Request) {
 		priorBlocked = 0
 	}
 
-	secrets, _ := s.db.ListSecretEventsFiltered(ctx, store.SecretEventFilter{TeamID: teamID, Since: window, Limit: 5000})
+	secrets, secretsErr := s.db.ListSecretEventsFiltered(ctx, store.SecretEventFilter{TeamID: teamID, Since: window, Limit: 5000})
+	failures.add("secrets", secretsErr)
 	secretByType := map[string]int{}
 	for _, e := range secrets {
 		secretByType[e.SecretType]++
 	}
 
-	pending, _ := s.db.ListApprovalsFiltered(ctx, store.ApprovalFilter{TeamID: teamID, Status: "pending", Limit: 100})
+	pending, pendingErr := s.db.ListApprovalsFiltered(ctx, store.ApprovalFilter{TeamID: teamID, Status: "pending", Limit: 100})
 
+	failures.add("approvals", pendingErr)
 	recent := make([]map[string]any, 0, 10)
 	for _, e := range cur {
 		if strings.EqualFold(e.Decision, "allow") {
@@ -199,6 +187,7 @@ func (s *Server) handleTeamRisk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"team_id":              teamID,
 		"since":                window.UTC().Format(time.RFC3339),
+		"partial_failures":     failures,
 		"blocked":              curBlocked,
 		"warned":               curWarned,
 		"blocked_prior_window": priorBlocked,
@@ -226,21 +215,26 @@ func (s *Server) handleTeamOnboarding(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Recommended models: the team's top models by usage (with success/cost).
-	dash, _ := s.db.TeamDashboardSince(ctx, keys, since, 5)
+	failures := teamPartialFailures{}
+	dash, dashErr := s.db.TeamDashboardSince(ctx, keys, since, 5)
+	failures.add("models", dashErr)
 	models := dash.Models
 	if len(models) > 5 {
 		models = models[:5]
 	}
 
 	// Recommended skills: the team's adopted skills, success-weighted.
-	skills, _ := s.db.TeamPopularSkills(ctx, keys, since, 5)
+	skills, skillsErr := s.db.TeamPopularSkills(ctx, keys, since, 5)
+	failures.add("skills", skillsErr)
 
 	// Recommended MCP tools: the team's most-used MCP tools.
-	tools, _ := s.db.TeamMCPTools(ctx, keys, since, 5)
+	tools, toolsErr := s.db.TeamMCPTools(ctx, keys, since, 5)
+	failures.add("mcp", toolsErr)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"team_id":            teamID,
 		"since":              since.UTC().Format(time.RFC3339),
+		"partial_failures":   failures,
 		"recommended_models": models,
 		"recommended_skills": skills,
 		"recommended_mcp":    tools,
@@ -269,12 +263,12 @@ func (s *Server) handleTeamSavingsChallenge(w http.ResponseWriter, r *http.Reque
 
 	mtd, err := s.db.TeamDashboardSince(ctx, keys, monthStart, 1)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_savings_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "team data unavailable", "server_error", "team_savings_failed")
 		return
 	}
 	sinceLast, err := s.db.TeamDashboardSince(ctx, keys, lastMonthStart, 1)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_savings_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "team data unavailable", "server_error", "team_savings_failed")
 		return
 	}
 	thisMTD := mtd.Totals.CostKRW
@@ -364,17 +358,28 @@ func (s *Server) handleTeamReports(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		reports, err := s.db.ListTeamReports(r.Context(), teamID)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_reports_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "team data unavailable", "server_error", "team_reports_failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"team_id": teamID, "reports": reports})
+		projected := make([]teamReportReview, 0, len(reports))
+		for _, report := range reports {
+			projected = append(projected, teamReportReview{Text2SQLSavedReport: report, Revision: teamReportRevision(report)})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"team_id": teamID, "reports": projected})
 	case http.MethodPost:
 		var p struct {
 			ReportID string `json:"report_id"`
 			Action   string `json:"action"` // approve | reject
+			Reason   string `json:"reason"` // optional for legacy callers
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		p.Action = strings.ToLower(strings.TrimSpace(p.Action))
+		p.Reason = strings.TrimSpace(p.Reason)
+		if (p.Action != "approve" && p.Action != "reject") || !utf8.ValidString(p.Reason) || utf8.RuneCountInString(p.Reason) > 500 {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid action or reason", "invalid_request_error", "invalid_body")
 			return
 		}
 		rep, found, err := s.db.GetText2SQLSavedReport(r.Context(), strings.TrimSpace(p.ReportID))
@@ -389,14 +394,14 @@ func (s *Server) handleTeamReports(w http.ResponseWriter, r *http.Request) {
 		}
 		approve := strings.EqualFold(strings.TrimSpace(p.Action), "approve")
 		if err := s.db.DecideTeamReport(r.Context(), rep.ID, approve, s.skillActor(r)); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "report_decision_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "report decision failed", "server_error", "report_decision_failed")
 			return
 		}
 		status := "rejected"
 		if approve {
 			status = "approved"
 		}
-		s.auditAdmin(r, "team_report."+status, rep.ID, auditJSON(map[string]any{"team": teamID}))
+		s.auditAdmin(r, "team_report."+status, rep.ID, auditJSON(map[string]any{"team": teamID, "reason": p.Reason}))
 		writeJSON(w, http.StatusOK, map[string]any{"report_id": rep.ID, "approval_status": status})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -415,4 +420,25 @@ func uniqueNonEmpty(values ...string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// A review fingerprint describes the exact stored report, including masked fields.
+// It is a comparison aid, not a conditional-write token or an atomic lock.
+type teamReportReview struct {
+	store.Text2SQLSavedReport
+	Revision string `json:"revision"`
+}
+
+func teamReportRevision(report store.Text2SQLSavedReport) string {
+	encoded, _ := json.Marshal(report) // The report contains only strings and booleans.
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
+
+type teamPartialFailures []string
+
+func (failures *teamPartialFailures) add(component string, err error) {
+	if err != nil {
+		*failures = append(*failures, component)
+	}
 }
