@@ -18,7 +18,7 @@ import { useNavigate } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { jumpItems, matchesQuery, type CommandItem } from "@/app/layouts/command-items";
-import { featurePath, resolveFeature } from "@/config/migration-registry";
+import { featurePath } from "@/config/migration-registry";
 import { commandPaletteLabels, migrationStatusLabels, uiLabels } from "@/config/ui-labels";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -27,6 +27,8 @@ import { usePreferences } from "@/shared/stores/preferences";
 import { tokenStore } from "@/shared/auth/token-store";
 import { rememberCommand } from "./recent-commands";
 import { useConsoleActions } from "./use-console-actions";
+import { useNavigationItems } from "./use-navigation-items";
+import { navigationLabels } from "./navigation-labels";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -44,6 +46,7 @@ const kindLabels: Record<CommandItem["kind"], string> = {
   jump: "바로 찾기",
   recent: "최근",
   recentAction: commandPaletteLabels.recentCommand,
+  favorite: navigationLabels.favorites,
 };
 
 function normalize(value: string): string {
@@ -74,7 +77,6 @@ function CommandPaletteContent({
   onShowShortcuts,
 }: CommandPaletteProps): React.JSX.Element {
   const auth = useAuth();
-  const { user, backendVersion, features, legacyFallback } = auth;
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -89,6 +91,7 @@ function CommandPaletteContent({
   const searchRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
   const recentFeatures = usePreferences((state) => state.recentFeatures);
+  const favoriteFeatures = usePreferences((state) => state.favoriteFeatures);
 
   const updateOpen = useCallback(
     (nextOpen: boolean): void => {
@@ -124,22 +127,17 @@ function CommandPaletteContent({
   );
 
   const actions = useConsoleActions(run, onShowShortcuts);
-  const available = useMemo(
-    () =>
-      features
-        .map((feature) => ({
-          feature,
-          effective: resolveFeature(feature, user, backendVersion, { legacyFallback }),
-        }))
-        .filter(({ effective }) => effective.permitted && effective.status !== "hidden"),
-    [backendVersion, features, legacyFallback, user],
-  );
+  const available = useNavigationItems();
 
   const items = useMemo((): CommandItem[] => {
     const needle = normalize(query);
     const destinations: CommandItem[] = available.map(({ feature, effective }) => ({
       id: `feature:${feature.featureId}`,
-      kind: recentFeatures.includes(feature.featureId) && needle === "" ? "recent" : "feature",
+      kind: favoriteFeatures.includes(feature.featureId)
+        ? "favorite"
+        : recentFeatures.includes(feature.featureId) && needle === ""
+          ? "recent"
+          : "feature",
       title: feature.title,
       hint: feature.group,
       keywords: [
@@ -150,14 +148,14 @@ function CommandPaletteContent({
       ],
       run: () => go(featurePath(feature)),
     }));
-    // With an empty box the palette answers "where was I?" first, then the full menu.
+    // Favorites precede recent screens; each destination is offered only once.
     const ordered =
       needle === ""
         ? [
-            ...recentFeatures
+            ...[...new Set([...favoriteFeatures, ...recentFeatures])]
               .map((featureId) => destinations.find((item) => item.id === `feature:${featureId}`))
               .filter((item): item is CommandItem => item !== undefined),
-            ...destinations.filter((item) => item.kind !== "recent"),
+            ...destinations.filter((item) => item.kind !== "recent" && item.kind !== "favorite"),
           ]
         : destinations;
     // Destinations stay on top: navigating is the common case, and a command is one
@@ -190,7 +188,7 @@ function CommandPaletteContent({
       ...ordered,
       ...commands.filter((item) => !recent.some((previous) => previous.id === item.id)),
     ].filter((item) => matchesQuery(item, needle));
-  }, [actions, available, go, query, recentFeatures, recentCommands]);
+  }, [actions, available, go, query, recentFeatures, favoriteFeatures, recentCommands]);
 
   const selectedIndex = items.length ? Math.min(activeIndex, items.length - 1) : 0;
   const activeResult = items[selectedIndex];

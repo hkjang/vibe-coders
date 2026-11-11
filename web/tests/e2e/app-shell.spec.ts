@@ -13,6 +13,154 @@ const providerRef = (seed: string): string =>
     .padStart(43, "x")
     .slice(-43)}`;
 
+test("즐겨찾기 추가·정렬·해제·새로고침과 최근 화면 이동을 연결한다", async ({ page }) => {
+  await mockGateway(page);
+  await page.goto("overview");
+  await page.getByRole("button", { name: "통합 현황 즐겨찾기에 추가" }).click();
+  await page.getByRole("link", { name: /^AI 공급자/u }).click();
+  await page.getByRole("button", { name: "AI 공급자 즐겨찾기에 추가" }).click();
+  const favorites = page.getByRole("list", { name: "즐겨찾기" });
+  await expect(favorites.getByRole("link")).toHaveCount(2);
+  await page.getByRole("button", { name: "즐겨찾기 관리" }).click();
+  const dialog = page.getByRole("dialog", { name: "즐겨찾기 관리" });
+  await dialog.getByRole("button", { name: "AI 공급자 위로 이동" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog.getByText("AI 공급자", { exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "즐겨찾기 관리" })).toBeFocused();
+  await page.reload();
+  await expect(favorites.getByRole("link").first()).toHaveAttribute("href", "/app/gateway/providers");
+  await page.getByRole("button", { name: "명령 팔레트 열기" }).click();
+  await expect(page.getByRole("option").first()).toHaveAccessibleName(/AI 공급자.*즐겨찾기/u);
+  await expect(page.getByRole("option", { name: /AI 공급자/u })).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await page.getByLabel("사용자 메뉴").click();
+  const recent = page.getByRole("region", { name: "최근 방문 화면" });
+  await recent.getByRole("link", { name: "통합 현황" }).click();
+  await expect(page).toHaveURL(/\/app\/overview$/u);
+  await expect(page.locator("#main-content")).toBeFocused();
+  await expect(page.locator("details.user-menu")).not.toHaveAttribute("open");
+  await page.getByLabel("사용자 메뉴").click();
+  await recent.getByRole("button", { name: "최근 화면 기록 지우기" }).click();
+  await expect(recent.getByText("최근 방문한 화면이 없습니다.")).toBeVisible();
+  const stored = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("vibe.app.preferences.v1") ?? "null"),
+  );
+  expect(stored.state.favoriteFeatures).toEqual(["gateway.providers", "overview"]);
+  expect(stored.state.recentFeatures).toEqual([]);
+  expect(JSON.stringify(stored)).not.toContain("/app/");
+  await page.getByLabel("사용자 메뉴").click();
+  await page.getByRole("button", { name: "통합 현황 즐겨찾기 해제" }).click();
+  await expect(favorites.getByRole("link")).toHaveCount(1);
+});
+
+for (const colorScheme of ["light", "dark"] as const) {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 844, height: 390 },
+  ]) {
+    test(`즐겨찾기 관리·최근 화면 접근성 ${colorScheme} ${viewport.width}×${viewport.height}`, async ({
+      page,
+    }, info) => {
+      await page.setViewportSize(viewport);
+      await page.emulateMedia({ colorScheme });
+      await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+      await page.addInitScript(() =>
+        localStorage.setItem(
+          "vibe.app.preferences.v1",
+          JSON.stringify({
+            state: {
+              favoriteFeatures: [
+                "overview",
+                "gateway.providers",
+                "gateway.health",
+                "gateway.models",
+                "system.health",
+              ],
+            },
+            version: 0,
+          }),
+        ),
+      );
+      await mockGateway(page);
+      await page.goto("overview");
+      const mobile = viewport.width < 1024;
+      if (mobile) await page.getByRole("button", { name: "탐색 메뉴 열기" }).click();
+      await page.getByRole("button", { name: "즐겨찾기 관리" }).click();
+      const dialog = page.getByRole("dialog", { name: "즐겨찾기 관리" });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "완료", exact: true })).toBeInViewport();
+      await expect(dialog.getByRole("button", { name: "즐겨찾기 전체 해제" })).toBeInViewport();
+      await expect(page.getByRole("dialog", { name: "주 메뉴" })).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await axeViolations(page)).toEqual([]);
+      await page.screenshot({ path: info.outputPath("favorites.png") });
+      await dialog.getByRole("button", { name: "완료", exact: true }).focus();
+      await page.keyboard.press("Tab");
+      expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(
+        page.getByRole("button", { name: mobile ? "탐색 메뉴 열기" : "즐겨찾기 관리" }),
+      ).toBeFocused();
+      await page.getByLabel("사용자 메뉴").click();
+      await expect(page.getByRole("region", { name: "최근 방문 화면" })).toBeVisible();
+      await page.getByRole("button", { name: "최근 화면 기록 지우기" }).scrollIntoViewIfNeeded();
+      await expect(page.getByRole("button", { name: "최근 화면 기록 지우기" })).toBeInViewport();
+      expect(await axeViolations(page)).toEqual([]);
+      await page.screenshot({ path: info.outputPath("recent-screens.png") });
+    });
+  }
+}
+
+test("접근 불가 메뉴는 저장된 즐겨찾기·최근 화면·팔레트에서 즉시 숨긴다", async ({ page }) => {
+  const current = structuredClone(bootstrap);
+  await mockGateway(page, { bootstrapPayload: current });
+  await page.goto("gateway/providers");
+  await page.getByRole("button", { name: "AI 공급자 즐겨찾기에 추가" }).click();
+  await page.getByRole("link", { name: /^통합 현황/u }).click();
+  current.user.features["gateway.providers"] = false;
+  current.allowed_features = current.allowed_features.filter((id) => id !== "gateway.providers");
+  const providerFeature = current.migration_registry.find(
+    (feature) => feature.feature_id === "gateway.providers",
+  );
+  if (!providerFeature) throw new Error("공급자 전환 항목이 없습니다.");
+  // Bootstrap's effective availability is authoritative for every navigation surface.
+  providerFeature.available = false;
+  const reply = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await (await reply).finished();
+  await expect(page.getByRole("list", { name: "즐겨찾기" })).toHaveCount(0);
+  await page.getByLabel("사용자 메뉴").click();
+  await expect(
+    page.getByRole("region", { name: "최근 방문 화면" }).getByRole("link", { name: "AI 공급자" }),
+  ).toHaveCount(0);
+  await page.getByLabel("사용자 메뉴").click();
+  await page.getByRole("button", { name: "명령 팔레트 열기" }).click();
+  await expect(page.getByRole("option", { name: /AI 공급자/u })).toHaveCount(0);
+});
+
+test("접힌 사이드바에서도 즐겨찾기 이름과 관리 작업을 사용할 수 있다", async ({ page }) => {
+  await mockGateway(page);
+  await page.goto("overview");
+  await page.getByRole("button", { name: "통합 현황 즐겨찾기에 추가" }).click();
+  await page.getByRole("button", { name: "사이드바 접기", exact: true }).click();
+  const pinned = page
+    .getByRole("list", { name: "즐겨찾기" })
+    .getByRole("link", { name: "통합 현황", exact: true });
+  await expect(pinned).toBeInViewport();
+  await expect(pinned).toHaveAttribute("title", "통합 현황");
+  await page.getByRole("button", { name: "즐겨찾기 관리" }).click();
+  await expect(page.getByRole("dialog", { name: "즐겨찾기 관리" })).toBeVisible();
+  await page.getByRole("button", { name: "완료", exact: true }).click();
+  await expect(page.getByRole("button", { name: "즐겨찾기 관리" })).toBeFocused();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "사이드바 펼치기" })).toBeVisible();
+  await expect(pinned).toBeVisible();
+});
+
 async function axeViolations(page: Page): Promise<unknown[]> {
   return page.evaluate(async () => {
     const axe = (window as unknown as { axe: AxeRuntime }).axe;
