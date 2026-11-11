@@ -511,6 +511,21 @@ export type GoldenPromptResult = {
     score: number;
 };
 
+export type GoldenPromptWriteBody = {
+    expected?: string;
+    id?: string;
+    models?: Array<string> | null;
+    name: string;
+    prompt: string;
+    run?: boolean;
+    tags?: Array<string> | null;
+};
+
+export type GoldenPromptWriteResponse = {
+    golden_prompt: GoldenPrompt;
+    results: Array<GoldenPromptResult>;
+};
+
 export type GoldenWorkflow = {
     created_at: string;
     description: string;
@@ -535,6 +550,31 @@ export type GoldenWorkflowStep = {
     selected_model?: string;
     source_run_id?: string;
     task_type?: string;
+};
+
+/**
+ * Input fields are optional. Steps with an absent or blank prompt are discarded; the workflow must retain at least one nonblank prompt.
+ */
+export type GoldenWorkflowStepInput = {
+    baseline_score?: number;
+    contract_id?: string;
+    expected?: string;
+    name?: string;
+    prompt?: string;
+    rubric_id?: string;
+    selected_model?: string;
+    source_run_id?: string;
+    task_type?: string;
+};
+
+export type GoldenWorkflowWriteBody = {
+    created_at?: string;
+    description?: string;
+    id?: string;
+    name: string;
+    steps: Array<GoldenWorkflowStepInput>;
+    tags?: Array<string> | null;
+    updated_at?: string;
 };
 
 export type GroupedStat = {
@@ -4926,18 +4966,45 @@ export type GetAdminGoldenPromptsResponses = {
 export type GetAdminGoldenPromptsResponse = GetAdminGoldenPromptsResponses[keyof GetAdminGoldenPromptsResponses];
 
 export type PostAdminGoldenPromptsData = {
-    body?: never;
+    body: GoldenPromptWriteBody;
     path?: never;
     query?: never;
     url: '/admin/golden-prompts';
 };
 
+export type PostAdminGoldenPromptsErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminGoldenPromptsError = PostAdminGoldenPromptsErrors[keyof PostAdminGoldenPromptsErrors];
+
 export type PostAdminGoldenPromptsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    201: GoldenPromptWriteResponse;
 };
+
+export type PostAdminGoldenPromptsResponse = PostAdminGoldenPromptsResponses[keyof PostAdminGoldenPromptsResponses];
 
 export type PostAdminGoldenPromptsRunData = {
     body?: never;
@@ -4991,18 +5058,45 @@ export type GetAdminGoldenWorkflowsResponses = {
 export type GetAdminGoldenWorkflowsResponse = GetAdminGoldenWorkflowsResponses[keyof GetAdminGoldenWorkflowsResponses];
 
 export type PostAdminGoldenWorkflowsData = {
-    body?: never;
+    body: GoldenWorkflowWriteBody;
     path?: never;
     query?: never;
     url: '/admin/golden-workflows';
 };
 
+export type PostAdminGoldenWorkflowsErrors = {
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing validation, authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminGoldenWorkflowsError = PostAdminGoldenWorkflowsErrors[keyof PostAdminGoldenWorkflowsErrors];
+
 export type PostAdminGoldenWorkflowsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: GoldenWorkflow;
 };
+
+export type PostAdminGoldenWorkflowsResponse = PostAdminGoldenWorkflowsResponses[keyof PostAdminGoldenWorkflowsResponses];
 
 export type PostAdminGoldenWorkflowsRunData = {
     body?: never;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { Button } from "@/shared/components/ui/Button";
@@ -25,6 +25,9 @@ import {
   type RegressionTab,
 } from "./regression-model";
 import { useGoldenPrompts, useGoldenWorkflows } from "./use-regression";
+import { DefinitionDialog } from "./editor/DefinitionDialog";
+import { newDefinitionTarget, type DefinitionTarget } from "./editor/definition-form";
+import { useDefinitionAccess } from "./editor/use-definition-write";
 import "./regression.css";
 
 export function RegressionPage() {
@@ -33,6 +36,8 @@ export function RegressionPage() {
 
 function RegressionContent({ owner }: { owner: FeatureReadOwner }) {
   const { credentialPrefixes } = useAuth();
+  const access = useDefinitionAccess();
+  const [editing, setEditing] = useState<DefinitionTarget>();
   const [params, update] = useSearchState();
   const tab: RegressionTab = regressionTabs.find((value) => value === params.get("tab")) ?? "prompts";
   const rawLimit = Number(params.get("limit"));
@@ -48,8 +53,14 @@ function RegressionContent({ owner }: { owner: FeatureReadOwner }) {
     const timer = window.setTimeout(() => setDebounced(search.trim().toLocaleLowerCase()), 200);
     return () => window.clearTimeout(timer);
   }, [search]);
-  const prompts = useGoldenPrompts(owner, limit, undefined, true, tab !== "workflows" && !selected);
-  const workflows = useGoldenWorkflows(owner, tab === "workflows");
+  const prompts = useGoldenPrompts(
+    owner,
+    limit,
+    undefined,
+    true,
+    tab !== "workflows" && !selected && !editing,
+  );
+  const workflows = useGoldenWorkflows(owner, tab === "workflows" && !editing);
   const active = tab === "workflows" ? workflows : prompts;
   const promptRows = prompts.data?.golden_prompts ?? [];
   const workflowRows = workflows.data?.workflows ?? [];
@@ -104,13 +115,31 @@ function RegressionContent({ owner }: { owner: FeatureReadOwner }) {
     <div className="page-stack">
       <PageHeader
         title="회귀 검증 세트"
-        status="preview_read_only"
-        readOnly
-        description="모델 변경을 점검할 기준 프롬프트와 독립적인 검증 단계를 살펴봅니다."
+        status={access.allowed ? "preview" : "preview_read_only"}
+        readOnly={!access.allowed}
+        description="모델 변경을 점검할 기준 프롬프트와 독립적인 검증 단계를 관리합니다."
         actions={
-          <Button variant="primary" disabled={active.isFetching} onClick={refresh}>
-            <RefreshCw aria-hidden="true" /> 새로고침
-          </Button>
+          <>
+            {access.allowed && tab !== "results" ? (
+              <Button
+                variant="primary"
+                onClick={(event) => {
+                  returnFocusRef.current = event.currentTarget;
+                  setEditing(newDefinitionTarget(tab === "prompts" ? "prompt" : "workflow"));
+                }}
+              >
+                <Plus aria-hidden="true" />
+                {tab === "prompts" ? "기준 프롬프트 추가" : "검증 워크플로 추가"}
+              </Button>
+            ) : null}
+            <Button
+              variant={access.allowed && tab !== "results" ? "secondary" : "primary"}
+              disabled={active.isFetching}
+              onClick={refresh}
+            >
+              <RefreshCw aria-hidden="true" /> 새로고침
+            </Button>
+          </>
         }
       />
       <StatGrid label="회귀 검증 조회 요약">
@@ -138,8 +167,8 @@ function RegressionContent({ owner }: { owner: FeatureReadOwner }) {
       <details>
         <summary>조회 범위와 검사 방식 안내</summary>
         <p>
-          이 화면은 조회 전용입니다. 등록·수정·실행은 기존 운영 API와 회귀 검증 스크립트를 사용하며, 같은
-          기능의 기존 관리자 화면은 없습니다.
+          편집 권한이 있으면 정의를 등록·수정할 수 있습니다. 모델 실행은 기존 운영 API와 회귀 검증 스크립트를
+          사용하며, 같은 기능의 기존 관리자 화면은 없습니다.
         </p>
         <p>
           목록의 정의는 전체 수신 후 25개씩 표시합니다. 결과는 최신순 최대 200건이며 전체 실행 수나 과거 정의
@@ -264,8 +293,8 @@ function RegressionContent({ owner }: { owner: FeatureReadOwner }) {
             />
             {!active.isPending && !active.isError && allRows.length === 0 ? (
               <p className="muted">
-                아직 등록된 항목이나 저장된 실행 결과가 없습니다. 운영 API로 세트를 등록하고 실행하면 조회할
-                수 있습니다.
+                아직 등록된 항목이나 저장된 실행 결과가 없습니다. 세트를 등록하고 기존 실행 도구로 검사하면
+                결과를 조회할 수 있습니다.
               </p>
             ) : null}
           </div>
@@ -284,11 +313,30 @@ function RegressionContent({ owner }: { owner: FeatureReadOwner }) {
           updatedAt={active.dataUpdatedAt}
           retry={refresh}
           returnFocusRef={returnFocusRef}
+          edit={
+            access.allowed
+              ? (target) => {
+                  returnFocusRef.current = listHeading.current;
+                  setLocalSelection(undefined);
+                  update({ selection: undefined }, { replace: true });
+                  setEditing(target);
+                }
+              : undefined
+          }
           close={() => {
             if (!returnFocusRef.current?.isConnected) returnFocusRef.current = listHeading.current;
             setLocalSelection(undefined);
             update({ selection: undefined }, { replace: false });
           }}
+        />
+      ) : null}
+      {editing ? (
+        <DefinitionDialog
+          key={`${editing.kind}:${editing.id}`}
+          owner={owner}
+          target={editing}
+          returnFocusRef={returnFocusRef}
+          close={() => setEditing(undefined)}
         />
       ) : null}
     </div>

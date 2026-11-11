@@ -4,9 +4,9 @@ AI 코딩 프록시 게이트웨이의 빌드·태깅·GitHub 릴리즈·오프�
 
 현재 일반 명령 예시는 게시된 `v0.86.40`과 그 직전 릴리즈 `v0.86.39`의 절차를 따릅니다.
 이 예시로 게시된 태그를 다시 만들거나 후보 소스를 이전 버전으로 포장하지 마세요.
-최신 공개 릴리스는 [`v0.86.64`](https://github.com/hkjang/vibe-coders/releases/tag/v0.86.64)이며 `v0.86.65`를 준비합니다.
-`v0.86.65` 후보는 기준 프롬프트·검증 워크플로·저장된 결과의 조회 전용 미리보기를 추가합니다.
-기존 GET API·권한과 등록·실행 경로를 유지하며 같은 기능의 Legacy UI가 없다는 점을 안내합니다.
+최신 공개 릴리스는 [`v0.86.65`](https://github.com/hkjang/vibe-coders/releases/tag/v0.86.65)이며 `v0.86.66`을 준비합니다.
+`v0.86.66` 후보는 기준 프롬프트·검증 워크플로의 등록·편집과 저장 전 변경 비교를 추가합니다.
+기존 POST API·권한·감사를 재사용하고 실행 필드를 보내지 않으며 같은 기능의 Legacy UI가 없다는 점을 안내합니다.
 Go·프론트엔드 의존성 버전은 유지합니다. 이전 소스의 출고 근거를
 새 소스에 재사용하지 않습니다. 현재 검증 범위는 [인수 검증표](APP_UI_ACCEPTANCE.md)를 확인하세요.
 
@@ -824,7 +824,7 @@ pwsh -File scripts/release.ps1 -Version v0.86.40
 
 | 단계 | 설명 |
 |------|------|
-| **[1/5] docker build** | Node 24+pnpm frozen → Go 1.26.10 embed → distroless nonroot 3-stage 이미지 생성 |
+| **[1/5] docker build** | Node 24+pnpm frozen → Go 1.26.11 embed → distroless nonroot 3-stage 이미지 생성 |
 | **[verify] container smoke** | `/admin`, `/app` 308/deep link, hashed asset cache, `/auth/me` build version, root 소유 볼륨의 진단·`repair-data-dir` 복구·재기동 검증 |
 | **[verify] image CVE** | Grype 0.117.0으로 최종 이미지의 High·Critical 취약점 차단 |
 | **[2/5] docker save** | OCI tar 파일 추출 |

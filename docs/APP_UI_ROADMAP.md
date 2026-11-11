@@ -4,10 +4,11 @@
 
 ## 운영 원칙
 
-최신 공개 기준선은 [v0.86.64](https://github.com/hkjang/vibe-coders/releases/tag/v0.86.64)이다.
-사이드바 즐겨찾기·순서 관리와 사용자 메뉴의 최근 화면 이동을 출고했다. 다음 v0.86.65 후보는
-기준 프롬프트·검증 워크플로·저장된 결과를 기존 API로 조회하는 회귀 검증 세트 화면이다.
-조회 전용 미리보기로 시작하고 등록·수정·실행은 후속 단계로 남긴다. 두 세트의 기존 API에는
+최신 공개 기준선은 [v0.86.65](https://github.com/hkjang/vibe-coders/releases/tag/v0.86.65)이다.
+회귀 검증 세트 조회를 출고했다. 다음 v0.86.66 후보는 기준 프롬프트·검증 워크플로의 정의 편집이다.
+기존 저장 API·권한을 재사용하며 변경 비교·확인, 최신 정의 비교와 응답 유실 후 조회 확인을 제공한다.
+단계 순서·출처·태그를 보존하고 기능별 읽기 전용 설정을 유지한다. 실제 모델 실행과 삭제는 후속 범위다.
+서버의 조건부 갱신이나 원자적 감사·전역 멱등성 보장은 추가하지 않는다. 두 세트의 기존 API에는
 동등한 Legacy 화면이 없으므로 잘못된 대체 링크를 제공하지 않는다. 아래 후보·출고 설명은
 각 시점의 이력이며 현재 상태는 인수 검증표와 공개 릴리스를
 우선한다. 전체 Phase 0–6 인수와 운영 안정화 승격은 남아 있다.
@@ -597,7 +598,7 @@ API 응답·HTTP 헤더·네트워크·기기 성능을 측정하지 않는다. 
 프로덕션 이미지는 세 단계로 만든다.
 
 1. Node 24 builder가 고정된 pnpm lockfile로 `web/dist`를 생성한다.
-2. Go 1.26.10 builder가 해당 산출물을 `internal/appui/dist`에 복사하고 바이너리에 embed한다.
+2. Go 1.26.11 builder가 해당 산출물을 `internal/appui/dist`에 복사하고 바이너리에 embed한다.
 3. Distroless nonroot 런타임에는 단일 gateway 바이너리와 쓰기 가능한 `/data`만 남긴다.
 
 동일한 release version을 `VITE_UI_VERSION`과 `proxy.AppVersion`에 주입한다. frontend build, 비어 있는 index, asset 누락 중 하나라도 발생하면 release build는 실패한다.

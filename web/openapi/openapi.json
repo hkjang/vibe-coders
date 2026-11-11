@@ -1929,6 +1929,63 @@
         ],
         "type": "object"
       },
+      "GoldenPromptWriteBody": {
+        "properties": {
+          "expected": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "run": {
+            "default": false,
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "prompt"
+        ],
+        "type": "object"
+      },
+      "GoldenPromptWriteResponse": {
+        "properties": {
+          "golden_prompt": {
+            "$ref": "#/components/schemas/GoldenPrompt"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/GoldenPromptResult"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "golden_prompt",
+          "results"
+        ],
+        "type": "object"
+      },
       "GoldenWorkflow": {
         "properties": {
           "created_at": {
@@ -2020,6 +2077,76 @@
           "name",
           "prompt",
           "expected"
+        ],
+        "type": "object"
+      },
+      "GoldenWorkflowStepInput": {
+        "description": "Input fields are optional. Steps with an absent or blank prompt are discarded; the workflow must retain at least one nonblank prompt.",
+        "properties": {
+          "baseline_score": {
+            "type": "number"
+          },
+          "contract_id": {
+            "type": "string"
+          },
+          "expected": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "rubric_id": {
+            "type": "string"
+          },
+          "selected_model": {
+            "type": "string"
+          },
+          "source_run_id": {
+            "type": "string"
+          },
+          "task_type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "GoldenWorkflowWriteBody": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/GoldenWorkflowStepInput"
+            },
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "steps"
         ],
         "type": "object"
       },
@@ -8176,7 +8303,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.65"
+    "version": "v0.86.66"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -11944,10 +12071,78 @@
         ]
       },
       "post": {
+        "description": "Existing admin:write definition upsert. No conditional revision or atomic audit guarantee. Response is the normalized input, not a persisted timestamp snapshot; read the registry after saving. Name and prompt are trimmed; expected and tags are preserved. Omitted/empty id generates an id. Supplying any models or run=true also executes models: definition-only clients must omit both fields. A save/run failure can occur after the definition was saved.",
         "operationId": "post__admin_golden_prompts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoldenPromptWriteBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenPromptWriteResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -12047,10 +12242,78 @@
         ]
       },
       "post": {
+        "description": "Existing admin:write definition upsert. No conditional revision or atomic audit guarantee. Response is the normalized input, not a persisted timestamp snapshot; read the registry after saving. Name, step names and step prompts are trimmed; empty-prompt steps are discarded and at least one must remain. Optional step provenance is preserved. Omitted/empty id generates an id. Definition upsert never executes models.",
         "operationId": "post__admin_golden_workflows",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoldenWorkflowWriteBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenWorkflow"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization, method or storage error"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
