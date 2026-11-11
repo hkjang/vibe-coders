@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PromptLabPage } from "@/features/gateway/prompt-lab/PromptLabPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -113,13 +114,21 @@ const rubrics = {
 function listHandlers() {
   return {
     "GET /admin/prompt-lab/experiments": () => experiments,
+    "GET /admin/prompt-lab/experiments/pexp_1": () => experimentDetail,
     "GET /admin/prompt-lab/contracts": () => contracts,
     "GET /admin/prompt-lab/rubrics": () => rubrics,
   };
 }
 
 function renderLab(route = "/prompts/lab") {
-  return renderScreen(<PromptLabPage />, { path: "/prompts/lab", route });
+  return renderScreen(
+    <FeatureAccessContext.Provider
+      value={{ featureId: "prompts.lab", permitted: true, readOnly: false, status: "preview" }}
+    >
+      <PromptLabPage />
+    </FeatureAccessContext.Provider>,
+    { path: "/prompts/lab", route },
+  );
 }
 
 beforeEach(() => {
@@ -161,7 +170,7 @@ describe("PromptLabPage", () => {
     renderLab();
 
     expect(await screen.findByRole("button", { name: /실험 만들기/ })).toBeDisabled();
-    expect(screen.getByText(/admin:write 권한이 필요합니다/)).toBeInTheDocument();
+    expect(screen.getByText(/admin:write 권한과/)).toBeInTheDocument();
   });
 
   it("creates an experiment and invalidates the list", async () => {
@@ -174,7 +183,7 @@ describe("PromptLabPage", () => {
 
     await screen.findByText("SQL 생성 품질");
     await user.click(screen.getByRole("button", { name: /실험 만들기/ }));
-    await user.type(await screen.findByLabelText(/^제목/), "요약 품질");
+    await user.type(within(await screen.findByRole("dialog")).getByLabelText(/^제목/), "요약 품질");
     await user.click(screen.getByRole("button", { name: "저장" }));
 
     await waitFor(() => {
@@ -210,7 +219,7 @@ describe("PromptLabPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "월별 매출 집계 테스트 케이스 실행" }));
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("비용이 발생합니다");
+    expect(dialog).toHaveTextContent("비용이 발생하며");
     await user.click(within(dialog).getByRole("button", { name: "실행" }));
 
     await waitFor(() => expect(api.bodies("POST /admin/prompt-lab/test-cases/ptc_1/run")).toHaveLength(1));
@@ -272,5 +281,71 @@ describe("PromptLabPage", () => {
 
     await screen.findByText("SQL 생성 품질");
     expect((await axe.run(container)).violations).toEqual([]);
+  });
+  it("creates an output contract with the reviewed strict flag", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...listHandlers(),
+      "POST /admin/prompt-lab/contracts": () => contracts.contracts[0],
+    });
+    renderLab("/prompts/lab?tab=contracts");
+    await user.click(await screen.findByRole("button", { name: "계약 추가" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.type(dialog.getByLabelText(/^이름/), "검증 계약");
+    await user.click(dialog.getByRole("checkbox", { name: /^엄격 모드/ }));
+    await user.click(dialog.getByRole("button", { name: "저장" }));
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/prompt-lab/contracts")[0]).toMatchObject({
+        name: "검증 계약",
+        type: "json",
+        strict: true,
+      }),
+    );
+  });
+  it("validates rubric JSON before creating evaluation criteria", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ ...listHandlers(), "POST /admin/prompt-lab/rubrics": () => rubrics.rubrics[0] });
+    renderLab("/prompts/lab?tab=rubrics");
+    await user.click(await screen.findByRole("button", { name: "평가 기준 추가" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.type(dialog.getByLabelText(/^이름/), "정확성 검사");
+    await user.type(dialog.getByLabelText("기준(JSON)"), "bad-json");
+    await user.click(dialog.getByRole("button", { name: "저장" }));
+    await dialog.findByText("올바른 JSON이 아닙니다.");
+    expect(api.bodies("POST /admin/prompt-lab/rubrics")).toHaveLength(0);
+    await user.clear(dialog.getByLabelText("기준(JSON)"));
+    await user.click(dialog.getByRole("button", { name: "저장" }));
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/prompt-lab/rubrics")[0]).toMatchObject({ name: "정확성 검사" }),
+    );
+  });
+  it("creates and deletes a saved case through the existing APIs", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...listHandlers(),
+      "POST /admin/prompt-lab/test-cases": () => experimentDetail.test_cases[0],
+      "DELETE /admin/prompt-lab/test-cases/ptc_1": () => ({ status: "deleted" }),
+    });
+    renderLab("/prompts/lab?exp=pexp_1");
+    await screen.findByText("월별 매출 집계");
+    await user.click(screen.getByRole("button", { name: "테스트 케이스 추가" }));
+    let dialog = within(screen.getByRole("dialog"));
+    await user.type(dialog.getByLabelText(/^이름/), "공개 검사");
+    await user.type(dialog.getByLabelText("모델"), "public-model-a");
+    await user.type(dialog.getByLabelText(/^사용자 프롬프트/), "공개 검증 입력");
+    await user.click(dialog.getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(api.bodies("POST /admin/prompt-lab/test-cases")[0]).toMatchObject({
+      experiment_id: "pexp_1",
+      name: "공개 검사",
+      models: ["public-model-a"],
+      messages: [{ role: "user", content: "공개 검증 입력" }],
+    });
+    await user.click(screen.getByRole("button", { name: "월별 매출 집계 테스트 케이스 삭제" }));
+    dialog = within(screen.getByRole("dialog"));
+    await user.click(dialog.getByRole("button", { name: "삭제" }));
+    await waitFor(() =>
+      expect(api.calls.some((row) => row.key === "DELETE /admin/prompt-lab/test-cases/ptc_1")).toBe(true),
+    );
   });
 });

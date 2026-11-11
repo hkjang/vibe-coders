@@ -38,6 +38,6 @@ export const gatewayFeatureModules = defineFeatureModules([
   {
     featureId: "prompts.lab",
     load: () => import("./prompt-lab/PromptLabPage").then((module) => module.PromptLabPage),
-    queryKeys: ["exp", "tab"],
+    queryKeys: ["exp", "tab", "q", "status", "sort", "page"],
   },
 ]);
