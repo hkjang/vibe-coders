@@ -5,7 +5,7 @@
   "name": "vibe-coders-v0.86.66-integrated-source-sbom",
   "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.66",
   "creationInfo": {
-    "created": "2026-11-11T04:03:46Z",
+    "created": "2026-11-11T04:34:38Z",
     "creators": [
       "Tool: Syft-1.51.0",
       "Tool: scripts/merge-source-sbom.mjs",
@@ -342,8 +342,8 @@
     },
     {
       "name": "stdlib",
-      "SPDXID": "SPDXRef-Package-go-stdlib-b17fc195ed46e5b5",
-      "versionInfo": "go1.26.10",
+      "SPDXID": "SPDXRef-Package-go-stdlib-4653a1b4e6ab56aa",
+      "versionInfo": "go1.26.11",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
@@ -353,7 +353,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/stdlib@1.26.10"
+          "referenceLocator": "pkg:golang/stdlib@1.26.11"
         }
       ]
     },
@@ -7002,7 +7002,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-go-stdlib-b17fc195ed46e5b5"
+      "relatedSpdxElement": "SPDXRef-Package-go-stdlib-4653a1b4e6ab56aa"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
