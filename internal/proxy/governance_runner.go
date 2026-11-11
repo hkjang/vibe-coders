@@ -38,6 +38,15 @@ const (
 )
 
 func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, prompt string) governanceRunResult {
+	return s.runGovernanceChatLimited(ctx, r, model, prompt, 0)
+}
+
+// A positive limit is only used by reviewed Golden runs. Provider enforcement
+// and monetary cost are not guaranteed by an output-token request parameter.
+func (s *Server) runGovernanceChatLimited(ctx context.Context, r *http.Request, model, prompt string, outputLimit int) governanceRunResult {
+	if outputLimit > 0 {
+		r = r.WithContext(ctx)
+	}
 	result := governanceRunResult{Model: model}
 	body, err := replayBodyForModel(prompt, model)
 	if err != nil {
@@ -46,6 +55,26 @@ func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, 
 	}
 	if expanded, _, _ := s.expandKnowledge(r, body); len(expanded) > 0 {
 		body = expanded
+	}
+	if outputLimit > 0 {
+		var request map[string]any
+		if json.Unmarshal(body, &request) != nil || request == nil {
+			result.Error = governanceRunErrRequestEncoding
+			return result
+		}
+		if _, exists := request["max_completion_tokens"]; exists {
+			request["max_completion_tokens"] = outputLimit
+			delete(request, "max_tokens")
+		} else {
+			request["max_tokens"] = outputLimit
+		}
+		request["n"] = 1
+		request["stream"] = false
+		body, err = json.Marshal(request)
+		if err != nil {
+			result.Error = governanceRunErrRequestEncoding
+			return result
+		}
 	}
 	provider, err := s.selectProvider(ctx, r, model)
 	if err != nil {

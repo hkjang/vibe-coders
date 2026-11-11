@@ -20,6 +20,7 @@ interface FormDialogProps<Input extends FieldValues, Output> {
   open: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
   submitLabel?: string;
+  pendingLabel?: string;
   /** External prerequisites may block submission without locking draft edits. */
   submitDisabled?: boolean;
   /** Optional plain-text keyboard scroll target, outside pending-disabled inputs. */
@@ -69,6 +70,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   open,
   returnFocusRef,
   submitLabel = "저장",
+  pendingLabel = "저장 중",
   submitDisabled = false,
   scrollHint,
   scrollBody = false,
@@ -206,7 +208,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
               focusedField.current = event.currentTarget;
             }}
           >
-            {pending ? "저장 중" : submitLabel}
+            {pending ? pendingLabel : submitLabel}
           </Button>
         </>
       }

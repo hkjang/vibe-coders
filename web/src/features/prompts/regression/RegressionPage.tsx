@@ -28,6 +28,7 @@ import { useGoldenPrompts, useGoldenWorkflows } from "./use-regression";
 import { DefinitionDialog } from "./editor/DefinitionDialog";
 import { newDefinitionTarget, type DefinitionTarget } from "./editor/definition-form";
 import { useDefinitionAccess } from "./editor/use-definition-write";
+import { RunControls } from "./runner/RunControls";
 import "./regression.css";
 
 export function RegressionPage() {
@@ -131,6 +132,35 @@ function RegressionContent({ owner }: { owner: FeatureReadOwner }) {
                 <Plus aria-hidden="true" />
                 {tab === "prompts" ? "기준 프롬프트 추가" : "검증 워크플로 추가"}
               </Button>
+            ) : null}
+            {tab !== "results" ? (
+              <RunControls
+                key={tab}
+                owner={owner}
+                allowed={access.allowed}
+                disabled={active.isFetching || active.isError}
+                catalog={
+                  tab === "workflows"
+                    ? { kind: "workflow", rows: workflowRows, revisions: workflows.data?.run_revisions }
+                    : { kind: "prompt", rows: promptRows, revisions: prompts.data?.run_revisions }
+                }
+                refresh={async () => {
+                  if (tab === "workflows") {
+                    const result = await workflows.refetch({ throwOnError: true });
+                    return {
+                      kind: "workflow",
+                      rows: result.data?.workflows ?? [],
+                      revisions: result.data?.run_revisions,
+                    };
+                  }
+                  const result = await prompts.refetch({ throwOnError: true });
+                  return {
+                    kind: "prompt",
+                    rows: result.data?.golden_prompts ?? [],
+                    revisions: result.data?.run_revisions,
+                  };
+                }}
+              />
             ) : null}
             <Button
               variant={access.allowed && tab !== "results" ? "secondary" : "primary"}
@@ -293,8 +323,8 @@ function RegressionContent({ owner }: { owner: FeatureReadOwner }) {
             />
             {!active.isPending && !active.isError && allRows.length === 0 ? (
               <p className="muted">
-                아직 등록된 항목이나 저장된 실행 결과가 없습니다. 세트를 등록하고 기존 실행 도구로 검사하면
-                결과를 조회할 수 있습니다.
+                아직 등록된 항목이나 저장된 실행 결과가 없습니다. 세트를 등록하고 회귀 검사를 실행하면 결과를
+                조회할 수 있습니다.
               </p>
             ) : null}
           </div>

@@ -94,6 +94,10 @@
   transform: translate(-50%, -50%);
 }
 
+.dialog-content-wide {
+  width: min(68rem, calc(100vw - var(--space-6) - var(--space-6)));
+}
+
 .dialog-header,
 .dialog-footer {
   display: flex;

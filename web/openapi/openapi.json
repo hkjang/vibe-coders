@@ -1877,6 +1877,9 @@
               "$ref": "#/components/schemas/GoldenPromptResult"
             },
             "type": "array"
+          },
+          "run_revisions": {
+            "$ref": "#/components/schemas/GoldenRunRevisions"
           }
         },
         "required": [
@@ -1926,6 +1929,170 @@
           "latency_ms",
           "response",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "GoldenPromptReviewedRunBody": {
+        "properties": {
+          "min_pass_rate": {
+            "nullable": true,
+            "type": "number"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "prompt_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "review": {
+            "$ref": "#/components/schemas/GoldenRunReview"
+          }
+        },
+        "required": [
+          "models",
+          "prompt_ids",
+          "review"
+        ],
+        "type": "object"
+      },
+      "GoldenPromptRunBody": {
+        "properties": {
+          "min_pass_rate": {
+            "nullable": true,
+            "type": "number"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "prompt_ids": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "review": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoldenRunReview"
+              }
+            ],
+            "nullable": true
+          },
+          "tag": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "type": "object"
+      },
+      "GoldenPromptRunFailure": {
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prompt_id": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "prompt_id",
+          "name",
+          "model",
+          "score"
+        ],
+        "type": "object"
+      },
+      "GoldenPromptRunResponse": {
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "execution_errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "failed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/GoldenPromptRunFailure"
+            },
+            "type": "array"
+          },
+          "max_output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_pass_rate": {
+            "type": "number"
+          },
+          "pass_rate": {
+            "type": "number"
+          },
+          "passed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "planned_total": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "regressed": {
+            "type": "boolean"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/GoldenPromptResult"
+            },
+            "type": "array"
+          },
+          "results_saved": {
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "passed",
+          "failed",
+          "pass_rate",
+          "min_pass_rate",
+          "regressed",
+          "results",
+          "failures"
         ],
         "type": "object"
       },
@@ -1986,6 +2153,36 @@
         ],
         "type": "object"
       },
+      "GoldenRunReview": {
+        "properties": {
+          "definitions": {
+            "$ref": "#/components/schemas/GoldenRunRevisions"
+          },
+          "max_calls": {
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "definitions",
+          "max_calls",
+          "max_output_tokens"
+        ],
+        "type": "object"
+      },
+      "GoldenRunRevisions": {
+        "additionalProperties": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "type": "object"
+      },
       "GoldenWorkflow": {
         "properties": {
           "created_at": {
@@ -2031,6 +2228,9 @@
       },
       "GoldenWorkflowListResponse": {
         "properties": {
+          "run_revisions": {
+            "$ref": "#/components/schemas/GoldenRunRevisions"
+          },
           "workflows": {
             "items": {
               "$ref": "#/components/schemas/GoldenWorkflow"
@@ -2040,6 +2240,197 @@
         },
         "required": [
           "workflows"
+        ],
+        "type": "object"
+      },
+      "GoldenWorkflowReviewedRunBody": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "min_pass_rate": {
+            "nullable": true,
+            "type": "number"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "review": {
+            "$ref": "#/components/schemas/GoldenRunReview"
+          }
+        },
+        "required": [
+          "id",
+          "models",
+          "review"
+        ],
+        "type": "object"
+      },
+      "GoldenWorkflowRunBody": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "min_pass_rate": {
+            "nullable": true,
+            "type": "number"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "review": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoldenRunReview"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "models"
+        ],
+        "type": "object"
+      },
+      "GoldenWorkflowRunFailure": {
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "step": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "step",
+          "name",
+          "model",
+          "score"
+        ],
+        "type": "object"
+      },
+      "GoldenWorkflowRunResponse": {
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "failed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/GoldenWorkflowRunFailure"
+            },
+            "type": "array"
+          },
+          "max_output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_pass_rate": {
+            "type": "number"
+          },
+          "pass_rate": {
+            "type": "number"
+          },
+          "passed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "planned_total": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "regressed": {
+            "type": "boolean"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/GoldenWorkflowRunStep"
+            },
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workflow_id": {
+            "type": "string"
+          },
+          "workflow_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "total",
+          "passed",
+          "failed",
+          "pass_rate",
+          "min_pass_rate",
+          "regressed",
+          "workflow_id",
+          "workflow_name",
+          "steps",
+          "failures"
+        ],
+        "type": "object"
+      },
+      "GoldenWorkflowRunStep": {
+        "properties": {
+          "cost_krw": {
+            "type": "number"
+          },
+          "error": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "number"
+          },
+          "step": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "step",
+          "name",
+          "model",
+          "score",
+          "passed",
+          "cost_krw",
+          "latency_ms"
         ],
         "type": "object"
       },
@@ -8303,7 +8694,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.66"
+    "version": "v0.86.67"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -12158,10 +12549,122 @@
     },
     "/admin/golden-prompts/run": {
       "post": {
+        "description": "Existing admin:write model execution. Optional review validates exact definition hashes before any model call, limits calls to 1..64 and requested output tokens per call to 1..4096, forces one completion, and stops further calls after cancellation or a 120 second deadline. Output-token requests are not a monetary cap or guarantee of provider enforcement. Definition snapshots are used after validation; there is no global idempotency or atomic audit guarantee. Omitted review preserves legacy behavior. Optional prompt_ids select exact IDs; omitted/empty selects the registry. Tag further filters selection. Prompt results are stored best-effort; reviewed responses report results_saved.",
         "operationId": "post__admin_golden_prompts_run",
+        "parameters": [
+          {
+            "description": "Return 422 with the normal result body on a regression, or on an incomplete reviewed execution.",
+            "in": "query",
+            "name": "fail_on_regression",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoldenPromptRunBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenPromptRunResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenPromptRunResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -12170,6 +12673,137 @@
           }
         ],
         "summary": "Run golden prompt regression",
+        "tags": [
+          "governance"
+        ]
+      }
+    },
+    "/admin/golden-prompts/run-reviewed": {
+      "post": {
+        "description": "Mandatory reviewed execution using the existing admin:write runner. Exact definition hashes, maximum 64 calls, requested output tokens 1..4096, one completion and a 120 second deadline are checked. Missing/null review is rejected before model calls. This distinct path prevents an older pod from silently ignoring new limits; never fall back to the legacy run path. Output-token requests are not a monetary cap or guarantee of provider enforcement. There is no global idempotency or atomic audit guarantee. Nonempty prompt_ids select exact IDs. Tag further filters selection. Prompt results are stored best-effort; reviewed responses report results_saved.",
+        "operationId": "post__admin_golden_prompts_run_reviewed",
+        "parameters": [
+          {
+            "description": "Return 422 with the normal result body on a regression, or on an incomplete reviewed execution.",
+            "in": "query",
+            "name": "fail_on_regression",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoldenPromptReviewedRunBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenPromptRunResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenPromptRunResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run reviewed golden prompt regression",
         "tags": [
           "governance"
         ]
@@ -12329,10 +12963,122 @@
     },
     "/admin/golden-workflows/run": {
       "post": {
+        "description": "Existing admin:write model execution. Optional review validates exact definition hashes before any model call, limits calls to 1..64 and requested output tokens per call to 1..4096, forces one completion, and stops further calls after cancellation or a 120 second deadline. Output-token requests are not a monetary cap or guarantee of provider enforcement. Definition snapshots are used after validation; there is no global idempotency or atomic audit guarantee. Omitted review preserves legacy behavior. Workflow steps are independent prompts executed for each selected model; outputs are not chained. Workflow-run results are returned only, not persisted as run history.",
         "operationId": "post__admin_golden_workflows_run",
+        "parameters": [
+          {
+            "description": "Return 422 with the normal result body on a regression, or on an incomplete reviewed execution.",
+            "in": "query",
+            "name": "fail_on_regression",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoldenWorkflowRunBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenWorkflowRunResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenWorkflowRunResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -12341,6 +13087,137 @@
           }
         ],
         "summary": "Run a golden workflow",
+        "tags": [
+          "governance"
+        ]
+      }
+    },
+    "/admin/golden-workflows/run-reviewed": {
+      "post": {
+        "description": "Mandatory reviewed execution using the existing admin:write runner. Exact definition hashes, maximum 64 calls, requested output tokens 1..4096, one completion and a 120 second deadline are checked. Missing/null review is rejected before model calls. This distinct path prevents an older pod from silently ignoring new limits; never fall back to the legacy run path. Output-token requests are not a monetary cap or guarantee of provider enforcement. There is no global idempotency or atomic audit guarantee. Workflow steps are independent prompts executed for each selected model; outputs are not chained. Workflow-run results are returned only, not persisted as run history.",
+        "operationId": "post__admin_golden_workflows_run_reviewed",
+        "parameters": [
+          {
+            "description": "Return 422 with the normal result body on a regression, or on an incomplete reviewed execution.",
+            "in": "query",
+            "name": "fail_on_regression",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoldenWorkflowReviewedRunBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenWorkflowRunResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenWorkflowRunResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Validation, authorization, changed review or lookup failure before execution"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run a reviewed golden workflow",
         "tags": [
           "governance"
         ]

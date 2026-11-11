@@ -23,7 +23,7 @@ const promptSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
-const resultSchema = z.object({
+export const goldenResultSchema = z.object({
   id: z.string().min(1),
   prompt_id: z.string().min(1),
   model: z.string(),
@@ -58,11 +58,15 @@ const uniqueIDs = (rows: readonly { id: string }[]) =>
   new Set(rows.map((row) => row.id)).size === rows.length;
 export const goldenPromptListSchema = z.object({
   golden_prompts: z.array(promptSchema).refine(uniqueIDs),
-  results: z.array(resultSchema).refine(uniqueIDs),
+  results: z.array(goldenResultSchema).refine(uniqueIDs),
+  run_revisions: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)).optional(),
 });
-export const goldenWorkflowListSchema = z.object({ workflows: z.array(workflowSchema).refine(uniqueIDs) });
+export const goldenWorkflowListSchema = z.object({
+  workflows: z.array(workflowSchema).refine(uniqueIDs),
+  run_revisions: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)).optional(),
+});
 export type GoldenPrompt = z.infer<typeof promptSchema>;
-export type GoldenResult = z.infer<typeof resultSchema>;
+export type GoldenResult = z.infer<typeof goldenResultSchema>;
 export type GoldenWorkflow = z.infer<typeof workflowSchema>;
 export type GoldenStep = z.infer<typeof stepSchema>;
 type PromptDefinitionBody = Pick<GoldenPromptWriteBody, "id" | "name" | "prompt" | "expected" | "tags">;
@@ -75,7 +79,7 @@ export const goldenEndpoints = {
   >()(
     "POST",
     "/admin/golden-prompts",
-    z.object({ golden_prompt: promptSchema, results: z.array(resultSchema) }),
+    z.object({ golden_prompt: promptSchema, results: z.array(goldenResultSchema) }),
   ),
   saveWorkflow: operation<
     WithBody<PostAdminGoldenWorkflowsData, WorkflowDefinitionBody>,

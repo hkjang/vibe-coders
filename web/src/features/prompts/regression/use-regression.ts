@@ -33,6 +33,7 @@ export function useGoldenPrompts(
         query: { limit, ...(promptID === undefined ? {} : { prompt_id: promptID }) },
         signal,
         routeId: regressionId,
+        cache: "no-store",
       });
       assertFeatureRead(owner, signal);
       if (promptID !== undefined && data.results.some((row) => row.prompt_id !== promptID))
@@ -55,6 +56,7 @@ export function useGoldenWorkflows(owner: FeatureReadOwner, refresh = true) {
       const data = await apiClient.request(endpoints.domains.prompts.golden.workflows, {
         signal,
         routeId: regressionId,
+        cache: "no-store",
       });
       assertFeatureRead(owner, signal);
       return projectWorkflows(data, credentialPrefixes);
