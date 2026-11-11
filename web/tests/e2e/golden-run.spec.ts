@@ -100,6 +100,30 @@ test("실행 중에는 중복 전송을 막고 실행 상태를 표시한다", a
   await expect(page.getByRole("dialog", { name: "회귀 검사 실행 결과" })).toBeVisible();
   fixture.check();
 });
+test("페이지와 검색을 바꾸어도 이전 선택과 호출 범위를 유지한다", async ({ page }) => {
+  const fixture = await installGoldenRunner(page);
+  const first = fixture.state.definitions.prompts[0];
+  if (!first) throw new Error("public fixture missing");
+  for (let index = 0; index < 23; index++) {
+    const id = `public-extra-${index}`;
+    fixture.state.definitions.prompts.push({ ...first, id, name: `추가 검사 ${index}` });
+    fixture.state.revisions[id] = "a".repeat(64);
+  }
+  const dialog = await prepare(page);
+  await dialog.getByRole("button", { name: "다음 정의" }).click();
+  await dialog.getByRole("checkbox", { name: "추가 검사 20", exact: true }).check();
+  await dialog.getByRole("button", { name: "이전 정의" }).click();
+  await expect(dialog.getByRole("checkbox", { name: "한글 답변 확인" })).toBeChecked();
+  const search = dialog.getByRole("textbox", { name: "정의 이름 검색" });
+  await search.fill("추가 검사 21");
+  await dialog.getByRole("checkbox", { name: "추가 검사 21", exact: true }).check();
+  await search.clear();
+  await expect(dialog.getByRole("checkbox", { name: "한글 답변 확인" })).toBeChecked();
+  await approve(dialog);
+  await expect(dialog.getByText("6회 / 64회", { exact: true })).toBeVisible();
+  expect(fixture.calls).toHaveLength(0);
+  fixture.check();
+});
 test("구 서버 실행 검토 미지원과 새로고침 직접 접근", async ({ page }) => {
   const fixture = await installGoldenRunner(page);
   fixture.state.capability = false;

@@ -251,3 +251,37 @@ it("민감한 식별자는 실행 선택값에도 노출하지 않는다", async
   expect(within(dialog).queryByRole("checkbox", { name: "민감한 식별자 정의" })).not.toBeInTheDocument();
   expect(dialog.innerHTML).not.toContain("corp_" + "x".repeat(40));
 });
+
+it("여러 페이지와 검색 결과에서 선택한 정의를 함께 유지한다", async () => {
+  const c = setup();
+  await screen.findByRole("link", { name: "한글 답변 확인" });
+  const first = goldenPrompts[0];
+  if (!first) throw new Error("public fixture missing");
+  for (let index = 0; index < 23; index++) {
+    const id = `public-extra-${index}`;
+    c.state.prompts.push({ ...first, id, name: `추가 검사 ${index}` });
+    c.state.revisions[id] = "a".repeat(64);
+  }
+  await act(() => c.client.invalidateQueries());
+  const dialog = await open(c);
+  await c.user.click(within(dialog).getByRole("button", { name: "다음 정의" }));
+  await c.user.click(within(dialog).getByRole("checkbox", { name: "추가 검사 20" }));
+  await c.user.click(within(dialog).getByRole("button", { name: "이전 정의" }));
+  expect(within(dialog).getByRole("checkbox", { name: "한글 답변 확인" })).toBeChecked();
+  const search = within(dialog).getByRole("textbox", { name: "정의 이름 검색" });
+  await c.user.type(search, "추가 검사 21");
+  await c.user.click(within(dialog).getByRole("checkbox", { name: "추가 검사 21" }));
+  await c.user.clear(search);
+  expect(within(dialog).getByRole("checkbox", { name: "한글 답변 확인" })).toBeChecked();
+  await approve(c, dialog);
+  expect(within(dialog).getByText("6회 / 64회")).toBeVisible();
+});
+it("선택 오류는 페이지와 무관하게 선택 그룹에 초점을 둔다", async () => {
+  const c = setup(),
+    dialog = await open(c);
+  await c.user.click(within(dialog).getByRole("button", { name: "선택 해제" }));
+  await c.user.click(within(dialog).getByRole("button", { name: "실행 내용 검토" }));
+  await waitFor(() => expect(within(dialog).getByText("실행할 기준 프롬프트")).toHaveFocus());
+  expect(within(dialog).getByText("실행할 정의를 선택하세요.")).toBeVisible();
+  expect(c.api.bodies("POST /admin/golden-prompts/run-reviewed")).toHaveLength(0);
+});

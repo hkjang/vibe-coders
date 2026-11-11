@@ -20,6 +20,7 @@ export function RunScope({
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const ids = useWatch({ control: form.control, name: "ids" });
+  const { ref: selectionRef } = form.register("ids");
   const rows = catalog.rows.filter(
     (row) =>
       canLinkRegressionID(row.id, prefixes) &&
@@ -35,7 +36,7 @@ export function RunScope({
           <Select
             {...control}
             name="ids"
-            ref={form.register("ids").ref}
+            ref={selectionRef}
             value={ids[0] ?? ""}
             onChange={(event) =>
               form.setValue("ids", event.target.value ? [event.target.value] : [], {
@@ -58,7 +59,11 @@ export function RunScope({
     );
   return (
     <fieldset className="regression-run-scope">
-      <legend>실행할 기준 프롬프트</legend>
+      {/* The persistent group label owns error focus. Options can unmount without
+          becoming the form field's source of truth or rebuilding its value. */}
+      <legend ref={selectionRef} tabIndex={-1}>
+        실행할 기준 프롬프트
+      </legend>
       <FormField label="정의 이름 검색">
         {(control) => (
           <Input
@@ -80,7 +85,24 @@ export function RunScope({
         </Button>
       </div>
       {rows.slice(current * 20, (current + 1) * 20).map((row) => (
-        <Checkbox key={row.id} value={row.id} label={row.name || "이름 없음"} {...form.register("ids")} />
+        <Checkbox
+          key={row.id}
+          name="ids"
+          value={row.id}
+          label={row.name || "이름 없음"}
+          checked={ids.includes(row.id)}
+          onChange={(event) => {
+            // Mounted checkbox refs are only a page, not the complete selection.
+            const selected = form.getValues("ids");
+            form.setValue(
+              "ids",
+              event.target.checked
+                ? [...new Set([...selected, row.id])]
+                : selected.filter((id) => id !== row.id),
+              { shouldDirty: true, shouldValidate: true },
+            );
+          }}
+        />
       ))}
       {!rows.length ? (
         <p className="muted">선택할 정의가 없습니다. 검색 조건이나 등록된 세트를 확인하세요.</p>

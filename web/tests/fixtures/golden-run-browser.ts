@@ -6,6 +6,8 @@ export async function installGoldenRunner(page: Page) {
   const fixture = await installDefinitionEditor(page);
   fixture.bootstrap.backend_version = "v0.86.67";
   const state = {
+    definitions: fixture.state,
+    revisions: structuredClone(promptRevisions),
     capability: true,
     lost: false,
     rejected: false,
@@ -28,7 +30,7 @@ export async function installGoldenRunner(page: Page) {
             ? {
                 golden_prompts: fixture.state.prompts,
                 results: [],
-                ...(state.capability ? { run_revisions: promptRevisions } : {}),
+                ...(state.capability ? { run_revisions: state.revisions } : {}),
               }
             : {
                 workflows: fixture.state.workflows,
