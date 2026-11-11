@@ -1,7 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 
-import { useAuth } from "@/app/auth/AuthProvider";
+import { LibraryBoundary } from "./LibraryBoundary";
+import { useLibraryOwner } from "./library-context";
+import { useLibraryAccess } from "./use-library-mutation";
 import { PromptAssetsTab } from "@/features/prompts/library/PromptAssetsTab";
 import { PromptDebtTab } from "@/features/prompts/library/PromptDebtTab";
 import { PromptSearchTab } from "@/features/prompts/library/PromptSearchTab";
@@ -22,10 +24,19 @@ const tabItems = [
 ];
 
 export function PromptLibraryPage(): React.JSX.Element {
-  const auth = useAuth();
+  return (
+    <LibraryBoundary>
+      <LibraryContent />
+    </LibraryBoundary>
+  );
+}
+
+function LibraryContent(): React.JSX.Element {
+  const owner = useLibraryOwner();
+  const access = useLibraryAccess();
   const queryClient = useQueryClient();
   const [tab, setTab] = useTabParam<TabId>(tabIds);
-  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
+  const canWrite = access.allowed;
 
   return (
     <div className="page-stack">
@@ -37,7 +48,12 @@ export function PromptLibraryPage(): React.JSX.Element {
         actions={
           <Button
             variant="primary"
-            onClick={() => void queryClient.invalidateQueries({ queryKey: ["prompts"] })}
+            onClick={() =>
+              void queryClient.invalidateQueries({
+                predicate: (query) =>
+                  query.queryKey.at(-2) === owner.marker && query.queryKey.at(-1) === owner.id,
+              })
+            }
           >
             <RefreshCw aria-hidden="true" /> 새로고침
           </Button>
@@ -46,7 +62,7 @@ export function PromptLibraryPage(): React.JSX.Element {
 
       {!canWrite ? (
         <InlineNotice tone="info" title="읽기 전용으로 열려 있습니다.">
-          자산 생성·삭제와 필터 저장에는 admin:write 권한이 필요합니다. 조회는 그대로 사용할 수 있습니다.
+          {access.reason} 초안은 유지되며 조회는 그대로 사용할 수 있습니다.
         </InlineNotice>
       ) : null}
 

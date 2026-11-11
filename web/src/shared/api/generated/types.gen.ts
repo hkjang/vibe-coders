@@ -4893,16 +4893,64 @@ export type PostAdminDwText2SqlFactResponses = {
 export type GetAdminExportCsvData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Trimmed keyword or tag search. Raw prompt text is searchable only with raw-view permission; otherwise only redacted prompt text is searched.
+         */
+        q?: string;
+        /**
+         * Optional programming language filter.
+         */
+        language?: string;
+        /**
+         * Optional client IP filter; does not widen the caller's team scope.
+         */
+        ip?: string;
+        /**
+         * Optional API key identifier filter; does not widen the caller's team scope.
+         */
+        api_key_id?: string;
+        /**
+         * Optional lower timestamp bound. Clients should send an ISO 8601 timestamp with a timezone; the existing handler forwards the trimmed string without format validation.
+         */
+        since?: string;
+        /**
+         * Optional decimal row limit. Empty, non-integer or non-positive values use 1000; values above 10000 clamp to 10000. Independent of /admin/prompts, whose limit is capped at 200.
+         */
+        limit?: string;
+    };
     url: '/admin/export.csv';
 };
 
+export type GetAdminExportCsvErrors = {
+    /**
+     * invalid_api_key: admin read authentication is required
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: only GET is supported; Allow: GET
+     */
+    405: AppError;
+    /**
+     * prompt_scope_failed or export_failed: no successful export; the error does not expose database details
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminExportCsvError = GetAdminExportCsvErrors[keyof GetAdminExportCsvErrors];
+
 export type GetAdminExportCsvResponses = {
     /**
-     * OK
+     * CSV columns: created_at, trace_id, request_id, endpoint, provider, model, api_key_id, client_ip, status_code, first_chunk_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, total_tokens, cost_krw, token_source, stream, languages, error. Empty results contain only the header. Cost is KRW with two decimal places; languages are joined with |.
      */
-    200: unknown;
+    200: string;
 };
+
+export type GetAdminExportCsvResponse = GetAdminExportCsvResponses[keyof GetAdminExportCsvResponses];
 
 export type GetAdminFallbackData = {
     body?: never;

@@ -1,26 +1,3 @@
-import { tokenStore } from "@/shared/auth/token-store";
-
-/**
- * Fetches a server-rendered CSV export and offers it as a download. These responses
- * are not JSON, so they bypass `apiClient` and carry the console headers by hand.
- */
-export async function downloadServerCsv(path: string, filename: string): Promise<void> {
-  const token = tokenStore.getAccessToken() || tokenStore.getLegacyToken();
-  const headers = new Headers({ "X-Vibe-UI": "app" });
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(path, { headers });
-  if (!response.ok) throw new Error(`내보내기에 실패했습니다. (HTTP ${response.status})`);
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-}
-
 export function assetStatusLabel(status: string | undefined): string {
   switch (status) {
     case "standard":
@@ -127,7 +104,7 @@ export function assetStatusTransitions(status: string | undefined): readonly Ass
 
 /** Only a draft can be submitted for review (`draft → pending`). */
 export function canSubmitAsset(status: string | undefined): boolean {
-  return (status ?? "draft") === "draft";
+  return status === "draft";
 }
 
 export interface DiffLine {
@@ -137,23 +114,22 @@ export interface DiffLine {
 }
 
 /**
- * Line-level difference between two version snapshots, matching the legacy
- * screen: a line present in only one side is shown as added or removed.
+ * Positional line comparison preserves repeated lines and reordered text.
+ * It intentionally reports both sides of shifted lines instead of hiding them.
  */
 export function diffPromptBodies(older: string, newer: string): readonly DiffLine[] {
   const oldLines = older.split("\n");
   const newLines = newer.split("\n");
-  const oldSet = new Set(oldLines);
-  const newSet = new Set(newLines);
   const lines: DiffLine[] = [];
   const max = Math.max(oldLines.length, newLines.length);
   for (let index = 0; index < max; index += 1) {
     const removed = oldLines[index];
     const added = newLines[index];
-    if (removed !== undefined && !newSet.has(removed)) {
+    if (removed === added) continue;
+    if (removed !== undefined) {
       lines.push({ key: `-${index}`, text: removed, tone: "removed" });
     }
-    if (added !== undefined && !oldSet.has(added)) {
+    if (added !== undefined) {
       lines.push({ key: `+${index}`, text: added, tone: "added" });
     }
   }

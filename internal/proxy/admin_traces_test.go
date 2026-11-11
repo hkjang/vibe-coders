@@ -289,6 +289,7 @@ func TestTeamScopedTraceListsFailClosedWhenTeamIdentityLookupFails(t *testing.T)
 	}{
 		{name: "React requests", path: "/admin/requests", app: true, code: "requests_failed", message: "요청 목록을 불러오지 못했습니다."},
 		{name: "LLM traces", path: "/admin/llm/traces", code: "llm_traces_failed", message: "trace list query failed"},
+		{name: "Prompt CSV", path: "/admin/export.csv", code: "prompt_scope_failed", message: "prompt export scope could not be resolved"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, gateway.URL+test.path, nil)

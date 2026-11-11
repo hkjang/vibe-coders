@@ -1,10 +1,11 @@
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PromptLibraryPage } from "@/features/prompts/library/PromptLibraryPage";
-import { apiFailure, mockApi } from "@/test/api";
+import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] as string[] }));
@@ -220,7 +221,7 @@ const assetUsageResponse = {
   ],
 };
 
-function mockAllEndpoints(overrides: Record<string, () => unknown> = {}) {
+function mockAllEndpoints(overrides: Record<string, ApiHandler> = {}) {
   return mockApi({
     "GET /admin/prompts": () => promptSearchResponse,
     "GET /admin/prompts/fingerprints": () => fingerprintResponse,
@@ -229,11 +230,18 @@ function mockAllEndpoints(overrides: Record<string, () => unknown> = {}) {
     "GET /admin/prompt-assets": () => assetsResponse,
     "POST /admin/templates": () => ({ template: assetsResponse.assets[0] }),
     "DELETE /admin/templates/refactor-basic": () => ({ id: "refactor-basic", status: "deleted" }),
-    "PATCH /admin/templates/refactor-basic": () => ({ template: assetsResponse.assets[0] }),
+    "PATCH /admin/templates/refactor-basic": ({ body }) => ({
+      template: { ...assetsResponse.assets[0], ...(body as object) },
+    }),
     "GET /admin/templates/refactor-basic/history": () => assetHistoryResponse,
     "GET /admin/templates/refactor-basic/usage": () => assetUsageResponse,
     "POST /admin/templates/refactor-basic/rollback": () => ({
-      template: assetsResponse.assets[0],
+      template: {
+        ...assetsResponse.assets[0],
+        body: assetHistoryResponse.history[1]?.body,
+        tags: assetHistoryResponse.history[1]?.tags,
+        description: "",
+      },
       restored_from: 1,
     }),
     "POST /admin/templates/refactor-basic/use": () => ({
@@ -263,7 +271,14 @@ afterEach(() => {
 });
 
 function render(route = "/prompts/library") {
-  return renderScreen(<PromptLibraryPage />, { route, path: "/prompts/library" });
+  return renderScreen(
+    <FeatureAccessContext.Provider
+      value={{ featureId: "prompts.library", permitted: true, readOnly: false, status: "preview" }}
+    >
+      <PromptLibraryPage />
+    </FeatureAccessContext.Provider>,
+    { route, path: "/prompts/library" },
+  );
 }
 
 describe("PromptLibraryPage", () => {
@@ -410,11 +425,6 @@ describe("PromptLibraryPage", () => {
       expect(api.bodies("PATCH /admin/templates/refactor-basic")).toEqual([
         {
           name: "기본 리팩터링 v2",
-          category: "refactor",
-          description: "레거시 자바 코드를 정리하는 표준 프롬프트",
-          body: "다음 코드를 읽고 가독성을 높여 리팩터링하세요.",
-          tags: ["java", "refactor"],
-          note: "",
         },
       ]),
     );
@@ -466,7 +476,7 @@ describe("PromptLibraryPage", () => {
     });
     render("/prompts/library?tab=assets&asset=refactor-basic");
 
-    await user.click(await screen.findByRole("button", { name: /사용 기록 남기고 복사/u }));
+    await user.click(await screen.findByRole("button", { name: /복사 및 사용 기록 요청/u }));
 
     await waitFor(() =>
       expect(api.calls.some((call) => call.key === "POST /admin/templates/refactor-basic/use")).toBe(true),
