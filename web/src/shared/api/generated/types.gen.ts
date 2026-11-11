@@ -2558,6 +2558,237 @@ export type StatusResponse = {
     status: string;
 };
 
+export type TeamConsoleCandidates = {
+    candidates?: Array<{
+        already_product?: boolean;
+        avg_cost_krw?: number;
+        fingerprint?: string;
+        requests?: number;
+        success_rate?: number;
+        task_type?: string;
+    }> | null;
+    since?: string;
+    team_id: string;
+};
+
+export type TeamConsoleDashboard = {
+    dashboard?: {
+        models?: Array<{
+            cost_krw?: number;
+            model?: string;
+            requests?: number;
+        }> | null;
+        recent_failures?: Array<{
+            created_at?: string;
+            error?: string;
+            id?: string;
+            model?: string;
+            status_code?: number;
+        }> | null;
+        team_keys?: Array<string> | null;
+        top_users?: Array<{
+            cost_krw?: number;
+            errors?: number;
+            requests?: number;
+            user_id?: string;
+        }> | null;
+        totals?: {
+            avg_latency_ms?: number;
+            cost_krw?: number;
+            errors?: number;
+            requests?: number;
+            success_rate?: number;
+            tokens?: number;
+        };
+    };
+    since?: string;
+    team_id: string;
+};
+
+export type TeamConsoleDecision = {
+    action: 'approve' | 'reject';
+    /**
+     * Optional for legacy compatibility. New UI requires a nonempty nonsecret reason.
+     */
+    reason?: string;
+    report_id: string;
+};
+
+export type TeamConsoleDecisionResult = {
+    approval_status: 'approved' | 'rejected';
+    report_id: string;
+};
+
+export type TeamConsoleOnboarding = {
+    note?: string;
+    /**
+     * Unavailable components. Zero/empty values for those components are not confirmed measurements.
+     */
+    partial_failures?: Array<'models' | 'skills' | 'mcp'>;
+    recommended_mcp?: Array<{
+        avg_latency_ms?: number;
+        calls?: number;
+        errors?: number;
+        ref?: string;
+        server_label?: string;
+        success_rate?: number;
+        tool_name?: string;
+    }> | null;
+    recommended_models?: Array<{
+        cost_krw?: number;
+        model?: string;
+        requests?: number;
+    }> | null;
+    recommended_skills?: Array<{
+        avg_latency_ms?: number;
+        errors?: number;
+        ok?: number;
+        runs?: number;
+        skill_name?: string;
+        success_rate?: number;
+        total_cost_krw?: number;
+    }> | null;
+    since?: string;
+    team_id: string;
+};
+
+export type TeamConsolePortal = {
+    accessible_skills?: Array<{
+        description?: string;
+        name?: string;
+        risk_level?: string;
+        version?: string;
+    }> | null;
+    api_key_count?: number;
+    api_keys?: Array<{
+        budget_limit_krw?: number;
+        expires_at?: string;
+        id?: string;
+        name?: string;
+        owner?: string;
+        role?: string;
+        status?: string;
+        user_id?: string;
+    }> | null;
+    budgets?: Array<{
+        burn_ratio?: number;
+        exhaustion_date?: string;
+        monthly_krw?: number;
+        note?: string;
+        on_track?: boolean;
+        projected_krw?: number;
+        projected_ratio?: number;
+        spent_krw?: number;
+    }> | null;
+    member_count?: number;
+    members?: Array<string> | null;
+    note?: string;
+    /**
+     * Unavailable components. Zero/empty values for those components are not confirmed measurements.
+     */
+    partial_failures?: Array<'budgets' | 'keys' | 'skills' | 'requests'>;
+    pending_skill_requests?: Array<{
+        created_at?: string;
+        id?: string;
+        reason?: string;
+        skill_name?: string;
+        user_id?: string;
+    }> | null;
+    since?: string;
+    skill_count?: number;
+    team_id: string;
+    usage?: {
+        avg_latency_ms?: number;
+        cost_krw?: number;
+        errors?: number;
+        requests?: number;
+        success_rate?: number;
+        tokens?: number;
+    };
+};
+
+export type TeamConsoleReport = {
+    approval_status?: string;
+    approved_at?: string;
+    approved_by?: string;
+    created_at?: string;
+    created_by?: string;
+    deliver_mattermost?: boolean;
+    id?: string;
+    kind?: string;
+    last_run_at?: string;
+    name?: string;
+    question?: string;
+    /**
+     * SHA-256 of the stored report fields. Changes even when a changed field is masked by the frontend; not a conditional-write token.
+     */
+    revision?: string;
+    schedule_enabled?: boolean;
+    schedule_interval?: string;
+    schema_name?: string;
+    sql?: string;
+    team?: string;
+    visibility?: string;
+};
+
+export type TeamConsoleReports = {
+    reports?: Array<TeamConsoleReport> | null;
+    since?: string;
+    team_id: string;
+};
+
+export type TeamConsoleRisk = {
+    blocked?: number;
+    blocked_prior_window?: number;
+    blocked_trend?: number;
+    /**
+     * Unavailable components. Zero/empty values for those components are not confirmed measurements.
+     */
+    partial_failures?: Array<'policy_current' | 'policy_prior' | 'secrets' | 'approvals'>;
+    pending_approvals?: number;
+    recent_violations?: Array<{
+        created_at?: string;
+        decision?: string;
+        endpoint?: string;
+        reason?: string;
+        risk_score?: number;
+        rule?: string;
+    }> | null;
+    secrets_by_type?: {
+        [key: string]: number;
+    };
+    secrets_total?: number;
+    since?: string;
+    team_id: string;
+    warned?: number;
+};
+
+export type TeamConsoleSavings = {
+    days_elapsed?: number;
+    days_in_month?: number;
+    last_month_krw?: number;
+    month_to_date_krw?: number;
+    on_track?: boolean;
+    projected_month_end_krw?: number;
+    projected_savings_krw?: number;
+    since?: string;
+    team_id: string;
+};
+
+export type TeamConsoleSkills = {
+    since?: string;
+    skills?: Array<{
+        avg_latency_ms?: number;
+        errors?: number;
+        ok?: number;
+        runs?: number;
+        skill_name?: string;
+        success_rate?: number;
+        total_cost_krw?: number;
+    }> | null;
+    team_id: string;
+};
+
 export type Text2SqlEmergencyChangeRequest = {
     disabled?: boolean | null;
     expected_review_token?: string | null;
@@ -13729,128 +13960,484 @@ export type GetSwaggerResponses = {
 export type GetTeamDashboardData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+        /**
+         * Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.
+         */
+        window?: string;
+    };
     url: '/team/dashboard';
 };
+
+export type GetTeamDashboardErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetTeamDashboardError = GetTeamDashboardErrors[keyof GetTeamDashboardErrors];
 
 export type GetTeamDashboardResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsoleDashboard;
 };
+
+export type GetTeamDashboardResponse = GetTeamDashboardResponses[keyof GetTeamDashboardResponses];
 
 export type GetTeamOnboardingData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+        /**
+         * Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.
+         */
+        window?: string;
+    };
     url: '/team/onboarding';
 };
+
+export type GetTeamOnboardingErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetTeamOnboardingError = GetTeamOnboardingErrors[keyof GetTeamOnboardingErrors];
 
 export type GetTeamOnboardingResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsoleOnboarding;
 };
+
+export type GetTeamOnboardingResponse = GetTeamOnboardingResponses[keyof GetTeamOnboardingResponses];
 
 export type GetTeamPortalData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+        /**
+         * Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.
+         */
+        window?: string;
+    };
     url: '/team/portal';
 };
+
+export type GetTeamPortalErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetTeamPortalError = GetTeamPortalErrors[keyof GetTeamPortalErrors];
 
 export type GetTeamPortalResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsolePortal;
 };
+
+export type GetTeamPortalResponse = GetTeamPortalResponses[keyof GetTeamPortalResponses];
 
 export type GetTeamReportsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+    };
     url: '/team/reports';
 };
+
+export type GetTeamReportsErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetTeamReportsError = GetTeamReportsErrors[keyof GetTeamReportsErrors];
 
 export type GetTeamReportsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsoleReports;
 };
 
+export type GetTeamReportsResponse = GetTeamReportsResponses[keyof GetTeamReportsResponses];
+
 export type PostTeamReportsData = {
-    body?: never;
+    body: TeamConsoleDecision;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+    };
     url: '/team/reports';
 };
+
+export type PostTeamReportsErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Report does not exist in the selected team
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostTeamReportsError = PostTeamReportsErrors[keyof PostTeamReportsErrors];
 
 export type PostTeamReportsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsoleDecisionResult;
 };
+
+export type PostTeamReportsResponse = PostTeamReportsResponses[keyof PostTeamReportsResponses];
 
 export type GetTeamRiskData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+        /**
+         * Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.
+         */
+        window?: string;
+    };
     url: '/team/risk';
 };
+
+export type GetTeamRiskErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetTeamRiskError = GetTeamRiskErrors[keyof GetTeamRiskErrors];
 
 export type GetTeamRiskResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsoleRisk;
 };
+
+export type GetTeamRiskResponse = GetTeamRiskResponses[keyof GetTeamRiskResponses];
 
 export type GetTeamSavingsChallengeData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+    };
     url: '/team/savings-challenge';
 };
+
+export type GetTeamSavingsChallengeErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetTeamSavingsChallengeError = GetTeamSavingsChallengeErrors[keyof GetTeamSavingsChallengeErrors];
 
 export type GetTeamSavingsChallengeResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsoleSavings;
 };
+
+export type GetTeamSavingsChallengeResponse = GetTeamSavingsChallengeResponses[keyof GetTeamSavingsChallengeResponses];
 
 export type GetTeamSkillsPopularData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+        /**
+         * Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.
+         */
+        window?: string;
+    };
     url: '/team/skills/popular';
 };
+
+export type GetTeamSkillsPopularErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetTeamSkillsPopularError = GetTeamSkillsPopularErrors[keyof GetTeamSkillsPopularErrors];
 
 export type GetTeamSkillsPopularResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsoleSkills;
 };
+
+export type GetTeamSkillsPopularResponse = GetTeamSkillsPopularResponses[keyof GetTeamSkillsPopularResponses];
 
 export type GetTeamTemplatesCandidatesData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional team ID or name override, honored only with admin:read or when authentication is disabled.
+         */
+        team?: string;
+        /**
+         * Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.
+         */
+        window?: string;
+        /**
+         * Minimum repeated requests; missing/invalid uses 3 and the store clamps values below 2 to 2. Maximum 15 candidates.
+         */
+        min_count?: number;
+    };
     url: '/team/templates/candidates';
 };
+
+export type GetTeamTemplatesCandidatesErrors = {
+    /**
+     * No associated team, invalid JSON, invalid action or reason
+     */
+    400: AppError;
+    /**
+     * Access token required
+     */
+    401: AppError;
+    /**
+     * team:read scope required
+     */
+    403: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Scope or required data could not be read, or decision failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetTeamTemplatesCandidatesError = GetTeamTemplatesCandidatesErrors[keyof GetTeamTemplatesCandidatesErrors];
 
 export type GetTeamTemplatesCandidatesResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: TeamConsoleCandidates;
 };
+
+export type GetTeamTemplatesCandidatesResponse = GetTeamTemplatesCandidatesResponses[keyof GetTeamTemplatesCandidatesResponses];
 
 export type PostTrackingCspReportData = {
     body?: never;

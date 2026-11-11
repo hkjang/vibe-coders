@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { TeamPage } from "@/features/access/team/TeamPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
@@ -11,7 +12,10 @@ const authRuntime = vi.hoisted(() => ({ scopes: ["team:read"] as string[] }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ role: "team_manager", scopes: authRuntime.scopes }) };
+  return {
+    useAuth: () =>
+      testAuth({ role: "team_manager", scopes: authRuntime.scopes, user: { team_id: "platform" } }),
+  };
 });
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -78,6 +82,7 @@ const pendingReports = {
       last_run_at: "",
       team: "platform",
       visibility: "team",
+      revision: "a".repeat(64),
       approval_status: "pending",
       approved_by: "",
       approved_at: "",
@@ -97,6 +102,7 @@ const pendingReports = {
       last_run_at: "",
       team: "platform",
       visibility: "team",
+      revision: "a".repeat(64),
       approval_status: "approved",
       approved_by: "usr_lead",
       approved_at: "2026-08-02T00:00:00Z",
@@ -111,7 +117,14 @@ describe("TeamPage", () => {
 
   it("renders the team dashboard totals", async () => {
     mockApi(handlers());
-    renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+    renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team" },
+    );
 
     expect(await screen.findByText("usr_alpha")).toBeVisible();
     expect(screen.getByText("upstream error")).toBeVisible();
@@ -120,10 +133,19 @@ describe("TeamPage", () => {
 
   it("shows empty states for the async team cards", async () => {
     mockApi(handlers());
-    renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+    renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team" },
+    );
 
-    expect(await screen.findByText("실행된 Skill이 없습니다.")).toBeVisible();
-    expect(screen.getByText("공유된 리포트가 없습니다.")).toBeVisible();
+    expect(await screen.findAllByText("아직 기록된 항목이 없습니다.")).not.toHaveLength(0);
+    expect(screen.getByRole("table", { name: "팀 공용 리포트" })).toHaveTextContent(
+      "아직 기록된 항목이 없습니다.",
+    );
   });
 
   it("surfaces the request id when the dashboard fails", async () => {
@@ -134,7 +156,14 @@ describe("TeamPage", () => {
         },
       }),
     );
-    renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+    renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team" },
+    );
 
     const alerts = await screen.findAllByRole("alert");
     expect(alerts.some((node) => node.textContent?.includes("req_team_1"))).toBe(true);
@@ -143,7 +172,14 @@ describe("TeamPage", () => {
   it("warns when the caller has no team:read scope", async () => {
     authRuntime.scopes = ["chat:completion"];
     mockApi(handlers());
-    renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+    renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team" },
+    );
 
     expect(await screen.findByText("팀 조회 권한이 없습니다.")).toBeVisible();
     expect(screen.queryByLabelText("팀")).toBeNull();
@@ -152,7 +188,14 @@ describe("TeamPage", () => {
   it("passes ?team= through only for operators with admin:read", async () => {
     authRuntime.scopes = ["team:read", "admin:read"];
     const api = mockApi(handlers());
-    renderScreen(<TeamPage />, { path: "/team/*", route: "/team?team=platform" });
+    renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team?team=platform" },
+    );
 
     await screen.findByText("usr_alpha");
     expect(api.calls.find((call) => call.key === "GET /team/dashboard")?.options.query).toEqual({
@@ -179,7 +222,14 @@ describe("TeamPage", () => {
         pending_skill_requests: [],
       }),
     });
-    renderScreen(<TeamPage />, { path: "/team/*", route: "/team?tab=portal" });
+    renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team?tab=portal" },
+    );
 
     expect(await screen.findByText("빌드")).toBeVisible();
     expect(screen.getByRole("tab", { name: "팀 포털" })).toHaveAttribute("aria-selected", "true");
@@ -198,17 +248,27 @@ describe("TeamPage", () => {
         "POST /team/reports": () => ({ report_id: "rep_1", approval_status: "approved" }),
       }),
     );
-    renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+    renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team" },
+    );
 
     await screen.findByText("주간 비용");
     const [pendingApprove, decidedApprove] = screen.getAllByRole("button", { name: "승인" });
     expect(decidedApprove).toBeDisabled();
     await user.click(pendingApprove as HTMLElement);
     const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/변경 사유/u), "검토 완료");
     await user.click(within(dialog).getByRole("button", { name: "승인" }));
 
     await waitFor(() => {
-      expect(api.bodies("POST /team/reports")).toEqual([{ report_id: "rep_1", action: "approve" }]);
+      expect(api.bodies("POST /team/reports")).toEqual([
+        { report_id: "rep_1", action: "approve", reason: "검토 완료" },
+      ]);
     });
   });
 
@@ -220,22 +280,39 @@ describe("TeamPage", () => {
         "POST /team/reports": () => ({ report_id: "rep_1", approval_status: "rejected" }),
       }),
     );
-    renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+    renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team" },
+    );
 
     await screen.findByText("주간 비용");
     const [pendingReject] = screen.getAllByRole("button", { name: "반려" });
     await user.click(pendingReject as HTMLElement);
     const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/변경 사유/u), "검토 완료");
     await user.click(within(dialog).getByRole("button", { name: "반려" }));
 
     await waitFor(() => {
-      expect(api.bodies("POST /team/reports")).toEqual([{ report_id: "rep_1", action: "reject" }]);
+      expect(api.bodies("POST /team/reports")).toEqual([
+        { report_id: "rep_1", action: "reject", reason: "검토 완료" },
+      ]);
     });
   });
 
   it("has no automated accessibility violations", async () => {
     mockApi(handlers());
-    const { container } = renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+    const { container } = renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "team.home", permitted: true, readOnly: false, status: "preview" }}
+      >
+        <TeamPage />
+      </FeatureAccessContext.Provider>,
+      { path: "/team/*", route: "/team" },
+    );
 
     await screen.findByText("usr_alpha");
     expect((await axe.run(container)).violations).toEqual([]);

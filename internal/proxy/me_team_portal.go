@@ -26,10 +26,11 @@ func (s *Server) handleTeamPortal(w http.ResponseWriter, r *http.Request) {
 	// Usage summary (totals + top users double as member activity).
 	dash, err := s.db.TeamDashboardSince(ctx, keys, since, 10)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_portal_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "team data unavailable", "server_error", "team_portal_failed")
 		return
 	}
 
+	failures := teamPartialFailures{}
 	// Budget status: only this team's budgets.
 	budgets := []map[string]any{}
 	if statuses, err := s.db.BudgetStatuses(ctx, time.Now().UTC()); err == nil {
@@ -39,11 +40,13 @@ func (s *Server) handleTeamPortal(w http.ResponseWriter, r *http.Request) {
 			}
 			budgets = append(budgets, map[string]any{
 				"monthly_krw": st.Budget.MonthlyKRW, "spent_krw": round1(st.SpentKRW),
-				"burn_ratio": round1(st.BurnRatio), "projected_krw": round1(st.ProjectedKRW),
-				"projected_ratio": round1(st.ProjectedRatio), "on_track": st.OnTrack,
+				"burn_ratio": st.BurnRatio, "projected_krw": round1(st.ProjectedKRW),
+				"projected_ratio": st.ProjectedRatio, "on_track": st.OnTrack,
 				"exhaustion_date": st.ExhaustionDate, "note": st.Budget.Note,
 			})
 		}
+	} else {
+		failures.add("budgets", err)
 	}
 
 	// API keys belonging to the team (public projection — never includes the secret).
@@ -63,6 +66,8 @@ func (s *Server) handleTeamPortal(w http.ResponseWriter, r *http.Request) {
 				memberSet[id] = true
 			}
 		}
+	} else {
+		failures.add("keys", err)
 	}
 	for _, u := range dash.TopUsers {
 		if u.UserID != "" {
@@ -85,6 +90,8 @@ func (s *Server) handleTeamPortal(w http.ResponseWriter, r *http.Request) {
 				"name": sk.Name, "description": sk.Description, "version": sk.Version, "risk_level": sk.RiskLevel,
 			})
 		}
+	} else {
+		failures.add("skills", err)
 	}
 	pendingRequests := []map[string]any{}
 	if reqs, err := s.db.ListSkillAccessRequests(ctx, ""); err == nil {
@@ -97,6 +104,8 @@ func (s *Server) handleTeamPortal(w http.ResponseWriter, r *http.Request) {
 				"reason": rq.Reason, "created_at": rq.CreatedAt,
 			})
 		}
+	} else {
+		failures.add("requests", err)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -104,9 +113,10 @@ func (s *Server) handleTeamPortal(w http.ResponseWriter, r *http.Request) {
 		"since":   since.UTC().Format(time.RFC3339),
 		"usage": map[string]any{
 			"requests": dash.Totals.Requests, "cost_krw": round1(dash.Totals.CostKRW),
-			"errors": dash.Totals.Errors, "success_rate": round1(dash.Totals.SuccessRate),
+			"errors": dash.Totals.Errors, "success_rate": dash.Totals.SuccessRate,
 			"avg_latency_ms": dash.Totals.AvgLatencyMS,
 		},
+		"partial_failures":       failures,
 		"budgets":                budgets,
 		"api_keys":               apiKeys,
 		"api_key_count":          len(apiKeys),

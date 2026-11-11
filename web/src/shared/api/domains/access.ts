@@ -270,6 +270,7 @@ export interface SkillFeedbackBody {
 export interface DecideTeamReportBody {
   report_id: string;
   action: "approve" | "reject";
+  reason?: string;
 }
 
 /* -------------------------------------------------------------- endpoints */
@@ -527,11 +528,10 @@ export const accessEndpoints = {
       teamReportsSchema,
       teamWindowQuery,
     ),
-    decideReport: operation<WithBody<PostTeamReportsData, DecideTeamReportBody>, unknown>()(
-      "POST",
-      "/team/reports",
-      teamReportDecisionSchema,
-    ),
+    decideReport: operation<
+      WithQuery<WithBody<PostTeamReportsData, DecideTeamReportBody>, TeamWindowQuery>,
+      unknown
+    >()("POST", "/team/reports", teamReportDecisionSchema, teamWindowQuery),
     savingsChallenge: operation<WithQuery<GetTeamSavingsChallengeData, TeamWindowQuery>, unknown>()(
       "GET",
       "/team/savings-challenge",

@@ -8087,6 +8087,731 @@
         ],
         "type": "object"
       },
+      "TeamConsoleCandidates": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "properties": {
+                "already_product": {
+                  "type": "boolean"
+                },
+                "avg_cost_krw": {
+                  "type": "number"
+                },
+                "fingerprint": {
+                  "type": "string"
+                },
+                "requests": {
+                  "type": "integer"
+                },
+                "success_rate": {
+                  "type": "number"
+                },
+                "task_type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "type": "object"
+      },
+      "TeamConsoleDashboard": {
+        "properties": {
+          "dashboard": {
+            "properties": {
+              "models": {
+                "items": {
+                  "properties": {
+                    "cost_krw": {
+                      "type": "number"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "requests": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "recent_failures": {
+                "items": {
+                  "properties": {
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "status_code": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "team_keys": {
+                "items": {
+                  "type": "string"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "top_users": {
+                "items": {
+                  "properties": {
+                    "cost_krw": {
+                      "type": "number"
+                    },
+                    "errors": {
+                      "type": "integer"
+                    },
+                    "requests": {
+                      "type": "integer"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "totals": {
+                "properties": {
+                  "avg_latency_ms": {
+                    "type": "number"
+                  },
+                  "cost_krw": {
+                    "type": "number"
+                  },
+                  "errors": {
+                    "type": "integer"
+                  },
+                  "requests": {
+                    "type": "integer"
+                  },
+                  "success_rate": {
+                    "type": "number"
+                  },
+                  "tokens": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "since": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "type": "object"
+      },
+      "TeamConsoleDecision": {
+        "properties": {
+          "action": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "Optional for legacy compatibility. New UI requires a nonempty nonsecret reason.",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "report_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "report_id",
+          "action"
+        ],
+        "type": "object"
+      },
+      "TeamConsoleDecisionResult": {
+        "properties": {
+          "approval_status": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "report_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "report_id",
+          "approval_status"
+        ],
+        "type": "object"
+      },
+      "TeamConsoleOnboarding": {
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "partial_failures": {
+            "description": "Unavailable components. Zero/empty values for those components are not confirmed measurements.",
+            "items": {
+              "enum": [
+                "models",
+                "skills",
+                "mcp"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "recommended_mcp": {
+            "items": {
+              "properties": {
+                "avg_latency_ms": {
+                  "type": "number"
+                },
+                "calls": {
+                  "type": "integer"
+                },
+                "errors": {
+                  "type": "integer"
+                },
+                "ref": {
+                  "type": "string"
+                },
+                "server_label": {
+                  "type": "string"
+                },
+                "success_rate": {
+                  "type": "number"
+                },
+                "tool_name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "recommended_models": {
+            "items": {
+              "properties": {
+                "cost_krw": {
+                  "type": "number"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "requests": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "recommended_skills": {
+            "items": {
+              "properties": {
+                "avg_latency_ms": {
+                  "type": "number"
+                },
+                "errors": {
+                  "type": "integer"
+                },
+                "ok": {
+                  "type": "integer"
+                },
+                "runs": {
+                  "type": "integer"
+                },
+                "skill_name": {
+                  "type": "string"
+                },
+                "success_rate": {
+                  "type": "number"
+                },
+                "total_cost_krw": {
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "type": "object"
+      },
+      "TeamConsolePortal": {
+        "properties": {
+          "accessible_skills": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "risk_level": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "api_key_count": {
+            "type": "integer"
+          },
+          "api_keys": {
+            "items": {
+              "properties": {
+                "budget_limit_krw": {
+                  "type": "number"
+                },
+                "expires_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "user_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "budgets": {
+            "items": {
+              "properties": {
+                "burn_ratio": {
+                  "type": "number"
+                },
+                "exhaustion_date": {
+                  "type": "string"
+                },
+                "monthly_krw": {
+                  "type": "number"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "on_track": {
+                  "type": "boolean"
+                },
+                "projected_krw": {
+                  "type": "number"
+                },
+                "projected_ratio": {
+                  "type": "number"
+                },
+                "spent_krw": {
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "member_count": {
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "note": {
+            "type": "string"
+          },
+          "partial_failures": {
+            "description": "Unavailable components. Zero/empty values for those components are not confirmed measurements.",
+            "items": {
+              "enum": [
+                "budgets",
+                "keys",
+                "skills",
+                "requests"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "pending_skill_requests": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "skill_name": {
+                  "type": "string"
+                },
+                "user_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "skill_count": {
+            "type": "integer"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "usage": {
+            "properties": {
+              "avg_latency_ms": {
+                "type": "number"
+              },
+              "cost_krw": {
+                "type": "number"
+              },
+              "errors": {
+                "type": "integer"
+              },
+              "requests": {
+                "type": "integer"
+              },
+              "success_rate": {
+                "type": "number"
+              },
+              "tokens": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "type": "object"
+      },
+      "TeamConsoleReport": {
+        "properties": {
+          "approval_status": {
+            "type": "string"
+          },
+          "approved_at": {
+            "type": "string"
+          },
+          "approved_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "deliver_mattermost": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_run_at": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "revision": {
+            "description": "SHA-256 of the stored report fields. Changes even when a changed field is masked by the frontend; not a conditional-write token.",
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "schedule_enabled": {
+            "type": "boolean"
+          },
+          "schedule_interval": {
+            "type": "string"
+          },
+          "schema_name": {
+            "type": "string"
+          },
+          "sql": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TeamConsoleReports": {
+        "properties": {
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/TeamConsoleReport"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "type": "object"
+      },
+      "TeamConsoleRisk": {
+        "properties": {
+          "blocked": {
+            "type": "integer"
+          },
+          "blocked_prior_window": {
+            "type": "integer"
+          },
+          "blocked_trend": {
+            "type": "integer"
+          },
+          "partial_failures": {
+            "description": "Unavailable components. Zero/empty values for those components are not confirmed measurements.",
+            "items": {
+              "enum": [
+                "policy_current",
+                "policy_prior",
+                "secrets",
+                "approvals"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "pending_approvals": {
+            "type": "integer"
+          },
+          "recent_violations": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "decision": {
+                  "type": "string"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "risk_score": {
+                  "type": "number"
+                },
+                "rule": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "secrets_by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "secrets_total": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "warned": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "type": "object"
+      },
+      "TeamConsoleSavings": {
+        "properties": {
+          "days_elapsed": {
+            "type": "integer"
+          },
+          "days_in_month": {
+            "type": "integer"
+          },
+          "last_month_krw": {
+            "type": "number"
+          },
+          "month_to_date_krw": {
+            "type": "number"
+          },
+          "on_track": {
+            "type": "boolean"
+          },
+          "projected_month_end_krw": {
+            "type": "number"
+          },
+          "projected_savings_krw": {
+            "type": "number"
+          },
+          "since": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "type": "object"
+      },
+      "TeamConsoleSkills": {
+        "properties": {
+          "since": {
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "properties": {
+                "avg_latency_ms": {
+                  "type": "number"
+                },
+                "errors": {
+                  "type": "integer"
+                },
+                "ok": {
+                  "type": "integer"
+                },
+                "runs": {
+                  "type": "integer"
+                },
+                "skill_name": {
+                  "type": "string"
+                },
+                "success_rate": {
+                  "type": "number"
+                },
+                "total_cost_krw": {
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "type": "object"
+      },
       "Text2SQLEmergencyChangeRequest": {
         "nullable": true,
         "properties": {
@@ -8694,7 +9419,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.69"
+    "version": "v0.86.70"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -26745,10 +27470,108 @@
     },
     "/team/dashboard": {
       "get": {
+        "description": "Team-scoped existing self-service API. With authentication enabled, requires team:read; admin:read additionally permits the team query override. Without authentication an explicit team query is required. Usage may match team ID and name; report/risk membership uses the resolved input team exactly. Scope lookup failure returns an error rather than broadening access. Responses are no-store. Reads are independent, not an atomic snapshot; lists are bounded where stated, not server-paginated.",
         "operationId": "get__team_dashboard",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsoleDashboard"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26764,10 +27587,108 @@
     },
     "/team/onboarding": {
       "get": {
+        "description": "Team-scoped existing self-service API. With authentication enabled, requires team:read; admin:read additionally permits the team query override. Without authentication an explicit team query is required. Usage may match team ID and name; report/risk membership uses the resolved input team exactly. Scope lookup failure returns an error rather than broadening access. Responses are no-store. Reads are independent, not an atomic snapshot; lists are bounded where stated, not server-paginated.",
         "operationId": "get__team_onboarding",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsoleOnboarding"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26783,10 +27704,108 @@
     },
     "/team/portal": {
       "get": {
+        "description": "Team-scoped existing self-service API. With authentication enabled, requires team:read; admin:read additionally permits the team query override. Without authentication an explicit team query is required. Usage may match team ID and name; report/risk membership uses the resolved input team exactly. Scope lookup failure returns an error rather than broadening access. Responses are no-store. Reads are independent, not an atomic snapshot; lists are bounded where stated, not server-paginated.",
         "operationId": "get__team_portal",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsolePortal"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26802,10 +27821,99 @@
     },
     "/team/reports": {
       "get": {
+        "description": "Team-scoped existing self-service API. With authentication enabled, requires team:read; admin:read additionally permits the team query override. Without authentication an explicit team query is required. Usage may match team ID and name; report/risk membership uses the resolved input team exactly. Scope lookup failure returns an error rather than broadening access. Responses are no-store. Reads are independent, not an atomic snapshot; lists are bounded where stated, not server-paginated.",
         "operationId": "get__team_reports",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsoleReports"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26819,10 +27927,119 @@
         ]
       },
       "post": {
+        "description": "Decides a report belonging exactly to the selected team. Uses the same existing team:read authorization as GET; admin:read permits a team override. action is trimmed/case-insensitive approve or reject. Optional reason is trimmed, at most 500 Unicode characters, and included in the existing best-effort admin audit. Legacy callers may omit reason. The server does not require a pending status or an expected revision: revision is a UI preflight comparison aid, not atomic compare-and-swap or idempotency. No automatic retry is safe.",
         "operationId": "post__team_reports",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamConsoleDecision"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsoleDecisionResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Report does not exist in the selected team"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26838,10 +28055,108 @@
     },
     "/team/risk": {
       "get": {
+        "description": "Team-scoped existing self-service API. With authentication enabled, requires team:read; admin:read additionally permits the team query override. Without authentication an explicit team query is required. Usage may match team ID and name; report/risk membership uses the resolved input team exactly. Scope lookup failure returns an error rather than broadening access. Responses are no-store. Reads are independent, not an atomic snapshot; lists are bounded where stated, not server-paginated.",
         "operationId": "get__team_risk",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsoleRisk"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26857,10 +28172,99 @@
     },
     "/team/savings-challenge": {
       "get": {
+        "description": "Team-scoped existing self-service API. With authentication enabled, requires team:read; admin:read additionally permits the team query override. Without authentication an explicit team query is required. Usage may match team ID and name; report/risk membership uses the resolved input team exactly. Scope lookup failure returns an error rather than broadening access. Responses are no-store. Reads are independent, not an atomic snapshot; lists are bounded where stated, not server-paginated.",
         "operationId": "get__team_savings_challenge",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsoleSavings"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26876,10 +28280,108 @@
     },
     "/team/skills/popular": {
       "get": {
+        "description": "Team-scoped existing self-service API. With authentication enabled, requires team:read; admin:read additionally permits the team query override. Without authentication an explicit team query is required. Usage may match team ID and name; report/risk membership uses the resolved input team exactly. Scope lookup failure returns an error rather than broadening access. Responses are no-store. Reads are independent, not an atomic snapshot; lists are bounded where stated, not server-paginated.",
         "operationId": "get__team_skills_popular",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsoleSkills"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26895,10 +28397,117 @@
     },
     "/team/templates/candidates": {
       "get": {
+        "description": "Team-scoped existing self-service API. With authentication enabled, requires team:read; admin:read additionally permits the team query override. Without authentication an explicit team query is required. Usage may match team ID and name; report/risk membership uses the resolved input team exactly. Scope lookup failure returns an error rather than broadening access. Responses are no-store. Reads are independent, not an atomic snapshot; lists are bounded where stated, not server-paginated.",
         "operationId": "get__team_templates_candidates",
+        "parameters": [
+          {
+            "description": "Optional team ID or name override, honored only with admin:read or when authentication is disabled.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing parseWindow syntax. Default 7d for risk, 90d for onboarding, 30d otherwise; no upper timestamp bound. Supports 7d and 30d; the UI sends 2160h for 90 days because parseWindow does not recognize 90d. Other Go durations, including nonpositive ones, retain existing handler behavior.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Minimum repeated requests; missing/invalid uses 3 and the store clamps values below 2 to 2. Maximum 15 candidates.",
+            "in": "query",
+            "name": "min_count",
+            "schema": {
+              "default": 3,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamConsoleCandidates"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No associated team, invalid JSON, invalid action or reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Access token required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "team:read scope required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Scope or required data could not be read, or decision failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

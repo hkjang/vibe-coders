@@ -1,4 +1,5 @@
 import { defineFeatureModules } from "@/features/feature-module";
+import { teamTableQueryKeys } from "./team/team-table-keys";
 
 // Screens owned by the access domain.
 export const accessFeatureModules = defineFeatureModules([
@@ -15,6 +16,6 @@ export const accessFeatureModules = defineFeatureModules([
   {
     featureId: "team.home",
     load: () => import("./team/TeamPage").then((module) => module.TeamPage),
-    queryKeys: ["tab", "team"],
+    queryKeys: ["tab", "team", "window", "report_status", ...teamTableQueryKeys],
   },
 ]);

@@ -37,7 +37,7 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 
 export const sensitiveQueryRejectionStateKey = "appSensitiveQueryKeys";
-const preservedRejectionKeys = new Set(["q"]);
+const preservedRejectionKeys = new Set(["q", "team"]);
 const preservedBooleanStateKeys = [
   "providerDetailRejected",
   "providerSearchRejected",
