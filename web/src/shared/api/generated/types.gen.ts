@@ -484,6 +484,59 @@ export type GatewayMcpInfoResponse = {
     }>;
 };
 
+export type GoldenPrompt = {
+    created_at: string;
+    expected: string;
+    id: string;
+    name: string;
+    prompt: string;
+    tags: Array<string> | null;
+    updated_at: string;
+};
+
+export type GoldenPromptListResponse = {
+    golden_prompts: Array<GoldenPrompt>;
+    results: Array<GoldenPromptResult>;
+};
+
+export type GoldenPromptResult = {
+    cost_krw: number;
+    created_at: string;
+    id: string;
+    latency_ms: number;
+    model: string;
+    passed: boolean;
+    prompt_id: string;
+    response: string;
+    score: number;
+};
+
+export type GoldenWorkflow = {
+    created_at: string;
+    description: string;
+    id: string;
+    name: string;
+    steps: Array<GoldenWorkflowStep> | null;
+    tags: Array<string> | null;
+    updated_at: string;
+};
+
+export type GoldenWorkflowListResponse = {
+    workflows: Array<GoldenWorkflow>;
+};
+
+export type GoldenWorkflowStep = {
+    baseline_score?: number;
+    contract_id?: string;
+    expected: string;
+    name: string;
+    prompt: string;
+    rubric_id?: string;
+    selected_model?: string;
+    source_run_id?: string;
+    task_type?: string;
+};
+
 export type GroupedStat = {
     average_latency_ms: number;
     cost_krw: number;
@@ -2468,7 +2521,7 @@ export type UiSystemStatus = {
 
 export type UiTelemetryEventRequest = {
     event: 'visit' | 'legacy_fallback';
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     /**
      * 128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.
      */
@@ -2476,7 +2529,7 @@ export type UiTelemetryEventRequest = {
 };
 
 export type UiTelemetryFeatureCount = {
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     legacy_opens: number;
     visits: number;
 };
@@ -4829,16 +4882,48 @@ export type GetAdminGatewayMcpInfoResponse = GetAdminGatewayMcpInfoResponses[key
 export type GetAdminGoldenPromptsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Filters results only; the complete prompt registry is still returned.
+         */
+        prompt_id?: string;
+        /**
+         * Recent results in descending creation time. No cursor or total count. Values above 200 are capped; invalid/nonpositive values use 50.
+         */
+        limit?: number;
+    };
     url: '/admin/golden-prompts';
 };
+
+export type GetAdminGoldenPromptsErrors = {
+    /**
+     * Existing authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminGoldenPromptsError = GetAdminGoldenPromptsErrors[keyof GetAdminGoldenPromptsErrors];
 
 export type GetAdminGoldenPromptsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: GoldenPromptListResponse;
 };
+
+export type GetAdminGoldenPromptsResponse = GetAdminGoldenPromptsResponses[keyof GetAdminGoldenPromptsResponses];
 
 export type PostAdminGoldenPromptsData = {
     body?: never;
@@ -4875,12 +4960,35 @@ export type GetAdminGoldenWorkflowsData = {
     url: '/admin/golden-workflows';
 };
 
+export type GetAdminGoldenWorkflowsErrors = {
+    /**
+     * Existing authorization, method or storage error
+     */
+    401: AppError;
+    /**
+     * Existing authorization, method or storage error
+     */
+    405: AppError;
+    /**
+     * Existing authorization, method or storage error
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminGoldenWorkflowsError = GetAdminGoldenWorkflowsErrors[keyof GetAdminGoldenWorkflowsErrors];
+
 export type GetAdminGoldenWorkflowsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: GoldenWorkflowListResponse;
 };
+
+export type GetAdminGoldenWorkflowsResponse = GetAdminGoldenWorkflowsResponses[keyof GetAdminGoldenWorkflowsResponses];
 
 export type PostAdminGoldenWorkflowsData = {
     body?: never;

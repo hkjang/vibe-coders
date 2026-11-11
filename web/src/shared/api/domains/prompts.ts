@@ -2,6 +2,7 @@
 // here with `operation()` from "@/shared/api/endpoint-factory" and a zod schema
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
+import { goldenEndpoints } from "./golden";
 
 import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
@@ -282,6 +283,7 @@ export interface SavedFilterCreateBody {
 }
 
 export const promptsEndpoints = {
+  golden: goldenEndpoints,
   search: operation<WithQuery<GetAdminPromptsData, PromptSearchQuery>, unknown>()(
     "GET",
     "/admin/prompts",

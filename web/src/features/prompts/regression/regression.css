@@ -1,0 +1,55 @@
+.regression-cell {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.regression-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+}
+.regression-filters label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.regression-search {
+  flex: 1;
+  min-width: min(100%, 16rem);
+}
+.regression-text {
+  min-width: 0;
+}
+.regression-text pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 20rem;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-background);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.regression-metadata {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+}
+.regression-metadata dt {
+  color: var(--color-muted);
+}
+.regression-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.regression-step {
+  border-bottom: 1px solid var(--color-border);
+  padding-block: var(--space-3);
+}
+.regression-steps {
+  padding-inline-start: var(--space-6);
+}
