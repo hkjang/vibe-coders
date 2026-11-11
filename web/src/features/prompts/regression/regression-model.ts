@@ -22,11 +22,12 @@ export const canLinkRegressionID = (id: string, prefixes: readonly string[]) =>
 /** Project stored text before it enters the screen's Query cache. IDs retain identity
  * internally, but are separately checked before display or URL navigation. */
 export function projectPrompts(
-  data: { golden_prompts: GoldenPrompt[]; results: GoldenResult[] },
+  data: { golden_prompts: GoldenPrompt[]; results: GoldenResult[]; run_revisions?: Record<string, string> },
   prefixes: readonly string[],
 ) {
   const safe = (value: string) => safeRegressionText(value, prefixes);
   return {
+    ...(data.run_revisions ? { run_revisions: data.run_revisions } : {}),
     golden_prompts: data.golden_prompts.map((row) => ({
       ...row,
       name: safe(row.name),
@@ -37,9 +38,13 @@ export function projectPrompts(
     results: data.results.map((row) => ({ ...row, model: safe(row.model), response: safe(row.response) })),
   };
 }
-export function projectWorkflows(data: { workflows: GoldenWorkflow[] }, prefixes: readonly string[]) {
+export function projectWorkflows(
+  data: { workflows: GoldenWorkflow[]; run_revisions?: Record<string, string> },
+  prefixes: readonly string[],
+) {
   const safe = (value: string) => safeRegressionText(value, prefixes);
   return {
+    ...(data.run_revisions ? { run_revisions: data.run_revisions } : {}),
     workflows: data.workflows.map((row) => ({
       ...row,
       name: safe(row.name),

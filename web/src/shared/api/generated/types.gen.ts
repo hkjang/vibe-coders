@@ -497,6 +497,7 @@ export type GoldenPrompt = {
 export type GoldenPromptListResponse = {
     golden_prompts: Array<GoldenPrompt>;
     results: Array<GoldenPromptResult>;
+    run_revisions?: GoldenRunRevisions;
 };
 
 export type GoldenPromptResult = {
@@ -509,6 +510,47 @@ export type GoldenPromptResult = {
     prompt_id: string;
     response: string;
     score: number;
+};
+
+export type GoldenPromptReviewedRunBody = {
+    min_pass_rate?: number | null;
+    models: Array<string>;
+    prompt_ids: Array<string>;
+    review: GoldenRunReview;
+};
+
+export type GoldenPromptRunBody = {
+    min_pass_rate?: number | null;
+    models: Array<string>;
+    prompt_ids?: Array<string> | null;
+    review?: GoldenRunReview | null;
+    tag?: string | null;
+};
+
+export type GoldenPromptRunFailure = {
+    model: string;
+    name: string;
+    prompt_id: string;
+    score: number;
+};
+
+export type GoldenPromptRunResponse = {
+    complete?: boolean;
+    execution_errors?: {
+        [key: string]: string;
+    };
+    failed: number;
+    failures: Array<GoldenPromptRunFailure>;
+    max_output_tokens?: number;
+    min_pass_rate: number;
+    pass_rate: number;
+    passed: number;
+    planned_total?: number;
+    regressed: boolean;
+    results: Array<GoldenPromptResult>;
+    results_saved?: boolean;
+    timeout_seconds?: number;
+    total: number;
 };
 
 export type GoldenPromptWriteBody = {
@@ -526,6 +568,16 @@ export type GoldenPromptWriteResponse = {
     results: Array<GoldenPromptResult>;
 };
 
+export type GoldenRunReview = {
+    definitions: GoldenRunRevisions;
+    max_calls: number;
+    max_output_tokens: number;
+};
+
+export type GoldenRunRevisions = {
+    [key: string]: string;
+};
+
 export type GoldenWorkflow = {
     created_at: string;
     description: string;
@@ -537,7 +589,57 @@ export type GoldenWorkflow = {
 };
 
 export type GoldenWorkflowListResponse = {
+    run_revisions?: GoldenRunRevisions;
     workflows: Array<GoldenWorkflow>;
+};
+
+export type GoldenWorkflowReviewedRunBody = {
+    id: string;
+    min_pass_rate?: number | null;
+    models: Array<string>;
+    review: GoldenRunReview;
+};
+
+export type GoldenWorkflowRunBody = {
+    id: string;
+    min_pass_rate?: number | null;
+    models: Array<string>;
+    review?: GoldenRunReview | null;
+};
+
+export type GoldenWorkflowRunFailure = {
+    model: string;
+    name: string;
+    score: number;
+    step: number;
+};
+
+export type GoldenWorkflowRunResponse = {
+    complete?: boolean;
+    failed: number;
+    failures: Array<GoldenWorkflowRunFailure>;
+    max_output_tokens?: number;
+    min_pass_rate: number;
+    pass_rate: number;
+    passed: number;
+    planned_total?: number;
+    regressed: boolean;
+    steps: Array<GoldenWorkflowRunStep>;
+    timeout_seconds?: number;
+    total: number;
+    workflow_id: string;
+    workflow_name: string;
+};
+
+export type GoldenWorkflowRunStep = {
+    cost_krw: number;
+    error?: string;
+    latency_ms: number;
+    model: string;
+    name: string;
+    passed: boolean;
+    score: number;
+    step: number;
 };
 
 export type GoldenWorkflowStep = {
@@ -5007,18 +5109,120 @@ export type PostAdminGoldenPromptsResponses = {
 export type PostAdminGoldenPromptsResponse = PostAdminGoldenPromptsResponses[keyof PostAdminGoldenPromptsResponses];
 
 export type PostAdminGoldenPromptsRunData = {
-    body?: never;
+    body: GoldenPromptRunBody;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Return 422 with the normal result body on a regression, or on an incomplete reviewed execution.
+         */
+        fail_on_regression?: '1';
+    };
     url: '/admin/golden-prompts/run';
 };
+
+export type PostAdminGoldenPromptsRunErrors = {
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    400: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    401: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    404: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    405: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    409: AppError;
+    /**
+     * OK
+     */
+    422: GoldenPromptRunResponse;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminGoldenPromptsRunError = PostAdminGoldenPromptsRunErrors[keyof PostAdminGoldenPromptsRunErrors];
 
 export type PostAdminGoldenPromptsRunResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: GoldenPromptRunResponse;
 };
+
+export type PostAdminGoldenPromptsRunResponse = PostAdminGoldenPromptsRunResponses[keyof PostAdminGoldenPromptsRunResponses];
+
+export type PostAdminGoldenPromptsRunReviewedData = {
+    body: GoldenPromptReviewedRunBody;
+    path?: never;
+    query?: {
+        /**
+         * Return 422 with the normal result body on a regression, or on an incomplete reviewed execution.
+         */
+        fail_on_regression?: '1';
+    };
+    url: '/admin/golden-prompts/run-reviewed';
+};
+
+export type PostAdminGoldenPromptsRunReviewedErrors = {
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    400: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    401: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    404: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    405: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    409: AppError;
+    /**
+     * OK
+     */
+    422: GoldenPromptRunResponse;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminGoldenPromptsRunReviewedError = PostAdminGoldenPromptsRunReviewedErrors[keyof PostAdminGoldenPromptsRunReviewedErrors];
+
+export type PostAdminGoldenPromptsRunReviewedResponses = {
+    /**
+     * OK
+     */
+    200: GoldenPromptRunResponse;
+};
+
+export type PostAdminGoldenPromptsRunReviewedResponse = PostAdminGoldenPromptsRunReviewedResponses[keyof PostAdminGoldenPromptsRunReviewedResponses];
 
 export type GetAdminGoldenWorkflowsData = {
     body?: never;
@@ -5099,18 +5303,120 @@ export type PostAdminGoldenWorkflowsResponses = {
 export type PostAdminGoldenWorkflowsResponse = PostAdminGoldenWorkflowsResponses[keyof PostAdminGoldenWorkflowsResponses];
 
 export type PostAdminGoldenWorkflowsRunData = {
-    body?: never;
+    body: GoldenWorkflowRunBody;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Return 422 with the normal result body on a regression, or on an incomplete reviewed execution.
+         */
+        fail_on_regression?: '1';
+    };
     url: '/admin/golden-workflows/run';
 };
+
+export type PostAdminGoldenWorkflowsRunErrors = {
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    400: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    401: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    404: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    405: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    409: AppError;
+    /**
+     * OK
+     */
+    422: GoldenWorkflowRunResponse;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminGoldenWorkflowsRunError = PostAdminGoldenWorkflowsRunErrors[keyof PostAdminGoldenWorkflowsRunErrors];
 
 export type PostAdminGoldenWorkflowsRunResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: GoldenWorkflowRunResponse;
 };
+
+export type PostAdminGoldenWorkflowsRunResponse = PostAdminGoldenWorkflowsRunResponses[keyof PostAdminGoldenWorkflowsRunResponses];
+
+export type PostAdminGoldenWorkflowsRunReviewedData = {
+    body: GoldenWorkflowReviewedRunBody;
+    path?: never;
+    query?: {
+        /**
+         * Return 422 with the normal result body on a regression, or on an incomplete reviewed execution.
+         */
+        fail_on_regression?: '1';
+    };
+    url: '/admin/golden-workflows/run-reviewed';
+};
+
+export type PostAdminGoldenWorkflowsRunReviewedErrors = {
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    400: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    401: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    404: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    405: AppError;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    409: AppError;
+    /**
+     * OK
+     */
+    422: GoldenWorkflowRunResponse;
+    /**
+     * Validation, authorization, changed review or lookup failure before execution
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminGoldenWorkflowsRunReviewedError = PostAdminGoldenWorkflowsRunReviewedErrors[keyof PostAdminGoldenWorkflowsRunReviewedErrors];
+
+export type PostAdminGoldenWorkflowsRunReviewedResponses = {
+    /**
+     * OK
+     */
+    200: GoldenWorkflowRunResponse;
+};
+
+export type PostAdminGoldenWorkflowsRunReviewedResponse = PostAdminGoldenWorkflowsRunReviewedResponses[keyof PostAdminGoldenWorkflowsRunReviewedResponses];
 
 export type GetAdminHeatmapData = {
     body?: never;

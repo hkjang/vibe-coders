@@ -264,8 +264,10 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/replay", []string{"get"}, "governance", "Request replay", false},
 	{"/admin/golden-prompts", []string{"get", "post"}, "governance", "List / create golden prompts", false},
 	{"/admin/golden-prompts/run", []string{"post"}, "governance", "Run golden prompt regression", false},
+	{"/admin/golden-prompts/run-reviewed", []string{"post"}, "governance", "Run reviewed golden prompt regression", false},
 	{"/admin/golden-workflows", []string{"get", "post"}, "governance", "List / create golden workflows", false},
 	{"/admin/golden-workflows/run", []string{"post"}, "governance", "Run a golden workflow", false},
+	{"/admin/golden-workflows/run-reviewed", []string{"post"}, "governance", "Run a reviewed golden workflow", false},
 	{"/admin/prompt-products", []string{"get", "post", "delete"}, "governance", "Prompt products (promote/list/delete)", false},
 	{"/admin/prompt-products/candidates", []string{"get"}, "governance", "Prompt product candidates", false},
 	{"/admin/prompts/fingerprints", []string{"get"}, "governance", "Prompt fingerprints", false},
@@ -639,6 +641,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichGoldenReadOpenAPI(key, op, responses)
 	case "post /admin/golden-prompts", "post /admin/golden-workflows":
 		enrichGoldenWriteOpenAPI(key, op, responses)
+	case "post /admin/golden-prompts/run", "post /admin/golden-workflows/run", "post /admin/golden-prompts/run-reviewed", "post /admin/golden-workflows/run-reviewed":
+		enrichGoldenRunOpenAPI(key, op, responses)
 	case "get /admin/gateway-mcp/info", "get /admin/mcp/contracts", "post /admin/mcp/contracts", "delete /admin/mcp/contracts", "post /admin/mcp/contracts/validate":
 		enrichMCPContractsOpenAPI(key, op, responses)
 	case "post /admin/mcp/route/explain", "post /admin/mcp/test":
@@ -1069,6 +1073,9 @@ func appUIOpenAPISchemas() map[string]any {
 		"UIBootstrapResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"backend_version", "ui_version", "api_version", "ui", "authentication", "roles", "permissions", "capabilities", "allowed_features", "migration_registry", "system_status", "legacy_route_map"}, "properties": map[string]any{"backend_version": map[string]any{"type": "string"}, "ui_version": map[string]any{"type": "string"}, "api_version": map[string]any{"type": "string"}, "ui": schemaRef("UIRuntimeConfig"), "authentication": schemaRef("UIAuthentication"), "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}, "roles": stringArray, "permissions": stringArray, "capabilities": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"raw_prompt_view"}, "properties": map[string]any{"raw_prompt_view": map[string]any{"type": "boolean"}}}, "allowed_features": stringArray, "migration_registry": map[string]any{"type": "array", "items": schemaRef("MigrationFeature")}, "system_status": schemaRef("UISystemStatus"), "legacy_route_map": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}},
 	}
 	for name, schema := range goldenReadOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range goldenRunOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range billingDashboardOpenAPISchemas() {

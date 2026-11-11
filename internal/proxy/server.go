@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.66"
+var AppVersion = "v0.86.67"
 
 type Server struct {
 	cfg      config.Config
@@ -581,8 +581,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/replay", s.handleReplay)
 	mux.HandleFunc("/admin/golden-prompts", s.handleGoldenPrompts)
 	mux.HandleFunc("/admin/golden-prompts/run", s.handleGoldenRun)
+	mux.HandleFunc("/admin/golden-prompts/run-reviewed", s.handleGoldenReviewedRun)
 	mux.HandleFunc("/admin/golden-workflows", s.handleGoldenWorkflows)
 	mux.HandleFunc("/admin/golden-workflows/run", s.handleGoldenWorkflowRun)
+	mux.HandleFunc("/admin/golden-workflows/run-reviewed", s.handleGoldenWorkflowReviewedRun)
 	mux.HandleFunc("/admin/prompt-products", s.handlePromptProducts)
 	mux.HandleFunc("/admin/prompt-products/candidates", s.handlePromptProductCandidates)
 	mux.HandleFunc("/admin/contexts", s.handleContexts)

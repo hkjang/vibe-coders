@@ -508,7 +508,7 @@ func (s *Server) handleGoldenPrompts(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_results_failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"golden_prompts": prompts, "results": results})
+		writeJSON(w, http.StatusOK, map[string]any{"golden_prompts": prompts, "results": results, "run_revisions": goldenPromptRevisions(prompts)})
 	case http.MethodPost:
 		var payload struct {
 			ID       string   `json:"id"`
@@ -722,6 +722,15 @@ func safeRate(n, total int) float64 {
 //	?fail_on_regression=1 → returns HTTP 422 when not all checks pass, so a CI
 //	step using `curl --fail` (or a non-zero exit) flags the regression.
 func (s *Server) handleGoldenRun(w http.ResponseWriter, r *http.Request) {
+	s.handleGoldenRunMode(w, r, false)
+}
+
+// A distinct path prevents older pods from silently ignoring reviewed limits.
+func (s *Server) handleGoldenReviewedRun(w http.ResponseWriter, r *http.Request) {
+	s.handleGoldenRunMode(w, r, true)
+}
+
+func (s *Server) handleGoldenRunMode(w http.ResponseWriter, r *http.Request, requireReview bool) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -731,12 +740,18 @@ func (s *Server) handleGoldenRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var payload struct {
-		Models      []string `json:"models"`
-		Tag         string   `json:"tag"`
-		MinPassRate *float64 `json:"min_pass_rate"`
+		Models      []string         `json:"models"`
+		Tag         string           `json:"tag"`
+		MinPassRate *float64         `json:"min_pass_rate"`
+		PromptIDs   []string         `json:"prompt_ids"`
+		Review      *goldenRunReview `json:"review"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if requireReview && (payload.Review == nil || len(payload.PromptIDs) == 0) {
+		writeOpenAIError(w, http.StatusBadRequest, "review and selected prompt ids are required", "invalid_request_error", "golden_run_review")
 		return
 	}
 	models := normalizeModelList(payload.Models)
@@ -750,16 +765,25 @@ func (s *Server) handleGoldenRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tag := strings.TrimSpace(payload.Tag)
+	prompts, valid := selectGoldenRunPrompts(w, prompts, payload.PromptIDs, tag)
+	if !valid || !checkGoldenRunReview(w, payload.Review, goldenPromptRevisions(prompts), len(prompts), len(models), payload.MinPassRate) {
+		return
+	}
+	ctx, cancel := goldenRunContext(r.Context(), payload.Review)
+	defer cancel()
 
 	results := []store.GoldenPromptResult{}
 	failures := []map[string]any{}
+	executionErrors := map[string]string{}
+	resultsSaved := true
 	total, passed := 0, 0
+runLoop:
 	for _, p := range prompts {
-		if tag != "" && !containsString(p.Tags, tag) {
-			continue
-		}
 		for _, model := range models {
-			run := s.runGovernanceChat(r.Context(), r, model, p.Prompt)
+			if payload.Review != nil && ctx.Err() != nil {
+				break runLoop
+			}
+			run := s.runGovernanceChatLimited(ctx, r, model, p.Prompt, goldenOutputLimit(payload.Review))
 			score, ok := scoreGoldenResponse(p.Expected, run.Response)
 			if run.Error != "" {
 				ok = false
@@ -770,8 +794,11 @@ func (s *Server) handleGoldenRun(w http.ResponseWriter, r *http.Request) {
 			}
 			if run.Error != "" {
 				result.Response = "ERROR: " + run.Error
+				executionErrors[result.ID] = run.Error
 			}
-			_ = s.db.InsertGoldenPromptResult(r.Context(), result)
+			if err := s.db.InsertGoldenPromptResult(r.Context(), result); err != nil {
+				resultsSaved = false
+			}
 			results = append(results, result)
 			total++
 			if ok {
@@ -799,8 +826,13 @@ func (s *Server) handleGoldenRun(w http.ResponseWriter, r *http.Request) {
 		"pass_rate": passRate, "min_pass_rate": minPassRate,
 		"regressed": regressed, "failures": failures, "results": results,
 	}
+	addGoldenRunCompletion(body, len(prompts)*len(models), total, ctx, payload.Review)
+	if payload.Review != nil {
+		body["execution_errors"] = executionErrors
+		body["results_saved"] = resultsSaved
+	}
 	status := http.StatusOK
-	if regressed && strings.TrimSpace(r.URL.Query().Get("fail_on_regression")) == "1" {
+	if (regressed || body["complete"] == false) && strings.TrimSpace(r.URL.Query().Get("fail_on_regression")) == "1" {
 		status = http.StatusUnprocessableEntity
 	}
 	writeJSON(w, status, body)
@@ -820,7 +852,7 @@ func (s *Server) handleGoldenWorkflows(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_workflows_failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"workflows": wfs})
+		writeJSON(w, http.StatusOK, map[string]any{"workflows": wfs, "run_revisions": goldenWorkflowRevisions(wfs)})
 	case http.MethodPost:
 		var wf store.GoldenWorkflow
 		if err := json.NewDecoder(r.Body).Decode(&wf); err != nil {
@@ -878,6 +910,14 @@ func (s *Server) handleGoldenWorkflows(w http.ResponseWriter, r *http.Request) {
 //
 //	?fail_on_regression=1 → HTTP 422 when pass_rate < min_pass_rate (CI gate).
 func (s *Server) handleGoldenWorkflowRun(w http.ResponseWriter, r *http.Request) {
+	s.handleGoldenWorkflowRunMode(w, r, false)
+}
+
+func (s *Server) handleGoldenWorkflowReviewedRun(w http.ResponseWriter, r *http.Request) {
+	s.handleGoldenWorkflowRunMode(w, r, true)
+}
+
+func (s *Server) handleGoldenWorkflowRunMode(w http.ResponseWriter, r *http.Request, requireReview bool) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -887,12 +927,17 @@ func (s *Server) handleGoldenWorkflowRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var payload struct {
-		ID          string   `json:"id"`
-		Models      []string `json:"models"`
-		MinPassRate *float64 `json:"min_pass_rate"`
+		ID          string           `json:"id"`
+		Models      []string         `json:"models"`
+		MinPassRate *float64         `json:"min_pass_rate"`
+		Review      *goldenRunReview `json:"review"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if requireReview && payload.Review == nil {
+		writeOpenAIError(w, http.StatusBadRequest, "review is required", "invalid_request_error", "golden_run_review")
 		return
 	}
 	if strings.TrimSpace(payload.ID) == "" {
@@ -909,13 +954,22 @@ func (s *Server) handleGoldenWorkflowRun(w http.ResponseWriter, r *http.Request)
 		writeOpenAIError(w, http.StatusNotFound, "workflow not found", "invalid_request_error", "workflow_not_found")
 		return
 	}
+	if !checkGoldenRunReview(w, payload.Review, goldenWorkflowRevisions([]store.GoldenWorkflow{wf}), len(wf.Steps), len(models), payload.MinPassRate) {
+		return
+	}
+	ctx, cancel := goldenRunContext(r.Context(), payload.Review)
+	defer cancel()
 
 	steps := []map[string]any{}
 	failures := []map[string]any{}
 	total, passed := 0, 0
+runLoop:
 	for _, model := range models {
 		for idx, step := range wf.Steps {
-			run := s.runGovernanceChat(r.Context(), r, model, step.Prompt)
+			if payload.Review != nil && ctx.Err() != nil {
+				break runLoop
+			}
+			run := s.runGovernanceChatLimited(ctx, r, model, step.Prompt, goldenOutputLimit(payload.Review))
 			score, ok := scoreGoldenResponse(step.Expected, run.Response)
 			if run.Error != "" {
 				ok = false
@@ -928,6 +982,9 @@ func (s *Server) handleGoldenWorkflowRun(w http.ResponseWriter, r *http.Request)
 				"step": idx + 1, "name": stepName, "model": model,
 				"score": score, "passed": ok, "cost_krw": run.CostKRW, "latency_ms": run.LatencyMS,
 			})
+			if payload.Review != nil {
+				steps[len(steps)-1]["error"] = run.Error
+			}
 			total++
 			if ok {
 				passed++
@@ -955,8 +1012,9 @@ func (s *Server) handleGoldenWorkflowRun(w http.ResponseWriter, r *http.Request)
 		"pass_rate": passRate, "min_pass_rate": minPassRate,
 		"regressed": regressed, "failures": failures, "steps": steps,
 	}
+	addGoldenRunCompletion(body, len(wf.Steps)*len(models), total, ctx, payload.Review)
 	status := http.StatusOK
-	if regressed && strings.TrimSpace(r.URL.Query().Get("fail_on_regression")) == "1" {
+	if (regressed || body["complete"] == false) && strings.TrimSpace(r.URL.Query().Get("fail_on_regression")) == "1" {
 		status = http.StatusUnprocessableEntity
 	}
 	writeJSON(w, status, body)

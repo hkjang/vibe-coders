@@ -55,13 +55,14 @@ func goldenReadOpenAPISchemas() map[string]any {
 		}),
 		"GoldenPromptListResponse": object([]string{"golden_prompts", "results"}, map[string]any{
 			"golden_prompts": array("GoldenPrompt"), "results": array("GoldenPromptResult"),
+			"run_revisions": schemaRef("GoldenRunRevisions"),
 		}),
 		"GoldenWorkflowStep": object([]string{"name", "prompt", "expected"}, stepFields),
 		"GoldenWorkflow": object([]string{"id", "name", "description", "steps", "tags", "created_at", "updated_at"}, map[string]any{
 			"id": text, "name": text, "description": text, "tags": strings, "created_at": text, "updated_at": text,
 			"steps": map[string]any{"type": "array", "nullable": true, "items": schemaRef("GoldenWorkflowStep")},
 		}),
-		"GoldenWorkflowListResponse": object([]string{"workflows"}, map[string]any{"workflows": array("GoldenWorkflow")}),
+		"GoldenWorkflowListResponse": object([]string{"workflows"}, map[string]any{"workflows": array("GoldenWorkflow"), "run_revisions": schemaRef("GoldenRunRevisions")}),
 	}
 }
 
