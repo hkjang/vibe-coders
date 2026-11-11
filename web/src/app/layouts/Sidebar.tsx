@@ -1,38 +1,50 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { ChevronDown, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { Fragment, useEffect, useMemo, type RefObject } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, Star, X } from "lucide-react";
+import { Fragment, useEffect, useRef, type RefObject } from "react";
 import { NavLink } from "react-router";
 
-import { useAuth } from "@/app/auth/AuthProvider";
-import { featurePath, resolveFeature } from "@/config/migration-registry";
+import { featurePath } from "@/config/migration-registry";
 import { navigationGroups } from "@/config/navigation";
 import { uiLabels } from "@/config/ui-labels";
 import { MigrationStatusBadge } from "@/shared/components/page/MigrationStatus";
 import { Button } from "@/shared/components/ui/Button";
 import { usePreferences } from "@/shared/stores/preferences";
+import { navigationLabels as labels } from "./navigation-labels";
+import { orderedNavigationItems, useNavigationItems, type NavigationItem } from "./use-navigation-items";
 
 interface SidebarProps {
   mobileTriggerRef: RefObject<HTMLButtonElement | null>;
+  onManageFavorites: (trigger: HTMLButtonElement, mobile: boolean) => void;
 }
 
-export function Sidebar({ mobileTriggerRef }: SidebarProps): React.JSX.Element {
-  const { user, backendVersion, features, legacyFallback } = useAuth();
+export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): React.JSX.Element {
   const collapsed = usePreferences((state) => state.sidebarCollapsed);
   const mobileOpen = usePreferences((state) => state.mobileSidebarOpen);
   const collapsedGroups = usePreferences((state) => state.collapsedGroups);
   const toggleSidebar = usePreferences((state) => state.toggleSidebar);
   const setMobileOpen = usePreferences((state) => state.setMobileSidebarOpen);
   const toggleGroup = usePreferences((state) => state.toggleGroup);
+  const favoriteIds = usePreferences((state) => state.favoriteFeatures);
+  const available = useNavigationItems();
+  const favorites = orderedNavigationItems(favoriteIds, available);
+  const openingFavorites = useRef(false);
 
-  const available = useMemo(
-    () =>
-      features
-        .map((feature) => ({
-          feature,
-          effective: resolveFeature(feature, user, backendVersion, { legacyFallback }),
-        }))
-        .filter(({ effective }) => effective.permitted && effective.status !== "hidden"),
-    [backendVersion, features, legacyFallback, user],
+  const renderItem = ({ feature, effective }: NavigationItem, mobile: boolean) => (
+    <li key={feature.featureId}>
+      <NavLink
+        to={featurePath(feature)}
+        title={!mobile && collapsed ? feature.title : undefined}
+        onClick={() => {
+          if (mobile) setMobileOpen(false);
+        }}
+      >
+        <span className="nav-icon" aria-hidden="true">
+          {feature.title.slice(0, 1)}
+        </span>
+        <span className="nav-copy">{feature.title}</span>
+        {effective.status !== "stable" ? <MigrationStatusBadge status={effective.status} /> : null}
+      </NavLink>
+    </li>
   );
 
   useEffect(() => {
@@ -70,6 +82,26 @@ export function Sidebar({ mobileTriggerRef }: SidebarProps): React.JSX.Element {
       </div>
 
       <nav className="sidebar-nav" aria-label={mobile ? "모바일 주 메뉴" : undefined}>
+        <div className="sidebar-favorites-heading">
+          <span className="nav-copy">{labels.favorites}</span>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={labels.manage}
+            title={labels.manage}
+            onClick={(event) => {
+              openingFavorites.current = mobile;
+              onManageFavorites(event.currentTarget, mobile);
+            }}
+          >
+            <Star aria-hidden="true" />
+          </Button>
+        </div>
+        {favorites.length ? (
+          <ul aria-label={labels.favorites}>{favorites.map((item) => renderItem(item, mobile))}</ul>
+        ) : (
+          <p className="sidebar-favorites-empty nav-copy">자주 쓰는 메뉴를 별 버튼으로 고정하세요.</p>
+        )}
         {navigationGroups.map((group) => {
           const items = available.filter(({ feature }) => feature.group === group);
           if (!items.length) return null;
@@ -85,29 +117,7 @@ export function Sidebar({ mobileTriggerRef }: SidebarProps): React.JSX.Element {
                 <span>{group}</span>
                 <ChevronDown aria-hidden="true" data-collapsed={groupCollapsed} />
               </button>
-              {!groupCollapsed ? (
-                <ul>
-                  {items.map(({ feature, effective }) => (
-                    <li key={feature.featureId}>
-                      <NavLink
-                        to={featurePath(feature)}
-                        title={!mobile && collapsed ? feature.title : undefined}
-                        onClick={() => {
-                          if (mobile) setMobileOpen(false);
-                        }}
-                      >
-                        <span className="nav-icon" aria-hidden="true">
-                          {feature.title.slice(0, 1)}
-                        </span>
-                        <span className="nav-copy">{feature.title}</span>
-                        {effective.status !== "stable" ? (
-                          <MigrationStatusBadge status={effective.status} />
-                        ) : null}
-                      </NavLink>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              {!groupCollapsed ? <ul>{items.map((item) => renderItem(item, mobile))}</ul> : null}
             </Fragment>
           );
         })}
@@ -140,7 +150,8 @@ export function Sidebar({ mobileTriggerRef }: SidebarProps): React.JSX.Element {
             asChild
             onCloseAutoFocus={(event) => {
               event.preventDefault();
-              mobileTriggerRef.current?.focus();
+              if (!openingFavorites.current) mobileTriggerRef.current?.focus();
+              openingFavorites.current = false;
             }}
           >
             <aside className="app-sidebar app-sidebar-mobile">{content(true)}</aside>

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { migrationRegistry } from "@/config/migration-registry";
 
 export type ThemePreference = "dark" | "light" | "system";
 export type DensityPreference = "compact" | "comfortable" | "default";
@@ -14,6 +15,8 @@ interface PreferenceState {
   collapsedGroups: string[];
   /** Feature ids most recently opened, newest first, so the palette can offer them back. */
   recentFeatures: string[];
+  /** Ordered menu ids only; these browser preferences never contain resource URLs. */
+  favoriteFeatures: string[];
   setTheme: (theme: ThemePreference) => void;
   setDensity: (density: DensityPreference) => void;
   setRefreshInterval: (seconds: RefreshInterval) => void;
@@ -21,10 +24,22 @@ interface PreferenceState {
   setMobileSidebarOpen: (open: boolean) => void;
   toggleGroup: (group: string) => void;
   rememberFeature: (featureId: string) => void;
+  clearRecentFeatures: () => void;
+  toggleFavorite: (featureId: string) => void;
+  moveFavorite: (featureId: string, adjacentId: string) => void;
+  clearFavorites: () => void;
 }
 
 /** Enough to answer "where was I?" without turning the palette into a history list. */
 const recentFeatureLimit = 5;
+const knownFeatureIds = new Set<string>(migrationRegistry.map((feature) => feature.featureId));
+
+export function safeFeatureIds(value: unknown, limit = knownFeatureIds.size): string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(value.filter((id): id is string => typeof id === "string" && knownFeatureIds.has(id))),
+  ].slice(0, limit);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -54,11 +69,8 @@ function mergePersistedPreferences(persistedState: unknown, currentState: Prefer
     collapsedGroups: Array.isArray(collapsedGroups)
       ? collapsedGroups.filter((group): group is string => typeof group === "string")
       : currentState.collapsedGroups,
-    recentFeatures: Array.isArray(persistedState.recentFeatures)
-      ? persistedState.recentFeatures
-          .filter((featureId): featureId is string => typeof featureId === "string")
-          .slice(0, recentFeatureLimit)
-      : currentState.recentFeatures,
+    recentFeatures: safeFeatureIds(persistedState.recentFeatures, recentFeatureLimit),
+    favoriteFeatures: safeFeatureIds(persistedState.favoriteFeatures),
   };
 }
 
@@ -74,6 +86,7 @@ export const usePreferences = create<PreferenceState>()(
       mobileSidebarOpen: false,
       collapsedGroups: [],
       recentFeatures: [],
+      favoriteFeatures: [],
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setRefreshInterval: (refreshInterval) => set({ refreshInterval }),
@@ -87,7 +100,7 @@ export const usePreferences = create<PreferenceState>()(
         })),
       rememberFeature: (featureId) =>
         set((state) =>
-          state.recentFeatures[0] === featureId
+          !knownFeatureIds.has(featureId) || state.recentFeatures[0] === featureId
             ? state
             : {
                 recentFeatures: [
@@ -96,6 +109,27 @@ export const usePreferences = create<PreferenceState>()(
                 ].slice(0, recentFeatureLimit),
               },
         ),
+      clearRecentFeatures: () => set({ recentFeatures: [] }),
+      toggleFavorite: (featureId) =>
+        set((state) => {
+          if (!knownFeatureIds.has(featureId)) return state;
+          const favorites = safeFeatureIds(state.favoriteFeatures);
+          return {
+            favoriteFeatures: favorites.includes(featureId)
+              ? favorites.filter((id) => id !== featureId)
+              : [...favorites, featureId],
+          };
+        }),
+      moveFavorite: (featureId, adjacentId) =>
+        set((state) => {
+          const favorites = safeFeatureIds(state.favoriteFeatures);
+          const from = favorites.indexOf(featureId);
+          const to = favorites.indexOf(adjacentId);
+          if (from < 0 || to < 0 || from === to) return state;
+          [favorites[from], favorites[to]] = [adjacentId, featureId];
+          return { favoriteFeatures: favorites };
+        }),
+      clearFavorites: () => set({ favoriteFeatures: [] }),
     }),
     {
       name: "vibe.app.preferences.v1",
@@ -108,6 +142,7 @@ export const usePreferences = create<PreferenceState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         collapsedGroups: state.collapsedGroups,
         recentFeatures: state.recentFeatures,
+        favoriteFeatures: state.favoriteFeatures,
       }),
     },
   ),

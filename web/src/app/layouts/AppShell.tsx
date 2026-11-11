@@ -1,14 +1,18 @@
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import "./navigation.css";
 
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, Menu, MonitorCog, Search } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ExternalLink, Menu, MonitorCog, Search, Star } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { CommandPalette } from "@/app/layouts/CommandPalette";
 import { ShortcutSheet } from "@/app/layouts/ShortcutSheet";
 import { Sidebar } from "@/app/layouts/Sidebar";
+import { RecentScreens } from "@/app/layouts/RecentScreens";
+import { navigationLabels } from "@/app/layouts/navigation-labels";
+import { useNavigationItems } from "@/app/layouts/use-navigation-items";
 import { featureByPath } from "@/config/migration-registry";
 import { healthStatusLabels, preferenceLabels, roleLabel, uiLabels } from "@/config/ui-labels";
 import { apiClient } from "@/shared/api/client";
@@ -28,12 +32,16 @@ import {
 } from "@/shared/stores/preferences";
 
 const refreshValues = new Set([0, 60, 300]);
+const FavoritesDialog = lazy(() => import("./FavoritesDialog"));
 
 export function AppShell(): React.JSX.Element {
   const auth = useAuth();
   const location = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const favoritesReturnFocusRef = useRef<HTMLElement | null>(null);
+  const userMenuRef = useRef<HTMLDetailsElement>(null);
   const mobileMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const {
     returnFocusRef: paletteReturnFocusRef,
@@ -53,6 +61,14 @@ export function AppShell(): React.JSX.Element {
   const setRefreshInterval = usePreferences((state) => state.setRefreshInterval);
   const setMobileSidebarOpen = usePreferences((state) => state.setMobileSidebarOpen);
   const currentFeature = featureByPath(location.pathname, auth.features);
+  const available = useNavigationItems();
+  const currentNavigationItem = available.find(
+    ({ feature }) => feature.featureId === currentFeature?.featureId,
+  );
+  const currentNavigationId = currentNavigationItem?.feature.featureId;
+  const favoriteFeatures = usePreferences((state) => state.favoriteFeatures);
+  const toggleFavorite = usePreferences((state) => state.toggleFavorite);
+  const isFavorite = Boolean(currentFeature && favoriteFeatures.includes(currentFeature.featureId));
   const showBreadcrumbGroup = currentFeature && currentFeature.group !== currentFeature.title;
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
 
@@ -108,8 +124,8 @@ export function AppShell(): React.JSX.Element {
   // The palette offers recently opened screens; this is where "recent" is recorded.
   const rememberFeature = usePreferences((state) => state.rememberFeature);
   useEffect(() => {
-    if (currentFeature) rememberFeature(currentFeature.featureId);
-  }, [currentFeature, rememberFeature]);
+    if (currentNavigationId) rememberFeature(currentNavigationId);
+  }, [currentNavigationId, rememberFeature]);
 
   return (
     <FeatureTelemetry feature={currentFeature}>
@@ -117,7 +133,14 @@ export function AppShell(): React.JSX.Element {
         <a className="skip-link" href="#main-content">
           본문으로 건너뛰기
         </a>
-        <Sidebar mobileTriggerRef={mobileMenuTriggerRef} />
+        <Sidebar
+          mobileTriggerRef={mobileMenuTriggerRef}
+          onManageFavorites={(trigger, mobile) => {
+            favoritesReturnFocusRef.current = mobile ? mobileMenuTriggerRef.current : trigger;
+            if (mobile) setMobileSidebarOpen(false);
+            setFavoritesOpen(true);
+          }}
+        />
         <div className="app-column">
           <header className="app-header">
             <Button
@@ -145,6 +168,28 @@ export function AppShell(): React.JSX.Element {
                 <strong aria-current="page">{uiLabels.console}</strong>
               )}
             </nav>
+
+            {currentNavigationItem ? (
+              <Button
+                className="header-favorite"
+                size="icon"
+                variant="ghost"
+                aria-label={
+                  isFavorite
+                    ? navigationLabels.remove(currentNavigationItem.feature.title)
+                    : navigationLabels.add(currentNavigationItem.feature.title)
+                }
+                title={
+                  isFavorite
+                    ? navigationLabels.remove(currentNavigationItem.feature.title)
+                    : navigationLabels.add(currentNavigationItem.feature.title)
+                }
+                aria-pressed={isFavorite}
+                onClick={() => toggleFavorite(currentNavigationItem.feature.featureId)}
+              >
+                <Star aria-hidden="true" fill={isFavorite ? "currentColor" : "none"} />
+              </Button>
+            ) : null}
 
             <button
               className="header-search"
@@ -212,7 +257,7 @@ export function AppShell(): React.JSX.Element {
                   기존 화면 <ExternalLink aria-hidden="true" />
                 </LegacyLink>
               ) : null}
-              <details className="user-menu">
+              <details className="user-menu" ref={userMenuRef}>
                 <summary aria-label="사용자 메뉴">
                   <span className="avatar" aria-hidden="true">
                     {(auth.user?.name ?? auth.user?.email ?? "A").slice(0, 1).toUpperCase()}
@@ -225,6 +270,12 @@ export function AppShell(): React.JSX.Element {
                   <span>백엔드 {auth.backendVersion}</span>
                   <span>UI {auth.uiVersion}</span>
                   <span>API {auth.apiVersion}</span>
+                  <RecentScreens
+                    onNavigate={() => {
+                      if (userMenuRef.current) userMenuRef.current.open = false;
+                      requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+                    }}
+                  />
                   {showLegacyAdmin ? (
                     <LegacyLink className="button button-secondary button-default" href="/admin">
                       {uiLabels.legacyAdmin} 열기 <ExternalLink aria-hidden="true" />
@@ -270,6 +321,20 @@ export function AppShell(): React.JSX.Element {
           onOpenChange={setShortcutsOpen}
           returnFocusRef={shortcutReturnFocusRef}
         />
+        {favoritesOpen ? (
+          <Suspense
+            fallback={
+              <span role="status" className="sr-only">
+                즐겨찾기를 준비하고 있습니다.
+              </span>
+            }
+          >
+            <FavoritesDialog
+              onClose={() => setFavoritesOpen(false)}
+              returnFocusRef={favoritesReturnFocusRef}
+            />
+          </Suspense>
+        ) : null}
       </div>
     </FeatureTelemetry>
   );
