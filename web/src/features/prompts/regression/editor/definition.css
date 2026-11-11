@@ -1,0 +1,43 @@
+.regression-editor-fields {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  border: 0;
+  padding: 0;
+}
+.regression-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.regression-diff-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.regression-diff {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  min-width: 32rem;
+}
+.regression-diff th,
+.regression-diff td {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+.regression-diff th:first-child {
+  width: 24%;
+}
+.regression-diff pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  margin: 0;
+  max-height: 18rem;
+  overflow: auto;
+}
+.regression-diff tr[data-changed="true"] th {
+  color: var(--color-primary);
+}

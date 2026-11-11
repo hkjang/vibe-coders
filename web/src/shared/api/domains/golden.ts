@@ -1,10 +1,16 @@
 import { z } from "zod";
-import { operation } from "@/shared/api/endpoint-factory";
+import { operation, type WithBody } from "@/shared/api/endpoint-factory";
 import type {
   GetAdminGoldenPromptsData,
   GetAdminGoldenPromptsResponse,
   GetAdminGoldenWorkflowsData,
   GetAdminGoldenWorkflowsResponse,
+  PostAdminGoldenPromptsData,
+  PostAdminGoldenPromptsResponse,
+  PostAdminGoldenWorkflowsData,
+  PostAdminGoldenWorkflowsResponse,
+  GoldenPromptWriteBody,
+  GoldenWorkflowWriteBody,
 } from "@/shared/api/generated";
 
 const tags = z.array(z.string()).nullable();
@@ -59,8 +65,22 @@ export type GoldenPrompt = z.infer<typeof promptSchema>;
 export type GoldenResult = z.infer<typeof resultSchema>;
 export type GoldenWorkflow = z.infer<typeof workflowSchema>;
 export type GoldenStep = z.infer<typeof stepSchema>;
+type PromptDefinitionBody = Pick<GoldenPromptWriteBody, "id" | "name" | "prompt" | "expected" | "tags">;
+type WorkflowDefinitionBody = Pick<GoldenWorkflowWriteBody, "id" | "name" | "description" | "steps" | "tags">;
 
 export const goldenEndpoints = {
+  savePrompt: operation<
+    WithBody<PostAdminGoldenPromptsData, PromptDefinitionBody>,
+    PostAdminGoldenPromptsResponse
+  >()(
+    "POST",
+    "/admin/golden-prompts",
+    z.object({ golden_prompt: promptSchema, results: z.array(resultSchema) }),
+  ),
+  saveWorkflow: operation<
+    WithBody<PostAdminGoldenWorkflowsData, WorkflowDefinitionBody>,
+    PostAdminGoldenWorkflowsResponse
+  >()("POST", "/admin/golden-workflows", workflowSchema),
   prompts: operation<GetAdminGoldenPromptsData, GetAdminGoldenPromptsResponse>()(
     "GET",
     "/admin/golden-prompts",

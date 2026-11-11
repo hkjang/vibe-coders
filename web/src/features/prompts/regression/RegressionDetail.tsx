@@ -15,6 +15,7 @@ import { canLinkRegressionID, safeRegressionText, type RegressionTab } from "./r
 import { RegressionQueryState } from "./RegressionQueryState";
 import { RegressionText } from "./RegressionText";
 import { useGoldenPrompts } from "./use-regression";
+import { editableDefinition, type DefinitionTarget } from "./editor/definition-form";
 
 const resultHelper = createDataTableColumnHelper<GoldenResult>();
 const historyColumns = [
@@ -60,7 +61,15 @@ const historyColumns = [
   }),
 ];
 
-function PromptDetail({ owner, id }: { owner: FeatureReadOwner; id: string }) {
+function PromptDetail({
+  owner,
+  id,
+  edit,
+}: {
+  owner: FeatureReadOwner;
+  id: string;
+  edit?: (target: DefinitionTarget) => void;
+}) {
   const { credentialPrefixes } = useAuth();
   const permittedID = canLinkRegressionID(id, credentialPrefixes);
   const query = useGoldenPrompts(owner, 200, id, permittedID);
@@ -89,6 +98,10 @@ function PromptDetail({ owner, id }: { owner: FeatureReadOwner; id: string }) {
       {prompt ? (
         <>
           <h3>{prompt.name || "이름 없음"}</h3>
+          <DefinitionEdit
+            target={{ kind: "prompt", id, original: prompt }}
+            edit={!query.isError && !query.isFetching ? edit : undefined}
+          />
           <DefinitionMetadata row={prompt} />
           <RegressionText label="현재 기준 프롬프트" value={prompt.prompt} />
           <RegressionText label="현재 기대 내용" value={prompt.expected} />
@@ -113,6 +126,23 @@ function PromptDetail({ owner, id }: { owner: FeatureReadOwner; id: string }) {
         emptyMessage="이 프롬프트에 저장된 최근 결과가 없습니다."
       />
     </div>
+  );
+}
+
+function DefinitionEdit({
+  target,
+  edit,
+}: {
+  target: DefinitionTarget;
+  edit?: (target: DefinitionTarget) => void;
+}) {
+  const { credentialPrefixes } = useAuth();
+  if (!edit) return null;
+  const editable = editableDefinition(target, credentialPrefixes);
+  return editable ? (
+    <Button onClick={() => edit(structuredClone(target))}>정의 편집</Button>
+  ) : (
+    <InlineNotice tone="warning">원본 일부가 숨겨져 있거나 단계 정보가 없어 편집할 수 없습니다.</InlineNotice>
   );
 }
 
@@ -242,6 +272,7 @@ export function RegressionDetail({
   retry,
   close,
   returnFocusRef,
+  edit,
 }: {
   owner: FeatureReadOwner;
   tab: RegressionTab;
@@ -254,6 +285,7 @@ export function RegressionDetail({
   retry: () => void;
   close: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
+  edit?: (target: DefinitionTarget) => void;
 }) {
   const workflow = workflows.find((row) => row.id === id);
   const result = results.find((row) => row.id === id);
@@ -272,18 +304,24 @@ export function RegressionDetail({
             ? "검증 워크플로 상세"
             : "실행 결과 상세"
       }
-      description="저장된 정의와 결과를 읽기 전용으로 확인합니다."
+      description="저장된 정의와 결과를 확인합니다."
       footer={<Button onClick={close}>닫기</Button>}
     >
       {tab === "prompts" ? (
-        <PromptDetail key={id} owner={owner} id={id} />
+        <PromptDetail key={id} owner={owner} id={id} edit={edit} />
       ) : (
         <>
           <RegressionQueryState error={error} updatedAt={updatedAt} fetching={loading} retry={retry} />
           {loading && !updatedAt ? (
             <LoadingState />
           ) : workflow && tab === "workflows" ? (
-            <WorkflowDetail key={id} workflow={workflow} />
+            <>
+              <DefinitionEdit
+                target={{ kind: "workflow", id, original: workflow }}
+                edit={!error && !loading ? edit : undefined}
+              />
+              <WorkflowDetail key={id} workflow={workflow} />
+            </>
           ) : result && tab === "results" ? (
             <ResultDetail result={result} />
           ) : !error ? (

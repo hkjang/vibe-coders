@@ -26,7 +26,26 @@ func goldenReadOpenAPISchemas() map[string]any {
 		return map[string]any{"type": "object", "required": required, "properties": fields}
 	}
 	array := func(name string) map[string]any { return map[string]any{"type": "array", "items": schemaRef(name)} }
+	stepFields := map[string]any{
+		"name": text, "prompt": text, "expected": text, "task_type": text, "selected_model": text,
+		"baseline_score": number, "contract_id": text, "rubric_id": text, "source_run_id": text,
+	}
 	return map[string]any{
+		"GoldenPromptWriteBody": object([]string{"name", "prompt"}, map[string]any{
+			"id": text, "name": text, "prompt": text, "expected": text, "tags": strings,
+			"models": map[string]any{"type": "array", "nullable": true, "items": text}, "run": map[string]any{"type": "boolean", "default": false},
+		}),
+		"GoldenPromptWriteResponse": object([]string{"golden_prompt", "results"}, map[string]any{
+			"golden_prompt": schemaRef("GoldenPrompt"), "results": array("GoldenPromptResult"),
+		}),
+		"GoldenWorkflowWriteBody": object([]string{"name", "steps"}, map[string]any{
+			"id": text, "name": text, "description": text, "tags": strings, "steps": array("GoldenWorkflowStepInput"),
+			"created_at": text, "updated_at": text,
+		}),
+		"GoldenWorkflowStepInput": map[string]any{
+			"type": "object", "properties": stepFields,
+			"description": "Input fields are optional. Steps with an absent or blank prompt are discarded; the workflow must retain at least one nonblank prompt.",
+		},
 		"GoldenPrompt": object([]string{"id", "name", "prompt", "expected", "tags", "created_at", "updated_at"}, map[string]any{
 			"id": text, "name": text, "prompt": text, "expected": text, "tags": strings, "created_at": text, "updated_at": text,
 		}),
@@ -37,14 +56,28 @@ func goldenReadOpenAPISchemas() map[string]any {
 		"GoldenPromptListResponse": object([]string{"golden_prompts", "results"}, map[string]any{
 			"golden_prompts": array("GoldenPrompt"), "results": array("GoldenPromptResult"),
 		}),
-		"GoldenWorkflowStep": object([]string{"name", "prompt", "expected"}, map[string]any{
-			"name": text, "prompt": text, "expected": text, "task_type": text, "selected_model": text,
-			"baseline_score": number, "contract_id": text, "rubric_id": text, "source_run_id": text,
-		}),
+		"GoldenWorkflowStep": object([]string{"name", "prompt", "expected"}, stepFields),
 		"GoldenWorkflow": object([]string{"id", "name", "description", "steps", "tags", "created_at", "updated_at"}, map[string]any{
 			"id": text, "name": text, "description": text, "tags": strings, "created_at": text, "updated_at": text,
 			"steps": map[string]any{"type": "array", "nullable": true, "items": schemaRef("GoldenWorkflowStep")},
 		}),
 		"GoldenWorkflowListResponse": object([]string{"workflows"}, map[string]any{"workflows": array("GoldenWorkflow")}),
+	}
+}
+
+func enrichGoldenWriteOpenAPI(key string, op, responses map[string]any) {
+	op["description"] = "Existing admin:write definition upsert. No conditional revision or atomic audit guarantee. Response is the normalized input, not a persisted timestamp snapshot; read the registry after saving."
+	if key == "post /admin/golden-prompts" {
+		delete(responses, "200")
+		op["description"] = op["description"].(string) + " Name and prompt are trimmed; expected and tags are preserved. Omitted/empty id generates an id. Supplying any models or run=true also executes models: definition-only clients must omit both fields. A save/run failure can occur after the definition was saved."
+		op["requestBody"] = requestBody("GoldenPromptWriteBody")
+		responses["201"] = successResponse("GoldenPromptWriteResponse")
+	} else {
+		op["description"] = op["description"].(string) + " Name, step names and step prompts are trimmed; empty-prompt steps are discarded and at least one must remain. Optional step provenance is preserved. Omitted/empty id generates an id. Definition upsert never executes models."
+		op["requestBody"] = requestBody("GoldenWorkflowWriteBody")
+		responses["200"] = successResponse("GoldenWorkflow")
+	}
+	for _, status := range []string{"400", "401", "405", "500"} {
+		responses[status] = map[string]any{"description": "Existing validation, authorization, method or storage error", "content": jsonContent(schemaRef("AppError"))}
 	}
 }

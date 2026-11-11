@@ -637,6 +637,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	switch key {
 	case "get /admin/golden-prompts", "get /admin/golden-workflows":
 		enrichGoldenReadOpenAPI(key, op, responses)
+	case "post /admin/golden-prompts", "post /admin/golden-workflows":
+		enrichGoldenWriteOpenAPI(key, op, responses)
 	case "get /admin/gateway-mcp/info", "get /admin/mcp/contracts", "post /admin/mcp/contracts", "delete /admin/mcp/contracts", "post /admin/mcp/contracts/validate":
 		enrichMCPContractsOpenAPI(key, op, responses)
 	case "post /admin/mcp/route/explain", "post /admin/mcp/test":

@@ -14,7 +14,7 @@ async function install(page: Page, allowed = true) {
     scopes: allowed ? ["admin:read"] : [],
   };
   const bootstrap: UiBootstrapResponse = {
-    backend_version: "v0.86.65",
+    backend_version: "v0.86.66",
     ui_version: "regression-public-fixture",
     api_version: "v1",
     ui: {
@@ -51,7 +51,7 @@ async function install(page: Page, allowed = true) {
         enabled_roles: [],
         rollout_percent: 100,
         fallback_enabled: false,
-        minimum_api_version: "v0.86.65",
+        minimum_api_version: "v0.86.66",
         available: allowed,
         ...(allowed ? {} : { availability_reason: "missing_permission" }),
       },
