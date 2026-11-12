@@ -43,7 +43,14 @@ func (s *Server) handleAuthTeamPage(w http.ResponseWriter, r *http.Request) {
 			*item.target = value
 		}
 	}
-	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+	claims, authenticated := s.currentAccessClaims(r)
+	if s.cfg.Auth.Enabled && !authenticated {
+		// A session can expire or be revoked after the outer authorization.
+		// Missing identity must not remove the authenticated team restriction.
+		writeOpenAIError(w, http.StatusUnauthorized, "authentication required", "invalid_request_error", "invalid_access_token")
+		return
+	}
+	if authenticated && claims.Role == "team_admin" {
 		team := claims.TeamID
 		query.ScopeTeam = &team
 	}
