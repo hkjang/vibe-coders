@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
+import { accountFixtureResponse } from "../../src/test/account-fixtures";
 
 async function installBudgetNotifications(page: Page) {
   const gateway = await installGateway(page);
@@ -360,11 +361,18 @@ async function installGateway(page: Page) {
       return json({ team });
     }
     if (key === "GET /admin/users")
-      return json({
-        auth_users: [{ ...user, role: "ops_admin", status: "active", created_at: "2026-10-01T00:00:00Z" }],
-        users: [],
-        team_names: {},
-      });
+      return json(
+        accountFixtureResponse(
+          {
+            auth_users: [
+              { ...user, role: "ops_admin", status: "active", created_at: "2026-10-01T00:00:00Z" },
+            ],
+            users: [],
+            team_names: {},
+          },
+          Object.fromEntries(url.searchParams),
+        ),
+      );
     if (key === "GET /admin/benchmark/users") return json({ users: [] });
     if (key === "GET /admin/roles") {
       roleReads++;
@@ -490,31 +498,36 @@ async function installUserUsage(page: Page) {
   const writes: unknown[] = [];
   let held: Promise<void> | undefined;
   let release = () => {};
-  await page.route("**/admin/users", async (route) => {
+  await page.route(/\/admin\/users(?:\?.*)?$/u, async (route) => {
     reads++;
     return status === 200
       ? route.fulfill({
-          json: {
-            auth_users: [
-              {
-                id: "usr_owned",
-                email: "owned@example.invalid",
-                name: "조회 소유 계정",
-                role: "developer",
-                status: "active",
-              },
-            ],
-            users: [
-              {
-                api_key_id: "key_external",
-                name: "조회 소유 키",
-                owner: "소유 팀",
-                team: "team_a",
-                status: promoted ? "active" : "external",
-              },
-            ],
-            team_names: {},
-          },
+          json: accountFixtureResponse(
+            {
+              auth_users: [
+                {
+                  id: "usr_owned",
+                  email: "owned@example.invalid",
+                  name: "조회 소유 계정",
+                  role: "developer",
+                  status: "active",
+                  team_id: "team_a",
+                  created_at: "2026-11-12T00:00:00Z",
+                },
+              ],
+              users: [
+                {
+                  api_key_id: "key_external",
+                  name: "조회 소유 키",
+                  owner: "소유 팀",
+                  team: "team_a",
+                  status: promoted ? "active" : "external",
+                },
+              ],
+              team_names: {},
+            },
+            Object.fromEntries(new URL(route.request().url()).searchParams),
+          ),
         })
       : route.fulfill({
           status,
@@ -550,7 +563,11 @@ test("사용자 목록 장애는 0건으로 표시하지 않고 목록만 다시
   await expect(page.getByText("사용자 목록을(를) 불러오지 못했습니다.")).toBeVisible();
   await expect(page.getByRole("table", { name: "로그인 계정 목록", exact: true })).toHaveCount(0);
   fixture.status(200);
-  await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await page
+    .getByRole("alert")
+    .filter({ hasText: "로그인 계정을(를) 불러오지 못했습니다." })
+    .getByRole("button", { name: "다시 시도", exact: true })
+    .click();
   await expect(page.getByText("owned@example.invalid", { exact: true })).toBeVisible();
   expect(fixture.writes).toEqual([]);
   expect(gateway.unexpected).toEqual([]);

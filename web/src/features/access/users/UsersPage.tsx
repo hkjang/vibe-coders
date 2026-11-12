@@ -4,7 +4,6 @@ import { ApiKeysTab } from "./ApiKeysTab";
 import { QuotasTab } from "./QuotasTab";
 import { RolesTab } from "./RolesTab";
 import { TeamsTab } from "./TeamsTab";
-import { UsersTab } from "./UsersTab";
 import { UsersPageShell } from "./UsersPageShell";
 import { accessTabIds, type AccessTab } from "./users-page-tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
@@ -23,9 +22,16 @@ export function UsersPage(): React.JSX.Element {
   // Preserve old bookmarks and all validated table/detail parameters.
   if (tab === "ips")
     return <Navigate replace to={{ pathname: "/access/users/ips", search: location.search }} />;
+  if (tab === "users")
+    return (
+      <Navigate
+        replace
+        to={{ pathname: "/access/users/accounts", search: location.search }}
+        state={location.state}
+      />
+    );
   return (
     <UsersPageShell tab={tab} canWrite={canWrite}>
-      {tab === "users" ? <UsersTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
       {tab === "teams" ? <TeamsTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
       {tab === "keys" ? (
         <ApiKeysTab canWrite={canWrite} isSuperAdmin={isSuperAdmin} writeDeniedReason={writeDeniedReason} />

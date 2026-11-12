@@ -161,6 +161,34 @@ export type AdminStatsResponse = {
     total_tokens: number;
 };
 
+export type AdminUserUsage = {
+    team_names: {
+        [key: string]: string;
+    };
+    users: Array<AdminUserUsageRow>;
+};
+
+export type AdminUserUsageRow = {
+    api_key_id: string;
+    average_latency_ms: number;
+    cost_krw: number;
+    last_seen: string;
+    name: string;
+    owner: string;
+    requests: number;
+    status: string;
+    team: string;
+    tokens: number;
+};
+
+export type AdminUsersLegacy = {
+    auth_users: Array<LegacyAuthAccount>;
+    team_names: {
+        [key: string]: string;
+    };
+    users: Array<AdminUserUsageRow>;
+};
+
 export type AgentRoute = {
     allowed_tools: Array<string>;
     backing_model: string;
@@ -296,6 +324,24 @@ export type AppRequestsResponse = {
     next_cursor?: string;
     previous_cursor?: string;
     requests: Array<AppRequestSummary>;
+};
+
+export type AuthAccount = {
+    created_at: string;
+    email: string;
+    id: string;
+    name: string;
+    role: string;
+    status: string;
+    team_id: string;
+    team_name: string;
+};
+
+export type AuthAccountPage = {
+    accounts: Array<AuthAccount>;
+    limit: number;
+    offset: number;
+    total: number;
 };
 
 export type AuthLoginRequest = {
@@ -852,6 +898,16 @@ export type LatencyQuantiles = {
     p50: number;
     p95: number;
     p99: number;
+};
+
+export type LegacyAuthAccount = {
+    created_at: string;
+    email: string;
+    id: string;
+    name: string;
+    role: string;
+    status: string;
+    team_id: string;
 };
 
 export type McpoAuthStatusResponse = {
@@ -13217,16 +13273,63 @@ export type GetAdminUiTelemetrySummaryResponse = GetAdminUiTelemetrySummaryRespo
 export type GetAdminUsersData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: '' | 'accounts' | 'usage';
+        /**
+         * Literal, case-insensitive substring of account ID, email, name, role, primary team ID or team name. Percent and underscore are literal. No control characters.
+         */
+        q?: string;
+        /**
+         * Exact role code, including custom roles.
+         */
+        role?: string;
+        /**
+         * Exact account status.
+         */
+        status?: string;
+        /**
+         * Exact primary team ID; explicitly empty means unassigned. Never broadens caller scope.
+         */
+        team_id?: string;
+        /**
+         * Up to three unique comma-separated field:asc or field:desc entries. Fields: id,email,name,role,status,team_id,team_name,created_at. Default created_at:desc. ID ascending breaks remaining ties.
+         */
+        sort?: string;
+        limit?: number;
+        offset?: number;
+    };
     url: '/admin/users';
 };
 
+export type GetAdminUsersErrors = {
+    /**
+     * Invalid view or account-page filter; duplicate known account query parameters are rejected
+     */
+    400: AppError;
+    /**
+     * Invalid authentication or missing admin read scope
+     */
+    401: AppError;
+    /**
+     * User query failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminUsersError = GetAdminUsersErrors[keyof GetAdminUsersErrors];
+
 export type GetAdminUsersResponses = {
     /**
-     * OK
+     * Response selected by view
      */
-    200: unknown;
+    200: AdminUsersLegacy | AdminUserUsage | AuthAccountPage;
 };
+
+export type GetAdminUsersResponse = GetAdminUsersResponses[keyof GetAdminUsersResponses];
 
 export type PostAdminUsersData = {
     body?: never;

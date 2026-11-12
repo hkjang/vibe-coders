@@ -6,9 +6,11 @@ import { useLocation } from "react-router";
 
 import { UsersPage as UsersPageScreen } from "@/features/access/users/UsersPage";
 import { IpUsagePage } from "@/features/access/users/IpUsagePage";
+import { AccountsPage } from "@/features/access/users/AccountsPage";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { accountFixtureResponse } from "@/test/account-fixtures";
 
 const authRuntime = vi.hoisted(() => ({ role: "admin", scopes: ["admin:read", "admin:write"] }));
 
@@ -16,7 +18,13 @@ function UsersPage() {
   const location = useLocation();
   return (
     <FeatureAccessContext.Provider value={{ featureId: "access.users", readOnly: false, permitted: true }}>
-      {location.pathname === "/access/users/ips" ? <IpUsagePage /> : <UsersPageScreen />}
+      {location.pathname === "/access/users/ips" ? (
+        <IpUsagePage />
+      ) : location.pathname === "/access/users/accounts" ? (
+        <AccountsPage />
+      ) : (
+        <UsersPageScreen />
+      )}
     </FeatureAccessContext.Provider>
   );
 }
@@ -161,10 +169,13 @@ const benchmark = { users: [] };
 
 function handlers(overrides: Record<string, () => unknown> = {}) {
   return {
-    "GET /admin/users": () => usersResponse,
     "GET /admin/benchmark/users": () => benchmark,
     "GET /admin/roles": () => ({ roles: [{ role: "developer" }], all_scopes: [] }),
     ...overrides,
+    "GET /admin/users": async ({ query }: { query?: object }) => {
+      const result = await (overrides["GET /admin/users"]?.() ?? usersResponse);
+      return accountFixtureResponse(result as typeof usersResponse, query);
+    },
   };
 }
 
@@ -189,7 +200,7 @@ describe("UsersPage", () => {
     renderScreen(<UsersPage />, { path: "/access/users/*", route: "/access/users" });
 
     expect(
-      await screen.findByText("등록된 로그인 계정이 없습니다. '사용자 등록'으로 첫 계정을 만드세요."),
+      await screen.findByText("조건에 맞는 로그인 계정이 없습니다. 필터를 바꾸거나 새 사용자를 등록하세요."),
     ).toBeVisible();
   });
 
@@ -203,8 +214,8 @@ describe("UsersPage", () => {
     );
     renderScreen(<UsersPage />, { path: "/access/users/*", route: "/access/users" });
 
-    const alert = await screen.findByRole("alert");
-    expect(within(alert).getByText(/req_users_1/u)).toBeVisible();
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.some((alert) => within(alert).queryByText(/req_users_1/u))).toBe(true);
   });
 
   it("disables write actions without admin:write", async () => {

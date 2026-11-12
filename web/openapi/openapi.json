@@ -619,6 +619,107 @@
         ],
         "type": "object"
       },
+      "AdminUserUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "team_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserUsageRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "team_names",
+          "users"
+        ],
+        "type": "object"
+      },
+      "AdminUserUsageRow": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "type": "string"
+          },
+          "average_latency_ms": {
+            "type": "number"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "last_seen": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          },
+          "tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_key_id",
+          "average_latency_ms",
+          "cost_krw",
+          "last_seen",
+          "name",
+          "owner",
+          "requests",
+          "status",
+          "team",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "AdminUsersLegacy": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_users": {
+            "items": {
+              "$ref": "#/components/schemas/LegacyAuthAccount"
+            },
+            "type": "array"
+          },
+          "team_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserUsageRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "auth_users",
+          "team_names",
+          "users"
+        ],
+        "type": "object"
+      },
       "AgentRoute": {
         "additionalProperties": false,
         "properties": {
@@ -1186,6 +1287,80 @@
           "requests",
           "limit",
           "generated_at"
+        ],
+        "type": "object"
+      },
+      "AuthAccount": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "team_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "email",
+          "id",
+          "name",
+          "role",
+          "status",
+          "team_id",
+          "team_name"
+        ],
+        "type": "object"
+      },
+      "AuthAccountPage": {
+        "additionalProperties": false,
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/AuthAccount"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accounts",
+          "limit",
+          "offset",
+          "total"
         ],
         "type": "object"
       },
@@ -3116,6 +3291,43 @@
           "p50",
           "p95",
           "p99"
+        ],
+        "type": "object"
+      },
+      "LegacyAuthAccount": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "email",
+          "id",
+          "name",
+          "role",
+          "status",
+          "team_id"
         ],
         "type": "object"
       },
@@ -27313,10 +27525,157 @@
     },
     "/admin/users": {
       "get": {
+        "description": "Existing admin:read user API. Omit view to retain the Legacy users/auth_users/team_names response. view=usage returns users/team_names without loading login accounts. view=accounts returns a server-paged login account projection without credentials. Account search, role, status, team, sorting and count all apply inside the caller's existing primary-team scope; a team administrator with an empty team sees only unassigned accounts, matching Legacy. Account-page filters apply only to view=accounts. Responses are no-store.",
         "operationId": "get__admin_users",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "",
+                "accounts",
+                "usage"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Literal, case-insensitive substring of account ID, email, name, role, primary team ID or team name. Percent and underscore are literal. No control characters.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact role code, including custom roles.",
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact account status.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "allowEmptyValue": true,
+            "description": "Exact primary team ID; explicitly empty means unassigned. Never broadens caller scope.",
+            "in": "query",
+            "name": "team_id",
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Up to three unique comma-separated field:asc or field:desc entries. Fields: id,email,name,role,status,team_id,team_name,created_at. Default created_at:desc. ID ascending breaks remaining ties.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminUsersLegacy"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AdminUserUsage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AuthAccountPage"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Response selected by view",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid view or account-page filter; duplicate known account query parameters are rejected"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid authentication or missing admin read scope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "User query failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

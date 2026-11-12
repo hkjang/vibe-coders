@@ -2,6 +2,8 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
+import { accountPageSchema, type AccountQuery } from "@/shared/api/domains/account-page.schemas";
+import { AppError } from "@/shared/api/error";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import {
   assertFeatureRead,
@@ -50,11 +52,40 @@ function useAccessQuery<Result>(
   });
 }
 
-export function useUsersQuery(enabled = true, owner?: FeatureReadOwner) {
+export function useUsersQuery(enabled = true, owner?: FeatureReadOwner, usageOnly = false) {
   return useAccessQuery(
-    accessKeys.users,
-    (signal) => apiClient.request(access.users.list, { signal, routeId }),
+    usageOnly ? [...accessKeys.users, "usage"] : accessKeys.users,
+    (signal) =>
+      usageOnly
+        ? apiClient.request(access.users.usage, { query: { view: "usage" }, signal, routeId })
+        : apiClient.request(access.users.list, { signal, routeId }),
     enabled,
+    owner,
+  );
+}
+
+export function useAccountPageQuery(query: AccountQuery, owner: FeatureReadOwner) {
+  return useAccessQuery(
+    [...accessKeys.users, "accounts", query],
+    async (signal) => {
+      const parsed = accountPageSchema.safeParse(
+        await apiClient.request(access.users.accounts, { query, signal, routeId }),
+      );
+      if (!parsed.success)
+        throw new AppError("계정 목록의 형식을 확인하지 못했습니다. 다시 조회하세요.", { kind: "contract" });
+      const result = parsed.data;
+      if (
+        result.limit !== query.limit ||
+        result.offset !== query.offset ||
+        result.accounts.length !== Math.min(query.limit, Math.max(0, result.total - query.offset)) ||
+        new Set(result.accounts.map((row) => row.id)).size !== result.accounts.length
+      )
+        throw new AppError("계정 목록의 조회 범위를 확인하지 못했습니다. 다시 조회하세요.", {
+          kind: "contract",
+        });
+      return result;
+    },
+    true,
     owner,
   );
 }

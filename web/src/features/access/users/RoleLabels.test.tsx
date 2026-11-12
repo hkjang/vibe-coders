@@ -6,6 +6,7 @@ import { RolesTab as RolesTabScreen } from "@/features/access/users/RolesTab";
 import { UsersTab as UsersTabScreen } from "@/features/access/users/UsersTab";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { mockApi } from "@/test/api";
+import { accountFixtureResponse } from "@/test/account-fixtures";
 import { renderScreen } from "@/test/render";
 
 vi.mock("@/app/auth/AuthProvider", async () => {
@@ -42,7 +43,8 @@ function RolesTab({ canWrite, writeDeniedReason }: { canWrite: boolean; writeDen
 
 function usersApi() {
   return mockApi({
-    "GET /admin/users": () => ({ auth_users: [account], users: [], team_names: {} }),
+    "GET /admin/users": ({ query }) =>
+      accountFixtureResponse({ auth_users: [account], users: [], team_names: {} }, query),
     "GET /admin/benchmark/users": () => ({ users: [] }),
     "GET /admin/roles": () => ({
       roles: [

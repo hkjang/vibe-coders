@@ -9,13 +9,19 @@ interface Props {
   columns: readonly { id: string; label: string; initialDirection?: "asc" | "desc" }[];
   value: readonly DataTableSort[];
   onChange: (value: readonly DataTableSort[]) => void;
+  maxCriteria?: number;
 }
 interface Draft extends DataTableSort {
   key: number;
 }
 
 /** Controlled ordering only. Never fetches, sorts or persists caller row data. */
-export function DataTableSortControls({ columns, value, onChange }: Props): React.JSX.Element {
+export function DataTableSortControls({
+  columns,
+  value,
+  onChange,
+  maxCriteria = columns.length,
+}: Props): React.JSX.Element {
   const trigger = useRef<HTMLButtonElement>(null);
   const add = useRef<HTMLButtonElement>(null);
   const inputs = useRef(new Map<number, HTMLSelectElement>());
@@ -31,7 +37,7 @@ export function DataTableSortControls({ columns, value, onChange }: Props): Reac
   const [announcement, setAnnouncement] = useState("");
   const available = columns.filter((column) => !draft.some((item) => item.columnId === column.id));
   const valid =
-    draft.length <= columns.length &&
+    draft.length <= Math.min(columns.length, maxCriteria) &&
     new Set(draft.map((item) => item.columnId)).size === draft.length &&
     draft.every((item) => columns.some((column) => column.id === item.columnId));
   useLayoutEffect(() => {
@@ -173,7 +179,7 @@ export function DataTableSortControls({ columns, value, onChange }: Props): Reac
           <Button
             ref={add}
             variant="secondary"
-            disabled={available.length === 0}
+            disabled={available.length === 0 || draft.length >= maxCriteria}
             onClick={() => {
               const column = available[0];
               if (!column) return;
