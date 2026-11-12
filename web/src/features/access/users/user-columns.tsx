@@ -5,12 +5,14 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { formatDateTime, formatKRW, formatNumber, shortId } from "@/shared/utils/format";
+import { AccountDetailLink } from "./AccountDetailLink";
 
 export function accountColumns(
   teamNames: Readonly<Record<string, string>>,
   onEdit: (user: AuthUserRow, trigger: HTMLElement) => void,
   canWrite: boolean,
   writeDeniedReason: string,
+  onOpen: (trigger: HTMLElement) => boolean,
 ): ReadonlyArray<DataTableColumn<AuthUserRow>> {
   const column = createDataTableColumnHelper<AuthUserRow>();
   return column.columns([
@@ -19,7 +21,7 @@ export function accountColumns(
       header: "이메일",
       cell: ({ row }) => (
         <div>
-          <strong className="truncate">{row.original.email || "—"}</strong>
+          <AccountDetailLink row={row.original} onOpen={onOpen} />
           <div className="access-list-detail mono">{shortId(row.original.id, 18)}</div>
         </div>
       ),

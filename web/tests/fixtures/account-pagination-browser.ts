@@ -32,6 +32,7 @@ export async function installAccountPagination(page: Page) {
       limit = Number(query.get("limit") ?? 25);
     let filtered = rows.filter(
       (row) =>
+        (!query.has("id") || row.id === query.get("id")) &&
         (!query.get("q") || row.email.includes(query.get("q") ?? "")) &&
         (!query.get("status") || row.status === query.get("status")) &&
         (!query.has("team_id") || row.team_id === query.get("team_id")),

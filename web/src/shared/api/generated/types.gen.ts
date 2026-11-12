@@ -13348,6 +13348,10 @@ export type GetAdminUsersData = {
     query?: {
         view?: '' | 'accounts' | 'usage';
         /**
+         * Exact account ID for view=accounts. Nonempty valid UTF-8, at most 4096 bytes, no control characters. Preserves whitespace and reserved characters; never broadens caller scope or other filters. Missing or out-of-scope accounts return an empty page.
+         */
+        id?: string;
+        /**
          * Literal, case-insensitive substring of account ID, email, name, role, primary team ID or team name. Percent and underscore are literal. No control characters.
          */
         q?: string;

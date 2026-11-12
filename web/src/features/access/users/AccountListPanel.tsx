@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { managedRoleLabel } from "@/config/ui-labels";
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
@@ -11,9 +11,11 @@ import { DataTable, type DataTableSort } from "@/shared/data-table/DataTable";
 import { DataTableSortControls } from "@/shared/data-table/DataTableSortControls";
 import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useSearchState } from "@/shared/hooks/use-search-state";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { downloadCsv, toCsv } from "@/shared/utils/csv";
 import { formatNumber } from "@/shared/utils/format";
 import { AccountFilters } from "./AccountFilters";
+import { AccountDetail } from "./AccountDetail";
 import { accountSortColumns, readAccountPage } from "./account-page-model";
 import { accountColumns } from "./user-columns";
 import { useAccountPageQuery } from "./use-access-admin";
@@ -34,6 +36,15 @@ export function AccountListPanel({
 }) {
   const { credentialPrefixes } = useAuth();
   const [params, update] = useSearchState();
+  const { returnFocusRef, remember } = useReturnFocus();
+  const openDetail = useCallback(
+    (trigger: HTMLElement) => {
+      if (!owner.isCurrent()) return false;
+      remember(trigger);
+      return true;
+    },
+    [owner, remember],
+  );
   const state = readAccountPage(params, credentialPrefixes);
   const result = useAccountPageQuery(state.query, owner);
   const rows = useMemo(() => result.data?.accounts ?? [], [result.data]);
@@ -42,8 +53,8 @@ export function AccountListPanel({
     [rows],
   );
   const columns = useMemo(
-    () => accountColumns(names, onEdit, allowed, reason),
-    [names, onEdit, allowed, reason],
+    () => accountColumns(names, onEdit, allowed, reason, openDetail),
+    [names, onEdit, allowed, reason, openDetail],
   );
   const total = result.data?.total;
   const pages = total === undefined ? state.page + 1 : Math.max(1, Math.ceil(total / state.size));
@@ -59,6 +70,15 @@ export function AccountListPanel({
       actions={actions}
     >
       {!allowed ? <InlineNotice tone="info">{reason}</InlineNotice> : null}
+      {params.has("account_id") ? (
+        <AccountDetail
+          key={params.getAll("account_id").join("\u0000")}
+          values={params.getAll("account_id")}
+          owner={owner}
+          onClose={() => update({ account_id: undefined })}
+          returnFocusRef={returnFocusRef}
+        />
+      ) : null}
       <AccountFilters state={state} update={update} />
       <div className="account-page-actions">
         <p className="access-note" role="status">

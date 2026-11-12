@@ -97,6 +97,14 @@ func TestAdminAccountPageHTTPAuthorizationAndLegacyParity(t *testing.T) {
 		total, count       int
 	}{
 		{"admin default", admin, "", 32, 25},
+		{"exact account", admin, "&id=account-http-29&limit=1", 1, 1},
+		{"exact scoped account", team, "&id=account-http-25&limit=1", 1, 1},
+		{"foreign exact account", team, "&id=account-http-29&limit=1", 0, 0},
+		{"exact unassigned account", empty, "&id=account-http-31&limit=1", 1, 1},
+		{"foreign empty scope", empty, "&id=account-http-25&limit=1", 0, 0},
+		{"exact id is not a search", admin, "&id=account-http-2", 0, 0},
+		{"exact id intersects role", admin, "&id=account-http-29&role=viewer", 0, 0},
+		{"exact readonly account", "account-page-readonly-fixture", "&id=account-http-29&limit=1", 1, 1},
 		{"admin second page", admin, "&offset=25", 32, 7},
 		{"legacy token", "account-page-legacy-fixture", "", 32, 25},
 		{"readonly legacy token", "account-page-readonly-fixture", "", 32, 25},
@@ -149,6 +157,13 @@ func TestAdminAccountPageHTTPAuthorizationAndLegacyParity(t *testing.T) {
 	}
 	for _, query := range []string{"?view=accounts&q=%ZZ", "?view=accounts&q=a;b"} {
 		read(t, admin, query, 400)
+	}
+	for _, query := range []string{"id=", "id=one&id=two", "id=%FF", "id=a%00b", "id=a%C2%85b", "id=" + strings.Repeat("a", 4097)} {
+		read(t, admin, "?view=accounts&"+query, 400)
+	}
+	if !reflect.DeepEqual(read(t, admin, "", 200), read(t, admin, "?id=ignored", 200)) ||
+		!reflect.DeepEqual(read(t, admin, "?view=usage", 200), read(t, admin, "?view=usage&id=ignored", 200)) {
+		t.Fatal("exact account filter changed legacy or usage behavior")
 	}
 	// The existing team API accepts identifiers beyond the new search-input
 	// bounds. Authenticated scope must continue to match those identifiers.
@@ -240,7 +255,7 @@ func TestAdminAccountPageOpenAPIAndFailureProjection(t *testing.T) {
 	spec := buildOpenAPISpec()
 	paths := spec["paths"].(map[string]any)
 	op := paths["/admin/users"].(map[string]any)["get"].(map[string]any)
-	if len(op["parameters"].([]any)) != 8 {
+	if len(op["parameters"].([]any)) != 9 {
 		t.Fatal("missing account query contract")
 	}
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)

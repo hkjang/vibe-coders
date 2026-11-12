@@ -24,6 +24,7 @@ export type AccountPage = z.output<typeof accountPageSchema>;
 export type AccountRow = z.output<typeof accountPageRowSchema>;
 export const accountQuerySchema = z.object({
   view: z.literal("accounts"),
+  id: z.string().min(1).max(4096).optional(),
   q: z
     .string()
     .refine((value) => [...value].length <= 200)
