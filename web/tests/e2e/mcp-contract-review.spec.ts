@@ -1,8 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 import type axe from "axe-core";
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
+import {
+  activateEditor,
+  refreshRuntime,
+  replaceCode,
+  watchEditorAssets,
+} from "../fixtures/agent-code-editor";
 
 async function install(page: Page) {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   const user = {
     id: "contract-public-admin",
     email: "public@example.invalid",
@@ -142,7 +150,7 @@ async function install(page: Page) {
     unexpected.push(url.pathname);
     return route.fulfill({ status: 500, json: {} });
   });
-  return { state, original, writes, unexpected, user, bootstrap };
+  return { state, original, writes, unexpected, user, bootstrap, errors };
 }
 async function edit(page: Page) {
   await page.goto("/app/mcp-gateway");
@@ -232,9 +240,9 @@ test("계약 조회 권한이 없으면 해당 API를 호출하지 않는다", a
 test("390px 어두운 계약 편집에서 고정 작업·키보드·접근성을 유지한다", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await install(page);
   const dialog = await edit(page);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () =>
     (await (window as unknown as { axe: typeof axe }).axe.run()).violations.map((item) => item.id),
   );
@@ -249,3 +257,112 @@ test("390px 어두운 계약 편집에서 고정 작업·키보드·접근성을
   await expect(dialog).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("mcp-contract-mobile.png"), fullPage: true });
 });
+
+test("계약 코드 입력 두 개의 원문과 변경 비교를 보존하고 권한 복구 후 한 번 저장한다", async ({ page }) => {
+  const f = await install(page);
+  const assets = await watchEditorAssets(page);
+  const dialog = await edit(page);
+  assets.expectDeferred();
+  const input = '  {"type":"object","example":9007199254740993}  ';
+  const output = '  {"type":"string","description":"한글 결과"}  ';
+  const inputEditor = await activateEditor(dialog, "입력 스키마 (JSON)");
+  await replaceCode(inputEditor, input);
+  const outputEditor = await activateEditor(dialog, "출력 스키마 (JSON)");
+  await replaceCode(outputEditor, output);
+  const comparison = dialog.getByRole("region", { name: "계약 변경 비교" });
+  await expect(comparison).toContainText(input.trim());
+  await expect(comparison).toContainText(output.trim());
+  const feature = f.bootstrap.migration_registry[0];
+  if (!feature) throw new Error("missing public feature");
+  feature.read_only = true;
+  await refreshRuntime(page);
+  await expect(inputEditor.locator("textarea.inputarea")).not.toBeEditable();
+  await expect(outputEditor.locator("textarea.inputarea")).not.toBeEditable();
+  await expect(dialog.getByRole("button", { name: "검토한 계약 저장", exact: true })).toBeDisabled();
+  expect(f.writes).toEqual([]);
+  feature.read_only = false;
+  await refreshRuntime(page);
+  await outputEditor
+    .getByRole("button", { name: "출력 스키마 (JSON) 기본 입력으로 전환", exact: true })
+    .click();
+  await expect(dialog.getByRole("textbox", { name: "출력 스키마 (JSON)", exact: true })).toHaveValue(output);
+  await dialog.getByRole("button", { name: "검토한 계약 저장", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(f.writes).toHaveLength(1);
+  expect(f.writes[0]?.body).toMatchObject({
+    id: f.original.id,
+    input_schema: input.trim(),
+    output_schema: output.trim(),
+  });
+  expect(f.unexpected).toEqual([]);
+  expect(f.errors).toEqual([]);
+});
+
+test("계약 코드 입력의 JSON 오류 초점과 빈 선언 제거를 유지한다", async ({ page }) => {
+  const f = await install(page);
+  await watchEditorAssets(page);
+  const dialog = await edit(page);
+  const editor = await activateEditor(dialog, "입력 스키마 (JSON)");
+  await replaceCode(editor, '{"type":');
+  const submit = dialog.getByRole("button", { name: "검토한 계약 저장", exact: true });
+  await submit.focus();
+  await page.keyboard.press("Enter");
+  await expect(editor.locator("textarea.inputarea")).toBeFocused();
+  await expect(editor.locator("textarea.inputarea")).toHaveAttribute("aria-invalid", "true");
+  expect(f.writes).toEqual([]);
+  await replaceCode(editor, "");
+  await submit.focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeHidden();
+  expect(f.writes).toHaveLength(1);
+  expect(f.writes[0]?.body).toMatchObject({ input_schema: "", output_schema: f.original.output_schema });
+  expect(f.unexpected).toEqual([]);
+  expect(f.errors).toEqual([]);
+});
+
+test("계약 충돌 후 코드 편집을 잠그고 작성 중인 JSON을 보존한다", async ({ page }) => {
+  const f = await install(page);
+  f.state.conflict = true;
+  await watchEditorAssets(page);
+  const dialog = await edit(page);
+  const editor = await activateEditor(dialog, "입력 스키마 (JSON)");
+  await replaceCode(editor, '{"description":"내 초안"}');
+  await dialog.getByRole("button", { name: "검토한 계약 저장", exact: true }).click();
+  await expect(dialog.getByText(/계약이 변경되거나 삭제되었습니다/)).toBeVisible();
+  await expect(editor.locator("textarea.inputarea")).not.toBeEditable();
+  await expect(dialog.getByRole("region", { name: "계약 변경 비교" })).toContainText("내 초안");
+  expect(f.writes).toEqual([]);
+  expect(f.unexpected).toEqual([]);
+  expect(f.errors).toEqual([]);
+});
+
+for (const colorScheme of ["light", "dark"] as const)
+  test(`계약 코드 입력 ${colorScheme} 좁은 화면의 고정 작업·초안 보호·접근성`, async ({ page }, info) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+    await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+    const f = await install(page);
+    await watchEditorAssets(page);
+    const dialog = await edit(page);
+    const editor = await activateEditor(dialog, "입력 스키마 (JSON)");
+    await replaceCode(editor, '{"description":"유지할 초안"}');
+    await expect(dialog.getByRole("heading", { name: "도구 계약", exact: true })).toBeInViewport();
+    await expect(dialog.getByRole("button", { name: "검토한 계약 저장", exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(
+      await page.evaluate(async () =>
+        (await (window as unknown as { axe: typeof axe }).axe.run(document)).violations.map((v) => v.id),
+      ),
+    ).toEqual([]);
+    await page.screenshot({ path: info.outputPath(`contract-code-${colorScheme}.png`) });
+    await dialog.getByRole("button", { name: "취소", exact: true }).click();
+    await expect(page.getByRole("alertdialog", { name: "저장하지 않은 변경사항이 있습니다" })).toBeVisible();
+    await page.getByRole("button", { name: "계속 편집", exact: true }).click();
+    await editor.getByRole("button", { name: "입력 스키마 (JSON) 기본 입력으로 전환", exact: true }).click();
+    await expect(dialog.getByRole("textbox", { name: "입력 스키마 (JSON)", exact: true })).toHaveValue(
+      '{"description":"유지할 초안"}',
+    );
+    expect(f.writes).toEqual([]);
+    expect(f.unexpected).toEqual([]);
+    expect(f.errors).toEqual([]);
+  });
