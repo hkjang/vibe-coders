@@ -37,6 +37,10 @@ export function Dialog({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="dialog-overlay" />
         <DialogPrimitive.Content
+          onEscapeKeyDown={(event) => {
+            if (event.target instanceof Element && event.target.closest("[data-code-editor-surface]"))
+              event.preventDefault();
+          }}
           className={[
             "dialog-content",
             scrollBody && "dialog-content-scroll-body",

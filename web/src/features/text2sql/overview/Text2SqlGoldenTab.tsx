@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
+import { Controller } from "react-hook-form";
 import { z } from "zod";
 
-import { ReadOnlyNotice } from "@/features/text2sql/overview/text2sql-presentation";
 import { clip, writeDisabledTitle } from "@/features/text2sql/overview/text2sql-labels";
 import { text2sqlInvalidations, text2sqlRouteId } from "@/features/text2sql/overview/use-text2sql-queries";
 import { apiClient } from "@/shared/api/client";
@@ -10,16 +10,17 @@ import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Textarea } from "@/shared/components/ui/Textarea";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { formatNumber, formatPercent } from "@/shared/utils/format";
 
 const goldenFormSchema = z.object({
@@ -38,6 +39,12 @@ interface Text2SqlGoldenTabProps {
 }
 
 export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenTabProps): React.JSX.Element {
+  const access = useFeatureMutationAccess(
+    [text2sqlRouteId],
+    canWrite,
+    "변경에는 admin:write 권한이 필요합니다.",
+  );
+  const writable = access.allowed;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [toDelete, setToDelete] = useState("");
   const [runConfirmOpen, setRunConfirmOpen] = useState(false);
@@ -55,8 +62,9 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
   });
 
   const save = useMutationFeedback({
-    mutate: (values: GoldenFormValues) =>
-      apiClient.request(endpoints.domains.text2sql.golden.save, {
+    mutate: (values: GoldenFormValues) => {
+      access.assertCurrent();
+      return apiClient.request(endpoints.domains.text2sql.golden.save, {
         body: {
           name: values.name,
           question: values.question,
@@ -69,26 +77,31 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
           enabled: true,
         },
         routeId: text2sqlRouteId,
-      }),
+      });
+    },
     invalidates: text2sqlInvalidations.overview,
     successMessage: "Golden Query를 저장했습니다.",
   });
   const remove = useMutationFeedback({
-    mutate: (id: string) =>
-      apiClient.request(endpoints.domains.text2sql.golden.remove, {
+    mutate: (id: string) => {
+      access.assertCurrent();
+      return apiClient.request(endpoints.domains.text2sql.golden.remove, {
         query: { id },
         routeId: text2sqlRouteId,
-      }),
+      });
+    },
     invalidates: text2sqlInvalidations.overview,
     successMessage: "Golden Query를 삭제했습니다.",
   });
   const run = useMutationFeedback({
-    mutate: () =>
-      apiClient.request(endpoints.domains.text2sql.golden.run, {
+    mutate: () => {
+      access.assertCurrent();
+      return apiClient.request(endpoints.domains.text2sql.golden.run, {
         body: {},
         routeId: text2sqlRouteId,
         timeoutMs: 120_000,
-      }),
+      });
+    },
     successMessage: (result) =>
       `회귀 검증 완료 — 통과 ${result.passed}/${result.total} (${formatPercent(result.pass_rate, 0)})`,
     onSuccess: (result) => setRunResult(result),
@@ -136,8 +149,8 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
         <Button
           size="small"
           variant="danger"
-          disabled={!canWrite}
-          title={writeDisabledTitle(canWrite)}
+          disabled={!writable}
+          title={access.reason ?? writeDisabledTitle(writable)}
           onClick={(event) => {
             rowTriggerRef.current = event.currentTarget;
             setToDelete(row.original.id);
@@ -193,7 +206,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
 
   return (
     <div className="t2s-stack">
-      <ReadOnlyNotice canWrite={canWrite} />
+      {!writable ? <InlineNotice tone="warning">{access.reason}</InlineNotice> : null}
 
       <SectionCard
         title="Golden Query (few-shot · 회귀)"
@@ -202,8 +215,8 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
           <>
             <Button
               ref={runTriggerRef}
-              disabled={!canWrite || run.isPending}
-              title={writeDisabledTitle(canWrite)}
+              disabled={!writable || run.isPending}
+              title={access.reason ?? writeDisabledTitle(writable)}
               onClick={() => setRunConfirmOpen(true)}
             >
               {run.isPending ? "실행 중" : "회귀 검증 실행"}
@@ -211,8 +224,8 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
             <Button
               ref={createTriggerRef}
               variant="primary"
-              disabled={!canWrite}
-              title={writeDisabledTitle(canWrite)}
+              disabled={!writable}
+              title={access.reason ?? writeDisabledTitle(writable)}
               onClick={() => setDialogOpen(true)}
             >
               Golden Query 추가
@@ -258,7 +271,9 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
         form={form}
         returnFocusRef={createTriggerRef}
         title="Golden Query 추가"
+        scrollBody
         description="자연어 질문과 검증된 기대 SQL을 한 쌍으로 등록합니다."
+        submitDisabled={!writable}
         onSubmit={async (values) => {
           await save.mutateAsync(values);
         }}
@@ -267,10 +282,42 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
           {(control) => <Input {...control} {...form.register("name")} />}
         </FormField>
         <FormField label="자연어 질문" required error={form.formState.errors.question?.message}>
-          {(control) => <Textarea {...control} rows={3} {...form.register("question")} />}
+          {(control) => (
+            <Controller
+              control={form.control}
+              name="question"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  value={field.value}
+                  label="자연어 질문"
+                  language="prompt"
+                  rows={3}
+                  disabled={!writable}
+                />
+              )}
+            />
+          )}
         </FormField>
         <FormField label="기대 SQL" required error={form.formState.errors.expected_sql?.message}>
-          {(control) => <Textarea {...control} rows={5} {...form.register("expected_sql")} />}
+          {(control) => (
+            <Controller
+              control={form.control}
+              name="expected_sql"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  value={field.value}
+                  label="기대 SQL"
+                  language="sql"
+                  rows={5}
+                  disabled={!writable}
+                />
+              )}
+            />
+          )}
         </FormField>
         <FormField label="스키마명" error={form.formState.errors.schema_name?.message}>
           {(control) => <Input {...control} {...form.register("schema_name")} />}
@@ -285,6 +332,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
         onOpenChange={setRunConfirmOpen}
         returnFocusRef={runTriggerRef}
         title="Golden Query 회귀 검증 실행"
+        confirmDisabled={!writable}
         description="사용 중인 모델로 모든 활성 Golden Query의 SQL을 다시 생성합니다. 모델 호출 비용이 발생하며 시간이 걸릴 수 있습니다."
         confirmLabel="실행"
         onConfirm={async () => {
@@ -300,6 +348,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
         returnFocusRef={rowTriggerRef}
         tone="danger"
         title="Golden Query 삭제"
+        confirmDisabled={!writable}
         description="삭제하면 few-shot 예시와 회귀 검증 대상에서 함께 빠집니다."
         confirmLabel="삭제"
         onConfirm={async () => {

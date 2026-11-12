@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Text2SqlPage } from "@/features/text2sql/overview/Text2SqlPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
 
@@ -166,7 +167,12 @@ const shellHandlers = {
 } as const;
 
 function renderPage(route = "/text2sql"): ReturnType<typeof renderScreen> {
-  return renderScreen(<Text2SqlPage />, { path: "/text2sql", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="text2sql.overview">
+      <Text2SqlPage />
+    </FeatureAccessHarness>,
+    { path: "/text2sql", route },
+  );
 }
 
 describe("Text2SqlPage", () => {
@@ -221,7 +227,7 @@ describe("Text2SqlPage", () => {
 
     expect(await screen.findByRole("button", { name: "Golden Query 추가" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "회귀 검증 실행" })).toBeDisabled();
-    expect(screen.getByText(/admin:write/u)).toBeVisible();
+    for (const notice of screen.getAllByText(/admin:write/u)) expect(notice).toBeVisible();
   });
 
   it("restores the selected tab and window from the URL", async () => {

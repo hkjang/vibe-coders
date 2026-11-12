@@ -1,8 +1,10 @@
 import { type RefObject } from "react";
+import { Controller } from "react-hook-form";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -80,14 +82,44 @@ export function DefinitionDialog({
         {target.kind === "prompt" ? (
           <>
             <FormField label="기준 프롬프트" required error={errors.prompt?.message}>
-              {(control) => <Textarea {...control} rows={6} {...form.register("prompt")} />}
+              {(control) => (
+                <Controller
+                  control={form.control}
+                  name="prompt"
+                  render={({ field }) => (
+                    <CodeEditor
+                      {...control}
+                      {...field}
+                      value={field.value ?? ""}
+                      label="기준 프롬프트"
+                      language="prompt"
+                      rows={6}
+                    />
+                  )}
+                />
+              )}
             </FormField>
             <FormField
               label="기대 내용"
               description="비워 두면 기존 문자열 검사는 점수 0으로도 통과할 수 있습니다. 공백은 그대로 저장합니다."
               error={errors.expected?.message}
             >
-              {(control) => <Textarea {...control} rows={4} {...form.register("expected")} />}
+              {(control) => (
+                <Controller
+                  control={form.control}
+                  name="expected"
+                  render={({ field }) => (
+                    <CodeEditor
+                      {...control}
+                      {...field}
+                      value={field.value ?? ""}
+                      label="기대 내용"
+                      language="prompt"
+                      rows={4}
+                    />
+                  )}
+                />
+              )}
             </FormField>
           </>
         ) : (
@@ -100,7 +132,22 @@ export function DefinitionDialog({
           description={'예: ["한글", "회귀"]. 쉼표와 공백을 포함한 태그도 그대로 유지합니다.'}
           error={errors.tags?.message}
         >
-          {(control) => <Textarea {...control} className="mono" rows={3} {...form.register("tags")} />}
+          {(control) => (
+            <Controller
+              control={form.control}
+              name="tags"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  value={field.value ?? ""}
+                  label="태그 (JSON 문자열 배열)"
+                  language="json"
+                  rows={3}
+                />
+              )}
+            />
+          )}
         </FormField>
         {target.kind === "workflow" ? <DefinitionSteps form={form} /> : null}
         <Button onClick={() => void review.review()}>변경 내용 검토</Button>

@@ -8,6 +8,12 @@ import ts from "typescript";
 
 export const INITIAL_WIRE_LIMIT = 350_000;
 export const ROUTE_RAW_LIMIT = 250_000;
+// Explicit user-activated tools have their own complete envelope. This is not
+// a route exemption: static reachability still fails and ordinary routes keep
+// their original limit. Browser tests verify the activation boundary.
+export const INTERACTIVE_FEATURES = {
+  "src/shared/code-editor/MonacoEditor.tsx": { rawBytes: 6_000_000, wireBytes: 1_500_000 },
+};
 
 // Keep this allowlist aligned with internal/appui/handler.go: compressibleAsset.
 const compressible = new Set([".css", ".html", ".js", ".json", ".map", ".svg", ".txt", ".webmanifest"]);
@@ -366,9 +372,35 @@ function moduleReferences(name, data) {
     } else if (
       ts.isNewExpression(node) &&
       ts.isIdentifier(node.expression) &&
+      ["Worker", "SharedWorker"].includes(node.expression.text)
+    ) {
+      const argument = node.arguments?.[0];
+      if (isLiteral(argument)) {
+        if (!argument.text.startsWith("/") && !/^[a-z][a-z\d+.-]*:/iu.test(argument.text))
+          fail(`${name}: relative Worker URL depends on the client route; use new URL with import.meta.url`);
+        references.push({ kind: "worker", url: argument.text });
+      } else if (
+        argument &&
+        ts.isNewExpression(argument) &&
+        ts.isIdentifier(argument.expression) &&
+        argument.expression.text === "URL" &&
+        importMetaURL(argument.arguments?.[1]) &&
+        isLiteral(argument.arguments?.[0])
+      ) {
+        references.push({ kind: "worker", url: argument.arguments[0].text });
+      } else unresolved.push("worker");
+    } else if (
+      ts.isNewExpression(node) &&
+      ts.isIdentifier(node.expression) &&
       node.expression.text === "URL" &&
       importMetaURL(node.arguments?.[1])
     ) {
+      if (
+        ts.isNewExpression(node.parent) &&
+        ts.isIdentifier(node.parent.expression) &&
+        ["Worker", "SharedWorker"].includes(node.parent.expression.text)
+      )
+        return;
       if (isLiteral(node.arguments[0])) references.push({ kind: "asset", url: node.arguments[0].text });
       else unresolved.push("import-meta-url");
     }
@@ -415,8 +447,9 @@ export function analyzeBundle(manifest, readFile) {
     }
     for (const { kind, url } of module.references) {
       const dependency = resourcePath(url, name);
-      if (kind === "asset") {
-        if (dependency !== null) assets.push(dependency);
+      if (kind === "asset" || kind === "worker") {
+        if (dependency === null && kind === "worker") fail(`${name}: inline worker cannot be budgeted`);
+        if (dependency !== null) assets.push({ resolved: dependency, standaloneModule: kind === "worker" });
         continue;
       }
       if (dependency === null) fail(`${name}: inline/fragment module imports are unsupported`);
@@ -430,7 +463,13 @@ export function analyzeBundle(manifest, readFile) {
   // Vite omits external modules from its manifest. Inspect emitted syntax too,
   // without executing it; ordinary fetch/API URLs are intentionally not examined.
   for (const name of bytes.keys()) verifyModule(name);
-  function closure(rootKey, cachedKeys = new Set(), cachedFiles = new Set(), dynamic = false) {
+  function closure(
+    rootKey,
+    cachedKeys = new Set(),
+    cachedFiles = new Set(),
+    dynamic = false,
+    deferInteractive = false,
+  ) {
     const keys = new Set();
     const files = new Set();
     function addFile(name) {
@@ -445,14 +484,15 @@ export function analyzeBundle(manifest, readFile) {
           ? cssReferences(data.toString("utf8"))
           : extension === ".html"
             ? htmlReferences(data.toString("utf8"), excluded)
-            : (moduleAssets.get(name) ?? []).map((url) => ({ resolved: url }));
+            : (moduleAssets.get(name) ?? []);
       for (const reference of references) {
         const dependency =
           reference.resolved ?? resourcePath(typeof reference === "string" ? reference : reference.url, name);
         if (dependency === null) continue;
         if (
           (reference.requiresRecord || modules.has(extname(dependency).toLowerCase())) &&
-          !recordsByFile.has(dependency)
+          !recordsByFile.has(dependency) &&
+          !reference.standaloneModule
         ) {
           fail(`${name}: missing manifest record for ${dependency}`);
         }
@@ -466,18 +506,39 @@ export function analyzeBundle(manifest, readFile) {
       keys.add(key);
       const record = manifest[key];
       for (const file of [record.file, ...(record.css ?? []), ...(record.assets ?? [])]) addFile(file);
-      for (const dependency of [...(record.imports ?? []), ...(dynamic ? (record.dynamicImports ?? []) : [])])
+      for (const dependency of record.imports ?? []) {
+        if (deferInteractive && Object.hasOwn(INTERACTIVE_FEATURES, dependency))
+          fail(`${key}: interactive feature must not be statically imported`);
         visit(dependency);
+      }
+      if (dynamic)
+        for (const dependency of record.dynamicImports ?? []) {
+          if (deferInteractive && Object.hasOwn(INTERACTIVE_FEATURES, dependency)) continue;
+          visit(dependency);
+        }
     }
     visit(rootKey);
     if (!dynamic) addFile("index.html");
     return { keys, files };
   }
   const initialClosure = closure("index.html");
+  const featureClosures = Object.entries(INTERACTIVE_FEATURES)
+    .filter(([entry]) => Object.hasOwn(manifest, entry))
+    .map(([entry, limits]) => {
+      if (manifest[entry].isDynamicEntry !== true || initialClosure.keys.has(entry))
+        fail(`${entry}: interactive feature must be a deferred dynamic entry`);
+      return { entry, limits, ...closure(entry, initialClosure.keys, initialClosure.files, true) };
+    });
+  // Follow every route before activation to keep independently reachable nested
+  // imports in the route gate, even when an optional tool also uses them.
+  const beforeActivation = closure("index.html", new Set(), new Set(), true, true);
+  const featureOnly = new Set(
+    featureClosures.flatMap(({ keys }) => [...keys].filter((key) => !beforeActivation.keys.has(key))),
+  );
   const routeClosures = Object.entries(manifest)
-    .filter(([, value]) => value.isDynamicEntry === true)
+    .filter(([key, value]) => value.isDynamicEntry === true && !featureOnly.has(key))
     .sort(([left], [right]) => compare(left, right))
-    .map(([entry]) => ({ entry, ...closure(entry, initialClosure.keys, initialClosure.files, true) }));
+    .map(([entry]) => ({ entry, ...closure(entry, initialClosure.keys, initialClosure.files, true, true) }));
   const measurements = new Map(
     [...bytes].map(([path, data]) => {
       const rawBytes = data.length;
@@ -512,14 +573,22 @@ export function analyzeBundle(manifest, readFile) {
     const result = { entry, ...totals(files) };
     return { ...result, passed: result.rawBytes <= ROUTE_RAW_LIMIT };
   });
+  const interactive = featureClosures.map(({ entry, files, limits }) => {
+    const result = { entry, limits, ...totals(files) };
+    return { ...result, passed: result.rawBytes <= limits.rawBytes && result.wireBytes <= limits.wireBytes };
+  });
   return {
     schemaVersion: 1,
-    passed: initial.passed && routes.every((route) => route.passed),
+    passed:
+      initial.passed &&
+      routes.every((route) => route.passed) &&
+      interactive.every((feature) => feature.passed),
     limits: { initialWireBytes: INITIAL_WIRE_LIMIT, routeRawBytes: ROUTE_RAW_LIMIT },
     accounting:
-      "Per-file Node gzip level 9; Go-compressible files use min(raw,gzip), other assets use raw. Routes conservatively include uncached manifest nested dynamic imports. Computed runtime references are reported, not resolved or measured; this is not an HTTP timing measurement.",
+      "Per-file Node gzip level 9; Go-compressible files use min(raw,gzip), other assets use raw. Routes include uncached nested dynamic imports up to named interactive boundaries, whose complete closures (including literal workers) have separate raw and wire limits. Computed runtime references are reported, not resolved or measured; this is not an HTTP timing measurement.",
     initial,
     routes,
+    interactive,
     files: [...measurements.values()].sort((left, right) => compare(left.path, right.path)),
     excluded: [...excluded]
       .sort()
@@ -554,7 +623,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     const failedRoutes = report.routes.filter((route) => !route.passed);
     process.stderr.write(
-      `번들 예산 ${report.passed ? "통과" : "초과"}: 초기 ${report.initial.wireBytes}/${INITIAL_WIRE_LIMIT} bytes, 화면 ${report.routes.length}개 (초과 ${failedRoutes.length}개)\n`,
+      `번들 예산 ${report.passed ? "통과" : "초과"}: 초기 ${report.initial.wireBytes}/${INITIAL_WIRE_LIMIT} bytes, 화면 ${report.routes.length}개 (초과 ${failedRoutes.length}개), 선택 도구 ${report.interactive.length}개 (초과 ${report.interactive.filter((feature) => !feature.passed).length}개)\n`,
     );
     if (!report.passed) process.exitCode = 1;
   } catch (error) {

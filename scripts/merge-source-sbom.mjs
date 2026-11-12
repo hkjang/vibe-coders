@@ -67,7 +67,10 @@ const npmLicenseReport = readJSON(npmLicensesPath);
 const npmLicenses = new Map();
 for (const [license, entries] of Object.entries(npmLicenseReport)) {
   if (!Array.isArray(entries)) continue;
-  const normalized = /^[A-Za-z0-9.+-]+(?:\s+(?:AND|OR)\s+[A-Za-z0-9.+-]+)*$/.test(license)
+  // pnpm reports dual licenses such as DOMPurify's with an outer group. Validate
+  // the flat expression inside that one group, retaining the original SPDX text.
+  const expression = license.startsWith("(") && license.endsWith(")") ? license.slice(1, -1) : license;
+  const normalized = /^[A-Za-z0-9.+-]+(?:\s+(?:AND|OR)\s+[A-Za-z0-9.+-]+)*$/.test(expression)
     ? license
     : "NOASSERTION";
   for (const entry of entries) {

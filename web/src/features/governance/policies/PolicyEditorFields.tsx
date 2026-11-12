@@ -4,7 +4,7 @@ import { FormField } from "@/shared/components/form/FormField";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { Input } from "@/shared/components/ui/Input";
-import { Textarea } from "@/shared/components/ui/Textarea";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { protectedJson } from "./policy-editor-security";
 import {
@@ -76,11 +76,13 @@ function ValueField({
       >
         {(control) =>
           json ? (
-            <Textarea
+            <CodeEditor
               {...control}
+              label={label}
+              language="json"
               value={rendered}
               rows={5}
-              onChange={(event) => onChange({ replacement: event.target.value })}
+              onChange={(replacement) => onChange({ replacement })}
             />
           ) : (
             <Input
