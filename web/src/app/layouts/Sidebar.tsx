@@ -5,12 +5,13 @@ import { NavLink } from "react-router";
 
 import { featurePath } from "@/config/migration-registry";
 import { navigationGroups } from "@/config/navigation";
-import { uiLabels } from "@/config/ui-labels";
+import { migrationStatusLabels, uiLabels } from "@/config/ui-labels";
 import { MigrationStatusBadge } from "@/shared/components/page/MigrationStatus";
 import { Button } from "@/shared/components/ui/Button";
 import { usePreferences } from "@/shared/stores/preferences";
 import { navigationLabels as labels } from "./navigation-labels";
 import { orderedNavigationItems, useNavigationItems, type NavigationItem } from "./use-navigation-items";
+import { SidebarNavigation } from "./SidebarNavigation";
 
 interface SidebarProps {
   mobileTriggerRef: RefObject<HTMLButtonElement | null>;
@@ -27,13 +28,19 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
   const favoriteIds = usePreferences((state) => state.favoriteFeatures);
   const available = useNavigationItems();
   const favorites = orderedNavigationItems(favoriteIds, available);
+  const menuSignature = JSON.stringify(
+    available.map(({ feature, effective }) => [feature.featureId, feature.title, effective.status]),
+  );
   const openingFavorites = useRef(false);
 
   const renderItem = ({ feature, effective }: NavigationItem, mobile: boolean) => (
     <li key={feature.featureId}>
       <NavLink
         to={featurePath(feature)}
-        title={!mobile && collapsed ? feature.title : undefined}
+        aria-label={`${feature.title} ${migrationStatusLabels[effective.status]}`}
+        title={
+          !mobile && collapsed ? `${feature.title} ${migrationStatusLabels[effective.status]}` : undefined
+        }
         onClick={() => {
           if (mobile) setMobileOpen(false);
         }}
@@ -41,8 +48,10 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
         <span className="nav-icon" aria-hidden="true">
           {feature.title.slice(0, 1)}
         </span>
-        <span className="nav-copy">{feature.title}</span>
-        {effective.status !== "stable" ? <MigrationStatusBadge status={effective.status} /> : null}
+        <span className="nav-copy sidebar-item-copy">
+          <span className="sidebar-item-title">{feature.title}</span>
+          {effective.status !== "stable" ? <MigrationStatusBadge status={effective.status} /> : null}
+        </span>
       </NavLink>
     </li>
   );
@@ -81,7 +90,7 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
         ) : null}
       </div>
 
-      <nav className="sidebar-nav" aria-label={mobile ? "모바일 주 메뉴" : undefined}>
+      <SidebarNavigation mobile={mobile} collapsed={!mobile && collapsed} menuSignature={menuSignature}>
         <div className="sidebar-favorites-heading">
           <span className="nav-copy">{labels.favorites}</span>
           <Button
@@ -121,7 +130,7 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
             </Fragment>
           );
         })}
-      </nav>
+      </SidebarNavigation>
 
       {!mobile ? (
         <div className="sidebar-footer">
@@ -154,7 +163,7 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
               openingFavorites.current = false;
             }}
           >
-            <aside className="app-sidebar app-sidebar-mobile">{content(true)}</aside>
+            <div className="app-sidebar app-sidebar-mobile">{content(true)}</div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

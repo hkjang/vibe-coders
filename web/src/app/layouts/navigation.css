@@ -1,3 +1,26 @@
+.sidebar-nav a:has(.sidebar-item-copy) {
+  align-items: flex-start;
+}
+.sidebar-item-copy.nav-copy {
+  display: grid;
+  gap: var(--space-1);
+  overflow: visible;
+  white-space: normal;
+}
+.sidebar-item-title {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+.sidebar-item-copy > .badge {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+}
+.app-sidebar[data-collapsed="true"] .sidebar-item-copy {
+  display: none;
+}
+
 .sidebar-favorites-heading {
   display: flex;
   align-items: center;
