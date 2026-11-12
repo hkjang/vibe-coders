@@ -55,7 +55,11 @@ for (const rootPurl of [
     const inputs = [
       { packages: [root, ...goDependencies] },
       { packages: npmDependencies },
-      {},
+      {
+        "(MPL-2.0 OR Apache-2.0)": [{ name: "dependency-0", versions: ["1.2.3"] }],
+        "(MIT OR Apache-2.0": [{ name: "dependency-1", versions: ["1.2.3"] }],
+        "MIT | unsafe <script>": [{ name: "dependency-2", versions: ["1.2.3"] }],
+      },
     ];
     inputs.forEach((input, index) =>
       writeFileSync(inputPaths[index], JSON.stringify(input)),
@@ -74,6 +78,9 @@ for (const rootPurl of [
     assert.equal(result.status, 0, result.stderr);
 
     const sbom = JSON.parse(readFileSync(sbomPath, "utf8"));
+    assert.equal(sbom.packages.find(pkg => pkg.name === "dependency-0").licenseDeclared, "(MPL-2.0 OR Apache-2.0)");
+    assert.equal(sbom.packages.find(pkg => pkg.name === "dependency-1").licenseDeclared, "NOASSERTION");
+    assert.equal(sbom.packages.find(pkg => pkg.name === "dependency-2").licenseDeclared, "NOASSERTION");
     const selfPackages = sbom.packages.filter(
       (pkg) => pkg.name === "vibe-coders",
     );

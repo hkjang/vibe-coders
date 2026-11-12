@@ -15,7 +15,12 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
-import { analyzeBundle, INITIAL_WIRE_LIMIT, ROUTE_RAW_LIMIT } from "./check-bundle-budget.mjs";
+import {
+  analyzeBundle,
+  INITIAL_WIRE_LIMIT,
+  ROUTE_RAW_LIMIT,
+  INTERACTIVE_FEATURES,
+} from "./check-bundle-budget.mjs";
 
 const script = fileURLToPath(new URL("./check-bundle-budget.mjs", import.meta.url));
 const buildScript = fileURLToPath(new URL("./build-bundle-budget.mjs", import.meta.url));
@@ -56,6 +61,101 @@ function analyze({ manifest, files }) {
 function route(report, entry = "src/route.js") {
   return report.routes.find((candidate) => candidate.entry === entry);
 }
+
+function interactiveFixture() {
+  const input = fixture();
+  const entry = Object.keys(INTERACTIVE_FEATURES)[0];
+  input.manifest["src/route.js"].dynamicImports = [entry];
+  input.manifest[entry] = {
+    file: "assets/editor.js",
+    isDynamicEntry: true,
+    imports: ["_shared.js"],
+    dynamicImports: ["language.js"],
+    css: ["assets/editor.css"],
+  };
+  input.manifest["language.js"] = { file: "assets/language.js", isDynamicEntry: true };
+  input.files.set("assets/editor.js", Buffer.from('new Worker("/app/assets/editor.worker.js");'));
+  input.files.set("assets/editor.worker.js", Buffer.from("/* worker */"));
+  input.files.set("assets/editor.css", Buffer.from('body { background: url("./editor-font.woff2") }'));
+  input.files.set("assets/editor-font.woff2", Buffer.alloc(10));
+  input.files.set("assets/language.js", Buffer.from("/* language */"));
+  return { ...input, entry };
+}
+
+test("explicit activation separately measures editor, nested language, CSS/font and manifest-less local worker", () => {
+  const input = interactiveFixture();
+  const report = analyze(input);
+  assert.equal(report.passed, true);
+  assert.deepEqual(route(report).files, ["assets/route.js"]);
+  assert.equal(report.routes.length, 1);
+  assert.deepEqual(report.interactive[0].files, [
+    "assets/editor-font.woff2",
+    "assets/editor.css",
+    "assets/editor.js",
+    "assets/editor.worker.js",
+    "assets/language.js",
+  ]);
+  assert.deepEqual(report.interactive[0].limits, INTERACTIVE_FEATURES[input.entry]);
+  input.files.set(
+    "assets/editor.worker.js",
+    Buffer.alloc(INTERACTIVE_FEATURES[input.entry].rawBytes + 1, " "),
+  );
+  assert.equal(analyze(input).passed, false, "oversized worker cannot hide behind an activation boundary");
+});
+
+test("interactive wire budget includes incompressible assets independently of raw budget", () => {
+  const input = interactiveFixture();
+  const limit = INTERACTIVE_FEATURES[input.entry].wireBytes;
+  input.files.set("assets/editor-font.woff2", Buffer.alloc(limit + 1));
+  const report = analyze(input);
+  assert.equal(report.initial.passed, true);
+  assert.equal(route(report).passed, true);
+  assert.equal(report.interactive[0].passed, false);
+  assert.equal(report.passed, false);
+});
+
+test("eager editor imports and external or missing workers fail instead of bypassing the gate", () => {
+  for (const root of ["index.html", "src/route.js"]) {
+    const input = interactiveFixture();
+    input.manifest[root].imports.push(input.entry);
+    assert.throws(() => analyze(input), /deferred dynamic entry|must not be statically imported/u);
+  }
+  for (const url of [
+    "https://example.invalid/worker.js",
+    "/app/assets/missing.worker.js",
+    "data:text/javascript,void(0)",
+  ]) {
+    const input = interactiveFixture();
+    input.files.set("assets/editor.js", Buffer.from(`new Worker(${JSON.stringify(url)});`));
+    assert.throws(() => analyze(input), /external|missing|inline worker/u);
+  }
+  const relativeWorker = interactiveFixture();
+  relativeWorker.files.set("assets/editor.js", Buffer.from('new Worker("worker.js");'));
+  assert.throws(() => analyze(relativeWorker), /relative Worker URL/u);
+});
+
+test("a language also reachable without editor activation still pays the ordinary route budget", () => {
+  const input = interactiveFixture();
+  input.manifest["src/route.js"].dynamicImports.push("language.js");
+  input.files.set("assets/language.js", Buffer.alloc(ROUTE_RAW_LIMIT + 1, " "));
+  const report = analyze(input);
+  assert.equal(report.routes.length, 2);
+  assert.equal(route(report).passed, false);
+  assert.equal(report.passed, false);
+});
+
+test("new URL worker syntax is measured once; computed workers remain explicitly unresolved", () => {
+  const input = interactiveFixture();
+  input.files.set(
+    "assets/editor.js",
+    Buffer.from('new Worker(new URL("./editor.worker.js", import.meta.url)); new Worker(runtime);'),
+  );
+  const report = analyze(input);
+  assert.equal(report.interactive[0].files.filter((file) => file.endsWith("editor.worker.js")).length, 1);
+  assert.deepEqual(report.unresolvedRuntimeReferences, [
+    { file: "assets/editor.js", kind: "worker", count: 1 },
+  ]);
+});
 
 test("initial entry includes actual HTML, static imports and CSS once; routes subtract cached files", () => {
   const input = fixture();

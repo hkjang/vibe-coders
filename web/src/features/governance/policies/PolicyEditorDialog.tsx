@@ -92,7 +92,9 @@ function Editor({ baseline, access, close, returnFocusRef }: Props) {
     }
     if (error) {
       const target = form.current?.querySelector<HTMLElement>(`[data-editor-field="${error.field}"]`);
-      (target?.querySelector<HTMLElement>("input,textarea,button") ?? target)?.focus();
+      const controlId = target?.querySelector("label")?.htmlFor;
+      const labeledControl = controlId ? document.getElementById(controlId) : undefined;
+      (labeledControl ?? target?.querySelector<HTMLElement>("input,textarea,button") ?? target)?.focus();
     } else if (review) form.current?.querySelector<HTMLElement>("[data-editor-review-heading]")?.focus();
   }, [access.read, error, review]);
   const validReview = review && review.prefixKey === access.prefixKey && review.approval === access.approval;

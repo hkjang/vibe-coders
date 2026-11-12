@@ -1,6 +1,7 @@
 import { expect, test as base } from "@playwright/test";
 import type { UiBootstrapResponse } from "../../../src/shared/api/generated";
-import type { MigrationStatus } from "../../../src/config/migration-registry";
+// Transport fixtures use the API contract without importing the UI route graph.
+type MigrationStatus = UiBootstrapResponse["migration_registry"][number]["status"];
 
 export const account = {
   id: "public-sql-operator",

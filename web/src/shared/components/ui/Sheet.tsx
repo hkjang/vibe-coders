@@ -35,6 +35,10 @@ export function Sheet({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="dialog-overlay" />
         <DialogPrimitive.Content
+          onEscapeKeyDown={(event) => {
+            if (event.target instanceof Element && event.target.closest("[data-code-editor-surface]"))
+              event.preventDefault();
+          }}
           className="sheet-content"
           data-size={size}
           onCloseAutoFocus={(event) => {

@@ -6,6 +6,7 @@
     "strict": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "paths": { "@/*": ["./src/*"] },
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -20,6 +21,7 @@
     "playwright.provider-connection.config.ts",
     "tests/auth-live",
     "tests/provider-connection-live",
+    "tests/e2e/code-editor.spec.ts",
     "eslint.config.js"
   ]
 }
