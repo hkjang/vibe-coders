@@ -19,13 +19,17 @@ func (s *Server) handleAuthAccountPage(w http.ResponseWriter, r *http.Request) {
 		invalid()
 		return
 	}
-	for _, key := range []string{"view", "limit", "offset", "q", "role", "status", "team_id", "sort"} {
+	for _, key := range []string{"view", "id", "limit", "offset", "q", "role", "status", "team_id", "sort"} {
 		if len(values[key]) > 1 {
 			invalid()
 			return
 		}
 	}
 	query := store.AuthAccountQuery{Search: values.Get("q"), Role: values.Get("role"), Status: values.Get("status"), Limit: 25}
+	if values.Has("id") {
+		id := values.Get("id")
+		query.ID = &id
+	}
 	for _, item := range []struct {
 		key    string
 		target *int

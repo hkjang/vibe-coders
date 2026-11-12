@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -29,6 +30,8 @@ type AuthAccountSort struct {
 }
 
 type AuthAccountQuery struct {
+	// ID is an exact identity filter, intersected with all other filters and scope.
+	ID     *string
 	Search string
 	Role   string
 	Status string
@@ -95,6 +98,9 @@ func (s *SQLStore) ListAuthAccountPage(ctx context.Context, query AuthAccountQue
 		!validAuthAccountText(query.Role, 256) || !validAuthAccountText(query.Status, 256) {
 		return page, ErrInvalidAuthAccountQuery
 	}
+	if query.ID != nil && (*query.ID == "" || !validAuthAccountText(*query.ID, 4096) || strings.IndexFunc(*query.ID, unicode.IsControl) >= 0) {
+		return page, ErrInvalidAuthAccountQuery
+	}
 	order, err := authAccountOrder(query.Sort, "")
 	if err != nil {
 		return page, err
@@ -102,6 +108,10 @@ func (s *SQLStore) ListAuthAccountPage(ctx context.Context, query AuthAccountQue
 	outerOrder, _ := authAccountOrder(query.Sort, "p.")
 	where := []string{"1 = 1"}
 	args := []any{}
+	if query.ID != nil {
+		where = append(where, "id = ?")
+		args = append(args, *query.ID)
+	}
 	// Authenticated team scope is an existing identifier, not a search input.
 	// Legacy teams may have long IDs or separators; parameter binding preserves
 	// their exact authority without applying new URL-input restrictions.

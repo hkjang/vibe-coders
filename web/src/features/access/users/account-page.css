@@ -19,3 +19,7 @@
 .account-page-actions > p {
   flex: 1 1 220px;
 }
+.account-detail-values dd {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
