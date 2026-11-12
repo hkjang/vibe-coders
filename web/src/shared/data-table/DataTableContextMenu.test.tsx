@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useRef, useState } from "react";
+import { StrictMode, useRef, useState } from "react";
 import { Dialog } from "@/shared/components/ui/Dialog";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import { DataTable } from "./DataTable";
@@ -30,7 +30,7 @@ const initial: [Item, Item] = [
   { id: "a", name: "첫 항목" },
   { id: "b", name: "둘째 항목" },
 ];
-function setup() {
+function setup(strict = false) {
   const onAction = vi.fn();
   const view = (data: Item[] = initial, enabled = true, loading = false, error?: string) => (
     <DataTable
@@ -45,11 +45,14 @@ function setup() {
         : { onRowClick: undefined, getRowActionLabel: undefined })}
     />
   );
-  const container = (child: React.ReactNode) => (
-    <main id="main-content" tabIndex={-1}>
-      {child}
-    </main>
-  );
+  const container = (child: React.ReactNode) => {
+    const content = (
+      <main id="main-content" tabIndex={-1}>
+        {child}
+      </main>
+    );
+    return strict ? <StrictMode>{content}</StrictMode> : content;
+  };
   const rendered = render(container(view()));
   return {
     user: userEvent.setup(),
@@ -72,6 +75,15 @@ beforeEach(() => {
 afterEach(() => {
   document.getSelection()?.removeAllRanges();
   Reflect.deleteProperty(HTMLElement.prototype, "showPopover");
+});
+
+it("개발 StrictMode의 효과 재연결 뒤에도 열린 메뉴의 초점을 유지한다", async () => {
+  const c = setup(true);
+  fireEvent.contextMenu(c.cell());
+  const item = await screen.findByRole("menuitem", { name: "첫 항목 상세 열기" });
+  await waitFor(() => expect(item).toHaveFocus());
+  expect(screen.getByRole("menu")).toBeInTheDocument();
+  expect(c.onAction).not.toHaveBeenCalled();
 });
 
 it("오른쪽 클릭은 기존 행 작업만 표시하고 선택할 때 한 번 실행한다", async () => {

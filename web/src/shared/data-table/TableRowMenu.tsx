@@ -15,12 +15,15 @@ export function TableRowMenu({ x, y, label, returnTo, onClose, onAction }: Table
   const menu = useRef<HTMLDivElement>(null);
   const item = useRef<HTMLButtonElement>(null);
   const close = useRef(onClose);
+  const lifetime = useRef(0);
   useLayoutEffect(() => {
     close.current = onClose;
   });
   useLayoutEffect(() => {
     const element = menu.current;
     if (!element) return;
+    const generation = lifetime.current + 1;
+    lifetime.current = generation;
     element.showPopover();
     const position = () => {
       const bounds = element.getBoundingClientRect();
@@ -52,6 +55,7 @@ export function TableRowMenu({ x, y, label, returnTo, onClose, onAction }: Table
         // React may remove the row after this layout cleanup. Restore only once
         // that commit finishes, and never override a new menu/dialog's focus.
         queueMicrotask(() => {
+          if (lifetime.current !== generation) return;
           if (document.activeElement !== document.body && !element.contains(document.activeElement)) return;
           const target =
             returnTo.isConnected && !returnTo.disabled
