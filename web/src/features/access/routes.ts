@@ -3,6 +3,7 @@ import { teamTableQueryKeys } from "./team/team-table-keys";
 import { meQueryKeys } from "./me/me-query-keys";
 import { ipQueryKeys } from "./users/ip-query-keys";
 import { accountQueryKeys } from "./users/account-query-keys";
+import { registeredTeamQueryKeys } from "./users/registered-team-query-keys";
 
 // Screens owned by the access domain.
 export const accessFeatureModules = defineFeatureModules([
@@ -13,7 +14,7 @@ export const accessFeatureModules = defineFeatureModules([
       { path: "accounts", load: () => import("./users/AccountsPage").then((module) => module.AccountsPage) },
       { path: "ips", load: () => import("./users/IpUsagePage").then((module) => module.IpUsagePage) },
     ],
-    queryKeys: ["tab", ...ipQueryKeys, ...accountQueryKeys],
+    queryKeys: ["tab", ...ipQueryKeys, ...accountQueryKeys, ...registeredTeamQueryKeys],
   },
   {
     featureId: "me.home",

@@ -619,6 +619,82 @@
         ],
         "type": "object"
       },
+      "AdminTeamUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTeamUsageRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "teams"
+        ],
+        "type": "object"
+      },
+      "AdminTeamUsageRow": {
+        "additionalProperties": false,
+        "properties": {
+          "average_latency_ms": {
+            "type": "number"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "keys": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_seen": {
+            "type": "string"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "team": {
+            "type": "string"
+          },
+          "tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "average_latency_ms",
+          "cost_krw",
+          "keys",
+          "last_seen",
+          "requests",
+          "team",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "AdminTeamsLegacy": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_teams": {
+            "items": {
+              "$ref": "#/components/schemas/RegisteredTeam"
+            },
+            "type": "array"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTeamUsageRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "auth_teams",
+          "teams"
+        ],
+        "type": "object"
+      },
       "AdminUserUsage": {
         "additionalProperties": false,
         "properties": {
@@ -1435,6 +1511,39 @@
         },
         "required": [
           "refresh_token"
+        ],
+        "type": "object"
+      },
+      "AuthTeamPage": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_teams": {
+            "items": {
+              "$ref": "#/components/schemas/RegisteredTeam"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "auth_teams",
+          "limit",
+          "offset",
+          "total"
         ],
         "type": "object"
       },
@@ -7923,6 +8032,32 @@
         ],
         "type": "object"
       },
+      "RegisteredTeam": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "name",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "RequestIODetail": {
         "additionalProperties": false,
         "properties": {
@@ -11242,7 +11377,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.76"
+    "version": "v0.86.77"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -25956,10 +26091,129 @@
     },
     "/admin/teams": {
       "get": {
+        "description": "Existing admin:read team API. Omit view to retain teams/auth_teams. view=usage returns existing usage without loading the registered-team catalog. view=registered returns a server-paged registered-team catalog inside the caller's existing team scope. Search and count use that same scope. New search-input bounds do not restrict existing authenticated team identifiers or stored metadata. Responses are no-store.",
         "operationId": "get__admin_teams",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "",
+                "registered",
+                "usage"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Literal case-insensitive substring of team ID or name, without control characters. Percent and underscore are literal. Applies only to view=registered.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Up to three unique comma-separated field:asc or field:desc entries. Fields: id,name,created_at,updated_at. Default name:asc. ID ascending breaks remaining ties. Applies only to view=registered.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminTeamsLegacy"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AdminTeamUsage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AuthTeamPage"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Response selected by view",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid view or registered-team filter"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid authentication or missing admin read scope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Team query failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

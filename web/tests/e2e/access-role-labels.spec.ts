@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 import { accountFixtureResponse } from "../../src/test/account-fixtures";
+import { teamFixtureResponse } from "../../src/test/team-fixtures";
 
 async function installBudgetNotifications(page: Page) {
   const gateway = await installGateway(page);
@@ -338,9 +339,15 @@ async function installGateway(page: Page) {
     if (key === "GET /auth/me") return json({ authenticated: true, user });
     if (key === "GET /health") return json({ status: "ok" });
     if (key === "GET /admin/ui-bootstrap") return json(bootstrap);
+    if (key === "GET /admin/teams" && url.searchParams.get("view") === "usage") return json({ teams: [] });
     if (key === "GET /admin/teams")
       return teamStatus === 200
-        ? json({ teams: [], auth_teams: [...teams.values()] })
+        ? json(
+            teamFixtureResponse(
+              { teams: [], auth_teams: [...teams.values()] },
+              Object.fromEntries(url.searchParams),
+            ),
+          )
         : route.fulfill({
             status: teamStatus,
             json: { error: { code: "auth_teams_failed", message: "private fixture failure" } },

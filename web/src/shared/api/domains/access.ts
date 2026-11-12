@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { accountPageSchema, accountQuerySchema, type AccountQuery } from "./account-page.schemas";
-import type { AuthAccountPage } from "@/shared/api/generated/types.gen";
+import type { AuthAccountPage, AuthTeamPage } from "@/shared/api/generated/types.gen";
+import {
+  registeredTeamPageSchema,
+  registeredTeamQuerySchema,
+  teamUsageSchema,
+  type RegisteredTeamQuery,
+} from "./team-page.schemas";
 
 import {
   adminApiKeysSchema,
@@ -323,6 +329,18 @@ export const accessEndpoints = {
     ),
   },
   teams: {
+    registered: operation<WithQuery<GetAdminTeamsData, RegisteredTeamQuery>, AuthTeamPage>()(
+      "GET",
+      "/admin/teams",
+      registeredTeamPageSchema,
+      registeredTeamQuerySchema,
+    ),
+    usage: operation<WithQuery<GetAdminTeamsData, { view: "usage" }>, unknown>()(
+      "GET",
+      "/admin/teams",
+      teamUsageSchema,
+      z.object({ view: z.literal("usage") }),
+    ),
     administration: operation<GetAdminTeamsData, unknown>()("GET", "/admin/teams", teamAdministrationSchema),
     list: operation<GetAdminTeamsData, unknown>()("GET", "/admin/teams", adminTeamsSchema),
     create: operation<WithBody<PostAdminTeamsData, CreateTeamBody>, unknown>()(

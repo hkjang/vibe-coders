@@ -8,6 +8,7 @@ import { teamAdministrationSchema } from "@/shared/api/domains/access.schemas";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { teamFixtureResponse } from "@/test/team-fixtures";
 
 const runtime = vi.hoisted(() => ({ id: "operator_a", role: "admin", write: true, readOnly: false }));
 vi.mock("@/app/auth/AuthProvider", async () => {
@@ -34,12 +35,16 @@ const team = {
 };
 const catalog = { teams: [], auth_teams: [team] };
 function setup(handlers: Record<string, ApiHandler> = {}) {
+  const catalogRead = handlers["GET /admin/teams"] ?? (() => catalog);
   const api = mockApi({
-    "GET /admin/teams": () => catalog,
     "GET /admin/teams/scorecard": () => ({ teams: [] }),
     "GET /admin/benchmark/teams": () => ({ teams: [] }),
     "POST /admin/teams": () => ({ team }),
     ...handlers,
+    "GET /admin/teams": async (options, endpoint) => {
+      if ((options.query as { view?: string } | undefined)?.view === "usage") return { teams: [] };
+      return teamFixtureResponse(await catalogRead(options, endpoint), options.query);
+    },
   });
   let update = () => undefined;
   function Host() {
@@ -166,7 +171,7 @@ describe("팀 생성과 이름 수정", () => {
       await user.click(screen.getByRole("button", { name: "다시 시도" }));
       expect(await screen.findByText(panel.empty)).toBeVisible();
       expect(screen.queryByText(`${panel.label}을(를) 불러오지 못했습니다.`)).not.toBeInTheDocument();
-      expect(api.calls.filter((call) => call.key === "GET /admin/teams")).toHaveLength(1);
+      expect(api.calls.filter((call) => call.key === "GET /admin/teams")).toHaveLength(2);
       expect(api.calls.filter((call) => call.key === panel.key)).toHaveLength(2);
     });
     it(`${panel.label} 보류는 로딩을 표시하고 정상 응답 뒤에만 빈 상태를 표시한다`, async () => {

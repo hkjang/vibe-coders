@@ -161,20 +161,27 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
+		view := r.URL.Query().Get("view")
+		if len(r.URL.Query()["view"]) > 1 || (view != "" && view != "registered" && view != "usage") {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid teams view", "invalid_request_error", "invalid_teams_view")
+			return
+		}
+		if view == "registered" {
+			s.handleAuthTeamPage(w, r)
+			return
+		}
 		teams, err := s.db.ListTeams(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "teams_failed")
-			return
-		}
-		authTeams, err := s.db.ListAuthTeams(r.Context())
-		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, "team catalog query failed", "server_error", "auth_teams_failed")
 			return
 		}
 		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
@@ -185,6 +192,17 @@ func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			teams = filteredTeams
+		}
+		if view == "usage" {
+			writeJSON(w, http.StatusOK, map[string]any{"teams": teams})
+			return
+		}
+		authTeams, err := s.db.ListAuthTeams(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "team catalog query failed", "server_error", "auth_teams_failed")
+			return
+		}
+		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
 			filteredAuthTeams := authTeams[:0]
 			for _, team := range authTeams {
 				if team.ID == claims.TeamID {
