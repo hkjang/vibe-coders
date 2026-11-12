@@ -169,7 +169,7 @@ export function Text2SqlRuntimeTab({
         routeId: text2sqlRouteId,
       }),
     invalidates: text2sqlInvalidations.connections,
-    successMessage: (_result, connectionId) => `실행 DB 연결 ${connectionId}을(를) 삭제했습니다.`,
+    successMessage: (_result, connectionId) => `실행 DB 연결 삭제 완료: ${connectionId}`,
     errorMessage: "실행 DB 연결을 삭제하지 못했습니다.",
   });
   const toggleFeature = useMutationFeedback({

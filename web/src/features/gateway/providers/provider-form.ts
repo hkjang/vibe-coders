@@ -8,15 +8,15 @@ export const numberText = (label: string, max: number) =>
     .string()
     .trim()
     .refine((value) => value === "" || (Number.isFinite(Number(value)) && Number(value) >= 0), {
-      message: `${label}은(는) 0 이상의 숫자여야 합니다.`,
+      message: `${label}: 0 이상의 숫자를 입력하세요.`,
     })
     .refine((value) => value === "" || Number(value) <= max, {
-      message: `${label}이(가) 허용 범위를 넘었습니다.`,
+      message: `${label}: 허용 범위를 넘었습니다.`,
     });
 
 const integerText = (label: string, max: number) =>
   numberText(label, max).refine((value) => value === "" || Number.isInteger(Number(value)), {
-    message: `${label}은(는) 정수여야 합니다.`,
+    message: `${label}: 정수를 입력하세요.`,
   });
 
 // Exact public representation accepted by the Go handler only for an existing

@@ -151,7 +151,7 @@ describe("팀 생성과 이름 수정", () => {
       await act(async () => {
         await view.client.invalidateQueries({ queryKey: ["access", "teams"] });
       });
-      expect(await screen.findByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+      expect(await screen.findByText(`${panel.label} 조회 실패`)).toBeVisible();
       expect(screen.getByText("보존할 사용량 팀")).toBeVisible();
       expect(screen.getByText(/마지막으로 확인된 값을 표시합니다/)).toBeVisible();
       expect(screen.getAllByText(/^마지막 갱신 /).length).toBeGreaterThanOrEqual(2);
@@ -165,12 +165,12 @@ describe("팀 생성과 이름 수정", () => {
           return { teams: [] };
         },
       });
-      expect(await screen.findByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+      expect(await screen.findByText(`${panel.label} 조회 실패`)).toBeVisible();
       expect(screen.queryByText(panel.empty)).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "팀 추가" })).toBeEnabled();
       await user.click(screen.getByRole("button", { name: "다시 시도" }));
       expect(await screen.findByText(panel.empty)).toBeVisible();
-      expect(screen.queryByText(`${panel.label}을(를) 불러오지 못했습니다.`)).not.toBeInTheDocument();
+      expect(screen.queryByText(`${panel.label} 조회 실패`)).not.toBeInTheDocument();
       expect(api.calls.filter((call) => call.key === "GET /admin/teams")).toHaveLength(2);
       expect(api.calls.filter((call) => call.key === panel.key)).toHaveLength(2);
     });
@@ -195,7 +195,7 @@ describe("팀 생성과 이름 수정", () => {
       await act(async () => {
         await view.client.invalidateQueries({ queryKey: ["access", "teams"] });
       });
-      expect(await screen.findByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+      expect(await screen.findByText(`${panel.label} 조회 실패`)).toBeVisible();
       expect(screen.queryByText(panel.empty)).not.toBeInTheDocument();
       expect(screen.getByText(/마지막으로 확인된 값을 표시합니다/)).toBeVisible();
     });

@@ -133,7 +133,7 @@ describe("등록 팀 서버 페이지", () => {
       const value = query as RegisteredTeamQuery;
       return { auth_teams: [rows[0]], total: 1, limit: value.limit, offset: value.offset };
     });
-    expect(await screen.findByText("등록 팀 목록을(를) 불러오지 못했습니다.")).toBeVisible();
+    expect(await screen.findByText("등록 팀 목록 조회 실패")).toBeVisible();
     expect(screen.getByText(/등록 팀 수 미확인/)).toBeVisible();
     expect(screen.queryByText(/검색 결과 0개 팀/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("팀 사용량 요약")).toBeVisible();
@@ -145,7 +145,7 @@ describe("등록 팀 서버 페이지", () => {
       throw apiFailure("private usage failure");
     });
     expect(await screen.findByText("등록 팀 0")).toBeVisible();
-    expect(screen.getByText("팀 사용량을(를) 불러오지 못했습니다.")).toBeVisible();
+    expect(screen.getByText("팀 사용량 조회 실패")).toBeVisible();
     expect(screen.getByRole("button", { name: "팀 추가" })).toBeEnabled();
     expect(within(screen.getByLabelText("팀 사용량 요약")).getAllByText("미확인")).toHaveLength(3);
   });
@@ -159,7 +159,7 @@ describe("등록 팀 서버 페이지", () => {
         limit: kind === "wrong-limit" ? 10 : (query as RegisteredTeamQuery).limit,
         offset: kind === "wrong-offset" ? 25 : 0,
       }));
-      expect(await screen.findByText("등록 팀 목록을(를) 불러오지 못했습니다.")).toBeVisible();
+      expect(await screen.findByText("등록 팀 목록 조회 실패")).toBeVisible();
       expect(screen.queryByText("등록 팀 0")).not.toBeInTheDocument();
     },
   );

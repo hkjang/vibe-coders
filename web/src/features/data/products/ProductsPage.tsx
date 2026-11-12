@@ -131,7 +131,7 @@ export function ProductsPage(): React.JSX.Element {
         },
       }),
     invalidates: [productQueryKey],
-    successMessage: (_result, values) => `데이터 상품 ${values.product_key}을(를) 저장했습니다.`,
+    successMessage: (_result, values) => `데이터 상품 저장 완료: ${values.product_key}`,
     errorMessage: "데이터 상품을 저장하지 못했습니다.",
   });
 
@@ -160,7 +160,7 @@ export function ProductsPage(): React.JSX.Element {
   const remove = useMutationFeedback({
     mutate: (product: DataProduct) => apiClient.request(products.remove, { query: { id: product.id } }),
     invalidates: [productQueryKey],
-    successMessage: (_result, product) => `${product.product_key}을(를) 삭제했습니다.`,
+    successMessage: (_result, product) => `데이터 상품 삭제 완료: ${product.product_key}`,
     errorMessage: "데이터 상품을 삭제하지 못했습니다.",
   });
 
@@ -209,7 +209,7 @@ export function ProductsPage(): React.JSX.Element {
     if (pending?.kind === "delete") {
       return {
         title: "데이터 상품 삭제",
-        description: `${pending.product.product_key}을(를) 삭제합니다. 되돌릴 수 없습니다.`,
+        description: `데이터 상품 "${pending.product.product_key}" 삭제를 진행합니다. 되돌릴 수 없습니다.`,
         label: "삭제",
         danger: true,
       };

@@ -50,7 +50,7 @@ test("상세만 실패해도 같은 ID로 재시도할 수 있다", async ({ pag
   });
   await page.goto("access/users?tab=teams&registered_team=team_page_042");
   const panel = page.getByRole("dialog", { name: "등록 팀 상세" });
-  await expect(panel).toContainText("등록 팀 상세을(를) 불러오지 못했습니다.");
+  await expect(panel).toContainText("등록 팀 상세 조회 실패");
   failed = false;
   await panel.getByRole("button", { name: "다시 시도", exact: true }).click();
   await expect(panel).toContainText("운영팀 42");

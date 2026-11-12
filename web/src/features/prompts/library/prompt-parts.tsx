@@ -6,6 +6,7 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { queryFailureTitle } from "@/shared/messages/query";
 import { useSearchState, pageFromParam } from "@/shared/hooks/use-search-state";
 
 export interface PromptColumn<Row extends object> {
@@ -148,7 +149,7 @@ export function PanelFailure({
   return (
     <InlineNotice
       tone="warning"
-      title={`${label}을(를) 불러오지 못했습니다.`}
+      title={queryFailureTitle(label)}
       actions={
         <Button size="small" onClick={onRetry}>
           다시 시도

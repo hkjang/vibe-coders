@@ -172,7 +172,7 @@ describe("사용자 화면 조회·작업 수명", () => {
         return catalog;
       },
     });
-    expect(await screen.findByText("사용자 목록을(를) 불러오지 못했습니다.")).toBeVisible();
+    expect(await screen.findByText("사용자 목록 조회 실패")).toBeVisible();
     expect(await screen.findByRole("table", { name: "로그인 계정 목록" })).toBeVisible();
     expect(screen.getByRole("button", { name: "사용자 등록" })).toBeVisible();
     expect(screen.getAllByText("미확인").length).toBeGreaterThanOrEqual(3);

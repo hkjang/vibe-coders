@@ -132,7 +132,7 @@ test("할당량 첫 조회 실패는 빈 목록이 아니며 수동 재조회로
   const fixture = await installQuotaEditor(page);
   fixture.quotaStatus(500);
   await page.goto("/app/access/users?tab=quotas");
-  const notice = page.getByRole("alert").filter({ hasText: "할당량을(를) 불러오지 못했습니다." });
+  const notice = page.getByRole("alert").filter({ hasText: "할당량 조회 실패" });
   await expect(notice).toBeVisible();
   await expect(page.getByText("설정된 할당량이 없습니다.")).toHaveCount(0);
   fixture.quotaStatus(200);
@@ -567,12 +567,12 @@ test("사용자 목록 장애는 0건으로 표시하지 않고 목록만 다시
   const fixture = await installUserUsage(page);
   fixture.status(500);
   await page.goto("/app/access/users");
-  await expect(page.getByText("사용자 목록을(를) 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByText("사용자 목록 조회 실패")).toBeVisible();
   await expect(page.getByRole("table", { name: "로그인 계정 목록", exact: true })).toHaveCount(0);
   fixture.status(200);
   await page
     .getByRole("alert")
-    .filter({ hasText: "로그인 계정을(를) 불러오지 못했습니다." })
+    .filter({ hasText: "로그인 계정 조회 실패" })
     .getByRole("button", { name: "다시 시도", exact: true })
     .click();
   await expect(page.getByText("owned@example.invalid", { exact: true })).toBeVisible();
@@ -793,13 +793,13 @@ for (const panel of [
     await expect(page.getByText(`${panel.label}를 불러오는 중입니다.`)).toBeVisible();
     await expect(page.getByText(panel.empty)).toHaveCount(0);
     release();
-    await expect(page.getByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+    await expect(page.getByText(`${panel.label} 조회 실패`)).toBeVisible();
     await expect(page.getByText(panel.empty)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "팀 추가", exact: true })).toBeEnabled();
     fail = false;
     await page.getByRole("button", { name: "다시 시도", exact: true }).click();
     await expect(page.getByText(panel.empty)).toBeVisible();
-    await expect(page.getByText(`${panel.label}을(를) 불러오지 못했습니다.`)).toHaveCount(0);
+    await expect(page.getByText(`${panel.label} 조회 실패`)).toHaveCount(0);
     expect(gateway.writes).toEqual([]);
     expect(gateway.unexpected).toEqual([]);
   });

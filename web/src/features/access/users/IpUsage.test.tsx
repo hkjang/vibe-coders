@@ -136,7 +136,7 @@ it("keeps initial failure separate from zero, then retries an empty result", asy
       return { ips: [] };
     },
   });
-  await screen.findByText("IP 목록을(를) 불러오지 못했습니다.");
+  await screen.findByText("IP 목록 조회 실패");
   expect(screen.queryByRole("region", { name: "조회된 IP 사용량 요약" })).not.toBeInTheDocument();
   expect(screen.queryByText("private database message")).not.toBeInTheDocument();
   fail = false;

@@ -246,9 +246,7 @@ describe("AssetsPage", () => {
     });
     render();
 
-    const notice = (await screen.findByText("AI 자산 SBOM을(를) 불러오지 못했습니다.")).closest(
-      ".inline-notice",
-    );
+    const notice = (await screen.findByText("AI 자산 SBOM 조회 실패")).closest(".inline-notice");
     expect(notice).toHaveTextContent("요청 ID: req_sbom");
   });
 

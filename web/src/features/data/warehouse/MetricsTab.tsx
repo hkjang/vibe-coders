@@ -95,7 +95,7 @@ export function MetricsTab({ canWrite }: MetricsTabProps): React.JSX.Element {
       }),
     invalidates: [dataQueryKeys.metrics],
     // The metric key is an operator-chosen identifier, never the query text.
-    successMessage: (_result, values) => `지표 ${values.metric_key}을(를) 저장했습니다.`,
+    successMessage: (_result, values) => `지표 저장 완료: ${values.metric_key}`,
     errorMessage: "지표를 저장하지 못했습니다.",
     onSuccess: (result, values) => {
       setValidation(result.validation);
@@ -121,7 +121,7 @@ export function MetricsTab({ canWrite }: MetricsTabProps): React.JSX.Element {
     mutate: (row: MetricEntry) =>
       apiClient.request(withPathParams(metrics.remove, { key: metricPathKey(row) })),
     invalidates: [dataQueryKeys.metrics],
-    successMessage: (_result, row) => `지표 ${row.metric_key}을(를) 삭제했습니다.`,
+    successMessage: (_result, row) => `지표 삭제 완료: ${row.metric_key}`,
     errorMessage: "지표를 삭제하지 못했습니다.",
     onSuccess: (_result, row) => {
       setPendingDelete(undefined);

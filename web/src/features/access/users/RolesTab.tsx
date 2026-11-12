@@ -354,7 +354,7 @@ function RolesContent({
         returnFocusRef={rowTrigger}
         tone="danger"
         title="역할 삭제"
-        description={`사용자 정의 역할 '${removingRole?.role ?? ""}'을(를) 삭제합니다. 해당 역할을 사용하는 계정과 키의 권한에 영향을 줄 수 있습니다.`}
+        description={`사용자 정의 역할 '${removingRole?.role ?? ""}' 삭제를 진행합니다. 해당 역할을 사용하는 계정과 키의 권한에 영향을 줄 수 있습니다.`}
         confirmLabel="삭제"
         confirmDisabled={!changeAllowed}
         onConfirm={async () => {

@@ -48,7 +48,7 @@ test("등록 팀 조회 실패를 0건으로 표시하지 않고 재시도한다
   const fixture = await installTeamPagination(page);
   fixture.state.registeredStatus = 500;
   await page.goto("access/users?tab=teams");
-  await expect(page.getByText("등록 팀 목록을(를) 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByText("등록 팀 목록 조회 실패")).toBeVisible();
   await expect(page.getByText(/등록 팀 수 미확인/u)).toBeVisible();
   await expect(page.getByText(/검색 결과 0개 팀/u)).toHaveCount(0);
   fixture.state.registeredStatus = 200;
@@ -61,7 +61,7 @@ test("팀 사용량 오류에도 등록 팀 목록과 수정 기능을 유지한
   const fixture = await installTeamPagination(page);
   fixture.state.usageStatus = 500;
   await page.goto("access/users?tab=teams");
-  await expect(page.getByText("팀 사용량을(를) 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByText("팀 사용량 조회 실패")).toBeVisible();
   await expect(page.getByRole("table", { name: "등록된 팀 목록", exact: true })).toContainText("운영팀 01");
   await expect(page.getByRole("button", { name: "팀 추가", exact: true })).toBeEnabled();
   fixture.check();

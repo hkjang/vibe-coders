@@ -135,7 +135,7 @@ test("예산 최초 오류는 빈 상태가 아니며 재시도로 복구한다"
   const fixture = await install(page);
   fixture.anomalyStatus(500);
   await page.goto("/app/finops?tab=budget");
-  await expect(page.getByText("예산 소진 예측을(를) 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByText("예산 소진 예측 조회 실패")).toBeVisible();
   await expect(page.getByText("예산이 없습니다.")).toHaveCount(0);
   await expect(page.getByText("반복 호출이 없습니다.")).toHaveCount(0);
   await expect(page.getByText("팀 · 공개 예산팀")).toBeVisible();

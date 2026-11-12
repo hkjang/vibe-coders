@@ -180,9 +180,7 @@ describe("ReportsPage", () => {
     });
     render();
 
-    const notice = (await screen.findByText("팀 성숙도을(를) 불러오지 못했습니다.")).closest(
-      ".inline-notice",
-    );
+    const notice = (await screen.findByText("팀 성숙도 조회 실패")).closest(".inline-notice");
     expect(notice).toHaveTextContent("요청 ID: req_scorecard");
     expect(notice).toHaveTextContent("서버가 요청을 처리하지 못했습니다.");
   });

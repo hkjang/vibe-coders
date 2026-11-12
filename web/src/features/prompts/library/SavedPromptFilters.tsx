@@ -178,7 +178,7 @@ export function SavedPromptFilters({
         }}
         returnFocusRef={deleteTriggerRef}
         title="저장된 필터를 삭제할까요?"
-        description={`저장된 필터 "${pendingDelete?.name ?? ""}"을(를) 삭제합니다. 되돌릴 수 없습니다.`}
+        description={`저장된 필터 "${pendingDelete?.name ?? ""}" 삭제를 진행합니다. 되돌릴 수 없습니다.`}
         confirmLabel="삭제"
         confirmDisabled={!canWrite || removeFilter.uncertain}
         tone="danger"

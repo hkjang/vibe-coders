@@ -132,7 +132,7 @@ describe("ProductsPage", () => {
     render();
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("데이터 상품을(를) 불러오지 못했습니다.");
+    expect(alert).toHaveTextContent("데이터 상품 조회 실패");
     expect(alert).toHaveTextContent("요청 ID: req_dp_1");
   });
 

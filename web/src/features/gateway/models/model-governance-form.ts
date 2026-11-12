@@ -33,7 +33,7 @@ const optionalNumber = (label: string, integer = false) =>
         (Number.isFinite(Number(value)) &&
           Number(value) >= 0 &&
           (!integer || Number.isSafeInteger(Number(value)))),
-      `${label}은(는) 0 이상의 ${integer ? "안전한 정수" : "숫자"}여야 합니다.`,
+      `${label}: 0 이상의 ${integer ? "안전한 정수" : "숫자"}를 입력하세요.`,
     );
 export const contractFields = [
   ["name", "이름"],
