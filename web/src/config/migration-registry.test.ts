@@ -35,6 +35,36 @@ const legacyOnlyAdmin: AuthUser = {
 };
 
 describe("migration registry", () => {
+  it("does not poll stored personal recommendations against an older generating endpoint", () => {
+    const feature = migrationRegistry.find((candidate) => candidate.featureId === "me.home");
+    if (!feature) throw new Error("personal feature is missing");
+    const oldServer: UIBootstrapFeature = {
+      feature_id: feature.featureId,
+      title: feature.title,
+      app_path: feature.appPath,
+      legacy_path: feature.legacyPath,
+      status: "preview",
+      risk_level: "low",
+      required_permission: "",
+      read_only: false,
+      enabled_roles: [],
+      rollout_percent: 100,
+      fallback_enabled: true,
+      minimum_api_version: "v0.84.0",
+      available: true,
+    };
+    const resolved = registryFromBootstrap([oldServer])[0];
+    if (!resolved) throw new Error("personal feature not resolved");
+    expect(resolved.minimumApiVersion).toBe("v0.86.71");
+    expect(resolveFeature(resolved, gatewayAdmin, "v0.86.70")).toMatchObject({
+      status: "legacy",
+      reason: "api_version",
+    });
+    expect(resolveFeature(resolved, gatewayAdmin, "v0.86.71")).toMatchObject({
+      permitted: true,
+      status: "preview",
+    });
+  });
   it("requires provider impact and masked round-trip contracts despite older server availability", () => {
     const fallback = migrationRegistry.find((feature) => feature.featureId === "gateway.providers");
     if (!fallback) throw new Error("provider registry entry is missing");

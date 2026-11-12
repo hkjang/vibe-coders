@@ -23,7 +23,7 @@ export const personalRequest = {
   cached: true,
   created_at: created,
 };
-export async function installPersonalConsole(page: Page, readOnly = false) {
+export async function installPersonalConsole(page: Page, readOnly = false, backendVersion = "v0.86.71") {
   const user = {
     id: "public-person",
     name: "공개 사용자",
@@ -34,7 +34,7 @@ export async function installPersonalConsole(page: Page, readOnly = false) {
     scopes: ["chat:completion"],
   };
   const bootstrap: UiBootstrapResponse = {
-    backend_version: "v0.86.71",
+    backend_version: backendVersion,
     ui_version: "public-personal-fixture",
     api_version: "v1",
     ui: {

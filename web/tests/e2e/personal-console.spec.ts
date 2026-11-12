@@ -18,6 +18,20 @@ async function violations(page: Page) {
     }));
   });
 }
+test("구버전 서버에서는 개인 API 호출 없이 기존 화면을 안내한다", async ({ page }) => {
+  const fixture = await installPersonalConsole(page, false, "v0.86.70");
+  await page.goto("me?tab=skills");
+  await expect(page.getByRole("heading", { name: "이 기능은 안정 운영 화면에서 제공됩니다." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "기존 화면에서 내 홈 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/me",
+  );
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "이 기능은 안정 운영 화면에서 제공됩니다." })).toBeVisible();
+  expect(fixture.reads).toHaveLength(0);
+  expect(fixture.writes).toHaveLength(0);
+  fixture.check();
+});
 test("개인 리포트 기간과 부분 조회 오류 복구", async ({ page }) => {
   const fixture = await installPersonalConsole(page);
   fixture.state.dashboardStatus = 500;

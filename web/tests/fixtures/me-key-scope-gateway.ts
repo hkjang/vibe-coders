@@ -53,7 +53,7 @@ type User = ReturnType<typeof userFor>;
 
 function bootstrap(user?: User): UiBootstrapResponse {
   return {
-    backend_version: "v0.86.12",
+    backend_version: "v0.86.71",
     ui_version: "personal-scope-fixture",
     api_version: "v1",
     ui: {
