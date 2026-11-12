@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from "react";
+import { Controller } from "react-hook-form";
 import { z } from "zod";
 
 import { skillRiskOptions } from "@/features/agents/skills/skill-form";
@@ -10,6 +11,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 
 const adoptSchema = z
   .object({
@@ -76,7 +78,7 @@ export function SkillAdoptDialog({
 
   return (
     <FormDialog
-      description="후보를 초안(draft) 스킬로 채택합니다. 승격은 게이트를 통과한 뒤에만 가능합니다."
+      description="후보를 초안 스킬로 채택합니다. 승격은 검증 기준을 통과한 뒤에만 가능합니다."
       form={form}
       onOpenChange={onOpenChange}
       onSubmit={(values) => onSubmit({ ...values, source: candidate?.source ?? "" })}
@@ -84,6 +86,8 @@ export function SkillAdoptDialog({
       returnFocusRef={returnFocusRef}
       submitLabel="초안으로 채택"
       submitDisabled={!canWrite}
+      scrollBody
+      scrollHint="지침과 실행 정책을 위아래로 스크롤해 확인할 수 있습니다."
       title="후보를 스킬로 채택"
     >
       {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
@@ -103,8 +107,23 @@ export function SkillAdoptDialog({
         <FormField label="허용 도구" error={errors.allowed_tools?.message}>
           {(control) => <Input {...control} {...form.register("allowed_tools")} />}
         </FormField>
-        <FormField label="지침(instructions)" required error={errors.instructions?.message}>
-          {(control) => <Textarea {...control} rows={10} {...form.register("instructions")} />}
+        <FormField label="실행 지침" required error={errors.instructions?.message}>
+          {(control) => (
+            <Controller
+              control={form.control}
+              name="instructions"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  label="실행 지침"
+                  language="prompt"
+                  rows={10}
+                  disabled={!canWrite || form.formState.isSubmitting}
+                />
+              )}
+            />
+          )}
         </FormField>
       </fieldset>
     </FormDialog>

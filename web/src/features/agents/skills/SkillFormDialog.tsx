@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from "react";
+import { Controller } from "react-hook-form";
 
 import {
   skillFormDefaults,
@@ -16,6 +17,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 
 interface SkillFormDialogProps {
   canWrite: boolean;
@@ -53,6 +55,8 @@ export function SkillFormDialog({
       returnFocusRef={returnFocusRef}
       submitLabel={skill ? "수정 저장" : "스킬 만들기"}
       submitDisabled={!canWrite}
+      scrollBody
+      scrollHint="지침과 실행 정책을 위아래로 스크롤해 확인할 수 있습니다."
       title={skill ? `스킬 수정 · ${skill.name}` : "스킬 추가"}
     >
       {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
@@ -104,11 +108,26 @@ export function SkillFormDialog({
           {(control) => <Input {...control} inputMode="numeric" {...form.register("daily_limit")} />}
         </FormField>
         <FormField
-          label="지침(instructions)"
+          label="실행 지침"
           description="호출자에게 전달되는 절차입니다. 비밀정보나 파괴적 명령을 넣지 마세요."
           error={errors.instructions?.message}
         >
-          {(control) => <Textarea {...control} rows={10} {...form.register("instructions")} />}
+          {(control) => (
+            <Controller
+              control={form.control}
+              name="instructions"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  label="실행 지침"
+                  language="prompt"
+                  rows={10}
+                  disabled={!canWrite || form.formState.isSubmitting}
+                />
+              )}
+            />
+          )}
         </FormField>
       </fieldset>
     </FormDialog>

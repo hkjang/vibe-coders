@@ -1,15 +1,17 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { useWatch, type UseFormReturn } from "react-hook-form";
+import { Controller, useWatch, type UseFormReturn } from "react-hook-form";
 import { FormField } from "@/shared/components/form/FormField";
 import { Button } from "@/shared/components/ui/Button";
 import { Input } from "@/shared/components/ui/Input";
-import { Textarea } from "@/shared/components/ui/Textarea";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import { emptyStep, type DefinitionInput, type DefinitionValues } from "./definition-form";
 
 export function DefinitionSteps({
   form,
+  disabled,
 }: {
   form: UseFormReturn<DefinitionInput, unknown, DefinitionValues>;
+  disabled: boolean;
 }) {
   const rows = useWatch({ control: form.control, name: "steps" });
   const [keys, setKeys] = useState(() => form.getValues("steps").map((_, index) => index));
@@ -59,10 +61,40 @@ export function DefinitionSteps({
             required
             error={errors.steps?.[index]?.prompt?.message}
           >
-            {(control) => <Textarea {...control} rows={4} {...form.register(`steps.${index}.prompt`)} />}
+            {(control) => (
+              <Controller
+                control={form.control}
+                name={`steps.${index}.prompt`}
+                render={({ field }) => (
+                  <CodeEditor
+                    {...control}
+                    {...field}
+                    label={`${index + 1}단계 검사 프롬프트`}
+                    language="prompt"
+                    rows={4}
+                    disabled={disabled}
+                  />
+                )}
+              />
+            )}
           </FormField>
           <FormField label={`${index + 1}단계 기대 내용`} error={errors.steps?.[index]?.expected?.message}>
-            {(control) => <Textarea {...control} rows={3} {...form.register(`steps.${index}.expected`)} />}
+            {(control) => (
+              <Controller
+                control={form.control}
+                name={`steps.${index}.expected`}
+                render={({ field }) => (
+                  <CodeEditor
+                    {...control}
+                    {...field}
+                    label={`${index + 1}단계 기대 내용`}
+                    language="prompt"
+                    rows={3}
+                    disabled={disabled}
+                  />
+                )}
+              />
+            )}
           </FormField>
           <details>
             <summary>{index + 1}단계 출처 정보</summary>

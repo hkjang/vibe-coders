@@ -41,6 +41,7 @@ export function DefinitionDialog({
   const write = useDefinitionWrite(owner, target);
   const editable = editableDefinition(target, auth.credentialPrefixes);
   const errors = form.formState.errors;
+  const editorDisabled = !write.allowed || write.uncertain || !editable || form.formState.isSubmitting;
   const title = `${target.kind === "prompt" ? "기준 프롬프트" : "검증 워크플로"} ${target.original ? "편집" : "추가"}`;
   return (
     <FormDialog
@@ -75,7 +76,10 @@ export function DefinitionDialog({
           다시 보내지 않습니다.
         </InlineNotice>
       ) : null}
-      <fieldset className="regression-editor-fields" disabled={write.uncertain || !editable}>
+      <fieldset
+        className="regression-editor-fields"
+        disabled={!write.allowed || write.uncertain || !editable}
+      >
         <FormField label="이름" required error={errors.name?.message}>
           {(control) => <Input {...control} {...form.register("name")} />}
         </FormField>
@@ -94,6 +98,7 @@ export function DefinitionDialog({
                       label="기준 프롬프트"
                       language="prompt"
                       rows={6}
+                      disabled={editorDisabled}
                     />
                   )}
                 />
@@ -116,6 +121,7 @@ export function DefinitionDialog({
                       label="기대 내용"
                       language="prompt"
                       rows={4}
+                      disabled={editorDisabled}
                     />
                   )}
                 />
@@ -144,12 +150,13 @@ export function DefinitionDialog({
                   label="태그 (JSON 문자열 배열)"
                   language="json"
                   rows={3}
+                  disabled={editorDisabled}
                 />
               )}
             />
           )}
         </FormField>
-        {target.kind === "workflow" ? <DefinitionSteps form={form} /> : null}
+        {target.kind === "workflow" ? <DefinitionSteps form={form} disabled={editorDisabled} /> : null}
         <Button onClick={() => void review.review()}>변경 내용 검토</Button>
         {review.values ? (
           <>
