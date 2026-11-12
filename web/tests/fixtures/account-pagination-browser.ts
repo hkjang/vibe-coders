@@ -8,7 +8,7 @@ export async function installAccountPagination(page: Page) {
     email: `account-${index}@example.test`,
     name: index === 0 ? "=1+1" : `운영 계정 ${index}`,
     role: "developer",
-    status: index % 2 ? "suspended" : "active",
+    status: index % 2 ? "disabled" : "active",
     team_id: index === 0 ? "" : "team_public",
     team_name: index === 0 ? "" : "공개 검증팀",
     created_at: "2026-11-12T00:00:00Z",

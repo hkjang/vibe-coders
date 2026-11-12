@@ -89,7 +89,7 @@ export function AccountFilters({
           <Select {...control} value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="">전체 상태</option>
             <option value="active">사용</option>
-            <option value="suspended">정지</option>
+            <option value="disabled">중지</option>
           </Select>
         )}
       </FormField>

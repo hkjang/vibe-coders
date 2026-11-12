@@ -20,7 +20,6 @@ export function statusTone(status: string): Tone {
     case "approved":
       return "success";
     case "disabled":
-    case "suspended":
     case "pending":
       return "warning";
     case "revoked":
@@ -36,7 +35,6 @@ export function statusTone(status: string): Tone {
 const statusText: Readonly<Record<string, string>> = {
   active: "사용",
   disabled: "중지",
-  suspended: "정지",
   revoked: "폐기",
   external: "외부 키",
   pending: "승인 대기",

@@ -22,6 +22,25 @@ test("계정 페이지·필터를 서버에 전달하고 새로고침 후 복원
   fixture.check();
 });
 
+test("중지 계정 필터는 실제 계정 상태 disabled를 조회하고 새로고침 후 유지한다", async ({ page }) => {
+  const fixture = await installAccountPagination(page);
+  await page.goto("access/users/accounts");
+  const table = page.getByRole("table", { name: "로그인 계정 목록", exact: true });
+  await expect(table).toContainText("account-0@example.test");
+  await page.getByLabel("계정 상태", { exact: true }).selectOption({ label: "중지" });
+  await page.getByRole("button", { name: "필터 적용", exact: true }).click();
+  await expect(page.getByText(/검색 결과 30개 계정/u)).toBeVisible();
+  await expect(table).toContainText("account-1@example.test");
+  await expect(table).not.toContainText("account-0@example.test");
+  expect(fixture.reads.at(-1)?.get("status")).toBe("disabled");
+  await expect(page).toHaveURL(/account_status=disabled/u);
+  await page.reload();
+  await expect(page.getByLabel("계정 상태", { exact: true })).toHaveValue("disabled");
+  await expect(page.getByText(/검색 결과 30개 계정/u)).toBeVisible();
+  expect(fixture.reads.at(-1)?.get("status")).toBe("disabled");
+  fixture.check();
+});
+
 test("팀 미지정은 빈 팀 ID를 서버로 보내며 현재 페이지 CSV만 내려받는다", async ({ page }) => {
   const fixture = await installAccountPagination(page);
   await page.goto("access/users");
@@ -96,7 +115,7 @@ for (const viewport of [
       await expect(page.getByRole("table", { name: "로그인 계정 목록", exact: true })).toContainText(
         "account-1@example.test",
       );
-      await expect(page.getByRole("table", { name: "로그인 계정 목록", exact: true })).toContainText("정지");
+      await expect(page.getByRole("table", { name: "로그인 계정 목록", exact: true })).toContainText("중지");
       await expect(page.getByLabel("계정 검색", { exact: true })).toBeFocused();
       const trigger = page.getByRole("button", { name: "다중 정렬", exact: true });
       await trigger.focus();
@@ -128,7 +147,7 @@ for (const theme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
       const fixture = await installAccountPagination(page);
       await page.goto("access/users/accounts?account_q=account-1%40");
-      await expect(page.getByRole("table", { name: "로그인 계정 목록", exact: true })).toContainText("정지");
+      await expect(page.getByRole("table", { name: "로그인 계정 목록", exact: true })).toContainText("중지");
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await expect(page).toHaveScreenshot(`account-pagination-${theme}-${width}.png`, {
         animations: "disabled",

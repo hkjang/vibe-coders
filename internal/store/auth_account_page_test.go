@@ -27,7 +27,7 @@ func TestAuthAccountPageScopeSearchSortAndBounds(t *testing.T) {
 			role = "viewer"
 		}
 		if index%5 == 0 {
-			status = "suspended"
+			status = "disabled"
 		}
 		if index == 0 {
 			name = "literal %_! needle"
@@ -93,7 +93,7 @@ func TestAuthAccountPageScopeSearchSortAndBounds(t *testing.T) {
 		{"team display name", AuthAccountQuery{Search: "개발팀"}, 22},
 		{"literal wildcards", AuthAccountQuery{Search: "%_!"}, 1},
 		{"case insensitive email", AuthAccountQuery{Search: "ACCOUNT-03@EXAMPLE.TEST"}, 1},
-		{"intersecting filters", AuthAccountQuery{ScopeTeam: &alpha, Role: "viewer", Status: "suspended"}, 2},
+		{"intersecting filters", AuthAccountQuery{ScopeTeam: &alpha, Role: "viewer", Status: "disabled"}, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.query.Limit = 100

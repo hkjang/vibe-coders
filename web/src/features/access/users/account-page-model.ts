@@ -25,7 +25,7 @@ export function readAccountPage(params: URLSearchParams, prefixes: readonly stri
   };
   const search = safe("account_q"),
     role = safe("account_role", 256);
-  const status = ["active", "suspended"].includes(safe("account_status")) ? safe("account_status") : "";
+  const status = ["active", "disabled"].includes(safe("account_status")) ? safe("account_status") : "";
   const rawTeam = params.get("account_team") ?? "";
   const team =
     rawTeam === "none"

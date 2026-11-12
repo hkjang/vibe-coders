@@ -152,6 +152,54 @@ func TestAdminAccountPageHTTPAuthorizationAndLegacyParity(t *testing.T) {
 	}
 }
 
+func TestAdminAccountPageStoppedAccountRoundTrip(t *testing.T) {
+	_, _, gateway := newAdminModelsTestServer(t, "account-state-fixture")
+	request := func(method, path, body string) map[string]any {
+		t.Helper()
+		req, err := http.NewRequest(method, gateway.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer account-state-fixture")
+		req.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			t.Fatalf("account lifecycle request failed: %s %d", method, response.StatusCode)
+		}
+		var result map[string]any
+		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	created := request(http.MethodPost, "/admin/users", `{"email":"account-state@example.test","password":"fixture-password-not-a-secret","name":"상태 검증 계정","role":"developer"}`)
+	id := created["user"].(map[string]any)["id"].(string)
+	for _, status := range []string{"disabled", "active"} {
+		request(http.MethodPatch, "/admin/users/"+id, `{"status":"`+status+`"}`)
+		page := request(http.MethodGet, "/admin/users?view=accounts&status="+status, "")
+		accounts := page["accounts"].([]any)
+		if page["total"] != float64(1) || len(accounts) != 1 {
+			t.Fatal("changed account was not found by its persisted status")
+		}
+		account := accounts[0].(map[string]any)
+		if account["id"] != id || account["status"] != status {
+			t.Fatal("account status filter disagrees with the change API")
+		}
+		other := "active"
+		if status == "active" {
+			other = "disabled"
+		}
+		opposite := request(http.MethodGet, "/admin/users?view=accounts&status="+other, "")
+		if opposite["total"] != float64(0) || len(opposite["accounts"].([]any)) != 0 {
+			t.Fatal("status filter included an account with another persisted status")
+		}
+	}
+}
+
 func TestAdminAccountPageOpenAPIAndFailureProjection(t *testing.T) {
 	spec := buildOpenAPISpec()
 	paths := spec["paths"].(map[string]any)

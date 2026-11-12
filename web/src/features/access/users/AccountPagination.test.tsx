@@ -79,13 +79,13 @@ describe("로그인 계정 서버 페이지", () => {
   });
   it("직접 접근의 필터·정렬을 첫 서버 요청부터 적용한다", async () => {
     const { api } = setup(
-      "/access/users?account_q=%25_%21&account_status=suspended&account_role=viewer&account_team=none&account_sort=role:asc,email:desc&account_size=10&account_page=3",
+      "/access/users?account_q=%25_%21&account_status=disabled&account_role=viewer&account_team=none&account_sort=role:asc,email:desc&account_size=10&account_page=3",
     );
     await waitFor(() => expect(pageCalls(api)).toHaveLength(1));
     expect(pageCalls(api)[0]?.options.query).toEqual({
       view: "accounts",
       q: "%_!",
-      status: "suspended",
+      status: "disabled",
       role: "viewer",
       team_id: "",
       sort: "role:asc,email:desc",
@@ -93,6 +93,7 @@ describe("로그인 계정 서버 페이지", () => {
       offset: 20,
     });
     expect(screen.getByLabelText("계정 검색")).toHaveValue("%_!");
+    expect(screen.getByLabelText("계정 상태")).toHaveValue("disabled");
     expect(screen.getByLabelText("소속 팀")).toHaveValue("none");
   });
   it("검색 적용은 서버에 새 조회를 보내고 페이지를 초기화한다", async () => {

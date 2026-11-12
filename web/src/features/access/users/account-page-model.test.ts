@@ -9,7 +9,7 @@ describe("로그인 계정 서버 조회 상태", () => {
       new URLSearchParams({
         account_q: "개발 %_!",
         account_role: "custom-reviewer",
-        account_status: "suspended",
+        account_status: "disabled",
         account_team: "id:team_a",
         account_sort: "role:asc,created_at:desc",
         account_size: "10",
@@ -21,7 +21,7 @@ describe("로그인 계정 서버 조회 상태", () => {
       view: "accounts",
       q: "개발 %_!",
       role: "custom-reviewer",
-      status: "suspended",
+      status: "disabled",
       team_id: "team_a",
       sort: "role:asc,created_at:desc",
       limit: 10,
