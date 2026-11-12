@@ -49,7 +49,11 @@ func authTeamOrder(sorts []AuthTeamSort, prefix string) (string, error) {
 		if sort.Desc {
 			direction = " DESC"
 		}
-		parts = append(parts, prefix+sort.Field+direction)
+		field := prefix + sort.Field
+		if sort.Field == "created_at" || sort.Field == "updated_at" {
+			field = metadataTimestampOrderSQL(field)
+		}
+		parts = append(parts, field+direction)
 	}
 	if !seen["id"] {
 		parts = append(parts, prefix+"id ASC")
@@ -78,7 +82,7 @@ func (s *SQLStore) ListAuthTeamPage(ctx context.Context, query AuthTeamQuery) (A
 	}
 	if query.Search != "" {
 		pattern := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(query.Search) + "%"
-		where = append(where, "(LOWER(id) LIKE LOWER(?) ESCAPE '!' OR LOWER(name) LIKE LOWER(?) ESCAPE '!')")
+		where = append(where, "("+s.metadataLowerSQL("id")+" LIKE "+s.metadataLowerSQL("?")+" ESCAPE '!' OR "+s.metadataLowerSQL("name")+" LIKE "+s.metadataLowerSQL("?")+" ESCAPE '!')")
 		args = append(args, pattern, pattern)
 	}
 	args = append(args, query.Limit, query.Offset)
