@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { accountPageSchema, accountQuerySchema, type AccountQuery } from "./account-page.schemas";
+import type { AuthAccountPage } from "@/shared/api/generated/types.gen";
 
 import {
   adminApiKeysSchema,
@@ -279,6 +281,18 @@ export interface DecideTeamReportBody {
 export const accessEndpoints = {
   users: {
     list: operation<GetAdminUsersData, unknown>()("GET", "/admin/users", adminUsersSchema),
+    accounts: operation<WithQuery<GetAdminUsersData, AccountQuery>, AuthAccountPage>()(
+      "GET",
+      "/admin/users",
+      accountPageSchema,
+      accountQuerySchema,
+    ),
+    usage: operation<WithQuery<GetAdminUsersData, { view: "usage" }>, unknown>()(
+      "GET",
+      "/admin/users",
+      adminUsersSchema,
+      z.object({ view: z.literal("usage") }),
+    ),
     create: operation<WithBody<PostAdminUsersData, CreateUserBody>, unknown>()(
       "POST",
       "/admin/users",

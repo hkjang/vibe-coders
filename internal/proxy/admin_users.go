@@ -37,12 +37,24 @@ func (s *Server) teamNameByID(r *http.Request) map[string]string {
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
+		view := r.URL.Query().Get("view")
+		if len(r.URL.Query()["view"]) > 1 || (view != "" && view != "accounts" && view != "usage") {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid users view", "invalid_request_error", "invalid_users_view")
+			return
+		}
+		if view == "accounts" {
+			s.handleAuthAccountPage(w, r)
+			return
+		}
 		users, err := s.db.ListUsers(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "users_failed")
@@ -56,6 +68,10 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			users = filtered
+		}
+		if view == "usage" {
+			writeJSON(w, http.StatusOK, map[string]any{"users": users, "team_names": s.teamNameByID(r)})
+			return
 		}
 		authUsers, _ := s.db.ListAuthUsers(r.Context())
 		enriched := make([]map[string]any, 0, len(authUsers))

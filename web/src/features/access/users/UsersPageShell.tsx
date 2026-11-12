@@ -47,7 +47,8 @@ export function UsersPageShell({
     const params = new URLSearchParams(location.search);
     if (next === "users") params.delete("tab");
     else params.set("tab", next);
-    const pathname = next === "ips" ? "/access/users/ips" : "/access/users";
+    const pathname =
+      next === "ips" ? "/access/users/ips" : next === "users" ? "/access/users/accounts" : "/access/users";
     const safe = sanitizeAppRouteSearch(pathname, params.toString(), credentialPrefixes);
     void navigate(
       { pathname, search: safe.search },

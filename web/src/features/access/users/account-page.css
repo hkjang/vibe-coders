@@ -1,0 +1,21 @@
+.account-page-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--space-3);
+  align-items: start;
+  margin-block: var(--space-3);
+}
+.account-page-filters > .table-actions,
+.account-page-filters > .form-error {
+  grid-column: 1 / -1;
+}
+.account-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  margin-block: var(--space-3);
+}
+.account-page-actions > p {
+  flex: 1 1 220px;
+}

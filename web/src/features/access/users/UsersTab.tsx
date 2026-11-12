@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
-import { accountColumns, keyUsageColumns, benchmarkColumns } from "./user-columns";
+import { keyUsageColumns, benchmarkColumns } from "./user-columns";
+import { AccountListPanel } from "./AccountListPanel";
 import { useExternalKeyPromotion } from "./use-external-key-promotion";
 import { useFeatureReadOwner, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { UserAccountDialog } from "@/features/access/users/UserAccountDialog";
@@ -10,11 +11,10 @@ import { UserDetailSheet } from "@/features/access/users/UserDetailSheet";
 import { useUserBenchmarkQuery, useUsersQuery } from "@/features/access/users/use-access-admin";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import type { AuthUserRow, UserSummary } from "@/shared/api/domains/access.schemas";
-import { LoadingState, ErrorState, PermissionDenied } from "@/shared/components/state/PageStates";
+import { ErrorState, PermissionDenied } from "@/shared/components/state/PageStates";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
-import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
@@ -54,7 +54,7 @@ function UsersContent({
   writeDeniedReason,
 }: UsersTabProps & { owner: FeatureReadOwner }): React.JSX.Element {
   const auth = useAuth();
-  const users = useUsersQuery(true, owner);
+  const users = useUsersQuery(true, owner, true);
   const { promoteKey, write, assertCurrent } = useExternalKeyPromotion(owner, canWrite, writeDeniedReason);
   const allowed = write.allowed;
   const [benchmarkWindow, setBenchmarkWindow] = useState("30d");
@@ -70,10 +70,7 @@ function UsersContent({
   const { returnFocusRef: dialogTrigger, remember: rememberDialogTrigger } = useReturnFocus();
   const { returnFocusRef: detailTrigger, rememberActive: rememberDetailTrigger } = useReturnFocus();
 
-  const teamNames = users.data?.team_names;
-  const authUsers = users.data?.auth_users;
   const keyUsers = users.data?.users;
-  const accountRows = authUsers ?? [];
   const keyRows = keyUsers ?? [];
 
   const filteredKeyUsers = useMemo(() => {
@@ -88,18 +85,12 @@ function UsersContent({
   }, [keyUsers, search, statusFilter]);
 
   // Stable cell renderers keep the opener connected while the dialog changes.
-  const accountTableColumns = useMemo(
-    () =>
-      accountColumns(
-        teamNames ?? {},
-        (user, trigger) => {
-          rememberDialogTrigger(trigger);
-          setEditing(user);
-        },
-        allowed,
-        write.reason ?? writeDeniedReason,
-      ),
-    [teamNames, rememberDialogTrigger, allowed, write.reason, writeDeniedReason],
+  const editAccount = useCallback(
+    (user: AuthUserRow, trigger: HTMLElement) => {
+      rememberDialogTrigger(trigger);
+      setEditing(user);
+    },
+    [rememberDialogTrigger],
   );
   const usageTableColumns = useMemo(
     () =>
@@ -114,17 +105,6 @@ function UsersContent({
     [rememberDialogTrigger, allowed, write.reason, writeDeniedReason],
   );
 
-  if (users.isPending && !users.data) return <LoadingState label="사용자 목록을 불러오는 중입니다." />;
-  if (users.isError && !users.data)
-    return (
-      <QueryNotice
-        error={users.error}
-        hasData={false}
-        label="사용자 목록"
-        onRetry={() => void users.refetch()}
-      />
-    );
-
   const benchmarkRows = benchmark.data?.users ?? [];
 
   return (
@@ -138,16 +118,23 @@ function UsersContent({
         />
       ) : null}
 
-      <StatGrid label="사용자 요약">
-        <StatCard label="로그인 계정" value={formatNumber(accountRows.length)} />
-        <StatCard label="프록시 키 사용자" value={formatNumber(keyRows.length)} />
-        <StatCard label="총 요청" value={formatNumber(keyRows.reduce((sum, row) => sum + row.requests, 0))} />
-        <StatCard label="총 비용" value={formatKRW(keyRows.reduce((sum, row) => sum + row.cost_krw, 0))} />
+      <StatGrid label="키 사용량 요약">
+        <StatCard label="프록시 키 사용자" value={users.data ? formatNumber(keyRows.length) : "미확인"} />
+        <StatCard
+          label="총 요청"
+          value={users.data ? formatNumber(keyRows.reduce((sum, row) => sum + row.requests, 0)) : "미확인"}
+        />
+        <StatCard
+          label="총 비용"
+          value={users.data ? formatKRW(keyRows.reduce((sum, row) => sum + row.cost_krw, 0)) : "미확인"}
+        />
       </StatGrid>
 
-      <SectionCard
-        title="로그인 계정"
-        description="이메일과 비밀번호로 콘솔에 로그인하는 계정입니다. 역할·상태·팀만 변경할 수 있습니다."
+      <AccountListPanel
+        owner={owner}
+        allowed={allowed}
+        reason={write.reason ?? writeDeniedReason}
+        onEdit={editAccount}
         actions={
           <Button
             ref={createTrigger}
@@ -161,16 +148,7 @@ function UsersContent({
             사용자 등록
           </Button>
         }
-      >
-        {!allowed ? <InlineNotice tone="info">{write.reason}</InlineNotice> : null}
-        <DataTable
-          caption="로그인 계정 목록"
-          columns={accountTableColumns}
-          data={accountRows}
-          getRowId={(row) => row.id}
-          emptyMessage="등록된 로그인 계정이 없습니다. '사용자 등록'으로 첫 계정을 만드세요."
-        />
-      </SectionCard>
+      />
 
       <SectionCard
         title="프록시 키 사용량"
@@ -213,6 +191,7 @@ function UsersContent({
         ) : null}
         <DataTable
           caption="프록시 키 사용량"
+          loading={users.isPending}
           columns={usageTableColumns}
           data={filteredKeyUsers}
           getRowId={(row) => row.api_key_id}

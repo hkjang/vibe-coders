@@ -7,6 +7,7 @@ import { UsersTab } from "./UsersTab";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { accountFixtureResponse } from "@/test/account-fixtures";
 
 const runtime = vi.hoisted(() => ({
   id: "operator_a",
@@ -90,13 +91,17 @@ function deferred() {
 }
 function setup(handlers: Record<string, ApiHandler> = {}) {
   const api = mockApi({
-    "GET /admin/users": () => catalog,
     "GET /admin/benchmark/users": () => ({ users: [] }),
     "GET /admin/users/key_external": () => detail,
     "GET /admin/users/key_external/report": () => report,
     "GET /admin/roles": () => ({ roles: [{ role: "developer", scopes: [] }] }),
     "PATCH /admin/api-keys/key_external": () => ({ id: "key_external" }),
     ...handlers,
+    "GET /admin/users": async (options, endpoint) =>
+      accountFixtureResponse(
+        (await (handlers["GET /admin/users"]?.(options, endpoint) ?? catalog)) as typeof catalog,
+        options.query,
+      ),
   });
   let update = () => {};
   function Host() {
@@ -136,7 +141,7 @@ describe("사용자 화면 조회·작업 수명", () => {
     await act(async () => held.resolve(detail));
     expect(await screen.findByRole("dialog", { name: "키 상세 A" })).toBeVisible();
     expect(screen.queryByText("사용자 상세를 불러오지 못했습니다.")).not.toBeInTheDocument();
-    expect(api.calls.filter((call) => call.key === "GET /admin/users")).toHaveLength(1);
+    expect(api.calls.filter((call) => call.key === "GET /admin/users")).toHaveLength(2);
     expect(api.calls.filter((call) => call.key === "GET /admin/users/key_external/report")).toHaveLength(1);
   });
   it("활동 리포트 장애는 상세와 별개로 다시 조회한다", async () => {
@@ -161,14 +166,16 @@ describe("사용자 화면 조회·작업 수명", () => {
     let reads = 0;
     const user = userEvent.setup();
     setup({
-      "GET /admin/users": () => {
-        if (++reads === 1) throw apiFailure("private failure");
+      "GET /admin/users": ({ query }) => {
+        if ((query as { view?: string })?.view === "usage" && ++reads === 1)
+          throw apiFailure("private failure");
         return catalog;
       },
     });
     expect(await screen.findByText("사용자 목록을(를) 불러오지 못했습니다.")).toBeVisible();
-    expect(screen.queryByRole("table", { name: "로그인 계정 목록" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "사용자 등록" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "로그인 계정 목록" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "사용자 등록" })).toBeVisible();
+    expect(screen.getAllByText("미확인").length).toBeGreaterThanOrEqual(3);
     await user.click(screen.getByRole("button", { name: "다시 시도" }));
     expect(await screen.findByText("a@example.invalid")).toBeVisible();
   });
@@ -191,7 +198,7 @@ describe("사용자 화면 조회·작업 수명", () => {
     update();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByText("a@example.invalid")).not.toBeInTheDocument();
-    expect(screen.getByText("사용자 목록을 불러오는 중입니다.")).toBeVisible();
+    expect(screen.getAllByText("미확인").length).toBeGreaterThanOrEqual(3);
     await act(async () => held.resolve({ users: [], auth_users: [], team_names: {} }));
     expect(await screen.findByRole("textbox", { name: "검색" })).toHaveValue("");
   });
