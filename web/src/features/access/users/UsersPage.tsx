@@ -1,73 +1,37 @@
-import { RefreshCw } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-
+import { Navigate, useLocation } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
-import { ApiKeysTab } from "@/features/access/users/ApiKeysTab";
-import { IpsTab } from "@/features/access/users/IpsTab";
-import { QuotasTab } from "@/features/access/users/QuotasTab";
-import { RolesTab } from "@/features/access/users/RolesTab";
-import { TeamsTab } from "@/features/access/users/TeamsTab";
-import { UsersTab } from "@/features/access/users/UsersTab";
-import { PageHeader } from "@/shared/components/page/PageHeader";
-import { Button } from "@/shared/components/ui/Button";
-import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
+import { ApiKeysTab } from "./ApiKeysTab";
+import { QuotasTab } from "./QuotasTab";
+import { RolesTab } from "./RolesTab";
+import { TeamsTab } from "./TeamsTab";
+import { UsersTab } from "./UsersTab";
+import { UsersPageShell } from "./UsersPageShell";
+import { accessTabIds, type AccessTab } from "./users-page-tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
-import "@/features/access/access.css";
-
-const tabIds = ["users", "teams", "keys", "ips", "quotas", "roles"] as const;
-type TabId = (typeof tabIds)[number];
-
-const tabs: ReadonlyArray<TabItem<TabId>> = [
-  { id: "users", label: "사용자" },
-  { id: "teams", label: "팀" },
-  { id: "keys", label: "API 키" },
-  { id: "ips", label: "IP" },
-  { id: "quotas", label: "할당량·예산" },
-  { id: "roles", label: "역할" },
-];
 
 export function UsersPage(): React.JSX.Element {
   const auth = useAuth();
-  const queryClient = useQueryClient();
-  const [tab, setTab] = useTabParam<TabId>(tabIds);
+  const location = useLocation();
+  const [tab] = useTabParam<AccessTab>(accessTabIds);
   const scopes = auth.user?.scopes ?? [];
   const role = auth.user?.role ?? "";
-  // `team_admin` may write to users, teams and API keys without `admin:write`;
-  // the server re-checks that the target belongs to their own team.
+  // The existing server verifies team-admin writes against the target team.
   const canWrite = scopes.includes("admin:write") || role === "team_admin";
   const isSuperAdmin = role === "super_admin";
   const writeDeniedReason =
     "변경 권한(admin:write)이 없어 읽기만 할 수 있습니다. 관리자에게 권한을 요청하세요.";
-
+  // Preserve old bookmarks and all validated table/detail parameters.
+  if (tab === "ips")
+    return <Navigate replace to={{ pathname: "/access/users/ips", search: location.search }} />;
   return (
-    <div className="page-stack">
-      <PageHeader
-        title="사용자와 팀"
-        description="로그인 계정, 팀, API 키, IP 사용량, 할당량·예산과 역할을 한 곳에서 관리합니다."
-        readOnly={!canWrite}
-        legacyHref="/admin#/users"
-        actions={
-          <Button
-            variant="primary"
-            onClick={() => void queryClient.invalidateQueries({ queryKey: ["access"] })}
-          >
-            <RefreshCw aria-hidden="true" /> 새로고침
-          </Button>
-        }
-      />
-
-      <Tabs ariaLabel="접근 관리 영역" items={tabs} value={tab} onChange={setTab} panelIdPrefix="access" />
-
-      <TabPanel key={tab} id={tab} panelIdPrefix="access">
-        {tab === "users" ? <UsersTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
-        {tab === "teams" ? <TeamsTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
-        {tab === "keys" ? (
-          <ApiKeysTab canWrite={canWrite} isSuperAdmin={isSuperAdmin} writeDeniedReason={writeDeniedReason} />
-        ) : null}
-        {tab === "ips" ? <IpsTab /> : null}
-        {tab === "quotas" ? <QuotasTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
-        {tab === "roles" ? <RolesTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
-      </TabPanel>
-    </div>
+    <UsersPageShell tab={tab} canWrite={canWrite}>
+      {tab === "users" ? <UsersTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
+      {tab === "teams" ? <TeamsTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
+      {tab === "keys" ? (
+        <ApiKeysTab canWrite={canWrite} isSuperAdmin={isSuperAdmin} writeDeniedReason={writeDeniedReason} />
+      ) : null}
+      {tab === "quotas" ? <QuotasTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
+      {tab === "roles" ? <RolesTab canWrite={canWrite} writeDeniedReason={writeDeniedReason} /> : null}
+    </UsersPageShell>
   );
 }

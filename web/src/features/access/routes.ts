@@ -1,13 +1,17 @@
 import { defineFeatureModules } from "@/features/feature-module";
 import { teamTableQueryKeys } from "./team/team-table-keys";
 import { meQueryKeys } from "./me/me-query-keys";
+import { ipQueryKeys } from "./users/ip-query-keys";
 
 // Screens owned by the access domain.
 export const accessFeatureModules = defineFeatureModules([
   {
     featureId: "access.users",
     load: () => import("./users/UsersPage").then((module) => module.UsersPage),
-    queryKeys: ["tab"],
+    subroutes: [
+      { path: "ips", load: () => import("./users/IpUsagePage").then((module) => module.IpUsagePage) },
+    ],
+    queryKeys: ["tab", ...ipQueryKeys],
   },
   {
     featureId: "me.home",

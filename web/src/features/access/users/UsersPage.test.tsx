@@ -2,8 +2,10 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useLocation } from "react-router";
 
 import { UsersPage as UsersPageScreen } from "@/features/access/users/UsersPage";
+import { IpUsagePage } from "@/features/access/users/IpUsagePage";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
@@ -11,9 +13,10 @@ import { renderScreen } from "@/test/render";
 const authRuntime = vi.hoisted(() => ({ role: "admin", scopes: ["admin:read", "admin:write"] }));
 
 function UsersPage() {
+  const location = useLocation();
   return (
     <FeatureAccessContext.Provider value={{ featureId: "access.users", readOnly: false, permitted: true }}>
-      <UsersPageScreen />
+      {location.pathname === "/access/users/ips" ? <IpUsagePage /> : <UsersPageScreen />}
     </FeatureAccessContext.Provider>
   );
 }

@@ -1,0 +1,28 @@
+.ip-usage-table {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.ip-usage-controls {
+  display: flex;
+  gap: var(--space-2);
+  align-items: end;
+  flex-wrap: wrap;
+}
+.ip-usage-controls > :first-child {
+  flex: 1 1 220px;
+}
+.ip-usage-controls > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.ip-usage-sort {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.ip-usage-summary {
+  overflow-wrap: anywhere;
+}

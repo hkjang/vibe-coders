@@ -42,6 +42,7 @@ const preservedBooleanStateKeys = [
   "providerDetailRejected",
   "providerSearchRejected",
   "policyTabFocus",
+  "accessTabFocus",
 ] as const;
 
 export interface SanitizedAppRouteSearch {

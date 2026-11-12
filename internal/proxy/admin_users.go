@@ -442,6 +442,7 @@ func (s *Server) handleAuthUserUpdate(w http.ResponseWriter, r *http.Request, id
 }
 
 func (s *Server) handleIPs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -478,6 +479,7 @@ func (s *Server) handleIPs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleIPDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
