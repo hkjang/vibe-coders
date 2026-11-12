@@ -6,7 +6,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
 import type { DataTableSettingsColumn } from "@/shared/data-table/use-data-table-layout";
 
-interface DataTableSettingsDialogProps {
+export interface DataTableSettingsDialogProps {
   announcement: string;
   columns: readonly DataTableSettingsColumn[];
   onMove: (columnId: string, direction: -1 | 1) => void;
