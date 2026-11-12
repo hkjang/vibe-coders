@@ -10,6 +10,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { CommandPalette } from "@/app/layouts/CommandPalette";
 import { ShortcutSheet } from "@/app/layouts/ShortcutSheet";
 import { Sidebar } from "@/app/layouts/Sidebar";
+import { HeaderMenu } from "@/app/layouts/HeaderMenu";
 import { RecentScreens } from "@/app/layouts/RecentScreens";
 import { navigationLabels } from "@/app/layouts/navigation-labels";
 import { useNavigationItems } from "@/app/layouts/use-navigation-items";
@@ -34,6 +35,14 @@ import {
 const refreshValues = new Set([0, 60, 300]);
 const FavoritesDialog = lazy(() => import("./FavoritesDialog"));
 
+function shortcutReturnTarget(): HTMLElement | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return null;
+  // A keyboard-opened overlay closes the header disclosure. Return to its
+  // visible summary, rather than an input or action that has become hidden.
+  return active.closest("details[name='console-header-menu']")?.querySelector("summary") ?? active;
+}
+
 export function AppShell(): React.JSX.Element {
   const auth = useAuth();
   const location = useLocation();
@@ -43,16 +52,8 @@ export function AppShell(): React.JSX.Element {
   const favoritesReturnFocusRef = useRef<HTMLElement | null>(null);
   const userMenuRef = useRef<HTMLDetailsElement>(null);
   const mobileMenuTriggerRef = useRef<HTMLButtonElement>(null);
-  const {
-    returnFocusRef: paletteReturnFocusRef,
-    remember: rememberPalette,
-    rememberActive: rememberPaletteActive,
-  } = useReturnFocus();
-  const {
-    returnFocusRef: shortcutReturnFocusRef,
-    remember: rememberShortcut,
-    rememberActive: rememberShortcutActive,
-  } = useReturnFocus();
+  const { returnFocusRef: paletteReturnFocusRef, remember: rememberPalette } = useReturnFocus();
+  const { returnFocusRef: shortcutReturnFocusRef, remember: rememberShortcut } = useReturnFocus();
   const theme = usePreferences((state) => state.theme);
   const density = usePreferences((state) => state.density);
   const refreshInterval = usePreferences((state) => state.refreshInterval);
@@ -101,7 +102,7 @@ export function AppShell(): React.JSX.Element {
       if (event.isComposing || event.keyCode === 229) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
         event.preventDefault();
-        if (!paletteOpen) rememberPaletteActive();
+        if (!paletteOpen) rememberPalette(shortcutReturnTarget());
         setPaletteOpen(true);
         return;
       }
@@ -114,12 +115,12 @@ export function AppShell(): React.JSX.Element {
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       }
       event.preventDefault();
-      if (!shortcutsOpen) rememberShortcutActive();
+      if (!shortcutsOpen) rememberShortcut(shortcutReturnTarget());
       setShortcutsOpen(true);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [paletteOpen, shortcutsOpen, rememberPaletteActive, rememberShortcutActive]);
+  }, [paletteOpen, shortcutsOpen, rememberPalette, rememberShortcut]);
 
   // The palette offers recently opened screens; this is where "recent" is recorded.
   const rememberFeature = usePreferences((state) => state.rememberFeature);
@@ -223,10 +224,11 @@ export function AppShell(): React.JSX.Element {
                   <option value={300}>5분</option>
                 </select>
               </label>
-              <details className="preference-menu">
-                <summary aria-label="화면 표시 설정">
-                  <MonitorCog aria-hidden="true" />
-                </summary>
+              <HeaderMenu
+                className="preference-menu"
+                label="화면 표시 설정"
+                icon={<MonitorCog aria-hidden="true" />}
+              >
                 <div className="popover-card">
                   <label>
                     {preferenceLabels.theme}
@@ -250,19 +252,37 @@ export function AppShell(): React.JSX.Element {
                       <option value="comfortable">{preferenceLabels.comfortable}</option>
                     </select>
                   </label>
+                  <label>
+                    자동 갱신 주기
+                    <select
+                      value={refreshInterval}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (refreshValues.has(value)) setRefreshInterval(value as RefreshInterval);
+                      }}
+                    >
+                      <option value={0}>자동 갱신 끔</option>
+                      <option value={60}>1분</option>
+                      <option value={300}>5분</option>
+                    </select>
+                  </label>
                 </div>
-              </details>
+              </HeaderMenu>
               {showLegacyAdmin ? (
                 <LegacyLink className="header-legacy" href="/admin">
                   기존 화면 <ExternalLink aria-hidden="true" />
                 </LegacyLink>
               ) : null}
-              <details className="user-menu" ref={userMenuRef}>
-                <summary aria-label="사용자 메뉴">
+              <HeaderMenu
+                className="user-menu"
+                menuRef={userMenuRef}
+                label="사용자 메뉴"
+                icon={
                   <span className="avatar" aria-hidden="true">
                     {(auth.user?.name ?? auth.user?.email ?? "A").slice(0, 1).toUpperCase()}
                   </span>
-                </summary>
+                }
+              >
                 <div className="popover-card user-card">
                   <strong>{auth.user?.name ?? auth.user?.email ?? uiLabels.legacyAdministrator}</strong>
                   <span>역할: {roleLabel(auth.user?.role)}</span>
@@ -285,7 +305,7 @@ export function AppShell(): React.JSX.Element {
                     로그아웃
                   </Button>
                 </div>
-              </details>
+              </HeaderMenu>
             </div>
           </header>
           <main className="app-main" id="main-content" tabIndex={-1}>

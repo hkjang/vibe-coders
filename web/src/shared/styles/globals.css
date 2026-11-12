@@ -455,6 +455,9 @@ kbd {
   z-index: var(--z-dropdown);
   display: grid;
   width: 15rem;
+  max-width: calc(100vw - var(--space-8));
+  max-height: calc(100dvh - var(--header-height) - var(--space-4));
+  overflow: auto;
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--color-border);
@@ -1232,8 +1235,7 @@ kbd {
   .breadcrumb,
   .header-search span,
   .header-search kbd,
-  .header-legacy,
-  .preference-menu {
+  .header-legacy {
     display: none;
   }
   .header-search {
