@@ -1,18 +1,21 @@
-import type { UseFormReturn } from "react-hook-form";
+import { Controller, type UseFormReturn } from "react-hook-form";
 import { FormField } from "@/shared/components/form/FormField";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import { assetStatuses, type AssetFormValues } from "./asset-form";
 import { assetStatusLabel } from "./prompt-utils";
 export function AssetFormFields({
   form,
   editing,
   categories,
+  editorDisabled,
 }: {
   form: UseFormReturn<AssetFormValues, unknown, AssetFormValues>;
   editing: boolean;
   categories: readonly { key: string; label?: string }[];
+  editorDisabled: boolean;
 }) {
   return (
     <>
@@ -65,7 +68,22 @@ export function AssetFormFields({
         {(control) => <Textarea {...control} rows={2} {...form.register("description")} />}
       </FormField>
       <FormField label="프롬프트 본문" required error={form.formState.errors.body?.message}>
-        {(control) => <Textarea {...control} rows={8} {...form.register("body")} />}
+        {(control) => (
+          <Controller
+            control={form.control}
+            name="body"
+            render={({ field }) => (
+              <CodeEditor
+                {...control}
+                {...field}
+                label="프롬프트 본문"
+                language="prompt"
+                rows={8}
+                disabled={editorDisabled}
+              />
+            )}
+          />
+        )}
       </FormField>
       <FormField label="노트" error={form.formState.errors.note?.message}>
         {(control) => <Input {...control} {...form.register("note")} />}

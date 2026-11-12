@@ -5,6 +5,10 @@ import "monaco-editor/editor/contrib/find/browser/findController.js";
 import "monaco-editor/editor/contrib/format/browser/formatActions.js";
 import "monaco-editor/languages/definitions/sql/register.js";
 import { jsonDefaults } from "monaco-editor/languages/features/json/register.js";
+// In Monaco 0.57 the JSON worker adapter also registers editor contributions.
+// Load it inside this optional bundle before the first editor initializes its
+// service collection; late registration otherwise breaks reopened editors.
+import "monaco-editor/languages/features/json/jsonMode.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import JsonWorker from "monaco-editor/languages/features/json/json.worker.js?worker";
 

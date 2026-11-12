@@ -276,6 +276,7 @@ export async function installPromptLibrary(page: Page, readOnly = false) {
     return json({ error: { message: "unexpected public fixture request" } }, 500);
   });
   return {
+    bootstrap,
     state,
     writes,
     check: () => {
