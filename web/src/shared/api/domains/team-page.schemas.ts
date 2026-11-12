@@ -17,6 +17,11 @@ export const registeredTeamPageSchema = z.object({
 export type RegisteredTeamPage = z.output<typeof registeredTeamPageSchema>;
 export const registeredTeamQuerySchema = z.object({
   view: z.literal("registered"),
+  id: z
+    .string()
+    .min(1)
+    .refine((value) => new TextEncoder().encode(value).length <= 4096)
+    .optional(),
   q: z
     .string()
     .refine((value) => [...value].length <= 200)

@@ -4,6 +4,8 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { readRegisteredTeamPage } from "./registered-team-model";
 import { RegisteredTeamPanel } from "./RegisteredTeamPanel";
+import { RegisteredTeamDetail } from "./RegisteredTeamDetail";
+import { registeredTeamColumns } from "./registered-team-columns";
 
 import { formatSignedRatio, formatSignedScore } from "@/features/access/access-format";
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
@@ -88,48 +90,6 @@ function usageColumns(): ReadonlyArray<DataTableColumn<TeamSummary>> {
   ]);
 }
 
-function registeredColumns(
-  onEdit: (row: AuthTeamRow, trigger: HTMLElement) => void,
-  canEdit: (row: AuthTeamRow) => boolean,
-  protectedId: (id: string) => boolean,
-): ReadonlyArray<DataTableColumn<AuthTeamRow>> {
-  const column = createDataTableColumnHelper<AuthTeamRow>();
-  return column.columns([
-    column.accessor((row) => row.name, { id: "name", header: "팀 이름" }),
-    column.accessor((row) => row.id, {
-      id: "id",
-      header: "팀 ID",
-      cell: ({ getValue }) => (
-        <span className="mono">{protectedId(getValue()) ? "보호된 팀 ID" : getValue()}</span>
-      ),
-    }),
-    column.accessor((row) => row.created_at, {
-      id: "created_at",
-      header: "생성",
-      cell: ({ getValue }) => formatDateTime(getValue()),
-    }),
-    column.accessor((row) => row.updated_at, {
-      id: "updated_at",
-      header: "수정",
-      cell: ({ getValue }) => formatDateTime(getValue()),
-    }),
-    column.display({
-      id: "actions",
-      header: "작업",
-      cell: ({ row }) => (
-        <Button
-          size="small"
-          disabled={!canEdit(row.original)}
-          title={protectedId(row.original.id) ? "ID 표시 보호 정책에 따라 수정할 수 없습니다." : undefined}
-          onClick={(event) => onEdit(row.original, event.currentTarget)}
-        >
-          이름 수정
-        </Button>
-      ),
-    }),
-  ]);
-}
-
 interface TeamsTabProps {
   canWrite: boolean;
   writeDeniedReason: string;
@@ -175,21 +135,27 @@ function TeamsContent({
   const [selectedTeam, setSelectedTeam] = useState("");
   const createTrigger = useRef<HTMLButtonElement>(null);
   const detailTrigger = useRef<HTMLElement>(null);
+  const { returnFocusRef: registeredTrigger, remember: rememberRegistered } = useReturnFocus();
   const { returnFocusRef, remember } = useReturnFocus();
   const usageTableColumns = useMemo(() => usageColumns(), []);
   // Keep cell renderers stable through loading/invalidation so the opener remains mounted.
   const registrationColumns = useMemo(
     () =>
-      registeredColumns(
+      registeredTeamColumns(
         (row, trigger) => {
           remember(trigger);
           setEditing(row);
           setCreateOpen(true);
         },
+        (trigger) => {
+          if (!owner.isCurrent()) return false;
+          rememberRegistered(trigger);
+          return true;
+        },
         canEdit,
         protectedId,
       ),
-    [remember, canEdit, protectedId],
+    [remember, rememberRegistered, canEdit, protectedId, owner],
   );
 
   const usage = usageQuery.data?.teams ?? [];
@@ -198,6 +164,15 @@ function TeamsContent({
 
   return (
     <div className="access-stack">
+      {params.has("registered_team") ? (
+        <RegisteredTeamDetail
+          key={params.getAll("registered_team").join("\u0000")}
+          values={params.getAll("registered_team")}
+          owner={owner}
+          onClose={() => update({ registered_team: undefined })}
+          returnFocusRef={registeredTrigger}
+        />
+      ) : null}
       {usageQuery.isError ? (
         <QueryNotice
           error={usageQuery.error}

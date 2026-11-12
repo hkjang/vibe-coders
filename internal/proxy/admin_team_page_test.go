@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -74,6 +75,11 @@ func TestAdminTeamPageAuthorizationAndLegacyParity(t *testing.T) {
 	}{
 		{admin, "", 32, 25}, {admin, "&offset=25", 32, 7}, {admin, "&offset=100", 32, 0},
 		{team, "", 1, 1}, {team, "&q=team-page-04", 0, 0}, {empty, "", 0, 0},
+		{admin, "&id=team-page-03&limit=1", 1, 1}, {admin, "&id=team-page-0", 0, 0},
+		{admin, "&id=team-page-03&q=team-page-04", 0, 0},
+		{team, "&id=team-page-03", 1, 1}, {team, "&id=team-page-04", 0, 0},
+		{empty, "&id=team-page-03", 0, 0},
+		{"team-page-readonly-fixture", "&id=team-page-03", 1, 1},
 		{"team-page-legacy-fixture", "", 32, 25}, {"team-page-readonly-fixture", "", 32, 25},
 	} {
 		page := read(tc.token, "?view=registered"+tc.query, 200)
@@ -93,6 +99,9 @@ func TestAdminTeamPageAuthorizationAndLegacyParity(t *testing.T) {
 		read("", query, 401)
 		read(denied, query, 401)
 	}
+	for _, query := range []string{"id=", "id=one&id=two", "id=%FF", "id=a%0Ab", "id=a%C2%85b", "id=" + strings.Repeat("x", 4097)} {
+		read(admin, "?view=registered&"+query, 400)
+	}
 	for _, query := range []string{"view=unknown", "view=registered&view=usage", "view=registered&limit=0", "view=registered&limit=101", "view=registered&offset=-1", "view=registered&offset=1000001", "view=registered&q=a&q=b", "view=registered&q=%FF", "view=registered&q=%ZZ", "view=registered&q=a;b", "view=registered&sort=name", "view=registered&sort=name:down", "view=registered&sort=name:asc,name:desc", "view=registered&sort=secret:asc"} {
 		read(admin, "?"+query, 400)
 	}
@@ -107,6 +116,12 @@ func TestAdminTeamPageAuthorizationAndLegacyParity(t *testing.T) {
 		if page["total"] != float64(1) || !reflect.DeepEqual(page["auth_teams"], legacy["auth_teams"]) {
 			t.Fatal("existing authenticated team identifier or metadata changed")
 		}
+		if index == 0 {
+			exact := read(token, "?view=registered&id="+url.QueryEscape(id)+"&limit=1", 200)
+			if exact["total"] != float64(1) || !reflect.DeepEqual(exact["auth_teams"], legacy["auth_teams"]) {
+				t.Fatal("long exact ID lookup changed registered metadata")
+			}
+		}
 		foreign := read(token, "?view=registered&q=team-page-03", 200)
 		if foreign["total"] != float64(0) {
 			t.Fatal("search escaped the authenticated team scope")
@@ -117,7 +132,7 @@ func TestAdminTeamPageAuthorizationAndLegacyParity(t *testing.T) {
 func TestAdminTeamPageOpenAPIAndFailureProjection(t *testing.T) {
 	spec := buildOpenAPISpec()
 	op := spec["paths"].(map[string]any)["/admin/teams"].(map[string]any)["get"].(map[string]any)
-	if len(op["parameters"].([]any)) != 5 {
+	if len(op["parameters"].([]any)) != 6 {
 		t.Fatal("missing registered-team query contract")
 	}
 	_, db, gateway := newAdminModelsTestServer(t, "")

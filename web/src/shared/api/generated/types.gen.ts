@@ -12237,6 +12237,10 @@ export type GetAdminTeamsData = {
          */
         q?: string;
         /**
+         * Exact registered-team ID, at most 4096 UTF-8 bytes without control characters. Combined with the authenticated team scope and other filters; never broadens permissions. Applies only to view=registered. Missing or out-of-scope IDs return an empty authorized page.
+         */
+        id?: string;
+        /**
          * Up to three unique comma-separated field:asc or field:desc entries. Fields: id,name,created_at,updated_at. Default name:asc. ID ascending breaks remaining ties. Applies only to view=registered.
          */
         sort?: string;

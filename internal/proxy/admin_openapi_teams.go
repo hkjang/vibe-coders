@@ -7,6 +7,7 @@ func enrichTeamPageOpenAPI(op, responses map[string]any) {
 	op["parameters"] = []any{
 		map[string]any{"name": "view", "in": "query", "schema": map[string]any{"type": "string", "enum": []string{"", "registered", "usage"}}},
 		map[string]any{"name": "q", "in": "query", "schema": map[string]any{"type": "string", "maxLength": 200}, "description": "Literal case-insensitive substring of team ID or name, without control characters. Percent and underscore are literal. Applies only to view=registered."},
+		map[string]any{"name": "id", "in": "query", "schema": map[string]any{"type": "string", "minLength": 1, "maxLength": 4096}, "description": "Exact registered-team ID, at most 4096 UTF-8 bytes without control characters. Combined with the authenticated team scope and other filters; never broadens permissions. Applies only to view=registered. Missing or out-of-scope IDs return an empty authorized page."},
 		map[string]any{"name": "sort", "in": "query", "schema": map[string]any{"type": "string"}, "description": "Up to three unique comma-separated field:asc or field:desc entries. Fields: id,name,created_at,updated_at. Default name:asc. ID ascending breaks remaining ties. Applies only to view=registered."},
 		map[string]any{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 25}},
 		map[string]any{"name": "offset", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 0, "maximum": 1000000, "default": 0}},
