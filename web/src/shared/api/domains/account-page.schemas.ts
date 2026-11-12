@@ -1,7 +1,9 @@
 import { z } from "zod";
 
 // Keep credentials and unknown fields out of the account query cache.
-const text = z.string().max(8192);
+// Existing account/team metadata has no such field-size cap. Limit rows and
+// validate types without rejecting a page because a Legacy value is longer.
+const text = z.string();
 export const accountPageRowSchema = z.object({
   id: text.min(1),
   email: text,

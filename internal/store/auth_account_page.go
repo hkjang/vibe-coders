@@ -98,15 +98,19 @@ func (s *SQLStore) ListAuthAccountPage(ctx context.Context, query AuthAccountQue
 	outerOrder, _ := authAccountOrder(query.Sort, "p.")
 	where := []string{"1 = 1"}
 	args := []any{}
-	for _, team := range []*string{query.ScopeTeam, query.Team} {
-		if team == nil {
-			continue
-		}
-		if !validAuthAccountText(*team, 256) {
+	// Authenticated team scope is an existing identifier, not a search input.
+	// Legacy teams may have long IDs or separators; parameter binding preserves
+	// their exact authority without applying new URL-input restrictions.
+	if query.ScopeTeam != nil {
+		where = append(where, "team_id = ?")
+		args = append(args, *query.ScopeTeam)
+	}
+	if query.Team != nil {
+		if !validAuthAccountText(*query.Team, 256) {
 			return page, ErrInvalidAuthAccountQuery
 		}
 		where = append(where, "team_id = ?")
-		args = append(args, *team)
+		args = append(args, *query.Team)
 	}
 	for _, filter := range []struct{ field, value string }{{"role", query.Role}, {"status", query.Status}} {
 		if filter.value != "" {

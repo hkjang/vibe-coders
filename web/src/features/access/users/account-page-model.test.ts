@@ -72,11 +72,11 @@ describe("로그인 계정 서버 조회 상태", () => {
     const account = {
       id: "usr_1",
       email: "a@example.test",
-      name: "계정",
+      name: "기존 계정 이름 ".repeat(2048),
       role: "developer",
       status: "active",
-      team_id: "",
-      team_name: "",
+      team_id: "team_" + "x".repeat(16384),
+      team_name: "기존 팀 이름 ".repeat(2048),
       created_at: "2026-11-12T00:00:00Z",
       password_hash: "private",
       access_token: "private",
@@ -89,6 +89,9 @@ describe("로그인 계정 서버 조회 상태", () => {
       secret: "private",
     });
     expect(JSON.stringify(result)).not.toContain("private");
+    expect(result.accounts[0]?.name).toBe(account.name);
+    expect(result.accounts[0]?.team_id).toBe(account.team_id);
+    expect(result.accounts[0]?.team_name).toBe(account.team_name);
     expect(accountPageSchema.safeParse({ accounts: [], limit: 25, offset: 0 }).success).toBe(false);
   });
 });

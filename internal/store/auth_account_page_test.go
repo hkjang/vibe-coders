@@ -121,7 +121,7 @@ func TestAuthAccountPageRejectsInvalidQueryAndCancellation(t *testing.T) {
 	for _, query := range []AuthAccountQuery{
 		{Limit: 0}, {Limit: 101}, {Limit: 25, Offset: -1}, {Limit: 25, Offset: 1_000_001},
 		{Limit: 25, Search: strings.Repeat("한", 201)}, {Limit: 25, Search: "\xff"}, {Limit: 25, Search: "a\nb"},
-		{Limit: 25, Team: &badTeam}, {Limit: 25, ScopeTeam: &badTeam}, {Limit: 25, Role: strings.Repeat("r", 257)},
+		{Limit: 25, Team: &badTeam}, {Limit: 25, Role: strings.Repeat("r", 257)},
 		{Limit: 25, Status: "active\x7f"}, {Limit: 25, Sort: []AuthAccountSort{{Field: "password_hash"}}},
 		{Limit: 25, Sort: []AuthAccountSort{{Field: "email"}, {Field: "email", Desc: true}}},
 		{Limit: 25, Sort: []AuthAccountSort{{Field: "role"}, {Field: "status"}, {Field: "name"}, {Field: "email"}}},

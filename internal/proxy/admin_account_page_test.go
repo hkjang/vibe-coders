@@ -150,6 +150,42 @@ func TestAdminAccountPageHTTPAuthorizationAndLegacyParity(t *testing.T) {
 	for _, query := range []string{"?view=accounts&q=%ZZ", "?view=accounts&q=a;b"} {
 		read(t, admin, query, 400)
 	}
+	// The existing team API accepts identifiers beyond the new search-input
+	// bounds. Authenticated scope must continue to match those identifiers.
+	for index, teamID := range []string{"team_" + strings.Repeat("x", 1024), "team_with\nseparator"} {
+		t.Run(fmt.Sprintf("legacy team scope %d", index), func(t *testing.T) {
+			teamName := fmt.Sprintf("%d ", index) + strings.Repeat("기존 팀 이름 ", 2048)
+			if err := db.UpsertAuthTeam(t.Context(), store.AuthTeam{ID: teamID, Name: teamName}); err != nil {
+				t.Fatal(err)
+			}
+			id := fmt.Sprintf("usr_legacy_account_%d", index)
+			if err := db.CreateAuthUser(t.Context(), store.AuthUser{ID: id, Email: id + "@example.test", Name: strings.Repeat("기존 계정 ", 2048), Role: "developer", Status: "active", CreatedAt: now}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.SetUserTeam(t.Context(), id, teamID, "developer"); err != nil {
+				t.Fatal(err)
+			}
+			token := issueLLMScopedTestToken(t, db, server, fmt.Sprintf("legacy_team_admin_%d", index), "team_admin", teamID, []string{"admin:read"}, now)
+			page := read(t, token, "?view=accounts", 200)
+			legacy := read(t, token, "", 200)
+			if page["total"] != float64(1) || len(page["accounts"].([]any)) != 1 || len(legacy["auth_users"].([]any)) != 1 {
+				t.Fatal("legacy team scope or account count changed")
+			}
+			account := page["accounts"].([]any)[0].(map[string]any)
+			if account["id"] != id || account["team_id"] != teamID || account["team_name"] != teamName {
+				t.Fatal("existing team metadata changed")
+			}
+			for key, value := range legacy["auth_users"].([]any)[0].(map[string]any) {
+				if !reflect.DeepEqual(account[key], value) {
+					t.Fatal("existing account metadata changed")
+				}
+			}
+			foreign := read(t, token, "?view=accounts&team_id=accounts-alpha", 200)
+			if foreign["total"] != float64(0) || len(foreign["accounts"].([]any)) != 0 {
+				t.Fatal("legacy scope was broadened by a user filter")
+			}
+		})
+	}
 }
 
 func TestAdminAccountPageStoppedAccountRoundTrip(t *testing.T) {
