@@ -241,7 +241,7 @@ describe("foundation form, dialog, and table components", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "열 설정" }));
-    const dialog = screen.getByRole("dialog", { name: "표 열 설정" });
+    const dialog = await screen.findByRole("dialog", { name: "표 열 설정" });
     expect(within(dialog).getByRole("checkbox", { name: /이름/u })).toBeDisabled();
     await user.click(within(dialog).getByRole("checkbox", { name: /역할/u }));
     await user.click(within(dialog).getByRole("button", { name: "팀 열을 왼쪽으로 이동" }));
@@ -273,7 +273,7 @@ describe("foundation form, dialog, and table components", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "열 설정" }));
-    await user.click(screen.getByRole("button", { name: "기본값으로 초기화" }));
+    await user.click(await screen.findByRole("button", { name: "기본값으로 초기화" }));
     await user.click(screen.getByRole("button", { name: "설정 완료" }));
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
       "이름",
@@ -296,7 +296,7 @@ describe("foundation form, dialog, and table components", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "열 설정" }));
-    await user.click(screen.getByRole("checkbox", { name: /역할/u }));
+    await user.click(await screen.findByRole("checkbox", { name: /역할/u }));
     await user.click(screen.getByRole("checkbox", { name: /팀/u }));
     expect(screen.getByRole("checkbox", { name: /이름/u })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "설정 완료" }));
@@ -379,6 +379,7 @@ describe("foundation form, dialog, and table components", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "열 설정" }));
+    await screen.findByRole("dialog", { name: "표 열 설정" });
     expect((await axe.run(container.ownerDocument.body)).violations).toEqual([]);
   });
 });
