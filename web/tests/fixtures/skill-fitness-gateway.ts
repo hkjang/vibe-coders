@@ -49,7 +49,7 @@ const userFor = (email: string) => ({
   features: { "agents.skills": true, "system.health": true },
 });
 type User = ReturnType<typeof userFor>;
-function bootstrap(user: User | undefined): UiBootstrapResponse {
+function bootstrap(user: User | undefined, readOnly = false): UiBootstrapResponse {
   return {
     backend_version: "v0.86.17",
     ui_version: "skill-fitness-fixture",
@@ -86,7 +86,7 @@ function bootstrap(user: User | undefined): UiBootstrapResponse {
       ...feature,
       status: feature.feature_id === "system.health" ? "legacy" : "preview",
       risk_level: "medium",
-      read_only: false,
+      read_only: readOnly,
       enabled_roles: [],
       rollout_percent: 100,
       fallback_enabled: true,
@@ -114,6 +114,7 @@ function gate() {
   };
 }
 async function installGateway(context: BrowserContext) {
+  let readOnly = false;
   const sessions = new Map<string, { refresh: string; user: User }>();
   const fitness = new Map<string, unknown>([
     [firstName, structuredClone(initial)],
@@ -165,7 +166,7 @@ async function installGateway(context: BrowserContext) {
         user,
       });
     }
-    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(session?.user));
+    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(session?.user, readOnly));
     if (call === "GET /auth/sso/status")
       return json({ keycloak_enabled: false, allow_local_login: true, login_url: "/auth/keycloak/login" });
     if (call === "GET /auth/me")
@@ -249,6 +250,9 @@ async function installGateway(context: BrowserContext) {
   return {
     writes,
     unexpected,
+    setReadOnly: (value: boolean) => {
+      readOnly = value;
+    },
     reads: () => readCount,
     logouts: () => logouts,
     logoutResponses: () => logoutResponses,

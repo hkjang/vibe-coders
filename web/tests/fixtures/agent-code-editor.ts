@@ -25,7 +25,9 @@ export async function watchEditorAssets(page: Page) {
 
 export async function activateEditor(dialog: Locator, label: string) {
   await dialog.getByRole("button", { name: `${label} 코드 편집기 열기`, exact: true }).click();
-  const editor = dialog.locator(".code-editor");
+  const editor = dialog.locator(".code-editor").filter({
+    has: dialog.page().getByRole("button", { name: `${label} 기본 입력으로 전환`, exact: true }),
+  });
   await expect(editor.locator("textarea.inputarea")).toBeFocused();
   return editor;
 }
@@ -33,7 +35,8 @@ export async function activateEditor(dialog: Locator, label: string) {
 export async function replaceCode(editor: Locator, value: string) {
   await editor.locator("textarea.inputarea").focus();
   await editor.page().keyboard.press("ControlOrMeta+A");
-  await editor.page().keyboard.insertText(value);
+  if (value === "") await editor.page().keyboard.press("Backspace");
+  else await editor.page().keyboard.insertText(value);
 }
 
 export async function refreshRuntime(page: Page) {
