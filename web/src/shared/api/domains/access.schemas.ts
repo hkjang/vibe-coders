@@ -201,27 +201,7 @@ export const benchmarkTeamsSchema = looseObject({
 
 /* -------------------------------------------------------------------- ips */
 
-export const adminIpsSchema = looseObject({
-  ips: list({
-    ip: z.string(),
-    requests: count,
-    tokens: count,
-    cost_krw: count,
-    average_latency_ms: count,
-    last_seen: text,
-    distinct_keys: count,
-  }),
-});
-export type IpSummary = z.output<typeof adminIpsSchema>["ips"][number];
-
-export const adminIpDetailSchema = looseObject({
-  stats: unknownRecord.nullish(),
-  daily: list({ day: text, requests: count, tokens: count, cost_krw: count }),
-  by_model: list({ model: text, requests: count, tokens: count, cost_krw: count }),
-  by_language: list({ language: text, requests: count }),
-  by_key: list({ api_key_id: text, name: text, requests: count, cost_krw: count }),
-  recent: list({ id: text, model: text, status_code: count, cost_krw: count, created_at: text }),
-});
+export { adminIpsSchema, adminIpDetailSchema, type IpSummary } from "./ip-usage.schemas";
 
 /* ---------------------------------------------------------- quotas/budgets */
 

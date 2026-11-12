@@ -637,6 +637,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "get /admin/ips", "get /admin/ips/{ip}":
+		enrichIPUsageOpenAPI(route, op, responses)
 	case "get /me/sessions", "delete /me/sessions/{id}", "post /me/sessions/revoke-others", "get /me/onboarding-pack", "post /me/connection-doctor":
 		enrichMeAccessOpenAPI(route, strings.ToLower(method), op, responses)
 	case "get /me/dashboard", "get /me/actions", "get /me/notifications", "get /me/report", "get /me/requests", "get /me/requests/{id}/receipt", "get /me/recommended-models", "get /me/skills", "get /me/recommendations", "post /me/actions/snooze", "post /me/skills/{name}/request-access", "post /me/skills/{name}/feedback", "post /me/recommendations/feedback", "post /me/recommendations/{id}/feedback":
@@ -1093,6 +1095,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range meAccessOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range ipUsageOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range teamConsoleOpenAPISchemas() {

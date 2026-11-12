@@ -94,14 +94,6 @@ export function useTeamScorecardQuery(window: string, enabled: boolean, owner?: 
   );
 }
 
-export function useIpsQuery(enabled: boolean) {
-  return useAccessQuery(
-    accessKeys.ips,
-    (signal) => apiClient.request(access.ips.list, { signal, routeId }),
-    enabled,
-  );
-}
-
 export function useQuotasQuery(enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     accessKeys.quotas,

@@ -1,201 +1,182 @@
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
-
-import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
-import { useIpsQuery } from "@/features/access/users/use-access-admin";
-import { apiClient } from "@/shared/api/client";
-import type { IpSummary } from "@/shared/api/domains/access.schemas";
-import { withPathParams } from "@/shared/api/endpoint-factory";
-import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
-import { LoadingState } from "@/shared/components/state/PageStates";
+import { Link, useLocation } from "react-router";
+import { useAuth } from "@/app/auth/AuthProvider";
+import type { IpSummary } from "@/shared/api/domains/ip-usage.schemas";
+import { ErrorState, LoadingState, PermissionDenied } from "@/shared/components/state/PageStates";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { Input } from "@/shared/components/ui/Input";
-import { JsonBlock } from "@/shared/components/ui/JsonBlock";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Sheet } from "@/shared/components/ui/Sheet";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
-import { Toolbar } from "@/shared/components/ui/Toolbar";
-import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
-import { DataTable } from "@/shared/data-table/DataTable";
-import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
+import { useFeatureReadOwner, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { sanitizeAppRouteSearch } from "@/shared/security/app-route-query";
+import { formatDateTime } from "@/shared/utils/format";
+import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
+import { IpUsageTable, type IpColumn } from "./IpUsageTable";
+import { IpUsageDetails } from "./IpUsageDetails";
+import {
+  ipCost,
+  ipIdentityLabel,
+  ipLatency,
+  ipNumber,
+  ipRouteId,
+  sumIpMetric,
+  validIpIdentity,
+} from "./ip-usage-model";
+import { useIpList } from "./use-ip-usage";
+import { useIpLinks } from "./use-ip-links";
+import "./ip-usage.css";
 
-const access = endpoints.domains.access;
-const routeId = "access.users";
-
-function ipColumns(): ReadonlyArray<DataTableColumn<IpSummary>> {
-  const column = createDataTableColumnHelper<IpSummary>();
-  return column.columns([
-    column.accessor((row) => row.ip, {
+export function IpsTab() {
+  const owner = useFeatureReadOwner(ipRouteId, "ip-usage-read", ["observability:read"]);
+  if (!owner.readable) return <PermissionDenied permission="admin:read" />;
+  if (owner.denied)
+    return (
+      <ErrorState
+        title="IP 사용량 조회 권한을 다시 확인하세요."
+        message="이전 목록·상세·내보내기는 표시하지 않습니다."
+        onRetry={owner.restart}
+      />
+    );
+  return <IpUsageContent key={owner.id} owner={owner} />;
+}
+function IpUsageContent({ owner }: { owner: FeatureReadOwner }) {
+  const ips = useIpList(owner);
+  const auth = useAuth();
+  const location = useLocation();
+  const [params, update] = useSearchState();
+  const focus = useReturnFocus();
+  const links = useIpLinks();
+  const requested = params.getAll("ip");
+  const ip =
+    requested.length === 1 && validIpIdentity(requested[0] ?? "", auth.credentialPrefixes)
+      ? (requested[0] ?? "")
+      : "";
+  const invalidSelection = requested.length > 0 && !ip;
+  const rows = ips.data?.ips;
+  const detailHref = (ip: string) => {
+    const next = new URLSearchParams(params);
+    next.set("ip", ip);
+    return (
+      location.pathname +
+      sanitizeAppRouteSearch(location.pathname, next.toString(), auth.credentialPrefixes).search
+    );
+  };
+  const columns: readonly IpColumn<IpSummary>[] = [
+    {
       id: "ip",
-      header: "IP",
-      cell: ({ getValue }) => <span className="mono">{getValue()}</span>,
-    }),
-    column.accessor((row) => row.distinct_keys, {
-      id: "distinct_keys",
+      header: "접속 IP",
+      value: (row) => row.ip,
+      cell: (row) => (
+        <Link to={detailHref(row.ip)} onClick={(event) => focus.remember(event.currentTarget)}>
+          {ipIdentityLabel(row.ip)}
+        </Link>
+      ),
+    },
+    {
+      id: "keys",
       header: "사용 키 수",
-      cell: ({ getValue }) => <span className="cell-number">{formatNumber(getValue())}</span>,
-    }),
-    column.accessor((row) => row.requests, {
+      value: (row) => row.distinct_keys,
+      cell: (row) => ipNumber(row.distinct_keys),
+    },
+    {
       id: "requests",
-      header: "요청",
-      cell: ({ getValue }) => <span className="cell-number">{formatNumber(getValue())}</span>,
-    }),
-    column.accessor((row) => row.tokens, {
-      id: "tokens",
-      header: "토큰",
-      cell: ({ getValue }) => <span className="cell-number">{formatNumber(getValue())}</span>,
-    }),
-    column.accessor((row) => row.cost_krw, {
-      id: "cost",
-      header: "비용",
-      cell: ({ getValue }) => <span className="cell-number">{formatKRW(getValue())}</span>,
-    }),
-    column.accessor((row) => row.average_latency_ms, {
+      header: "요청 수",
+      value: (row) => row.requests,
+      cell: (row) => ipNumber(row.requests),
+    },
+    { id: "tokens", header: "토큰 수", value: (row) => row.tokens, cell: (row) => ipNumber(row.tokens) },
+    { id: "cost", header: "비용 (원)", value: (row) => row.cost_krw, cell: (row) => ipCost(row.cost_krw) },
+    {
       id: "latency",
-      header: "평균 지연",
-      cell: ({ getValue }) => <span className="cell-number">{formatNumber(getValue())}ms</span>,
-    }),
-    column.accessor((row) => row.last_seen, {
+      header: "평균 지연 (ms)",
+      value: (row) => row.average_latency_ms,
+      cell: (row) => ipLatency(row.average_latency_ms),
+    },
+    {
       id: "last_seen",
       header: "최근 사용",
-      cell: ({ getValue }) => formatDateTime(getValue()),
-    }),
-  ]);
-}
-
-export function IpsTab(): React.JSX.Element {
-  const ips = useIpsQuery(true);
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState("");
-  const detailTrigger = useRef<HTMLElement>(null);
-
-  const detail = useQuery({
-    queryKey: ["access", "ips", "detail", selected],
-    enabled: selected !== "",
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(access.ips.detail, { ip: selected }), {
-        query: { limit: 100 },
-        signal,
-        routeId,
-      }),
-  });
-
-  const rows = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    const all = ips.data?.ips ?? [];
-    return needle ? all.filter((row) => row.ip.toLowerCase().includes(needle)) : all;
-  }, [ips.data?.ips, search]);
-
-  if (ips.isPending && !ips.data) return <LoadingState label="IP 사용량을 불러오는 중입니다." />;
-
-  const all = ips.data?.ips ?? [];
-
+      value: (row) => row.last_seen,
+      cell: (row) => formatDateTime(row.last_seen),
+    },
+  ];
+  const legacyHref = links.legacyHref();
   return (
     <div className="access-stack">
+      <InlineNotice tone="info" title="IP 차단 기능은 서버에 없습니다.">
+        허용 IP는 API 키를 발급할 때 지정할 수 있습니다. 이미 발급한 키의 허용 IP를 바꾸려면 새 키를
+        발급하세요.
+      </InlineNotice>
+      {invalidSelection ? (
+        <InlineNotice tone="warning" title="상세 IP 주소를 확인하세요.">
+          올바른 IPv4·IPv6 주소 또는 IP 미기록 항목을 선택하세요.
+        </InlineNotice>
+      ) : null}
+      {ips.isPending && !rows ? <LoadingState label="IP 사용량을 불러오는 중입니다." /> : null}
       {ips.isError ? (
         <QueryNotice
           error={ips.error}
-          hasData={Boolean(ips.data)}
+          hasData={Boolean(rows)}
           label="IP 목록"
           onRetry={() => void ips.refetch()}
         />
       ) : null}
-
-      <StatGrid label="IP 요약">
-        <StatCard label="관측된 IP" value={formatNumber(all.length)} />
-        <StatCard label="총 요청" value={formatNumber(all.reduce((sum, row) => sum + row.requests, 0))} />
-        <StatCard label="총 비용" value={formatKRW(all.reduce((sum, row) => sum + row.cost_krw, 0))} />
-      </StatGrid>
-
-      <InlineNotice tone="info" title="IP 차단 기능은 서버에 없습니다.">
-        IP 단위 차단·해제 API가 제공되지 않습니다. 특정 IP만 허용하려면 API 키 탭에서 키를 발급할 때 허용 IP
-        목록을 지정하세요. 이미 발급된 키의 허용 IP는 변경할 수 없으므로 새 키를 발급해야 합니다.
-      </InlineNotice>
-
-      <SectionCard
-        title="IP별 사용량"
-        description="서버가 상위 200개 IP만 집계합니다. 행을 선택하면 상세 사용 내역을 볼 수 있습니다."
-      >
-        <Toolbar label="IP 필터">
-          <label className="access-toolbar-field">
-            <span>IP 검색</span>
-            <Input value={search} placeholder="10.0." onChange={(event) => setSearch(event.target.value)} />
-          </label>
-        </Toolbar>
-        <DataTable
-          caption="IP별 사용량"
-          columns={ipColumns()}
-          data={rows}
-          getRowId={(row) => row.ip}
-          getRowActionLabel={(row) => `${row.ip} 상세 열기`}
-          onRowClick={(row) => {
-            detailTrigger.current = document.activeElement as HTMLElement | null;
-            setSelected(row.ip);
-          }}
-          emptyMessage="집계된 IP 사용량이 없습니다."
+      {ips.data?.excluded ? (
+        <InlineNotice tone="warning">
+          유효한 주소로 확인할 수 없는 과거 IP 그룹 {ipNumber(ips.data.excluded)}개를 제외했습니다. 아래
+          합계는 표시된 그룹의 값입니다.
+        </InlineNotice>
+      ) : null}
+      {rows ? (
+        <>
+          <StatGrid label="조회된 IP 사용량 요약">
+            <StatCard label="조회된 IP 그룹" value={ipNumber(rows.length)} hint="최대 200개" />
+            <StatCard
+              label="조회된 그룹의 요청"
+              value={ipNumber(sumIpMetric(rows, (row) => row.requests))}
+              hint="전체 트래픽 합계가 아닙니다."
+            />
+            <StatCard label="조회된 그룹의 토큰" value={ipNumber(sumIpMetric(rows, (row) => row.tokens))} />
+            <StatCard label="조회된 그룹의 비용" value={ipCost(sumIpMetric(rows, (row) => row.cost_krw))} />
+          </StatGrid>
+          <SectionCard
+            title="IP별 사용량"
+            description="보관된 전체 기간에서 요청 수가 많은 상위 200개 IP까지 조회합니다. IP를 선택하면 상세 사용 내역을 확인할 수 있습니다."
+            actions={
+              legacyHref ? (
+                <a className="button button-secondary button-default" href={legacyHref}>
+                  기존 관리자에서 보기
+                </a>
+              ) : undefined
+            }
+          >
+            <IpUsageTable
+              id="ips"
+              caption="IP별 사용량"
+              rows={rows}
+              columns={columns}
+              owner={owner}
+              loading={ips.isFetching}
+              getRowId={(row) => row.ip}
+              onRowClick={(row) => {
+                if (!owner.isCurrent()) return;
+                focus.rememberActive();
+                update({ ip: row.ip }, { replace: false });
+              }}
+              getRowActionLabel={(row) => `${ipIdentityLabel(row.ip)} 상세 열기`}
+            />
+            <UpdatedAt at={ips.dataUpdatedAt} />
+          </SectionCard>
+        </>
+      ) : null}
+      {ip ? (
+        <IpUsageDetails
+          key={ip}
+          owner={owner}
+          ip={ip}
+          returnFocusRef={focus.returnFocusRef}
+          onClose={() => update({ ip: undefined }, { replace: false })}
         />
-        <UpdatedAt at={ips.dataUpdatedAt} />
-      </SectionCard>
-
-      <Sheet
-        open={selected !== ""}
-        onOpenChange={(open) => {
-          if (!open) setSelected("");
-        }}
-        returnFocusRef={detailTrigger}
-        size="wide"
-        title={selected || "IP 상세"}
-        description="선택한 IP의 사용량, 모델·키 분포와 최근 호출입니다."
-      >
-        {detail.isPending ? <LoadingState label="IP 상세를 불러오는 중입니다." /> : null}
-        {detail.isError ? (
-          <InlineNotice tone="danger" title="IP 상세를 불러오지 못했습니다.">
-            {safeAppErrorMessage(detail.error, "잠시 후 다시 시도하세요.")}
-            {isAppError(detail.error) && detail.error.requestId ? (
-              <span className="request-id"> 요청 ID: {detail.error.requestId}</span>
-            ) : null}
-          </InlineNotice>
-        ) : null}
-        {detail.data ? (
-          <div className="access-stack">
-            {detail.data.stats ? <JsonBlock label="사용량 통계" value={detail.data.stats} /> : null}
-            <SectionCard title="API 키별 사용" headingLevel={3}>
-              {detail.data.by_key.length === 0 ? (
-                <p className="access-note">기록된 값이 없습니다.</p>
-              ) : (
-                <ul className="access-list">
-                  {detail.data.by_key.slice(0, 20).map((row, index) => (
-                    <li key={`${row.api_key_id}-${String(index)}`}>
-                      <span className="access-list-title">{row.name || row.api_key_id}</span>
-                      <span className="access-list-detail">
-                        요청 {formatNumber(row.requests)} · {formatKRW(row.cost_krw)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </SectionCard>
-            <SectionCard title="모델별 사용" headingLevel={3}>
-              {detail.data.by_model.length === 0 ? (
-                <p className="access-note">기록된 값이 없습니다.</p>
-              ) : (
-                <ul className="access-list">
-                  {detail.data.by_model.slice(0, 20).map((row, index) => (
-                    <li key={`${row.model}-${String(index)}`}>
-                      <span className="access-list-title">{row.model || "—"}</span>
-                      <span className="access-list-detail">
-                        요청 {formatNumber(row.requests)} · {formatKRW(row.cost_krw)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </SectionCard>
-          </div>
-        ) : null}
-      </Sheet>
+      ) : null}
     </div>
   );
 }

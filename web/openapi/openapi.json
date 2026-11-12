@@ -2587,6 +2587,215 @@
         ],
         "type": "object"
       },
+      "IPUsageDay": {
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "date": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bucket",
+          "cost_krw",
+          "date",
+          "requests",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "IPUsageDetail": {
+        "properties": {
+          "by_key": {
+            "items": {
+              "$ref": "#/components/schemas/IPUsageGroup"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "by_language": {
+            "items": {
+              "$ref": "#/components/schemas/IPUsageLanguage"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/IPUsageGroup"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/IPUsageDay"
+            },
+            "maxItems": 60,
+            "type": "array"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/IPUsageRecent"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/IPUsageSummary"
+          }
+        },
+        "required": [
+          "by_key",
+          "by_language",
+          "by_model",
+          "daily",
+          "recent",
+          "stats"
+        ],
+        "type": "object"
+      },
+      "IPUsageGroup": {
+        "properties": {
+          "average_latency_ms": {
+            "type": "number"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "key": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "average_latency_ms",
+          "cost_krw",
+          "key",
+          "requests",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "IPUsageLanguage": {
+        "properties": {
+          "average_confidence": {
+            "type": "number"
+          },
+          "language": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "average_confidence",
+          "language",
+          "requests"
+        ],
+        "type": "object"
+      },
+      "IPUsageList": {
+        "properties": {
+          "ips": {
+            "items": {
+              "$ref": "#/components/schemas/IPUsageSummary"
+            },
+            "maxItems": 200,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ips"
+        ],
+        "type": "object"
+      },
+      "IPUsageRecent": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "estimated_cost": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "status_code": {
+            "type": "integer"
+          },
+          "total_tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created_at",
+          "estimated_cost",
+          "id",
+          "latency_ms",
+          "model",
+          "status_code",
+          "total_tokens"
+        ],
+        "type": "object"
+      },
+      "IPUsageSummary": {
+        "properties": {
+          "average_latency_ms": {
+            "type": "number"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "distinct_keys": {
+            "type": "integer"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "last_seen": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "average_latency_ms",
+          "cost_krw",
+          "distinct_keys",
+          "ip",
+          "last_seen",
+          "requests",
+          "tokens"
+        ],
+        "type": "object"
+      },
       "KeycloakConfigRequest": {
         "description": "Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.",
         "properties": {
@@ -10821,7 +11030,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.72"
+    "version": "v0.86.73"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -15605,10 +15814,68 @@
     },
     "/admin/ips": {
       "get": {
+        "description": "Existing admin:read API, with team-scoped aggregates for team administrators and existing prompt/metadata masking. All retained history; no time filter or server pagination. Responses are no-store. List returns at most 200 groups ordered by request count; this is not a gateway-wide total. Invalid legacy IPs can be filtered by caller permissions.",
         "operationId": "get__admin_ips",
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IPUsageList"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid authentication or missing admin read scope"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Aggregate or team scope query failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -15624,8 +15891,30 @@
     },
     "/admin/ips/{ip}": {
       "get": {
+        "description": "Existing admin:read IP detail with the same team scope on every aggregate. Preserve the exact stored IPv4/IPv6 representation; unknown is the unrecorded-address group. Zones and invalid addresses are rejected. Daily data contains at most 60 active Asia/Seoul date buckets; model/key groups at most 50 each. No prompt or response body is needed by the new UI. Responses are no-store.",
         "operationId": "get__admin_ips_ip",
         "parameters": [
+          {
+            "description": "Exact stored IP address or unknown; URL-encode without canonicalizing.",
+            "in": "path",
+            "name": "ip",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Recent requests only. Missing, invalid or nonpositive values use 50; values above 200 are capped.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
           {
             "in": "path",
             "name": "ip",
@@ -15637,7 +15926,84 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IPUsageDetail"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid IP"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid authentication or missing admin read scope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No records in the caller's team scope"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Aggregate or team scope query failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

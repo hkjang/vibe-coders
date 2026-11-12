@@ -691,6 +691,61 @@ export type HealthResponse = {
     status: 'ok';
 };
 
+export type IpUsageDay = {
+    bucket: string;
+    cost_krw: number;
+    date: string;
+    requests: number;
+    tokens: number;
+};
+
+export type IpUsageDetail = {
+    by_key: Array<IpUsageGroup>;
+    by_language: Array<IpUsageLanguage>;
+    by_model: Array<IpUsageGroup>;
+    daily: Array<IpUsageDay>;
+    recent: Array<IpUsageRecent>;
+    stats: IpUsageSummary;
+};
+
+export type IpUsageGroup = {
+    average_latency_ms: number;
+    cost_krw: number;
+    key: string;
+    requests: number;
+    tokens: number;
+};
+
+export type IpUsageLanguage = {
+    average_confidence: number;
+    language: string;
+    requests: number;
+};
+
+export type IpUsageList = {
+    ips: Array<IpUsageSummary>;
+};
+
+export type IpUsageRecent = {
+    created_at: string;
+    estimated_cost: number;
+    id: string;
+    latency_ms: number;
+    model: string;
+    status_code: number;
+    total_tokens: number;
+};
+
+export type IpUsageSummary = {
+    average_latency_ms: number;
+    cost_krw: number;
+    distinct_keys: number;
+    ip: string;
+    last_seen: string;
+    requests: number;
+    tokens: number;
+};
+
 /**
  * Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.
  */
@@ -6229,28 +6284,87 @@ export type GetAdminIpsData = {
     url: '/admin/ips';
 };
 
+export type GetAdminIpsErrors = {
+    /**
+     * Invalid authentication or missing admin read scope
+     */
+    401: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Aggregate or team scope query failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminIpsError = GetAdminIpsErrors[keyof GetAdminIpsErrors];
+
 export type GetAdminIpsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: IpUsageList;
 };
+
+export type GetAdminIpsResponse = GetAdminIpsResponses[keyof GetAdminIpsResponses];
 
 export type GetAdminIpsIpData = {
     body?: never;
     path: {
         ip: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Recent requests only. Missing, invalid or nonpositive values use 50; values above 200 are capped.
+         */
+        limit?: number;
+    };
     url: '/admin/ips/{ip}';
 };
+
+export type GetAdminIpsIpErrors = {
+    /**
+     * Invalid IP
+     */
+    400: AppError;
+    /**
+     * Invalid authentication or missing admin read scope
+     */
+    401: AppError;
+    /**
+     * No records in the caller's team scope
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Aggregate or team scope query failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminIpsIpError = GetAdminIpsIpErrors[keyof GetAdminIpsIpErrors];
 
 export type GetAdminIpsIpResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: IpUsageDetail;
 };
+
+export type GetAdminIpsIpResponse = GetAdminIpsIpResponses[keyof GetAdminIpsIpResponses];
 
 export type PostAdminJourneyProbeData = {
     body?: never;
