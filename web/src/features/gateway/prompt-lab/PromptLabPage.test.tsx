@@ -332,7 +332,7 @@ describe("PromptLabPage", () => {
     let dialog = within(screen.getByRole("dialog"));
     await user.type(dialog.getByLabelText(/^이름/), "공개 검사");
     await user.type(dialog.getByLabelText("모델"), "public-model-a");
-    await user.type(dialog.getByLabelText(/^사용자 프롬프트/), "공개 검증 입력");
+    await user.type(dialog.getByRole("textbox", { name: /^사용자 프롬프트/ }), "공개 검증 입력");
     await user.click(dialog.getByRole("button", { name: "저장" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(api.bodies("POST /admin/prompt-lab/test-cases")[0]).toMatchObject({

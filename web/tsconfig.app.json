@@ -34,6 +34,8 @@
     "tests/e2e/code-editor-workflow.spec.ts",
     "tests/e2e/code-editor-golden-steps.spec.ts",
     "tests/e2e/code-editor-skill.spec.ts",
+    "tests/e2e/code-editor-library.spec.ts",
+    "tests/e2e/code-editor-lab.spec.ts",
     "tests/fixtures/agent-code-editor.ts"
   ]
 }

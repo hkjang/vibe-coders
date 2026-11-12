@@ -124,6 +124,7 @@ export async function installPromptLab(page: Page, readOnly = false) {
     return json({ error: { message: "unexpected public fixture request" } }, 500);
   });
   return {
+    bootstrap,
     state,
     writes,
     check: () => {

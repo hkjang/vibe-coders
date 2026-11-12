@@ -322,7 +322,16 @@ export function PromptAssetsTab({ canWrite: canEdit }: { canWrite: boolean }): R
         }}
       >
         <LibraryWriteNotice uncertain={editing ? updateAsset.uncertain : createAsset.uncertain} />
-        <AssetFormFields form={form} editing={editing !== undefined} categories={categories} />
+        <AssetFormFields
+          form={form}
+          editing={editing !== undefined}
+          categories={categories}
+          editorDisabled={
+            !canWrite ||
+            form.formState.isSubmitting ||
+            (editing ? updateAsset.uncertain : createAsset.uncertain)
+          }
+        />
         <AssetChangePreview form={form} asset={editing} />
       </FormDialog>
 

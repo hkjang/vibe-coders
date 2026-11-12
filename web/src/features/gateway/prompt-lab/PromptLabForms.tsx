@@ -1,3 +1,4 @@
+import { Controller, useWatch } from "react-hook-form";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { Input } from "@/shared/components/ui/Input";
@@ -5,6 +6,7 @@ import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import type { PromptLabController } from "./use-prompt-lab-controller";
 import { contractTypes, contractTypeLabels } from "./prompt-lab-form";
 export function PromptLabForms({ lab }: { lab: PromptLabController }) {
@@ -29,6 +31,7 @@ export function PromptLabForms({ lab }: { lab: PromptLabController }) {
     createRubric,
     createTestCase,
   } = lab;
+  const contractType = useWatch({ control: contractForm.control, name: "type" });
   return (
     <>
       <FormDialog
@@ -69,6 +72,7 @@ export function PromptLabForms({ lab }: { lab: PromptLabController }) {
         description="응답이 만족해야 하는 형식을 정의합니다."
         onSubmit={(values) => createContract.mutateAsync(values)}
         scrollBody
+        scrollHint="계약 내용을 위아래로 스크롤해 확인할 수 있습니다."
         submitDisabled={!lab.canWrite || createContract.uncertain}
       >
         {!lab.canWrite ? <InlineNotice tone="warning">{lab.writeDeniedReason}</InlineNotice> : null}
@@ -93,8 +97,25 @@ export function PromptLabForms({ lab }: { lab: PromptLabController }) {
         <FormField
           label="스키마 / 정규식"
           description="JSON 스키마(required, properties) 또는 정규식 패턴을 입력합니다."
+          error={contractForm.formState.errors.schema_json?.message}
         >
-          {(control) => <Textarea {...control} rows={5} {...contractForm.register("schema_json")} />}
+          {(control) => (
+            <Controller
+              control={contractForm.control}
+              name="schema_json"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  value={field.value ?? ""}
+                  label="스키마 / 정규식"
+                  language={contractType === "json" || contractType === "json_schema" ? "json" : "prompt"}
+                  rows={5}
+                  disabled={!lab.canWrite || createContract.uncertain || contractForm.formState.isSubmitting}
+                />
+              )}
+            />
+          )}
         </FormField>
         <Checkbox
           label="엄격 모드"
@@ -112,6 +133,7 @@ export function PromptLabForms({ lab }: { lab: PromptLabController }) {
         description="채점 기준을 JSON으로 저장합니다."
         onSubmit={(values) => createRubric.mutateAsync(values)}
         scrollBody
+        scrollHint="평가 기준을 위아래로 스크롤해 확인할 수 있습니다."
         submitDisabled={!lab.canWrite || createRubric.uncertain}
       >
         {!lab.canWrite ? <InlineNotice tone="warning">{lab.writeDeniedReason}</InlineNotice> : null}
@@ -129,7 +151,23 @@ export function PromptLabForms({ lab }: { lab: PromptLabController }) {
           error={rubricForm.formState.errors.criteria_json?.message}
           description='예: {"accuracy": 0.4, "completeness": 0.3}'
         >
-          {(control) => <Textarea {...control} rows={5} {...rubricForm.register("criteria_json")} />}
+          {(control) => (
+            <Controller
+              control={rubricForm.control}
+              name="criteria_json"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  value={field.value ?? ""}
+                  label="기준(JSON)"
+                  language="json"
+                  rows={5}
+                  disabled={!lab.canWrite || createRubric.uncertain || rubricForm.formState.isSubmitting}
+                />
+              )}
+            />
+          )}
         </FormField>
       </FormDialog>
 
@@ -142,6 +180,7 @@ export function PromptLabForms({ lab }: { lab: PromptLabController }) {
         description="프롬프트와 기본 모델 집합을 저장합니다. 프롬프트 원문은 서버에 저장되므로 비밀값을 넣지 마세요."
         onSubmit={(values) => createTestCase.mutateAsync(values)}
         scrollBody
+        scrollHint="프롬프트와 검사 조건을 위아래로 스크롤해 확인할 수 있습니다."
         submitDisabled={!lab.canWrite || createTestCase.uncertain}
       >
         {!lab.canWrite ? <InlineNotice tone="warning">{lab.writeDeniedReason}</InlineNotice> : null}
@@ -181,11 +220,42 @@ export function PromptLabForms({ lab }: { lab: PromptLabController }) {
             </Select>
           )}
         </FormField>
-        <FormField label="시스템 프롬프트">
-          {(control) => <Textarea {...control} rows={3} {...testCaseForm.register("system")} />}
+        <FormField label="시스템 프롬프트" error={testCaseForm.formState.errors.system?.message}>
+          {(control) => (
+            <Controller
+              control={testCaseForm.control}
+              name="system"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  value={field.value ?? ""}
+                  label="시스템 프롬프트"
+                  language="prompt"
+                  rows={3}
+                  disabled={!lab.canWrite || createTestCase.uncertain || testCaseForm.formState.isSubmitting}
+                />
+              )}
+            />
+          )}
         </FormField>
         <FormField label="사용자 프롬프트" required error={testCaseForm.formState.errors.user?.message}>
-          {(control) => <Textarea {...control} rows={5} {...testCaseForm.register("user")} />}
+          {(control) => (
+            <Controller
+              control={testCaseForm.control}
+              name="user"
+              render={({ field }) => (
+                <CodeEditor
+                  {...control}
+                  {...field}
+                  label="사용자 프롬프트"
+                  language="prompt"
+                  rows={5}
+                  disabled={!lab.canWrite || createTestCase.uncertain || testCaseForm.formState.isSubmitting}
+                />
+              )}
+            />
+          )}
         </FormField>
       </FormDialog>
     </>
