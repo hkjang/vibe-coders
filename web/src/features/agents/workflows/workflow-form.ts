@@ -15,9 +15,9 @@ export const workflowStepTypes = [
 
 export const workflowStepTypeLabels: Record<(typeof workflowStepTypes)[number], string> = {
   chat: "채팅",
-  text2sql: "Text2SQL",
+  text2sql: "자연어 SQL",
   mcp_tool: "MCP 도구",
-  skill: "Skill",
+  skill: "스킬",
   condition: "조건",
   approval: "승인",
   transform: "변환",

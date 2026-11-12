@@ -284,7 +284,7 @@ function AppPageContent(): React.JSX.Element {
   const header = (
     <PageHeader
       title="AI 업무 앱"
-      description="Skill·프롬프트·리포트를 묶은 업무 앱을 만들고 검증·발행하며 접근 권한을 관리합니다."
+      description="스킬·프롬프트·리포트를 묶은 업무 앱을 만들고 검증·발행하며 접근 권한을 관리합니다."
       legacyHref="/admin#/apps"
       actions={
         <>

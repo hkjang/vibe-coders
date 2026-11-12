@@ -62,7 +62,7 @@ const userFor = (email: string) => ({
   features: { "agents.apps": true },
 });
 type User = ReturnType<typeof userFor>;
-function bootstrap(user?: User): UiBootstrapResponse {
+function bootstrap(user?: User, readOnly = false): UiBootstrapResponse {
   return {
     backend_version: "v0.86.13",
     ui_version: "app-permission-fixture",
@@ -96,7 +96,7 @@ function bootstrap(user?: User): UiBootstrapResponse {
         status: "preview",
         risk_level: "medium",
         required_permission: "admin:read",
-        read_only: false,
+        read_only: readOnly,
         enabled_roles: [],
         rollout_percent: 100,
         fallback_enabled: true,
@@ -117,6 +117,7 @@ type Mutation = {
 };
 
 async function installGateway(context: BrowserContext) {
+  let readOnly = false;
   const sessions = new Map<string, { refresh: string; user: User }>();
   let apps: App[] = structuredClone([alpha, beta]);
   let rows = structuredClone([
@@ -171,7 +172,7 @@ async function installGateway(context: BrowserContext) {
         user,
       });
     }
-    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(session?.user));
+    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(session?.user, readOnly));
     if (call === "GET /health") return json({ status: "ok" });
     if (call === "GET /ready") return json({ status: "ready" });
     if (path.startsWith("/auth/") || path.startsWith("/admin/") || path.startsWith("/me/")) {
@@ -258,6 +259,9 @@ async function installGateway(context: BrowserContext) {
     permissionReads: () => permissionReads,
     logouts: () => logouts,
     logoutResponses: () => logoutResponses,
+    setReadOnly: (value: boolean) => {
+      readOnly = value;
+    },
     replaceApps: (next: App[]) => {
       apps = structuredClone(next);
     },
