@@ -90,9 +90,9 @@ test("모바일 정책 상세는 포커스와 가로 넘침 및 자동 접근성
 }, info) => {
   await page.setViewportSize({ width: 390, height: 640 });
   gateway.writable(false);
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await login(page, true);
   await expect(detail(page).getByRole("heading", { name: policy.name })).toBeVisible();
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (target: string) => Promise<{ violations: { id: string }[] }> } }
