@@ -358,7 +358,7 @@ describe("WarehousePage", () => {
     render();
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("DW 요약을(를) 불러오지 못했습니다.");
+    expect(alert).toHaveTextContent("DW 요약 조회 실패");
     expect(alert).toHaveTextContent("요청 ID: req_dw_1");
   });
 
@@ -447,7 +447,7 @@ describe("WarehousePage", () => {
     await waitFor(() =>
       expect(api.calls.some((call) => call.key === "DELETE /admin/dw/metrics/metric_1")).toBe(true),
     );
-    expect(toastSpy.success).toHaveBeenCalledWith("지표 daily_cost을(를) 삭제했습니다.");
+    expect(toastSpy.success).toHaveBeenCalledWith("지표 삭제 완료: daily_cost");
   });
 
   it("쓰기 권한이 없으면 지표 재검증과 삭제 버튼이 비활성화된다", async () => {

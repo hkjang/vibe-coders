@@ -113,7 +113,7 @@ describe("등록 팀 읽기 전용 상세", () => {
   it("응답의 ID가 다르면 메타데이터를 노출하지 않는다", async () => {
     setup("/access/users?tab=teams&registered_team=team_other");
     const panel = within(await screen.findByRole("dialog"));
-    expect(await panel.findByText("등록 팀 상세을(를) 불러오지 못했습니다.")).toBeVisible();
+    expect(await panel.findByText("등록 팀 상세 조회 실패")).toBeVisible();
     expect(panel.queryByText("플랫폼 팀")).not.toBeInTheDocument();
   });
   it("실패 후 같은 ID만 재시도한다", async () => {

@@ -143,7 +143,7 @@ describe("로그인 계정 서버 페이지", () => {
       const value = query as AccountQuery;
       return { accounts: [rows[0]], total: 1, limit: value.limit, offset: value.offset };
     });
-    expect(await screen.findByText("로그인 계정을(를) 불러오지 못했습니다.")).toBeVisible();
+    expect(await screen.findByText("로그인 계정 조회 실패")).toBeVisible();
     expect(screen.getByText(/계정 수 미확인/)).toBeVisible();
     expect(screen.queryByText(/검색 결과 0개 계정/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("키 사용량 요약")).toBeVisible();
@@ -159,7 +159,7 @@ describe("로그인 계정 서버 페이지", () => {
         limit: (query as AccountQuery).limit,
         offset: kind === "wrong-offset" ? 25 : 0,
       }));
-      expect(await screen.findByText("로그인 계정을(를) 불러오지 못했습니다.")).toBeVisible();
+      expect(await screen.findByText("로그인 계정 조회 실패")).toBeVisible();
       expect(screen.queryByText("account-0@example.test")).not.toBeInTheDocument();
     },
   );

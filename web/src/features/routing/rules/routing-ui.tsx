@@ -4,6 +4,7 @@ import { isAppError } from "@/shared/api/error";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { queryFailureTitle } from "@/shared/messages/query";
 import { formatNumber } from "@/shared/utils/format";
 
 export interface BarDatum {
@@ -58,7 +59,7 @@ export function QueryFailureNotice({
   return (
     <InlineNotice
       tone={hasData ? "warning" : "danger"}
-      title={`${label}을(를) 불러오지 못했습니다.`}
+      title={queryFailureTitle(label)}
       actions={
         <Button size="small" onClick={onRetry}>
           다시 시도

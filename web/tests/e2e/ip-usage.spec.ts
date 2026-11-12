@@ -96,7 +96,7 @@ test("조회 오류 복구와 403 이후 목록·상세 제거", async ({ page }
   const fixture = await installIpUsage(page);
   fixture.state.listStatus = 500;
   await page.goto("access/users?tab=ips");
-  await expect(page.getByText("IP 목록을(를) 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByText("IP 목록 조회 실패")).toBeVisible();
   await expect(page.getByRole("region", { name: "조회된 IP 사용량 요약" })).toHaveCount(0);
   fixture.state.listStatus = 200;
   await page.getByRole("button", { name: "다시 시도" }).click();

@@ -67,7 +67,7 @@ test("계정 조회만 실패하면 키 사용량은 유지하고 계정 조회�
   const fixture = await installAccountPagination(page);
   fixture.state.accountStatus = 500;
   await page.goto("access/users");
-  await expect(page.getByText("로그인 계정을(를) 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByText("로그인 계정 조회 실패")).toBeVisible();
   await expect(page.getByText(/계정 수 미확인/u)).toBeVisible();
   await expect(page.getByText(/검색 결과 0개 계정/u)).toHaveCount(0);
   fixture.state.accountStatus = 200;

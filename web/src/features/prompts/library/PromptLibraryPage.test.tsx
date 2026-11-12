@@ -312,9 +312,7 @@ describe("PromptLibraryPage", () => {
     });
     render();
 
-    const notice = (await screen.findByText("프롬프트 검색 결과을(를) 불러오지 못했습니다.")).closest(
-      ".inline-notice",
-    );
+    const notice = (await screen.findByText("프롬프트 검색 결과 조회 실패")).closest(".inline-notice");
     expect(notice).toHaveTextContent("요청 ID: req_prompts");
   });
 

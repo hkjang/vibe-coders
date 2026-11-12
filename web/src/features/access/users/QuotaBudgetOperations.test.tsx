@@ -308,7 +308,7 @@ describe("할당량·예산 작업 수명", () => {
           throw apiFailure("private-data");
         },
       });
-      expect(await screen.findByText(`${label}을(를) 불러오지 못했습니다.`)).toBeVisible();
+      expect(await screen.findByText(`${label} 조회 실패`)).toBeVisible();
       const empty: Record<string, string> = {
         할당량: "설정된 할당량이 없습니다.",
         예산: "설정된 예산이 없습니다.",

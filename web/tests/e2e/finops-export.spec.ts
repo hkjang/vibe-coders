@@ -210,7 +210,7 @@ test("모바일 정산 오류 복구와 키보드·어두운 화면 접근성을
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await page.goto("/app/finops?tab=chargeback&month=2026-10");
-  await expect(page.getByText("비용 배부 팩을(를) 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByText("비용 배부 팩 조회 실패")).toBeVisible();
   await expect(page.getByText("배부할 비용이 없습니다.")).toHaveCount(0);
   fixture.jsonStatus(200);
   await page.getByRole("button", { name: "다시 시도", exact: true }).click();

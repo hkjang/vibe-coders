@@ -188,9 +188,7 @@ describe("FinopsPage", () => {
     render();
 
     const alerts = await screen.findAllByRole("alert");
-    const notice = alerts.find((element) =>
-      element.textContent?.includes("비용 대시보드을(를) 불러오지 못했습니다."),
-    );
+    const notice = alerts.find((element) => element.textContent?.includes("비용 대시보드 조회 실패"));
     expect(notice).toBeDefined();
     expect(notice).toHaveTextContent("요청 ID: req_finops_1");
   });

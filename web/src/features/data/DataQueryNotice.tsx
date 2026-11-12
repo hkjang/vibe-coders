@@ -4,6 +4,7 @@ import { isAppError } from "@/shared/api/error";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { queryFailureTitle } from "@/shared/messages/query";
 
 interface DataQueryNoticeProps {
   error: unknown;
@@ -25,9 +26,7 @@ export function DataQueryNotice({
     <InlineNotice
       tone={hasPreviousData ? "warning" : "danger"}
       title={
-        hasPreviousData
-          ? `${label} 갱신에 실패해 마지막 정상 데이터를 표시합니다.`
-          : `${label}을(를) 불러오지 못했습니다.`
+        hasPreviousData ? `${label} 갱신에 실패해 마지막 정상 데이터를 표시합니다.` : queryFailureTitle(label)
       }
       actions={
         <Button size="small" variant="secondary" onClick={onRetry} aria-label={`${label} 다시 시도`}>

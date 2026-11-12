@@ -7,7 +7,7 @@ const numberField = (label: string) =>
     .string()
     .trim()
     .refine((value) => value === "" || (Number.isFinite(Number(value)) && Number(value) >= 0), {
-      message: `${label}은(는) 0 이상의 숫자여야 합니다.`,
+      message: `${label}: 0 이상의 숫자를 입력하세요.`,
     })
     .transform((value) => (value === "" ? 0 : Number(value)));
 
