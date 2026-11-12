@@ -2,6 +2,9 @@
   display: grid;
   gap: var(--space-4);
 }
+.access-text-link {
+  text-decoration: underline;
+}
 .dialog-content:has(.access-key-edit-review, .access-role-change-review, .access-team-edit-review) {
   display: flex;
   flex-direction: column;

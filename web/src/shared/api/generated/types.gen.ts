@@ -161,6 +161,25 @@ export type AdminStatsResponse = {
     total_tokens: number;
 };
 
+export type AdminTeamUsage = {
+    teams: Array<AdminTeamUsageRow>;
+};
+
+export type AdminTeamUsageRow = {
+    average_latency_ms: number;
+    cost_krw: number;
+    keys: number;
+    last_seen: string;
+    requests: number;
+    team: string;
+    tokens: number;
+};
+
+export type AdminTeamsLegacy = {
+    auth_teams: Array<RegisteredTeam>;
+    teams: Array<AdminTeamUsageRow>;
+};
+
 export type AdminUserUsage = {
     team_names: {
         [key: string]: string;
@@ -364,6 +383,13 @@ export type AuthMeResponse = {
 
 export type AuthRefreshRequest = {
     refresh_token: string;
+};
+
+export type AuthTeamPage = {
+    auth_teams: Array<RegisteredTeam>;
+    limit: number;
+    offset: number;
+    total: number;
 };
 
 export type AuthTokenResponse = {
@@ -2292,6 +2318,13 @@ export type ReadinessFailureResponse = {
 
 export type ReadyResponse = {
     status: 'ready';
+};
+
+export type RegisteredTeam = {
+    created_at: string;
+    id: string;
+    name: string;
+    updated_at: string;
 };
 
 export type RequestIoDetail = {
@@ -12197,16 +12230,51 @@ export type PostAdminSystemErrorsClearResponses = {
 export type GetAdminTeamsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: '' | 'registered' | 'usage';
+        /**
+         * Literal case-insensitive substring of team ID or name, without control characters. Percent and underscore are literal. Applies only to view=registered.
+         */
+        q?: string;
+        /**
+         * Up to three unique comma-separated field:asc or field:desc entries. Fields: id,name,created_at,updated_at. Default name:asc. ID ascending breaks remaining ties. Applies only to view=registered.
+         */
+        sort?: string;
+        limit?: number;
+        offset?: number;
+    };
     url: '/admin/teams';
 };
 
+export type GetAdminTeamsErrors = {
+    /**
+     * Invalid view or registered-team filter
+     */
+    400: AppError;
+    /**
+     * Invalid authentication or missing admin read scope
+     */
+    401: AppError;
+    /**
+     * Team query failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminTeamsError = GetAdminTeamsErrors[keyof GetAdminTeamsErrors];
+
 export type GetAdminTeamsResponses = {
     /**
-     * OK
+     * Response selected by view
      */
-    200: unknown;
+    200: AdminTeamsLegacy | AdminTeamUsage | AuthTeamPage;
 };
+
+export type GetAdminTeamsResponse = GetAdminTeamsResponses[keyof GetAdminTeamsResponses];
 
 export type PostAdminTeamsData = {
     body?: never;

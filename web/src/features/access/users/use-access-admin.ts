@@ -107,6 +107,15 @@ export function useTeamsQuery(enabled = true) {
   );
 }
 
+export function useTeamUsageQuery(owner: FeatureReadOwner) {
+  return useAccessQuery(
+    [...accessKeys.teams, "usage"],
+    (signal) => apiClient.request(access.teams.usage, { query: { view: "usage" }, signal, routeId }),
+    true,
+    owner,
+  );
+}
+
 export function useTeamBenchmarkQuery(window: string, enabled: boolean, owner?: FeatureReadOwner) {
   return useAccessQuery(
     [...accessKeys.teamsBenchmark, window],

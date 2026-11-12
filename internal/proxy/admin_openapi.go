@@ -639,6 +639,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	switch key {
 	case "get /admin/users":
 		enrichAccountPageOpenAPI(op, responses)
+	case "get /admin/teams":
+		enrichTeamPageOpenAPI(op, responses)
 	case "get /admin/ips", "get /admin/ips/{ip}":
 		enrichIPUsageOpenAPI(route, op, responses)
 	case "get /me/sessions", "delete /me/sessions/{id}", "post /me/sessions/revoke-others", "get /me/onboarding-pack", "post /me/connection-doctor":
@@ -1103,6 +1105,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range accountPageOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range teamPageOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range teamConsoleOpenAPISchemas() {

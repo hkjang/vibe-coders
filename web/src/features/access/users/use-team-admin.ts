@@ -2,6 +2,7 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { useCallback, useSyncExternalStore } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import type { AuthTeamRow } from "@/shared/api/domains/access.schemas";
+import type { RegisteredTeamQuery } from "@/shared/api/domains/team-page.schemas";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
@@ -21,7 +22,12 @@ const routeId = "access.users";
 const api = endpoints.domains.access.teams;
 const pending = new WeakMap<QueryClient, Set<string>>();
 const snapshot = (row: AuthTeamRow) => JSON.stringify([row.id, row.name, row.created_at, row.updated_at]);
-export function useTeamAdmin(owner: FeatureReadOwner, canWrite: boolean, reason: string) {
+export function useTeamAdmin(
+  owner: FeatureReadOwner,
+  canWrite: boolean,
+  reason: string,
+  query: RegisteredTeamQuery,
+) {
   const auth = useAuth();
   const client = useQueryClient();
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
@@ -38,11 +44,20 @@ export function useTeamAdmin(owner: FeatureReadOwner, canWrite: boolean, reason:
     write.assertCurrent();
   };
   const options = {
-    queryKey: featureOwnedKey([...accessKeys.teams, "administration"], owner),
+    queryKey: featureOwnedKey([...accessKeys.teams, "administration", query], owner),
     queryFn: async ({ signal }: { signal: AbortSignal }) => {
       assertFeatureRead(owner, signal);
-      const data = await apiClient.request(api.administration, { signal, routeId });
+      const data = await apiClient.request(api.registered, { query, signal, routeId });
       assertFeatureRead(owner, signal);
+      if (
+        data.limit !== query.limit ||
+        data.offset !== query.offset ||
+        data.auth_teams.length !== Math.min(query.limit, Math.max(0, data.total - query.offset)) ||
+        new Set(data.auth_teams.map((team) => team.id)).size !== data.auth_teams.length
+      )
+        throw new AppError("등록 팀 목록의 조회 범위를 확인하지 못했습니다. 다시 조회하세요.", {
+          kind: "contract",
+        });
       return data;
     },
     staleTime: 0,
@@ -113,7 +128,20 @@ export function useTeamAdmin(owner: FeatureReadOwner, canWrite: boolean, reason:
             kind: "contract",
             code: "team_catalog_unconfirmed",
           });
-        const fresh = await client.fetchQuery(options);
+        // A page cannot prove a new ID is unused or validate an off-page draft.
+        // Keep the existing complete catalog check immediately before writing.
+        const fresh = await client.fetchQuery({
+          queryKey: featureOwnedKey([...accessKeys.teams, "write-preflight"], owner),
+          queryFn: async ({ signal }) => {
+            assertFeatureRead(owner, signal);
+            const data = await apiClient.request(api.administration, { signal, routeId });
+            assertFeatureRead(owner, signal);
+            return data;
+          },
+          staleTime: 0,
+          gcTime: 0,
+          retry: false,
+        });
         assertCurrent();
         const matches = fresh.auth_teams.filter((row) => row.id === body.id);
         const match = matches[0];

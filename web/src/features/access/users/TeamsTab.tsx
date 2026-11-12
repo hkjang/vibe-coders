@@ -1,9 +1,18 @@
 import { useMemo, useRef, useState } from "react";
+import { Link } from "react-router";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { readRegisteredTeamPage } from "./registered-team-model";
+import { RegisteredTeamPanel } from "./RegisteredTeamPanel";
 
 import { formatSignedRatio, formatSignedScore } from "@/features/access/access-format";
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
 import { TeamDetailSheet } from "@/features/access/users/TeamDetailSheet";
-import { useTeamBenchmarkQuery, useTeamScorecardQuery } from "@/features/access/users/use-access-admin";
+import {
+  useTeamBenchmarkQuery,
+  useTeamScorecardQuery,
+  useTeamUsageQuery,
+} from "@/features/access/users/use-access-admin";
 import { useTeamAdmin } from "./use-team-admin";
 import { TeamEditor } from "./TeamEditor";
 import { useFeatureReadOwner, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
@@ -148,11 +157,16 @@ function TeamsContent({
   canWrite,
   writeDeniedReason,
 }: TeamsTabProps & { owner: FeatureReadOwner }): React.JSX.Element {
+  const { credentialPrefixes } = useAuth();
+  const [params, update] = useSearchState();
+  const page = readRegisteredTeamPage(params, credentialPrefixes);
   const { teams, save, write, assertCurrent, canEdit, canCreate, confirmed, protectedId } = useTeamAdmin(
     owner,
     canWrite,
     writeDeniedReason,
+    page.query,
   );
+  const usageQuery = useTeamUsageQuery(owner);
   const [window, setWindow] = useState("30d");
   const scorecard = useTeamScorecardQuery(window, true, owner);
   const benchmark = useTeamBenchmarkQuery(window, true, owner);
@@ -178,51 +192,51 @@ function TeamsContent({
     [remember, canEdit, protectedId],
   );
 
-  if (teams.isPending && !teams.data) return <LoadingState label="팀 목록을 불러오는 중입니다." />;
-  if (teams.isError && !teams.data)
-    return (
-      <div className="access-stack">
-        <Button disabled>팀 추가</Button>
-        <QueryNotice
-          error={teams.error}
-          hasData={false}
-          label="팀 목록"
-          onRetry={() => void teams.refetch()}
-        />
-      </div>
-    );
-
-  const usage = teams.data?.teams ?? [];
-  const registered = teams.data?.auth_teams ?? [];
+  const usage = usageQuery.data?.teams ?? [];
   const scorecardRows = scorecard.data?.teams ?? [];
   const benchmarkRows = benchmark.data?.teams ?? [];
 
   return (
     <div className="access-stack">
-      {teams.isError ? (
+      {usageQuery.isError ? (
         <QueryNotice
-          error={teams.error}
-          hasData={Boolean(teams.data)}
-          label="팀 목록"
-          onRetry={() => void teams.refetch()}
+          error={usageQuery.error}
+          hasData={Boolean(usageQuery.data)}
+          label="팀 사용량"
+          onRetry={() => void usageQuery.refetch()}
         />
       ) : null}
 
-      <StatGrid label="팀 요약">
-        <StatCard label="등록 팀" value={formatNumber(registered.length)} />
-        <StatCard label="사용 기록이 있는 팀" value={formatNumber(usage.length)} />
-        <StatCard label="총 요청" value={formatNumber(usage.reduce((sum, row) => sum + row.requests, 0))} />
-        <StatCard label="총 비용" value={formatKRW(usage.reduce((sum, row) => sum + row.cost_krw, 0))} />
+      <StatGrid label="팀 사용량 요약">
+        <StatCard
+          label="사용 기록이 있는 팀"
+          value={usageQuery.data ? formatNumber(usage.length) : "미확인"}
+        />
+        <StatCard
+          label="누적 요청"
+          value={usageQuery.data ? formatNumber(usage.reduce((sum, row) => sum + row.requests, 0)) : "미확인"}
+        />
+        <StatCard
+          label="누적 비용"
+          value={usageQuery.data ? formatKRW(usage.reduce((sum, row) => sum + row.cost_krw, 0)) : "미확인"}
+        />
       </StatGrid>
 
       <InlineNotice tone="info" title="팀 배정은 사용자 화면에서 합니다.">
-        멤버를 직접 추가·제거하는 API는 없습니다. 사용자 탭에서 계정의 팀을 바꾸면 팀 구성이 바뀝니다. API
-        키의 팀은 별도의 자유 입력 값입니다.
+        <Link className="access-text-link" to="/access/users/accounts">
+          사용자 화면
+        </Link>
+        에서 계정의 팀을 바꾸면 팀 구성이 바뀝니다. API 키의 팀은 별도로 설정합니다.
       </InlineNotice>
 
-      <SectionCard
-        title="등록된 팀"
-        description="새 팀 추가와 기존 팀 이름 수정을 구분합니다. 팀 ID는 수정하지 않습니다."
+      <RegisteredTeamPanel
+        result={teams}
+        state={page}
+        update={update}
+        columns={registrationColumns}
+        owner={owner}
+        reason={write.allowed ? undefined : write.reason}
+        protectedId={protectedId}
         actions={
           <Button
             ref={createTrigger}
@@ -242,31 +256,25 @@ function TeamsContent({
             팀 추가
           </Button>
         }
-      >
-        {!write.allowed ? <InlineNotice tone="info">{write.reason}</InlineNotice> : null}
-        <DataTable
-          caption="등록된 팀 목록"
-          columns={registrationColumns}
-          data={registered}
-          getRowId={(row) => row.id}
-          emptyMessage="등록된 팀이 없습니다. '팀 추가'로 첫 팀을 만드세요."
-        />
-      </SectionCard>
+      />
 
       <SectionCard title="팀별 사용량" description="행을 선택하면 팀 상세 사용 내역을 볼 수 있습니다.">
-        <DataTable
-          caption="팀별 사용량"
-          columns={usageTableColumns}
-          data={usage}
-          getRowId={(row) => row.team}
-          getRowActionLabel={(row) => `${row.team} 상세 열기`}
-          onRowClick={(row) => {
-            detailTrigger.current = document.activeElement as HTMLElement | null;
-            setSelectedTeam(row.team);
-          }}
-          emptyMessage="집계된 팀 사용량이 없습니다."
-        />
-        <UpdatedAt at={teams.dataUpdatedAt} />
+        {usageQuery.data || usageQuery.isPending ? (
+          <DataTable
+            caption="팀별 사용량"
+            columns={usageTableColumns}
+            data={usage}
+            loading={usageQuery.isPending}
+            getRowId={(row) => row.team}
+            getRowActionLabel={(row) => `${row.team} 상세 열기`}
+            onRowClick={(row) => {
+              detailTrigger.current = document.activeElement as HTMLElement | null;
+              setSelectedTeam(row.team);
+            }}
+            emptyMessage="집계된 팀 사용량이 없습니다."
+          />
+        ) : null}
+        <UpdatedAt at={usageQuery.dataUpdatedAt} />
       </SectionCard>
 
       <SectionCard
