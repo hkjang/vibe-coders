@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -17,6 +18,7 @@ type AuthTeamSort struct {
 
 type AuthTeamQuery struct {
 	Search    string
+	ID        *string // Optional exact resource filter, additional to authenticated scope.
 	ScopeTeam *string // Existing authenticated identifier; no new input-size policy.
 	Sort      []AuthTeamSort
 	Limit     int
@@ -66,7 +68,8 @@ func authTeamOrder(sorts []AuthTeamSort, prefix string) (string, error) {
 func (s *SQLStore) ListAuthTeamPage(ctx context.Context, query AuthTeamQuery) (AuthTeamPage, error) {
 	page := AuthTeamPage{Teams: []AuthTeam{}, Limit: query.Limit, Offset: query.Offset}
 	if query.Limit < 1 || query.Limit > 100 || query.Offset < 0 || query.Offset > 1_000_000 ||
-		!validAuthAccountText(query.Search, 800) || utf8.RuneCountInString(query.Search) > 200 {
+		!validAuthAccountText(query.Search, 800) || utf8.RuneCountInString(query.Search) > 200 ||
+		(query.ID != nil && (*query.ID == "" || !validAuthAccountText(*query.ID, 4096) || strings.IndexFunc(*query.ID, unicode.IsControl) >= 0)) {
 		return page, ErrInvalidAuthTeamQuery
 	}
 	order, err := authTeamOrder(query.Sort, "")
@@ -79,6 +82,10 @@ func (s *SQLStore) ListAuthTeamPage(ctx context.Context, query AuthTeamQuery) (A
 	if query.ScopeTeam != nil {
 		where = append(where, "id = ?")
 		args = append(args, *query.ScopeTeam)
+	}
+	if query.ID != nil {
+		where = append(where, "id = ?")
+		args = append(args, *query.ID)
 	}
 	if query.Search != "" {
 		pattern := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(query.Search) + "%"

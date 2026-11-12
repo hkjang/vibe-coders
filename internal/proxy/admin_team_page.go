@@ -19,13 +19,17 @@ func (s *Server) handleAuthTeamPage(w http.ResponseWriter, r *http.Request) {
 		invalid()
 		return
 	}
-	for _, key := range []string{"view", "q", "sort", "limit", "offset"} {
+	for _, key := range []string{"view", "q", "id", "sort", "limit", "offset"} {
 		if len(values[key]) > 1 {
 			invalid()
 			return
 		}
 	}
 	query := store.AuthTeamQuery{Search: values.Get("q"), Limit: 25}
+	if values.Has("id") {
+		id := values.Get("id")
+		query.ID = &id
+	}
 	for _, item := range []struct {
 		key    string
 		target *int

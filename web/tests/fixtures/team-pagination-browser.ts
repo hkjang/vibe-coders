@@ -45,7 +45,9 @@ export async function installTeamPagination(page: Page) {
     const search = (query.get("q") ?? "").toLowerCase();
     const sorts = (query.get("sort") || "name:asc").split(",");
     const filtered = rows.filter(
-      (row) => row.name.toLowerCase().includes(search) || row.id.toLowerCase().includes(search),
+      (row) =>
+        (!query.has("id") || row.id === query.get("id")) &&
+        (row.name.toLowerCase().includes(search) || row.id.toLowerCase().includes(search)),
     );
     filtered.sort((a, b) => {
       for (const part of [...sorts, "id:asc"]) {
