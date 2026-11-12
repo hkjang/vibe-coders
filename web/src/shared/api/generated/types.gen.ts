@@ -1005,6 +1005,361 @@ export type McpTopologyResponse = {
     nodes: Array<McpTopologyNode>;
 };
 
+export type MeConsoleActions = {
+    actions?: Array<{
+        button_href?: string;
+        button_label?: string;
+        message?: string;
+        severity?: string;
+        type?: string;
+    }> | null;
+    count?: number;
+    /**
+     * Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.
+     */
+    partial_failures?: Array<'snoozes' | 'keys' | 'usage_week' | 'usage_day' | 'usage_month' | 'models' | 'candidates' | 'mcp' | 'profile' | 'recommendations'>;
+    user_id: string;
+};
+
+export type MeConsoleDashboard = {
+    frequent_models?: Array<{
+        avg_cost_krw?: number;
+        model?: string;
+        requests?: number;
+        success_rate?: number;
+    }> | null;
+    key_alerts?: Array<{
+        days_idle?: number;
+        expires_at?: string;
+        flags?: Array<string> | null;
+        id?: string;
+        last_used_at?: string;
+        name?: string;
+        severity?: string;
+        team?: string;
+        user_id?: string;
+    }> | null;
+    month?: {
+        cost_krw?: number;
+        errors?: number;
+        requests?: number;
+        tokens?: number;
+    };
+    my_saved_reports?: Array<{
+        approval_status?: string;
+        created_at?: string;
+        id?: string;
+        kind?: string;
+        name?: string;
+        schema_name?: string;
+        visibility?: string;
+    }> | null;
+    /**
+     * Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.
+     */
+    partial_failures?: Array<'blocks' | 'reports'>;
+    potential_savings_krw?: number;
+    potential_savings_model?: string;
+    profile?: {
+        avg_latency_ms?: number;
+        cache_rate?: number;
+        mcp_usage_rate?: number;
+        risk_score?: number;
+        since?: string;
+        success_rate?: number;
+        summary?: string;
+        text2sql_usage_rate?: number;
+        top_languages?: Array<{
+            key?: string;
+            requests?: number;
+        }> | null;
+        top_mcp_tools?: Array<{
+            key?: string;
+            requests?: number;
+        }> | null;
+        top_models?: Array<{
+            key?: string;
+            requests?: number;
+        }> | null;
+        top_task_types?: Array<{
+            key?: string;
+            requests?: number;
+        }> | null;
+    };
+    recent_blocks?: Array<{
+        created_at?: string;
+        endpoint?: string;
+        model?: string;
+        reason?: string;
+        rule?: string;
+    }> | null;
+    recent_failures?: Array<{
+        created_at?: string;
+        error?: string;
+        id?: string;
+        model?: string;
+        status_code?: number;
+        task_type?: string;
+    }> | null;
+    recent_prompt_products?: Array<{
+        description?: string;
+        id?: string;
+        name?: string;
+    }> | null;
+    recommended_templates?: Array<{
+        category?: string;
+        description?: string;
+        id?: string;
+        name?: string;
+    }> | null;
+    today?: {
+        cost_krw?: number;
+        errors?: number;
+        requests?: number;
+        tokens?: number;
+    };
+    user_id: string;
+};
+
+export type MeConsoleModels = {
+    note?: string;
+    /**
+     * Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.
+     */
+    partial_failures?: Array<'team_winners'>;
+    tagged_model_count?: number;
+    task_recommendations?: Array<{
+        avoid?: Array<string> | null;
+        recommend?: Array<string> | null;
+        requests?: number;
+        task_type?: string;
+    }> | null;
+    team_winners?: Array<{
+        appearances?: number;
+        avg_score?: number;
+        model?: string;
+        wins?: number;
+    }> | null;
+    your_models?: Array<{
+        model?: string;
+        requests?: number;
+        tags?: {
+            avoid_for?: string;
+            good_for?: string;
+            risk_note?: string;
+        };
+    }> | null;
+};
+
+export type MeConsoleNotifications = {
+    count?: number;
+    critical_count?: number;
+    notifications?: Array<{
+        category?: string;
+        created_at?: string;
+        detail?: string;
+        href?: string;
+        level?: string;
+        title?: string;
+    }> | null;
+    /**
+     * Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.
+     */
+    partial_failures?: Array<'recommendations' | 'keys' | 'failures' | 'policy' | 'secrets'>;
+    user_id: string;
+};
+
+export type MeConsoleReceipt = {
+    blocked?: boolean;
+    cache_hit?: boolean;
+    cost_krw?: number;
+    created_at?: string;
+    endpoint?: string;
+    finish_reason?: string;
+    latency_ms?: number;
+    mcp_tools?: Array<{
+        error?: boolean;
+        server?: string;
+        tool?: string;
+    }> | null;
+    mcp_used?: boolean;
+    model?: string;
+    note?: string;
+    /**
+     * Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.
+     */
+    partial_failures?: Array<'routing' | 'policy' | 'tools'>;
+    policy?: Array<{
+        decision?: string;
+        reason?: string;
+        rule?: string;
+    }> | null;
+    provider?: string;
+    request_id?: string;
+    routing?: {
+        complexity_tier?: string;
+        fallback_path?: Array<string> | null;
+        reason?: string;
+        requested_model?: string;
+        risk_tier?: string;
+        selected_model?: string;
+        selected_provider?: string;
+    };
+    skill_used?: boolean;
+    skills?: Array<string> | null;
+    status_code?: number;
+    tokens?: {
+        cached?: number;
+        completion?: number;
+        prompt?: number;
+        total?: number;
+    };
+};
+
+export type MeConsoleRecommendationFeedback = {
+    /**
+     * adopted, dismissed or later; legacy aliases accepted/rejected/accept/reject/adopt/dismiss/snooze/snoozed remain supported, case-insensitive and trimmed. Body id is required for the legacy /feedback alias and ignored when a path ID is present.
+     */
+    action: string;
+    id?: string;
+    reason?: string;
+};
+
+export type MeConsoleRecommendationFeedbackResult = {
+    action: 'adopted' | 'dismissed' | 'later';
+    kind: string;
+    status: 'recorded';
+};
+
+export type MeConsoleRecommendations = {
+    recommendations?: Array<{
+        created_at?: string;
+        detail?: string;
+        est_savings_krw?: number;
+        id?: string;
+        kind?: string;
+        ref?: string;
+        title?: string;
+        user_id?: string;
+    }> | null;
+    user_id: string;
+};
+
+export type MeConsoleReport = {
+    avg_latency_ms?: number;
+    cache_rate?: number;
+    cost_delta_ratio?: number;
+    cost_krw?: number;
+    errors?: number;
+    /**
+     * Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.
+     */
+    partial_failures?: Array<'models' | 'profile' | 'recommendations'>;
+    potential_savings_krw?: number;
+    potential_savings_model?: string;
+    prior_cost_krw?: number;
+    prior_requests?: number;
+    recommendation_count?: number;
+    requests?: number;
+    risk_score?: number;
+    since?: string;
+    success_rate?: number;
+    tokens?: number;
+    top_models?: Array<{
+        avg_cost_krw?: number;
+        model?: string;
+        requests?: number;
+        success_rate?: number;
+    }> | null;
+    top_task_types?: Array<{
+        key?: string;
+        requests?: number;
+    }> | null;
+    user_id: string;
+    window?: 'weekly' | 'monthly';
+};
+
+export type MeConsoleRequests = {
+    requests?: Array<{
+        cached?: boolean;
+        cost_krw?: number;
+        created_at?: string;
+        endpoint?: string;
+        id?: string;
+        model?: string;
+        provider?: string;
+        status_code?: number;
+        total_tokens?: number;
+    }> | null;
+};
+
+export type MeConsoleSkillActionResult = {
+    skill: string;
+    status: 'requested' | 'recorded';
+};
+
+export type MeConsoleSkillFeedback = {
+    comment?: string;
+    rating: number;
+};
+
+export type MeConsoleSkillRequest = {
+    reason?: string;
+};
+
+export type MeConsoleSkills = {
+    available?: Array<{
+        description?: string;
+        feedback_count?: number;
+        name?: string;
+        risk_level?: string;
+        runs_30d?: number;
+        /**
+         * Average rating; zero feedback_count means unobserved.
+         */
+        satisfaction?: number;
+        /**
+         * Percentage, not a fraction. Zero runs means no observed success rate.
+         */
+        success_rate?: number;
+        users_30d?: number;
+    }> | null;
+    /**
+     * Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.
+     */
+    partial_failures?: Array<'runs' | 'feedback'>;
+    requestable?: Array<{
+        description?: string;
+        feedback_count?: number;
+        name?: string;
+        risk_level?: string;
+        runs_30d?: number;
+        /**
+         * Average rating; zero feedback_count means unobserved.
+         */
+        satisfaction?: number;
+        /**
+         * Percentage, not a fraction. Zero runs means no observed success rate.
+         */
+        success_rate?: number;
+        users_30d?: number;
+    }> | null;
+    team?: string;
+};
+
+export type MeConsoleSnooze = {
+    /**
+     * Values outside 1..90 default to 7 days.
+     */
+    days?: number;
+    type: string;
+};
+
+export type MeConsoleSnoozeResult = {
+    snoozed_until: string;
+    type: string;
+};
+
 export type MeKeyCatalog = {
     api_keys: Array<MeKeyPublic>;
     grantable_scopes: Array<string>;
@@ -13320,26 +13675,96 @@ export type GetMeActionsData = {
     url: '/me/actions';
 };
 
+export type GetMeActionsErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeActionsError = GetMeActionsErrors[keyof GetMeActionsErrors];
+
 export type GetMeActionsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleActions;
 };
 
+export type GetMeActionsResponse = GetMeActionsResponses[keyof GetMeActionsResponses];
+
 export type PostMeActionsSnoozeData = {
-    body?: never;
+    body: MeConsoleSnooze;
     path?: never;
     query?: never;
     url: '/me/actions/snooze';
 };
 
+export type PostMeActionsSnoozeErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostMeActionsSnoozeError = PostMeActionsSnoozeErrors[keyof PostMeActionsSnoozeErrors];
+
 export type PostMeActionsSnoozeResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleSnoozeResult;
 };
+
+export type PostMeActionsSnoozeResponse = PostMeActionsSnoozeResponses[keyof PostMeActionsSnoozeResponses];
 
 export type GetMeAppRunsData = {
     body?: never;
@@ -13376,12 +13801,47 @@ export type GetMeDashboardData = {
     url: '/me/dashboard';
 };
 
+export type GetMeDashboardErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeDashboardError = GetMeDashboardErrors[keyof GetMeDashboardErrors];
+
 export type GetMeDashboardResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleDashboard;
 };
+
+export type GetMeDashboardResponse = GetMeDashboardResponses[keyof GetMeDashboardResponses];
 
 export type GetMeDataProductsData = {
     body?: never;
@@ -13571,12 +14031,47 @@ export type GetMeNotificationsData = {
     url: '/me/notifications';
 };
 
+export type GetMeNotificationsErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeNotificationsError = GetMeNotificationsErrors[keyof GetMeNotificationsErrors];
+
 export type GetMeNotificationsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleNotifications;
 };
+
+export type GetMeNotificationsResponse = GetMeNotificationsResponses[keyof GetMeNotificationsResponses];
 
 export type GetMeOnboardingPackData = {
     body?: never;
@@ -13609,33 +14104,108 @@ export type GetMeOverlayResponses = {
 export type GetMeRecommendationsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Only the literal false reads the caller's stored recommendations without side effects. Omitted/true preserves legacy generation and replaces stored IDs. Generation is not idempotent and must not be automatically replayed, including after 401.
+         */
+        refresh?: boolean;
+    };
     url: '/me/recommendations';
 };
+
+export type GetMeRecommendationsErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeRecommendationsError = GetMeRecommendationsErrors[keyof GetMeRecommendationsErrors];
 
 export type GetMeRecommendationsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleRecommendations;
 };
 
+export type GetMeRecommendationsResponse = GetMeRecommendationsResponses[keyof GetMeRecommendationsResponses];
+
 export type PostMeRecommendationsFeedbackData = {
-    body?: never;
+    body: MeConsoleRecommendationFeedback;
     path?: never;
     query?: never;
     url: '/me/recommendations/feedback';
 };
 
+export type PostMeRecommendationsFeedbackErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostMeRecommendationsFeedbackError = PostMeRecommendationsFeedbackErrors[keyof PostMeRecommendationsFeedbackErrors];
+
 export type PostMeRecommendationsFeedbackResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleRecommendationFeedbackResult;
 };
 
+export type PostMeRecommendationsFeedbackResponse = PostMeRecommendationsFeedbackResponses[keyof PostMeRecommendationsFeedbackResponses];
+
 export type PostMeRecommendationsIdFeedbackData = {
-    body?: never;
+    body: MeConsoleRecommendationFeedback;
     path: {
         id: string;
     };
@@ -13643,12 +14213,47 @@ export type PostMeRecommendationsIdFeedbackData = {
     url: '/me/recommendations/{id}/feedback';
 };
 
+export type PostMeRecommendationsIdFeedbackErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostMeRecommendationsIdFeedbackError = PostMeRecommendationsIdFeedbackErrors[keyof PostMeRecommendationsIdFeedbackErrors];
+
 export type PostMeRecommendationsIdFeedbackResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleRecommendationFeedbackResult;
 };
+
+export type PostMeRecommendationsIdFeedbackResponse = PostMeRecommendationsIdFeedbackResponses[keyof PostMeRecommendationsIdFeedbackResponses];
 
 export type GetMeRecommendedModelsData = {
     body?: never;
@@ -13657,26 +14262,101 @@ export type GetMeRecommendedModelsData = {
     url: '/me/recommended-models';
 };
 
+export type GetMeRecommendedModelsErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeRecommendedModelsError = GetMeRecommendedModelsErrors[keyof GetMeRecommendedModelsErrors];
+
 export type GetMeRecommendedModelsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleModels;
 };
+
+export type GetMeRecommendedModelsResponse = GetMeRecommendedModelsResponses[keyof GetMeRecommendedModelsResponses];
 
 export type GetMeReportData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Rolling 7 days (weekly) or 30 days (monthly), compared with the previous equal-length interval; unknown input uses weekly. Dashboard today/month use UTC calendar boundaries instead.
+         */
+        window?: 'weekly' | 'monthly';
+    };
     url: '/me/report';
 };
+
+export type GetMeReportErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeReportError = GetMeReportErrors[keyof GetMeReportErrors];
 
 export type GetMeReportResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleReport;
 };
+
+export type GetMeReportResponse = GetMeReportResponses[keyof GetMeReportResponses];
 
 export type PostMeReportsSubmitToTeamData = {
     body?: never;
@@ -13695,16 +14375,56 @@ export type PostMeReportsSubmitToTeamResponses = {
 export type GetMeRequestsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Newest request metadata, at most 100 rows. Values outside 1..100 or invalid/missing use 20. No server pagination or total history count.
+         */
+        limit?: number;
+    };
     url: '/me/requests';
 };
+
+export type GetMeRequestsErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeRequestsError = GetMeRequestsErrors[keyof GetMeRequestsErrors];
 
 export type GetMeRequestsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleRequests;
 };
+
+export type GetMeRequestsResponse = GetMeRequestsResponses[keyof GetMeRequestsResponses];
 
 export type GetMeRequestsIdReceiptData = {
     body?: never;
@@ -13715,12 +14435,47 @@ export type GetMeRequestsIdReceiptData = {
     url: '/me/requests/{id}/receipt';
 };
 
+export type GetMeRequestsIdReceiptErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeRequestsIdReceiptError = GetMeRequestsIdReceiptErrors[keyof GetMeRequestsIdReceiptErrors];
+
 export type GetMeRequestsIdReceiptResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleReceipt;
 };
+
+export type GetMeRequestsIdReceiptResponse = GetMeRequestsIdReceiptResponses[keyof GetMeRequestsIdReceiptResponses];
 
 export type GetMeSessionsData = {
     body?: never;
@@ -13773,15 +14528,50 @@ export type GetMeSkillsData = {
     url: '/me/skills';
 };
 
+export type GetMeSkillsErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeSkillsError = GetMeSkillsErrors[keyof GetMeSkillsErrors];
+
 export type GetMeSkillsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeConsoleSkills;
 };
 
+export type GetMeSkillsResponse = GetMeSkillsResponses[keyof GetMeSkillsResponses];
+
 export type PostMeSkillsNameFeedbackData = {
-    body?: never;
+    body: MeConsoleSkillFeedback;
     path: {
         name: string;
     };
@@ -13789,15 +14579,50 @@ export type PostMeSkillsNameFeedbackData = {
     url: '/me/skills/{name}/feedback';
 };
 
+export type PostMeSkillsNameFeedbackErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostMeSkillsNameFeedbackError = PostMeSkillsNameFeedbackErrors[keyof PostMeSkillsNameFeedbackErrors];
+
 export type PostMeSkillsNameFeedbackResponses = {
     /**
      * OK
      */
-    200: unknown;
+    201: MeConsoleSkillActionResult;
 };
 
+export type PostMeSkillsNameFeedbackResponse = PostMeSkillsNameFeedbackResponses[keyof PostMeSkillsNameFeedbackResponses];
+
 export type PostMeSkillsNameRequestAccessData = {
-    body?: never;
+    body: MeConsoleSkillRequest;
     path: {
         name: string;
     };
@@ -13805,12 +14630,47 @@ export type PostMeSkillsNameRequestAccessData = {
     url: '/me/skills/{name}/request-access';
 };
 
+export type PostMeSkillsNameRequestAccessErrors = {
+    /**
+     * Invalid input
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Resource belongs to another caller
+     */
+    403: AppError;
+    /**
+     * Resource not found or recommendation replaced
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Required data or write failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostMeSkillsNameRequestAccessError = PostMeSkillsNameRequestAccessErrors[keyof PostMeSkillsNameRequestAccessErrors];
+
 export type PostMeSkillsNameRequestAccessResponses = {
     /**
      * OK
      */
-    200: unknown;
+    201: MeConsoleSkillActionResult;
 };
+
+export type PostMeSkillsNameRequestAccessResponse = PostMeSkillsNameRequestAccessResponses[keyof PostMeSkillsNameRequestAccessResponses];
 
 export type GetMeWorkflowRunsData = {
     body?: never;

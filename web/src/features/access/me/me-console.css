@@ -1,0 +1,45 @@
+.me-table {
+  min-width: 0;
+}
+.me-table-controls,
+.me-filter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.me-table-controls .form-field {
+  min-width: 12rem;
+  flex: 1 1 14rem;
+}
+.me-table-summary,
+.me-period-note {
+  color: var(--color-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.me-table td,
+.me-table th {
+  overflow-wrap: anywhere;
+}
+.me-receipt-link {
+  max-width: 20rem;
+  overflow-wrap: anywhere;
+}
+.me-home-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.me-home-columns > * {
+  min-width: 0;
+}
+@media (max-width: 767px) {
+  .me-home-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .me-table-controls > button {
+    flex: 1 1 auto;
+  }
+}

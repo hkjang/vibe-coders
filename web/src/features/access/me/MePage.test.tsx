@@ -21,7 +21,14 @@ function renderScreen(ui: React.ReactNode, options?: Parameters<typeof renderBas
 // admin scopes.
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ role: "developer", scopes: ["chat:completion"] }) };
+  return {
+    useAuth: () =>
+      testAuth({
+        role: "developer",
+        scopes: ["chat:completion"],
+        user: { id: "usr_1", team_id: "platform" },
+      }),
+  };
 });
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -89,6 +96,7 @@ function handlers(overrides: Record<string, () => unknown> = {}) {
     "GET /me/actions": () => actions,
     "GET /me/notifications": () => ({ user_id: "usr_1", count: 0, critical_count: 0, notifications: [] }),
     "GET /me/report": () => ({ user_id: "usr_1", window: "weekly", requests: 900, cost_krw: 45_000 }),
+    "GET /me/recommendations": () => ({ user_id: "usr_1", recommendations: [] }),
     ...overrides,
   };
 }
@@ -122,7 +130,7 @@ const skills = {
       description: "코드 리뷰 보조",
       risk_level: "low",
       runs_30d: 120,
-      success_rate: 0.98,
+      success_rate: 98,
       users_30d: 12,
       satisfaction: 4.3,
       feedback_count: 9,
@@ -150,7 +158,7 @@ describe("MePage", () => {
     expect(await screen.findByText("이번 주 비용이 급증했습니다.")).toBeVisible();
     expect(screen.getAllByText("gpt-4o-mini").length).toBeGreaterThan(0);
     // The server has no `key_alerts[].reason`; flags carry the signal instead.
-    expect(screen.getByText(/expiring_soon/u)).toBeVisible();
+    expect(screen.getByText(/곧 만료/u)).toBeVisible();
   });
 
   it("shows empty states when there is nothing to act on", async () => {
@@ -162,8 +170,8 @@ describe("MePage", () => {
     );
     renderScreen(<MePage />, { path: "/me/*", route: "/me" });
 
-    expect(await screen.findByText("처리할 액션이 없습니다.")).toBeVisible();
-    expect(screen.getByText("새 알림이 없습니다.")).toBeVisible();
+    expect(await screen.findByText("처리할 할 일이 없습니다.")).toBeVisible();
+    expect(screen.getByText("조회된 알림이 없습니다.")).toBeVisible();
   });
 
   it("surfaces the request id when the dashboard fails", async () => {

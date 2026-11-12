@@ -14,6 +14,8 @@ interface SheetProps {
   title: ReactNode;
   /** Wide sheets suit tables and JSON; default suits forms. */
   size?: "default" | "wide";
+  /** Label a keyboard scroll target for long, read-only content. */
+  scrollLabel?: string;
 }
 
 /** Side panel for detail views and editors that should keep the list visible. */
@@ -25,6 +27,7 @@ export function Sheet({
   open,
   returnFocusRef,
   size = "default",
+  scrollLabel,
   title,
 }: SheetProps): React.JSX.Element {
   return (
@@ -54,7 +57,14 @@ export function Sheet({
               </Button>
             </DialogPrimitive.Close>
           </header>
-          <div className="dialog-body sheet-body">{children}</div>
+          <div
+            className="dialog-body sheet-body"
+            role={scrollLabel ? "region" : undefined}
+            aria-label={scrollLabel}
+            tabIndex={scrollLabel ? 0 : undefined}
+          >
+            {children}
+          </div>
           {footer ? <footer className="dialog-footer">{footer}</footer> : null}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

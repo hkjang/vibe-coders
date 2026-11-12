@@ -1,286 +1,219 @@
-import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { z } from "zod";
-
-import { formatSignedRatio, severityTone } from "@/features/access/access-format";
-import { QueryNotice } from "@/features/access/access-ui";
-import { meKeys, useMeSkillsQuery } from "@/features/access/me/use-me-queries";
-import { apiClient } from "@/shared/api/client";
-import type {
-  RecommendationFeedbackBody,
-  SkillAccessRequestBody,
-  SkillFeedbackBody,
-} from "@/shared/api/domains/access";
-import type { MeSkill } from "@/shared/api/domains/access.schemas";
-import { withPathParams } from "@/shared/api/endpoint-factory";
-import { endpoints } from "@/shared/api/endpoints";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { severityTone } from "@/features/access/access-format";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
-import { LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
-import { formatKRW, formatNumber } from "@/shared/utils/format";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import type { MeSkill } from "@/shared/api/domains/me-console.schemas";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { useMeSkillsQuery } from "./use-me-queries";
+import { useMeSkillRequest, useMeSkillFeedback } from "./me-console-actions";
+import { MeQueryContent, MePartial, MeOperationNotice } from "./me-console-ui";
+import { meLabel, meNumber, mePercent, safeMeMessage, validMeText } from "./me-console-model";
+import { MeRecommendations } from "./MeRecommendations";
+import { MeTable, type MeColumn } from "./MeTable";
 
-const access = endpoints.domains.access;
-const routeId = "me.home";
-
-const requestSchema = z.object({ reason: z.string().min(1, "신청 사유를 입력하세요.") });
-type RequestForm = z.infer<typeof requestSchema>;
-
-// The server rejects anything outside 1..5 with `bad_rating`.
-const feedbackSchema = z.object({
-  rating: z.enum(["1", "2", "3", "4", "5"]),
-  comment: z.string(),
-});
-type FeedbackForm = z.infer<typeof feedbackSchema>;
-
-const ratingLabels: Readonly<Record<string, string>> = {
-  "1": "1 · 매우 불만족",
-  "2": "2 · 불만족",
-  "3": "3 · 보통",
-  "4": "4 · 만족",
-  "5": "5 · 매우 만족",
-};
-
-export function MeSkillsTab(): React.JSX.Element {
-  const skills = useMeSkillsQuery(true);
-  const [recommendationsRequested, setRecommendationsRequested] = useState(false);
-  // Every GET regenerates and replaces the caller's recommendations, so this is
-  // deliberately opt-in rather than loaded with the tab.
-  const recommendations = useQuery({
-    queryKey: meKeys.recommendations,
-    enabled: recommendationsRequested,
-    queryFn: ({ signal }) => apiClient.request(access.me.recommendations, { signal, routeId }),
+type SkillRow = MeSkill & { available: boolean };
+export function MeSkillsTab() {
+  const { credentialPrefixes } = useAuth();
+  const query = useMeSkillsQuery(true);
+  const [params, update] = useSearchState();
+  const kind = ["available", "requestable"].find((value) => value === params.get("skill_kind")) ?? "all";
+  const request = useMeSkillRequest(),
+    feedback = useMeSkillFeedback();
+  const [requesting, setRequesting] = useState<MeSkill>();
+  const [rating, setRating] = useState<MeSkill>();
+  const [requested, setRequested] = useState<ReadonlySet<string>>(new Set());
+  const trigger = useRef<HTMLElement>(null);
+  const requestSchema = z.object({
+    reason: z
+      .string()
+      .trim()
+      .min(1, "신청 사유를 입력하세요.")
+      .max(500, "500자 이내로 입력하세요.")
+      .refine((value) => validMeText(value, credentialPrefixes), "비밀값과 제어 문자는 입력할 수 없습니다."),
   });
-
-  const [requesting, setRequesting] = useState<MeSkill | undefined>();
-  const [rating, setRating] = useState<MeSkill | undefined>();
-  const rowTrigger = useRef<HTMLElement>(null);
-
-  const requestForm = useZodForm<RequestForm, RequestForm>(requestSchema, { reason: "" });
-  const feedbackForm = useZodForm<FeedbackForm, FeedbackForm>(feedbackSchema, {
-    rating: "5",
-    comment: "",
+  const feedbackSchema = z.object({
+    rating: z.enum(["1", "2", "3", "4", "5"]),
+    comment: z
+      .string()
+      .trim()
+      .max(500, "500자 이내로 입력하세요.")
+      .refine(
+        (value) => !value || validMeText(value, credentialPrefixes),
+        "비밀값과 제어 문자는 입력할 수 없습니다.",
+      ),
   });
-
-  const requestAccess = useMutationFeedback({
-    mutate: ({ name, body }: { name: string; body: SkillAccessRequestBody }) =>
-      apiClient.request(withPathParams(access.me.requestSkillAccess, { name }), { body, routeId }),
-    invalidates: [meKeys.skills],
-    successMessage: "접근 요청이 접수되었습니다.",
-  });
-  const skillFeedback = useMutationFeedback({
-    mutate: ({ name, body }: { name: string; body: SkillFeedbackBody }) =>
-      apiClient.request(withPathParams(access.me.skillFeedback, { name }), { body, routeId }),
-    invalidates: [meKeys.skills],
-    successMessage: "평가를 남겼습니다.",
-  });
-
-  const feedback = useMutationFeedback({
-    mutate: ({ id, body }: { id: string; body: RecommendationFeedbackBody }) =>
-      apiClient.request(withPathParams(access.me.recommendationFeedback, { id }), { body, routeId }),
-    invalidates: [meKeys.recommendations],
-    successMessage: "의견을 반영했습니다.",
-  });
-
-  if (skills.isPending && !skills.data) return <LoadingState label="스킬 목록을 불러오는 중입니다." />;
-
-  const available = skills.data?.available ?? [];
-  const requestable = skills.data?.requestable ?? [];
-  const recommendationRows = recommendations.data?.recommendations ?? [];
-
+  const requestForm = useZodForm<z.input<typeof requestSchema>, z.output<typeof requestSchema>>(
+    requestSchema,
+    { reason: "" },
+  );
+  const feedbackForm = useZodForm<z.input<typeof feedbackSchema>, z.output<typeof feedbackSchema>>(
+    feedbackSchema,
+    { rating: "5", comment: "" },
+  );
+  const rows: SkillRow[] = [
+    ...(query.data?.available ?? []).map((row) => ({ ...row, available: true })),
+    ...(query.data?.requestable ?? []).map((row) => ({ ...row, available: false })),
+  ].filter((row) => kind === "all" || row.available === (kind === "available"));
+  const statsUnavailable = query.data?.partial_failures.includes("runs") ?? false;
+  const feedbackUnavailable = query.data?.partial_failures.includes("feedback") ?? false;
+  const columns: readonly MeColumn<SkillRow>[] = [
+    { id: "name", header: "스킬", value: (row) => row.name },
+    { id: "description", header: "설명", value: (row) => row.description },
+    { id: "access", header: "접근", value: (row) => (row.available ? "사용 가능" : "신청 가능") },
+    {
+      id: "risk",
+      header: "위험도",
+      value: (row) => meLabel(row.risk_level),
+      cell: (row) => <Badge tone={severityTone(row.risk_level)}>{meLabel(row.risk_level)}</Badge>,
+    },
+    { id: "runs", header: "30일 실행", value: (row) => (statsUnavailable ? undefined : row.runs_30d) },
+    {
+      id: "success",
+      header: "성공률 (%)",
+      value: (row) => (statsUnavailable || !row.runs_30d ? undefined : row.success_rate),
+      cell: (row) => "성공률 " + mePercent(statsUnavailable || !row.runs_30d ? undefined : row.success_rate),
+    },
+    { id: "users", header: "사용자 수", value: (row) => (statsUnavailable ? undefined : row.users_30d) },
+    {
+      id: "rating",
+      header: "만족도 (5점)",
+      value: (row) => (feedbackUnavailable || !row.feedback_count ? undefined : row.satisfaction),
+      cell: (row) => meNumber(feedbackUnavailable || !row.feedback_count ? undefined : row.satisfaction, 1),
+    },
+    {
+      id: "actions",
+      header: "작업",
+      cell: (row) =>
+        row.available ? (
+          <Button
+            size="small"
+            disabled={feedback.disabled || query.isFetching}
+            onClick={(event) => {
+              trigger.current = event.currentTarget;
+              feedbackForm.reset({ rating: "5", comment: "" });
+              setRating(row);
+            }}
+          >
+            평가하기
+          </Button>
+        ) : requested.has(row.name) ? (
+          <span>이번 화면에서 신청 완료</span>
+        ) : (
+          <Button
+            size="small"
+            disabled={request.disabled || query.isFetching}
+            onClick={(event) => {
+              trigger.current = event.currentTarget;
+              requestForm.reset({ reason: "" });
+              setRequesting(row);
+            }}
+          >
+            접근 신청
+          </Button>
+        ),
+    },
+  ];
   return (
     <div className="access-stack">
-      {skills.isError ? (
-        <QueryNotice
-          error={skills.error}
-          hasData={Boolean(skills.data)}
-          label="스킬 목록"
-          onRetry={() => void skills.refetch()}
-        />
+      {!request.access.allowed ? (
+        <InlineNotice tone="info">
+          읽기 전용입니다. 입력한 사유와 평가는 유지되며 전송은 할 수 없습니다.
+        </InlineNotice>
       ) : null}
-
-      <SectionCard title="사용 가능한 스킬" description="내 팀에 열려 있는 스킬과 최근 30일 성과입니다.">
-        {available.length === 0 ? (
-          <EmptyState
-            title="사용 가능한 스킬이 없습니다."
-            description="관리자가 스킬을 팀에 배포하면 여기에 나타납니다."
-          />
-        ) : (
-          <ul className="access-list">
-            {available.map((skill) => (
-              <li key={skill.name}>
-                <span className="access-list-title">
-                  {skill.name}
-                  <Badge tone={severityTone(skill.risk_level)}>{skill.risk_level || "위험도 미상"}</Badge>
-                </span>
-                <span className="access-list-detail">{skill.description}</span>
-                <span className="access-inline-actions">
-                  <span className="access-list-detail">
-                    30일 실행 {formatNumber(skill.runs_30d)} · 성공률 {formatSignedRatio(skill.success_rate)}{" "}
-                    · 사용자 {formatNumber(skill.users_30d)} · 만족도 {formatNumber(skill.satisfaction, 1)}
-                  </span>
-                  <Button
-                    size="small"
-                    onClick={(event) => {
-                      rowTrigger.current = event.currentTarget;
-                      feedbackForm.reset({ rating: "5", comment: "" });
-                      setRating(skill);
-                    }}
-                  >
-                    평가하기
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </SectionCard>
-
-      <SectionCard title="요청 가능한 스킬" description="접근 권한을 신청해야 쓸 수 있는 스킬입니다.">
-        {requestable.length === 0 ? (
-          <EmptyState
-            title="신청할 스킬이 없습니다."
-            description="팀에 아직 열리지 않은 스킬이 생기면 여기에 표시됩니다."
-          />
-        ) : (
-          <ul className="access-list">
-            {requestable.map((skill) => (
-              <li key={skill.name}>
-                <span className="access-list-title">
-                  {skill.name}
-                  <Badge tone={severityTone(skill.risk_level)}>{skill.risk_level || "위험도 미상"}</Badge>
-                </span>
-                <span className="access-list-detail">{skill.description}</span>
-                <span className="access-inline-actions">
-                  <Button
-                    size="small"
-                    variant="primary"
-                    onClick={(event) => {
-                      rowTrigger.current = event.currentTarget;
-                      requestForm.reset({ reason: "" });
-                      setRequesting(skill);
-                    }}
-                  >
-                    접근 신청
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </SectionCard>
-
+      <MeOperationNotice
+        pending={request.pending || feedback.pending}
+        uncertain={request.uncertain || feedback.uncertain}
+      />
       <SectionCard
-        title="내 추천"
-        description="비용과 품질을 개선할 수 있는 제안입니다. 불러올 때마다 최신 상태로 다시 계산됩니다."
-        actions={
-          <Button
-            variant="primary"
-            disabled={recommendations.isFetching}
-            onClick={() => setRecommendationsRequested(true)}
-          >
-            {recommendations.isFetching ? "불러오는 중" : "추천 불러오기"}
-          </Button>
-        }
+        title="내 팀의 스킬"
+        description="스킬의 접근 가능 여부와 최근 30일 전체 사용자 실행 통계입니다. 만족도는 전체 평가 기준입니다."
       >
-        {!recommendationsRequested ? (
-          <p className="access-note">'추천 불러오기'를 누르면 내 사용 패턴을 다시 분석해 제안을 만듭니다.</p>
-        ) : recommendations.isError ? (
-          <QueryNotice
-            error={recommendations.error}
-            hasData={Boolean(recommendations.data)}
-            label="추천"
-            onRetry={() => void recommendations.refetch()}
+        <FormField label="접근 상태">
+          {(control) => (
+            <Select
+              {...control}
+              value={kind}
+              onChange={(event) =>
+                update({
+                  skill_kind: event.target.value === "all" ? undefined : event.target.value,
+                  skills_page: undefined,
+                })
+              }
+            >
+              <option value="all">전체</option>
+              <option value="available">사용 가능한 스킬</option>
+              <option value="requestable">신청 가능한 스킬</option>
+            </Select>
+          )}
+        </FormField>
+        <MeQueryContent query={query} label="스킬 목록">
+          <MePartial failures={query.data?.partial_failures} />
+          <MeTable
+            id="skills"
+            caption="내 팀 스킬"
+            rows={rows}
+            columns={columns}
+            getRowId={(row) => row.name}
+            loading={query.isFetching}
           />
-        ) : recommendationRows.length === 0 ? (
-          <EmptyState
-            title="지금은 제안할 항목이 없습니다."
-            description="사용량이 더 쌓이면 절감이나 품질 개선 제안을 만들어 드립니다."
-          />
-        ) : (
-          <ul className="access-list">
-            {recommendationRows.map((row) => (
-              <li key={row.id}>
-                <span className="access-list-title">
-                  {row.title}
-                  <Badge tone="info">{row.kind}</Badge>
-                </span>
-                <span className="access-list-detail">{row.detail}</span>
-                <span className="access-inline-actions">
-                  <span className="access-list-detail">예상 절감 {formatKRW(row.est_savings_krw)}</span>
-                  <Button
-                    size="small"
-                    onClick={() => feedback.mutate({ id: row.id, body: { action: "adopted" } })}
-                  >
-                    적용함
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="ghost"
-                    onClick={() => feedback.mutate({ id: row.id, body: { action: "later" } })}
-                  >
-                    나중에
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="ghost"
-                    onClick={() => feedback.mutate({ id: row.id, body: { action: "dismissed" } })}
-                  >
-                    필요 없음
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        </MeQueryContent>
       </SectionCard>
-
+      <MeRecommendations />
       <FormDialog
         form={requestForm}
-        open={requesting !== undefined}
+        open={Boolean(requesting)}
         onOpenChange={(open) => {
           if (!open) setRequesting(undefined);
         }}
-        returnFocusRef={rowTrigger}
+        returnFocusRef={trigger}
         title="스킬 접근 신청"
-        description={`'${requesting?.name ?? ""}' 스킬 사용 권한을 신청합니다. 사유는 승인 담당자에게 그대로 전달됩니다.`}
+        description={`'${requesting?.name ?? ""}' 스킬의 접근을 신청합니다. 사유는 승인 담당자에게 전달됩니다. 비밀값을 입력하지 마세요.`}
         submitLabel="신청"
+        submitDisabled={request.disabled}
+        errorFormatter={safeMeMessage}
+        scrollBody
         onSubmit={async (values) => {
           if (!requesting) return;
-          await requestAccess.mutateAsync({ name: requesting.name, body: { reason: values.reason } });
+          const name = requesting.name;
+          await request.execute({ name, reason: values.reason });
+          setRequested((previous) => new Set([...previous, name]));
           setRequesting(undefined);
         }}
       >
         <FormField label="신청 사유" required error={requestForm.formState.errors.reason?.message}>
-          {(control) => <Textarea {...control} rows={3} {...requestForm.register("reason")} />}
+          {(control) => (
+            <Textarea {...control} maxLength={500} rows={4} {...requestForm.register("reason")} />
+          )}
         </FormField>
       </FormDialog>
-
       <FormDialog
         form={feedbackForm}
-        open={rating !== undefined}
+        open={Boolean(rating)}
         onOpenChange={(open) => {
           if (!open) setRating(undefined);
         }}
-        returnFocusRef={rowTrigger}
+        returnFocusRef={trigger}
         title="스킬 평가"
-        description={`'${rating?.name ?? ""}' 스킬을 1~5점으로 평가합니다. 의견은 스킬 담당자가 확인합니다.`}
+        description={`'${rating?.name ?? ""}' 스킬을 평가합니다. 의견은 담당자에게 전달됩니다. 비밀값을 입력하지 마세요.`}
         submitLabel="평가 보내기"
+        submitDisabled={feedback.disabled}
+        errorFormatter={safeMeMessage}
+        scrollBody
         onSubmit={async (values) => {
           if (!rating) return;
-          await skillFeedback.mutateAsync({
+          await feedback.execute({
             name: rating.name,
-            body: {
-              rating: Number(values.rating),
-              ...(values.comment ? { comment: values.comment } : {}),
-            },
+            rating: Number(values.rating),
+            comment: values.comment,
           });
           setRating(undefined);
         }}
@@ -288,16 +221,20 @@ export function MeSkillsTab(): React.JSX.Element {
         <FormField label="점수" required>
           {(control) => (
             <Select {...control} {...feedbackForm.register("rating")}>
-              {Object.entries(ratingLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
+              {["1 · 매우 불만족", "2 · 불만족", "3 · 보통", "4 · 만족", "5 · 매우 만족"].map(
+                (label, index) => (
+                  <option key={label} value={index + 1}>
+                    {label}
+                  </option>
+                ),
+              )}
             </Select>
           )}
         </FormField>
-        <FormField label="의견">
-          {(control) => <Textarea {...control} rows={3} {...feedbackForm.register("comment")} />}
+        <FormField label="의견" error={feedbackForm.formState.errors.comment?.message}>
+          {(control) => (
+            <Textarea {...control} maxLength={500} rows={4} {...feedbackForm.register("comment")} />
+          )}
         </FormField>
       </FormDialog>
     </div>

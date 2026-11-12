@@ -3544,6 +3544,1136 @@
         ],
         "type": "object"
       },
+      "MeConsoleActions": {
+        "properties": {
+          "actions": {
+            "items": {
+              "properties": {
+                "button_href": {
+                  "type": "string"
+                },
+                "button_label": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "partial_failures": {
+            "description": "Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.",
+            "items": {
+              "enum": [
+                "snoozes",
+                "keys",
+                "usage_week",
+                "usage_day",
+                "usage_month",
+                "models",
+                "candidates",
+                "mcp",
+                "profile",
+                "recommendations"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "MeConsoleDashboard": {
+        "properties": {
+          "frequent_models": {
+            "items": {
+              "properties": {
+                "avg_cost_krw": {
+                  "type": "number"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "requests": {
+                  "type": "integer"
+                },
+                "success_rate": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "key_alerts": {
+            "items": {
+              "properties": {
+                "days_idle": {
+                  "type": "integer"
+                },
+                "expires_at": {
+                  "type": "string"
+                },
+                "flags": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "nullable": true,
+                  "type": "array"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "last_used_at": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "team": {
+                  "type": "string"
+                },
+                "user_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "month": {
+            "properties": {
+              "cost_krw": {
+                "type": "number"
+              },
+              "errors": {
+                "type": "integer"
+              },
+              "requests": {
+                "type": "integer"
+              },
+              "tokens": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "my_saved_reports": {
+            "items": {
+              "properties": {
+                "approval_status": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "schema_name": {
+                  "type": "string"
+                },
+                "visibility": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "partial_failures": {
+            "description": "Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.",
+            "items": {
+              "enum": [
+                "blocks",
+                "reports"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "potential_savings_krw": {
+            "type": "number"
+          },
+          "potential_savings_model": {
+            "type": "string"
+          },
+          "profile": {
+            "properties": {
+              "avg_latency_ms": {
+                "type": "number"
+              },
+              "cache_rate": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "mcp_usage_rate": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "risk_score": {
+                "type": "number"
+              },
+              "since": {
+                "type": "string"
+              },
+              "success_rate": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "text2sql_usage_rate": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "top_languages": {
+                "items": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "requests": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "top_mcp_tools": {
+                "items": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "requests": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "top_models": {
+                "items": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "requests": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "top_task_types": {
+                "items": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "requests": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "recent_blocks": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rule": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "recent_failures": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "status_code": {
+                  "type": "integer"
+                },
+                "task_type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "recent_prompt_products": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "recommended_templates": {
+            "items": {
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "today": {
+            "properties": {
+              "cost_krw": {
+                "type": "number"
+              },
+              "errors": {
+                "type": "integer"
+              },
+              "requests": {
+                "type": "integer"
+              },
+              "tokens": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "MeConsoleModels": {
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "partial_failures": {
+            "description": "Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.",
+            "items": {
+              "enum": [
+                "team_winners"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "tagged_model_count": {
+            "type": "integer"
+          },
+          "task_recommendations": {
+            "items": {
+              "properties": {
+                "avoid": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "nullable": true,
+                  "type": "array"
+                },
+                "recommend": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "nullable": true,
+                  "type": "array"
+                },
+                "requests": {
+                  "type": "integer"
+                },
+                "task_type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "team_winners": {
+            "items": {
+              "properties": {
+                "appearances": {
+                  "type": "integer"
+                },
+                "avg_score": {
+                  "type": "number"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "wins": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "your_models": {
+            "items": {
+              "properties": {
+                "model": {
+                  "type": "string"
+                },
+                "requests": {
+                  "type": "integer"
+                },
+                "tags": {
+                  "properties": {
+                    "avoid_for": {
+                      "type": "string"
+                    },
+                    "good_for": {
+                      "type": "string"
+                    },
+                    "risk_note": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "MeConsoleNotifications": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "critical_count": {
+            "type": "integer"
+          },
+          "notifications": {
+            "items": {
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "href": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "partial_failures": {
+            "description": "Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.",
+            "items": {
+              "enum": [
+                "recommendations",
+                "keys",
+                "failures",
+                "policy",
+                "secrets"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "MeConsoleReceipt": {
+        "properties": {
+          "blocked": {
+            "type": "boolean"
+          },
+          "cache_hit": {
+            "type": "boolean"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "finish_reason": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "type": "number"
+          },
+          "mcp_tools": {
+            "items": {
+              "properties": {
+                "error": {
+                  "type": "boolean"
+                },
+                "server": {
+                  "type": "string"
+                },
+                "tool": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "mcp_used": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "partial_failures": {
+            "description": "Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.",
+            "items": {
+              "enum": [
+                "routing",
+                "policy",
+                "tools"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "policy": {
+            "items": {
+              "properties": {
+                "decision": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rule": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "routing": {
+            "properties": {
+              "complexity_tier": {
+                "type": "string"
+              },
+              "fallback_path": {
+                "items": {
+                  "type": "string"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requested_model": {
+                "type": "string"
+              },
+              "risk_tier": {
+                "type": "string"
+              },
+              "selected_model": {
+                "type": "string"
+              },
+              "selected_provider": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "skill_used": {
+            "type": "boolean"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "status_code": {
+            "type": "integer"
+          },
+          "tokens": {
+            "properties": {
+              "cached": {
+                "type": "integer"
+              },
+              "completion": {
+                "type": "integer"
+              },
+              "prompt": {
+                "type": "integer"
+              },
+              "total": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "MeConsoleRecommendationFeedback": {
+        "properties": {
+          "action": {
+            "description": "adopted, dismissed or later; legacy aliases accepted/rejected/accept/reject/adopt/dismiss/snooze/snoozed remain supported, case-insensitive and trimmed. Body id is required for the legacy /feedback alias and ignored when a path ID is present.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "MeConsoleRecommendationFeedbackResult": {
+        "properties": {
+          "action": {
+            "enum": [
+              "adopted",
+              "dismissed",
+              "later"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "recorded"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "kind",
+          "action"
+        ],
+        "type": "object"
+      },
+      "MeConsoleRecommendations": {
+        "properties": {
+          "recommendations": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "est_savings_krw": {
+                  "type": "number"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "ref": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "user_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "MeConsoleReport": {
+        "properties": {
+          "avg_latency_ms": {
+            "type": "number"
+          },
+          "cache_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "cost_delta_ratio": {
+            "type": "number"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "partial_failures": {
+            "description": "Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.",
+            "items": {
+              "enum": [
+                "models",
+                "profile",
+                "recommendations"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "potential_savings_krw": {
+            "type": "number"
+          },
+          "potential_savings_model": {
+            "type": "string"
+          },
+          "prior_cost_krw": {
+            "type": "number"
+          },
+          "prior_requests": {
+            "type": "integer"
+          },
+          "recommendation_count": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "risk_score": {
+            "type": "number"
+          },
+          "since": {
+            "type": "string"
+          },
+          "success_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "tokens": {
+            "type": "integer"
+          },
+          "top_models": {
+            "items": {
+              "properties": {
+                "avg_cost_krw": {
+                  "type": "number"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "requests": {
+                  "type": "integer"
+                },
+                "success_rate": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "top_task_types": {
+            "items": {
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "requests": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "weekly",
+              "monthly"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "MeConsoleRequests": {
+        "properties": {
+          "requests": {
+            "items": {
+              "properties": {
+                "cached": {
+                  "type": "boolean"
+                },
+                "cost_krw": {
+                  "type": "number"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "status_code": {
+                  "type": "integer"
+                },
+                "total_tokens": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "MeConsoleSkillActionResult": {
+        "properties": {
+          "skill": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "requested",
+              "recorded"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "skill"
+        ],
+        "type": "object"
+      },
+      "MeConsoleSkillFeedback": {
+        "properties": {
+          "comment": {
+            "type": "string"
+          },
+          "rating": {
+            "maximum": 5,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rating"
+        ],
+        "type": "object"
+      },
+      "MeConsoleSkillRequest": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MeConsoleSkills": {
+        "properties": {
+          "available": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "feedback_count": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "risk_level": {
+                  "type": "string"
+                },
+                "runs_30d": {
+                  "type": "integer"
+                },
+                "satisfaction": {
+                  "description": "Average rating; zero feedback_count means unobserved.",
+                  "maximum": 5,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "success_rate": {
+                  "description": "Percentage, not a fraction. Zero runs means no observed success rate.",
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "users_30d": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "partial_failures": {
+            "description": "Unavailable optional components. Their zero/empty values must not be presented as confirmed measurements.",
+            "items": {
+              "enum": [
+                "runs",
+                "feedback"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "requestable": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "feedback_count": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "risk_level": {
+                  "type": "string"
+                },
+                "runs_30d": {
+                  "type": "integer"
+                },
+                "satisfaction": {
+                  "description": "Average rating; zero feedback_count means unobserved.",
+                  "maximum": 5,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "success_rate": {
+                  "description": "Percentage, not a fraction. Zero runs means no observed success rate.",
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "users_30d": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "team": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MeConsoleSnooze": {
+        "properties": {
+          "days": {
+            "description": "Values outside 1..90 default to 7 days.",
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "MeConsoleSnoozeResult": {
+        "properties": {
+          "snoozed_until": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "snoozed_until"
+        ],
+        "type": "object"
+      },
       "MeKeyCatalog": {
         "additionalProperties": false,
         "properties": {
@@ -9419,7 +10549,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.70"
+    "version": "v0.86.71"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -26486,10 +27616,98 @@
     },
     "/me/actions": {
       "get": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros.",
         "operationId": "get__me_actions",
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleActions"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26505,10 +27723,108 @@
     },
     "/me/actions/snooze": {
       "post": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros. Writes use the existing server authorization and have no idempotency token. A lost acknowledgment must not trigger automatic retry. Recommendation feedback is tied to a currently stored recommendation owned by this caller, returns status/kind/action, and does not regenerate the list.",
         "operationId": "post__me_actions_snooze",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeConsoleSnooze"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleSnoozeResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26562,10 +27878,98 @@
     },
     "/me/dashboard": {
       "get": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros.",
         "operationId": "get__me_dashboard",
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleDashboard"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26901,10 +28305,98 @@
     },
     "/me/notifications": {
       "get": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros.",
         "operationId": "get__me_notifications",
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleNotifications"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26958,10 +28450,110 @@
     },
     "/me/recommendations": {
       "get": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros.",
         "operationId": "get__me_recommendations",
+        "parameters": [
+          {
+            "description": "Only the literal false reads the caller's stored recommendations without side effects. Omitted/true preserves legacy generation and replaces stored IDs. Generation is not idempotent and must not be automatically replayed, including after 401.",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": true,
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleRecommendations"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26977,10 +28569,108 @@
     },
     "/me/recommendations/feedback": {
       "post": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros. Writes use the existing server authorization and have no idempotency token. A lost acknowledgment must not trigger automatic retry. Recommendation feedback is tied to a currently stored recommendation owned by this caller, returns status/kind/action, and does not regenerate the list.",
         "operationId": "post__me_recommendations_feedback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeConsoleRecommendationFeedback"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleRecommendationFeedbackResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -26996,6 +28686,7 @@
     },
     "/me/recommendations/{id}/feedback": {
       "post": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros. Writes use the existing server authorization and have no idempotency token. A lost acknowledgment must not trigger automatic retry. Recommendation feedback is tied to a currently stored recommendation owned by this caller, returns status/kind/action, and does not regenerate the list.",
         "operationId": "post__me_recommendations_id_feedback",
         "parameters": [
           {
@@ -27007,9 +28698,106 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeConsoleRecommendationFeedback"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleRecommendationFeedbackResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -27025,10 +28813,98 @@
     },
     "/me/recommended-models": {
       "get": {
+        "description": "Existing self-service API requiring a JWT subject (not a proxy API key); does not require admin:read. Uses the JWT team for skill visibility and model evaluation. Responses are no-store. Skill run statistics cover all users over 30 days; satisfaction covers all stored feedback. These are not personal execution statistics.",
         "operationId": "get__me_recommended_models",
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleModels"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -27044,10 +28920,114 @@
     },
     "/me/report": {
       "get": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros.",
         "operationId": "get__me_report",
+        "parameters": [
+          {
+            "description": "Rolling 7 days (weekly) or 30 days (monthly), compared with the previous equal-length interval; unknown input uses weekly. Dashboard today/month use UTC calendar boundaries instead.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "weekly",
+              "enum": [
+                "weekly",
+                "monthly"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleReport"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -27082,10 +29062,110 @@
     },
     "/me/requests": {
       "get": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros.",
         "operationId": "get__me_requests",
+        "parameters": [
+          {
+            "description": "Newest request metadata, at most 100 rows. Values outside 1..100 or invalid/missing use 20. No server pagination or total history count.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleRequests"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -27101,6 +29181,7 @@
     },
     "/me/requests/{id}/receipt": {
       "get": {
+        "description": "Existing personal self-service API. Resolves the caller from a JWT subject or an owned proxy API key; does not require admin:read. User query overrides are not accepted. Responses are no-store. Reads are independent, not an atomic snapshot; missing or failed optional measurements are not confirmed zeros.",
         "operationId": "get__me_requests_id_receipt",
         "parameters": [
           {
@@ -27114,7 +29195,94 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleReceipt"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -27197,10 +29365,98 @@
     },
     "/me/skills": {
       "get": {
+        "description": "Existing self-service API requiring a JWT subject (not a proxy API key); does not require admin:read. Uses the JWT team for skill visibility and model evaluation. Responses are no-store. Skill run statistics cover all users over 30 days; satisfaction covers all stored feedback. These are not personal execution statistics.",
         "operationId": "get__me_skills",
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleSkills"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -27216,6 +29472,7 @@
     },
     "/me/skills/{name}/feedback": {
       "post": {
+        "description": "Existing self-service API requiring a JWT subject (not a proxy API key); does not require admin:read. Uses the JWT team for skill visibility and model evaluation. Responses are no-store. Skill run statistics cover all users over 30 days; satisfaction covers all stored feedback. These are not personal execution statistics. Writes use the existing server authorization and have no idempotency token. A lost acknowledgment must not trigger automatic retry. Recommendation feedback is tied to a currently stored recommendation owned by this caller, returns status/kind/action, and does not regenerate the list.",
         "operationId": "post__me_skills_name_feedback",
         "parameters": [
           {
@@ -27227,9 +29484,106 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeConsoleSkillFeedback"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
-            "description": "OK"
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleSkillActionResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -27245,6 +29599,7 @@
     },
     "/me/skills/{name}/request-access": {
       "post": {
+        "description": "Existing self-service API requiring a JWT subject (not a proxy API key); does not require admin:read. Uses the JWT team for skill visibility and model evaluation. Responses are no-store. Skill run statistics cover all users over 30 days; satisfaction covers all stored feedback. These are not personal execution statistics. Writes use the existing server authorization and have no idempotency token. A lost acknowledgment must not trigger automatic retry. Recommendation feedback is tied to a currently stored recommendation owned by this caller, returns status/kind/action, and does not regenerate the list.",
         "operationId": "post__me_skills_name_request_access",
         "parameters": [
           {
@@ -27256,9 +29611,106 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeConsoleSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
-            "description": "OK"
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeConsoleSkillActionResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource belongs to another caller"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Resource not found or recommendation replaced"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Required data or write failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

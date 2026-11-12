@@ -11,6 +11,7 @@ import (
 // handleMyRecentRequests lists the caller's own recent requests (safe metadata only) so they can
 // open a receipt for any of them. GET /me/requests[?limit=]
 func (s *Server) handleMyRecentRequests(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	userID, ok := s.meUserID(r)
 	if !ok {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -22,7 +23,7 @@ func (s *Server) handleMyRecentRequests(w http.ResponseWriter, r *http.Request) 
 	}
 	items, err := s.db.UserRecentRequests(r.Context(), userID, intQuery(r, "limit", 20))
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "list_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "list_failed")
 		return
 	}
 	for index := range items {
@@ -41,6 +42,7 @@ func (s *Server) handleMyRecentRequests(w http.ResponseWriter, r *http.Request) 
 // skill / MCP tool was used. It never exposes raw prompt, SQL, tool args, or admin-only trace.
 // GET /me/requests/{id}/receipt
 func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	userID, ok := s.meUserID(r)
 	if !ok {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -65,7 +67,7 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 	// Ownership: the request's API key must belong to the caller.
 	owner, err := s.db.RequestUserID(r.Context(), reqID)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "lookup_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "lookup_failed")
 		return
 	}
 	if owner == "" {
@@ -79,7 +81,7 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 
 	detail, err := s.db.RequestDetail(r.Context(), reqID)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "detail_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "detail_failed")
 		return
 	}
 	req := projectRecentRequestProviderForExternal(detail.Request, s.externalCredentialProjectionArgs()...)
@@ -101,6 +103,7 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 		"cost_krw":  req.EstimatedCost,
 	}
 
+	partialFailures := []string{}
 	// Routing reason (if a routing decision was recorded).
 	if rd, err := s.db.RoutingDecisionByRequestID(r.Context(), reqID); err == nil {
 		rd = projectRoutingDecisionProviderForExternal(rd, s.externalCredentialProjectionArgs()...)
@@ -110,8 +113,7 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 			"fallback_path": rd.FallbackPath, "risk_tier": rd.Risk.Tier, "complexity_tier": rd.Complexity.Tier,
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {
-		// Non-fatal: omit routing on any lookup error.
-		_ = err
+		personalReadFailed(&partialFailures, "routing", err)
 	}
 
 	// Policy outcome — decisions only (rule + reason), no raw context.
@@ -132,6 +134,8 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 				"reason":   boundedExternalProviderText(e.Reason, e.Provider),
 			})
 		}
+	} else {
+		personalReadFailed(&partialFailures, "policy", err)
 	}
 	receipt["blocked"] = blocked
 	receipt["policy"] = policy
@@ -161,7 +165,10 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 				}
 			}
 		}
+	} else {
+		personalReadFailed(&partialFailures, "tools", err)
 	}
+	receipt["partial_failures"] = partialFailures
 	receipt["mcp_used"] = mcpUsed
 	receipt["mcp_tools"] = mcpTools
 	receipt["skill_used"] = skillUsed

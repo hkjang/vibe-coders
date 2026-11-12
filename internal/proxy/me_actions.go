@@ -25,6 +25,7 @@ type actionCard struct {
 // affinity, rising risk, cache opportunity, and unreviewed recommendations.
 // GET /me/actions
 func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -37,11 +38,13 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	now := time.Now().UTC()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	snoozed, _ := s.db.SnoozedActions(ctx, userID, now)
+	partialFailures := []string{}
+	snoozed, snoozeErr := s.db.SnoozedActions(ctx, userID, now)
+	personalReadFailed(&partialFailures, "snoozes", snoozeErr)
 	actions := []actionCard{}
 
 	// Key expiry (≤7 days) / expired.
-	if alerts, err := s.db.KeyHealthAlerts(ctx, now, 30, 7, userID); err == nil {
+	if alerts, err := s.db.KeyHealthAlerts(ctx, now, 30, 7, userID); !personalReadFailed(&partialFailures, "keys", err) {
 		expiring := 0
 		for _, a := range alerts {
 			for _, f := range a.Flags {
@@ -57,57 +60,62 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cost spike: this week ≥ 130% of last week.
-	thisWeek, _ := s.db.UserUsageTotalsSince(ctx, userID, now.Add(-7*24*time.Hour))
-	twoWeek, _ := s.db.UserUsageTotalsSince(ctx, userID, now.Add(-14*24*time.Hour))
+	thisWeek, thisWeekErr := s.db.UserUsageTotalsSince(ctx, userID, now.Add(-7*24*time.Hour))
+	twoWeek, twoWeekErr := s.db.UserUsageTotalsSince(ctx, userID, now.Add(-14*24*time.Hour))
+	weekFailed := personalReadFailed(&partialFailures, "usage_week", thisWeekErr) || personalReadFailed(&partialFailures, "usage_week", twoWeekErr)
 	lastWeekCost := twoWeek.CostKRW - thisWeek.CostKRW
-	if lastWeekCost > 0 && thisWeek.CostKRW >= lastWeekCost*1.3 {
+	if !weekFailed && lastWeekCost > 0 && thisWeek.CostKRW >= lastWeekCost*1.3 {
 		actions = append(actions, actionCard{Type: "cost_increase", Severity: "medium",
 			Message: "이번 주 AI 비용이 평소보다 높습니다.", ButtonLabel: "절감 추천 보기", ButtonHref: "scroll:me-report"})
 	}
 
 	// Failure spike: last 24h errors > prior 24h errors.
-	last24, _ := s.db.UserUsageTotalsSince(ctx, userID, now.Add(-24*time.Hour))
-	last48, _ := s.db.UserUsageTotalsSince(ctx, userID, now.Add(-48*time.Hour))
+	last24, last24Err := s.db.UserUsageTotalsSince(ctx, userID, now.Add(-24*time.Hour))
+	last48, last48Err := s.db.UserUsageTotalsSince(ctx, userID, now.Add(-48*time.Hour))
+	dayFailed := personalReadFailed(&partialFailures, "usage_day", last24Err) || personalReadFailed(&partialFailures, "usage_day", last48Err)
 	prev24Errors := last48.Errors - last24.Errors
-	if last24.Errors > 0 && last24.Errors > prev24Errors {
+	if !dayFailed && last24.Errors > 0 && last24.Errors > prev24Errors {
 		actions = append(actions, actionCard{Type: "failure_increase", Severity: "medium",
 			Message: "최근 실패 요청이 늘었습니다.", ButtonLabel: "실패 원인 보기", ButtonHref: "scroll:me-failures"})
 	}
 
 	// Model switch: a cheaper adequate model exists for this month's mix.
-	month, _ := s.db.UserUsageTotalsSince(ctx, userID, monthStart)
-	models, _ := s.db.UserModelCosts(ctx, userID, monthStart)
-	if savings, cheap := potentialSavingsKRW(month, models); savings > 0 && cheap != "" {
+	month, monthErr := s.db.UserUsageTotalsSince(ctx, userID, monthStart)
+	models, modelsErr := s.db.UserModelCosts(ctx, userID, monthStart)
+	personalReadFailed(&partialFailures, "usage_month", monthErr)
+	personalReadFailed(&partialFailures, "models", modelsErr)
+	if savings, cheap := potentialSavingsKRW(month, models); monthErr == nil && modelsErr == nil && savings > 0 && cheap != "" {
 		actions = append(actions, actionCard{Type: "model_switch", Severity: "low",
 			Message: "이 작업은 더 저렴한 모델로 처리 가능해 보입니다.", ButtonLabel: "전환 가이드", ButtonHref: "modal:model_switch"})
 	}
 
 	// Repeated Text2SQL questions → report candidate.
-	cands, _ := s.db.UserText2SQLReportCandidates(ctx, userID, now.Add(-30*24*time.Hour), 3, 5)
-	if len(cands) > 0 {
+	cands, candidatesErr := s.db.UserText2SQLReportCandidates(ctx, userID, now.Add(-30*24*time.Hour), 3, 5)
+	if !personalReadFailed(&partialFailures, "candidates", candidatesErr) && len(cands) > 0 {
 		actions = append(actions, actionCard{Type: "repeat_question", Severity: "low",
 			Message: "반복되는 질문을 저장 리포트로 만들 수 있습니다.", ButtonLabel: "리포트 만들기", ButtonHref: "modal:repeat_question"})
 	}
 
 	// MCP affinity.
-	if aff, _ := s.db.UserMCPAffinities(ctx, userID, now.Add(-30*24*time.Hour), 2, 5); len(aff) > 0 {
+	if aff, err := s.db.UserMCPAffinities(ctx, userID, now.Add(-30*24*time.Hour), 2, 5); !personalReadFailed(&partialFailures, "mcp", err) && len(aff) > 0 {
 		actions = append(actions, actionCard{Type: "mcp_recommend", Severity: "low",
 			Message: "자주 하는 작업에 맞는 MCP 도구가 있습니다.", ButtonLabel: "도구 보기", ButtonHref: "scroll:me-recmodels"})
 	}
 
 	// Rising personal risk + cache opportunity (both from the profile).
-	profile, _ := s.db.BuildPersonalProfile(ctx, userID, now.Add(-30*24*time.Hour))
-	if profile.RiskScore >= 30 {
+	profile, profileErr := s.db.BuildPersonalProfile(ctx, userID, now.Add(-30*24*time.Hour))
+	personalReadFailed(&partialFailures, "profile", profileErr)
+	if profileErr == nil && profile.RiskScore >= 30 {
 		actions = append(actions, actionCard{Type: "safety_warning", Severity: "high",
 			Message: "민감정보 포함 가능성이 있는 요청이 증가했습니다.", ButtonLabel: "안전 가이드", ButtonHref: "modal:safety"})
 	}
-	if len(cands) >= 2 && profile.CacheRate < 0.2 {
+	if candidatesErr == nil && profileErr == nil && len(cands) >= 2 && profile.CacheRate < 0.2 {
 		actions = append(actions, actionCard{Type: "cache_improve", Severity: "low",
 			Message: "유사 질문 재사용으로 응답 속도를 개선할 수 있습니다.", ButtonLabel: "템플릿 만들기", ButtonHref: "modal:cache_improve"})
 	}
 
 	// Unreviewed recommendations.
-	if recs, _ := s.db.ListUserRecommendations(ctx, userID); len(recs) > 0 {
+	if recs, err := s.db.ListUserRecommendations(ctx, userID); !personalReadFailed(&partialFailures, "recommendations", err) && len(recs) > 0 {
 		actions = append(actions, actionCard{Type: "unreviewed_recommendations", Severity: "low",
 			Message: "확인하지 않은 개인화 추천이 있습니다.", ButtonLabel: "추천 보기", ButtonHref: "scroll:me-recs"})
 	}
@@ -125,12 +133,13 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	// Highest severity first.
 	rank := map[string]int{"high": 0, "medium": 1, "low": 2}
 	sort.SliceStable(actions, func(i, j int) bool { return rank[actions[i].Severity] < rank[actions[j].Severity] })
-	writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "actions": actions, "count": len(actions)})
+	writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "actions": actions, "count": len(actions), "partial_failures": partialFailures})
 }
 
 // handleMeActionSnooze defers an action-queue card type for the caller (default 7 days), so
 // a handled action stops re-appearing. POST /me/actions/snooze {type, days}
 func (s *Server) handleMeActionSnooze(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -159,7 +168,7 @@ func (s *Server) handleMeActionSnooze(w http.ResponseWriter, r *http.Request) {
 	}
 	until := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour)
 	if err := s.db.SnoozeAction(r.Context(), userID, actionType, until); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "snooze_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "snooze_failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"type": actionType, "snoozed_until": until.Format(time.RFC3339)})
@@ -179,6 +188,7 @@ type meNotification struct {
 // health, recent failures, and per-user policy/secret events — into one feed.
 // GET /me/notifications
 func (s *Server) handleMeNotifications(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -192,14 +202,15 @@ func (s *Server) handleMeNotifications(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	since := now.Add(-7 * 24 * time.Hour)
 	out := []meNotification{}
+	partialFailures := []string{}
 
-	if recs, _ := s.db.ListUserRecommendations(ctx, userID); len(recs) > 0 {
+	if recs, err := s.db.ListUserRecommendations(ctx, userID); !personalReadFailed(&partialFailures, "recommendations", err) && len(recs) > 0 {
 		for _, rec := range recs {
 			out = append(out, meNotification{Category: "recommendation", Level: "info",
 				Title: rec.Title, Detail: rec.Detail, CreatedAt: rec.CreatedAt, Href: "#/me"})
 		}
 	}
-	if alerts, _ := s.db.KeyHealthAlerts(ctx, now, 30, 7, userID); len(alerts) > 0 {
+	if alerts, err := s.db.KeyHealthAlerts(ctx, now, 30, 7, userID); !personalReadFailed(&partialFailures, "keys", err) && len(alerts) > 0 {
 		for _, a := range alerts {
 			level := "warning"
 			if a.Severity == "high" {
@@ -209,13 +220,13 @@ func (s *Server) handleMeNotifications(w http.ResponseWriter, r *http.Request) {
 				Title: "API Key 주의: " + a.Name, Detail: strings.Join(a.Flags, ", "), CreatedAt: a.LastUsedAt, Href: "#/mykeys"})
 		}
 	}
-	if fails, _ := s.db.UserRecentFailures(ctx, userID, 5); len(fails) > 0 {
+	if fails, err := s.db.UserRecentFailures(ctx, userID, 5); !personalReadFailed(&partialFailures, "failures", err) && len(fails) > 0 {
 		for _, f := range fails {
 			out = append(out, meNotification{Category: "failure", Level: "warning",
 				Title: "실패 요청 (" + f.Model + ")", Detail: "HTTP " + itoa64(int64(f.StatusCode)) + " " + f.Error, CreatedAt: f.CreatedAt, Href: "#/me"})
 		}
 	}
-	if decisions, _ := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{UserID: userID, Since: since, Limit: 20}); len(decisions) > 0 {
+	if decisions, err := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{UserID: userID, Since: since, Limit: 20}); !personalReadFailed(&partialFailures, "policy", err) && len(decisions) > 0 {
 		for _, d := range decisions {
 			if strings.EqualFold(d.Decision, "allow") {
 				continue
@@ -228,7 +239,7 @@ func (s *Server) handleMeNotifications(w http.ResponseWriter, r *http.Request) {
 				Title: "정책 " + d.Decision, Detail: d.Reason, CreatedAt: d.CreatedAt.UTC().Format(time.RFC3339), Href: "#/me"})
 		}
 	}
-	if secrets, _ := s.db.ListSecretEventsFiltered(ctx, store.SecretEventFilter{UserID: userID, Since: since, Limit: 20}); len(secrets) > 0 {
+	if secrets, err := s.db.ListSecretEventsFiltered(ctx, store.SecretEventFilter{UserID: userID, Since: since, Limit: 20}); !personalReadFailed(&partialFailures, "secrets", err) && len(secrets) > 0 {
 		for _, e := range secrets {
 			out = append(out, meNotification{Category: "secret", Level: "critical",
 				Title: "Secret 탐지: " + e.SecretType, Detail: e.Action, CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339), Href: "#/me"})
@@ -244,13 +255,14 @@ func (s *Server) handleMeNotifications(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id": userID, "notifications": out, "count": len(out), "critical_count": critical,
+		"user_id": userID, "notifications": out, "count": len(out), "critical_count": critical, "partial_failures": partialFailures,
 	})
 }
 
 // handleMeReport generates a personal weekly/monthly usage report so a user can understand
 // their own AI usage and its trend. GET /me/report?window=weekly|monthly
 func (s *Server) handleMeReport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -272,8 +284,16 @@ func (s *Server) handleMeReport(w http.ResponseWriter, r *http.Request) {
 	since := now.Add(-span)
 	prior := now.Add(-2 * span)
 
-	cur, _ := s.db.UserUsageTotalsSince(ctx, userID, since)
-	wide, _ := s.db.UserUsageTotalsSince(ctx, userID, prior)
+	cur, err := s.db.UserUsageTotalsSince(ctx, userID, since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "could not read personal usage", "server_error", "report_failed")
+		return
+	}
+	wide, err := s.db.UserUsageTotalsSince(ctx, userID, prior)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "could not read prior personal usage", "server_error", "report_failed")
+		return
+	}
 	priorCost := wide.CostKRW - cur.CostKRW
 	priorReq := wide.Requests - cur.Requests
 	costDelta := 0.0
@@ -281,14 +301,17 @@ func (s *Server) handleMeReport(w http.ResponseWriter, r *http.Request) {
 		costDelta = (cur.CostKRW - priorCost) / priorCost
 	}
 
-	models, _ := s.db.UserModelCosts(ctx, userID, since)
+	partialFailures := []string{}
+	models, modelsErr := s.db.UserModelCosts(ctx, userID, since)
+	personalReadFailed(&partialFailures, "models", modelsErr)
 	if len(models) > 5 {
 		models = models[:5]
 	}
-	profile, _ := s.db.BuildPersonalProfile(ctx, userID, since)
+	profile, profileErr := s.db.BuildPersonalProfile(ctx, userID, since)
+	personalReadFailed(&partialFailures, "profile", profileErr)
 	savings, cheap := potentialSavingsKRW(cur, models)
 	recCount := 0
-	if recs, _ := s.db.ListUserRecommendations(ctx, userID); recs != nil {
+	if recs, err := s.db.ListUserRecommendations(ctx, userID); !personalReadFailed(&partialFailures, "recommendations", err) && recs != nil {
 		recCount = len(recs)
 	}
 	successRate := profile.SuccessRate
@@ -316,5 +339,6 @@ func (s *Server) handleMeReport(w http.ResponseWriter, r *http.Request) {
 		"potential_savings_krw":   savings,
 		"potential_savings_model": cheap,
 		"recommendation_count":    recCount,
+		"partial_failures":        partialFailures,
 	})
 }

@@ -489,196 +489,21 @@ export const effectivePermissionsSchema = looseObject({
 
 /* -------------------------------------------------------------------- /me */
 
-export const meDashboardSchema = looseObject({
-  user_id: text,
-  today: looseObject({ requests: count, tokens: count, cost_krw: count, errors: count }).nullish(),
-  month: looseObject({ requests: count, tokens: count, cost_krw: count, errors: count }).nullish(),
-  profile: looseObject({
-    success_rate: ratio,
-    avg_latency_ms: count,
-    cache_rate: ratio,
-    text2sql_usage_rate: ratio,
-    mcp_usage_rate: ratio,
-    risk_score: count,
-    summary: text,
-    since: text,
-    top_task_types: list({ key: text, requests: count }),
-    top_models: list({ model: text, key: text, requests: count }),
-    top_languages: list({ language: text, key: text, requests: count }),
-    top_mcp_tools: list({ tool: text, key: text, requests: count }),
-  }).nullish(),
-  frequent_models: list({ model: text, requests: count, avg_cost_krw: count, success_rate: ratio }),
-  recent_failures: list({
-    id: text,
-    model: text,
-    status_code: count,
-    error: text,
-    task_type: text,
-    created_at: text,
-  }),
-  potential_savings_krw: count,
-  potential_savings_model: text,
-  recommended_templates: orDefault(z.array(unknownRecord), []),
-  recent_prompt_products: orDefault(z.array(unknownRecord), []),
-  // The legacy screen showed `key_alerts[].reason`, which the server never sends.
-  // `flags` and `severity` are the real signals.
-  key_alerts: list({
-    id: text,
-    name: text,
-    user_id: text,
-    team: text,
-    expires_at: text,
-    last_used_at: text,
-    days_idle: count,
-    flags: stringList,
-    severity: text,
-  }),
-  recent_blocks: list({ rule: text, reason: text, model: text, endpoint: text, created_at: text }),
-  my_saved_reports: list({
-    id: text,
-    name: text,
-    schema_name: text,
-    kind: text,
-    visibility: text,
-    approval_status: text,
-    created_at: text,
-  }),
-});
-export type MeDashboard = z.output<typeof meDashboardSchema>;
-
-export const meActionsSchema = looseObject({
-  user_id: text,
-  count: count,
-  actions: list({
-    type: text,
-    severity: text,
-    message: text,
-    button_label: text,
-    button_href: text,
-  }),
-});
-export type MeAction = z.output<typeof meActionsSchema>["actions"][number];
-
-export const meSnoozeSchema = looseObject({ type: text, snoozed_until: text });
-
-export const meReportSchema = looseObject({
-  user_id: text,
-  window: text,
-  since: text,
-  requests: count,
-  tokens: count,
-  cost_krw: count,
-  errors: count,
-  success_rate: ratio,
-  prior_cost_krw: count,
-  prior_requests: count,
-  cost_delta_ratio: ratio,
-  avg_latency_ms: count,
-  cache_rate: ratio,
-  risk_score: count,
-  top_models: orDefault(z.array(unknownRecord), []),
-  top_task_types: orDefault(z.array(unknownRecord), []),
-  potential_savings_krw: count,
-  potential_savings_model: text,
-  recommendation_count: count,
-});
-
-export const meNotificationsSchema = looseObject({
-  user_id: text,
-  count: count,
-  critical_count: count,
-  notifications: list({
-    category: text,
-    level: text,
-    title: text,
-    detail: text,
-    created_at: text,
-    href: text,
-  }),
-});
-
-export const meRecommendedModelsSchema = looseObject({
-  note: text,
-  tagged_model_count: count,
-  task_recommendations: list({
-    task_type: text,
-    requests: count,
-    recommend: stringList,
-    avoid: stringList,
-  }),
-  your_models: list({
-    model: text,
-    requests: count,
-    tags: looseObject({ good_for: text, avoid_for: text, risk_note: text }).nullish(),
-  }),
-  team_winners: list({ model: text, wins: count, avg_score: count, appearances: count }),
-});
-
-export const meRequestsSchema = looseObject({
-  requests: list({
-    id: z.string(),
-    model: text,
-    provider: text,
-    endpoint: text,
-    status_code: count,
-    cost_krw: count,
-    total_tokens: count,
-    cached: orDefault(z.boolean(), false),
-    created_at: text,
-  }),
-});
-export type MeRequest = z.output<typeof meRequestsSchema>["requests"][number];
-
-export const meReceiptSchema = looseObject({
-  request_id: text,
-  created_at: text,
-  endpoint: text,
-  model: text,
-  provider: text,
-  status_code: count,
-  finish_reason: text,
-  latency_ms: count,
-  tokens: looseObject({ prompt: count, completion: count, total: count, cached: count }).nullish(),
-  cache_hit: orDefault(z.boolean(), false),
-  cost_krw: count,
-  blocked: orDefault(z.boolean(), false),
-  policy: list({ decision: text, rule: text, reason: text }),
-  mcp_used: orDefault(z.boolean(), false),
-  mcp_tools: list({ server: text, tool: text, error: text }),
-  skill_used: orDefault(z.boolean(), false),
-  skills: stringList,
-  note: text,
-  routing: looseObject({
-    requested_model: text,
-    selected_model: text,
-    selected_provider: text,
-    reason: text,
-    fallback_path: stringList,
-    risk_tier: text,
-    complexity_tier: text,
-  }).nullish(),
-});
-
-const meSkillSchema = {
-  name: z.string(),
-  description: text,
-  risk_level: text,
-  runs_30d: count,
-  success_rate: ratio,
-  users_30d: count,
-  satisfaction: ratio,
-  feedback_count: count,
-};
-
-export const meSkillsSchema = looseObject({
-  team: text,
-  available: list(meSkillSchema),
-  requestable: list(meSkillSchema),
-});
-
-export type MeSkill = z.output<typeof meSkillsSchema>["available"][number];
-
-export const meSkillActionSchema = looseObject({ status: text, skill: text });
+export {
+  meDashboardSchema,
+  meActionsSchema,
+  meSnoozeSchema,
+  meReportSchema,
+  meNotificationsSchema,
+  meRecommendedModelsSchema,
+  meRequestsSchema,
+  meReceiptSchema,
+  meSkillsSchema,
+  meSkillActionSchema,
+  meRecommendationsSchema,
+  meRecommendationFeedbackSchema,
+} from "./me-console.schemas";
+export type { MeDashboard, MeAction, MeRequest, MeSkill, MeRecommendation } from "./me-console.schemas";
 
 export const meSessionsSchema = looseObject({
   current_session_id: text,
@@ -705,27 +530,6 @@ export const meConnectionDoctorSchema = looseObject({
   auth_mode: text,
   note: text,
   checks: list({ name: text, status: text, detail: text, fix: text }),
-});
-
-export const meRecommendationsSchema = looseObject({
-  user_id: text,
-  recommendations: list({
-    id: z.string(),
-    user_id: text,
-    kind: text,
-    ref: text,
-    title: text,
-    detail: text,
-    est_savings_krw: count,
-    created_at: text,
-  }),
-});
-export type MeRecommendation = z.output<typeof meRecommendationsSchema>["recommendations"][number];
-
-export const meRecommendationFeedbackSchema = looseObject({
-  id: text,
-  action: text,
-  status: text,
 });
 
 export const meKeysSchema = looseObject({

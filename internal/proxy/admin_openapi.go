@@ -637,6 +637,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "get /me/dashboard", "get /me/actions", "get /me/notifications", "get /me/report", "get /me/requests", "get /me/requests/{id}/receipt", "get /me/recommended-models", "get /me/skills", "get /me/recommendations", "post /me/actions/snooze", "post /me/skills/{name}/request-access", "post /me/skills/{name}/feedback", "post /me/recommendations/feedback", "post /me/recommendations/{id}/feedback":
+		enrichMeConsoleOpenAPI(route, strings.ToLower(method), op, responses)
 	case "get /team/dashboard", "get /team/reports", "post /team/reports", "get /team/portal", "get /team/risk", "get /team/onboarding", "get /team/savings-challenge", "get /team/skills/popular", "get /team/templates/candidates":
 		enrichTeamConsoleOpenAPI(route, strings.ToLower(method), op, responses)
 	case "get /admin/export.csv":
@@ -1083,6 +1085,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range billingDashboardOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range meConsoleOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range teamConsoleOpenAPISchemas() {

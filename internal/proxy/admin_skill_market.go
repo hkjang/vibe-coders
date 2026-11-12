@@ -22,6 +22,7 @@ func skillVisibleToTeam(sk store.Skill, team string) bool {
 // handleMeSkills lists the production skills available to the caller's team plus skills they can
 // request access to, with light adoption/satisfaction stats. GET /me/skills
 func (s *Server) handleMeSkills(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	claims, ok := s.currentAccessClaims(r)
 	if !ok || claims.Subject == "" {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -33,15 +34,18 @@ func (s *Server) handleMeSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	skills, err := s.db.ListSkills(r.Context(), "production")
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "list_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "list_failed")
 		return
 	}
-	stats, _ := s.db.SkillRunStats(r.Context(), time.Now().UTC().AddDate(0, 0, -30))
+	partialFailures := []string{}
+	stats, statsErr := s.db.SkillRunStats(r.Context(), time.Now().UTC().AddDate(0, 0, -30))
+	personalReadFailed(&partialFailures, "runs", statsErr)
 	statByName := map[string]store.SkillRunStat{}
 	for _, st := range stats {
 		statByName[st.SkillName] = st
 	}
-	fb, _ := s.db.SkillFeedbackStats(r.Context())
+	fb, feedbackErr := s.db.SkillFeedbackStats(r.Context())
+	personalReadFailed(&partialFailures, "feedback", feedbackErr)
 
 	available, requestable := []map[string]any{}, []map[string]any{}
 	for _, sk := range skills {
@@ -61,11 +65,12 @@ func (s *Server) handleMeSkills(w http.ResponseWriter, r *http.Request) {
 			requestable = append(requestable, row)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"available": available, "requestable": requestable, "team": claims.TeamID})
+	writeJSON(w, http.StatusOK, map[string]any{"available": available, "requestable": requestable, "team": claims.TeamID, "partial_failures": partialFailures})
 }
 
 // handleMeSkillAction dispatches POST /me/skills/{name}/request-access and /feedback.
 func (s *Server) handleMeSkillAction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	claims, ok := s.currentAccessClaims(r)
 	if !ok || claims.Subject == "" {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -94,7 +99,7 @@ func (s *Server) handleMeSkillAction(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&p)
 		rq := store.SkillAccessRequest{ID: newID("skreq"), SkillName: name, UserID: claims.Subject, Team: claims.TeamID, Status: "pending", Reason: strings.TrimSpace(p.Reason)}
 		if err := s.db.AddSkillAccessRequest(r.Context(), rq); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "request_failed")
 			return
 		}
 		s.auditAuthEvent(r.Context(), "skill_access_request", claims.Subject, "", claims.TeamID, "skill="+name)
@@ -110,7 +115,7 @@ func (s *Server) handleMeSkillAction(w http.ResponseWriter, r *http.Request) {
 		}
 		fb := store.SkillFeedback{ID: newID("skfb"), SkillName: name, UserID: claims.Subject, Rating: p.Rating, Comment: strings.TrimSpace(p.Comment)}
 		if err := s.db.AddSkillFeedback(r.Context(), fb); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "feedback_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "feedback_failed")
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]any{"status": "recorded", "skill": name})

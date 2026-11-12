@@ -26,6 +26,7 @@ func csvContains(csv, value string) bool {
 // admin-curated model usage tags (good_for / avoid_for / risk_note), plus annotates the models
 // they already use. GET /me/recommended-models
 func (s *Server) handleMeRecommendedModels(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	claims, ok := s.currentAccessClaims(r)
 	if !ok || claims.Subject == "" {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -38,12 +39,12 @@ func (s *Server) handleMeRecommendedModels(w http.ResponseWriter, r *http.Reques
 	since := time.Now().UTC().AddDate(0, 0, -30)
 	profile, err := s.db.BuildPersonalProfile(r.Context(), claims.Subject, since)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "profile_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "profile_failed")
 		return
 	}
 	tags, err := s.db.ListModelUsageTags(r.Context())
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "tags_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "tags_failed")
 		return
 	}
 
@@ -86,12 +87,15 @@ func (s *Server) handleMeRecommendedModels(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Team winners: top models by wins from the team's recent multi-model judge results.
-	teamWinners := s.teamModelWinners(r, claims.TeamID, 3)
+	teamWinners, winnersErr := s.teamModelWinners(r, claims.TeamID, 3)
+	partialFailures := []string{}
+	personalReadFailed(&partialFailures, "team_winners", winnersErr)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task_recommendations": taskRecs,
 		"your_models":          yourModels,
 		"team_winners":         teamWinners,
+		"partial_failures":     partialFailures,
 		"tagged_model_count":   len(tags),
 		"note":                 "최근 30일 작업 유형·관리자 모델 용도 태그·팀 멀티모델 평가 결과를 결합한 추천입니다.",
 	})
@@ -99,14 +103,14 @@ func (s *Server) handleMeRecommendedModels(w http.ResponseWriter, r *http.Reques
 
 // teamModelWinners aggregates the team's recent (90d) multi-model judge results into the top-N
 // models by wins (times a model had the top score in its run), then avg score.
-func (s *Server) teamModelWinners(r *http.Request, team string, topN int) []map[string]any {
+func (s *Server) teamModelWinners(r *http.Request, team string, topN int) ([]map[string]any, error) {
 	if strings.TrimSpace(team) == "" {
-		return []map[string]any{}
+		return []map[string]any{}, nil
 	}
 	since := time.Now().UTC().AddDate(0, 0, -90).Format(time.RFC3339Nano)
 	rows, err := s.db.MultiModelJudgementRows(r.Context(), team, since)
 	if err != nil || len(rows) == 0 {
-		return []map[string]any{}
+		return []map[string]any{}, err
 	}
 	type agg struct {
 		appear int
@@ -160,5 +164,5 @@ func (s *Server) teamModelWinners(r *http.Request, team string, topN int) []map[
 	if len(out) > topN {
 		out = out[:topN]
 	}
-	return out
+	return out, nil
 }
