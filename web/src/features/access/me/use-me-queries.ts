@@ -3,6 +3,22 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
+import { useMeOwner } from "./me-console-context";
+import { safeMeError } from "./me-console-model";
+import {
+  readMeDashboard,
+  readMeActions,
+  readMeReport,
+  readMeNotifications,
+  readMeModels,
+  readMeRequests,
+  readMeReceipt,
+  readMeSkills,
+  readMeRecommendations,
+  type MeRead,
+} from "./me-console-api";
 
 const access = endpoints.domains.access;
 const routeId = "me.home";
@@ -37,51 +53,51 @@ function useMeQuery<Result>(
   });
 }
 
-export function useMeDashboardQuery() {
-  return useMeQuery(meKeys.dashboard, (signal) =>
-    apiClient.request(access.me.dashboard, { signal, routeId }),
-  );
-}
-
-export function useMeActionsQuery() {
-  return useMeQuery(meKeys.actions, (signal) => apiClient.request(access.me.actions, { signal, routeId }));
-}
-
-export function useMeReportQuery(window: "weekly" | "monthly") {
-  return useMeQuery([...meKeys.report, window], (signal) =>
-    apiClient.request(access.me.report, { query: { window }, signal, routeId }),
-  );
-}
-
-export function useMeNotificationsQuery() {
-  return useMeQuery(meKeys.notifications, (signal) =>
-    apiClient.request(access.me.notifications, { signal, routeId }),
-  );
-}
-
-export function useMeRecommendedModelsQuery(enabled: boolean) {
-  return useMeQuery(
-    meKeys.recommendedModels,
-    (signal) => apiClient.request(access.me.recommendedModels, { signal, routeId }),
+function usePersonalQuery<Result>(
+  key: readonly unknown[],
+  read: (scope: MeRead) => Promise<Result>,
+  enabled = true,
+) {
+  const owner = useMeOwner();
+  const auth = useAuth();
+  const interval = useRefreshInterval();
+  return useQuery({
+    queryKey: featureOwnedKey(key, owner),
     enabled,
-  );
+    retry: false,
+    refetchInterval: interval,
+    refetchIntervalInBackground: false,
+    queryFn: async ({ signal }) => {
+      try {
+        assertFeatureRead(owner, signal);
+        const result = await read({
+          user: auth.user?.id ?? "",
+          team: auth.user?.team_id ?? "",
+          prefixes: auth.credentialPrefixes,
+          signal,
+        });
+        assertFeatureRead(owner, signal);
+        return result;
+      } catch (error) {
+        throw safeMeError(error, auth.credentialPrefixes);
+      }
+    },
+  });
 }
-
-export function useMeRequestsQuery(limit: number, enabled: boolean) {
-  return useMeQuery(
-    [...meKeys.requests, limit],
-    (signal) => apiClient.request(access.me.requests, { query: { limit }, signal, routeId }),
-    enabled,
-  );
-}
-
-export function useMeSkillsQuery(enabled: boolean) {
-  return useMeQuery(
-    meKeys.skills,
-    (signal) => apiClient.request(access.me.skills, { signal, routeId }),
-    enabled,
-  );
-}
+export const useMeDashboardQuery = () => usePersonalQuery(meKeys.dashboard, readMeDashboard);
+export const useMeActionsQuery = () => usePersonalQuery(meKeys.actions, readMeActions);
+export const useMeReportQuery = (window: "weekly" | "monthly") =>
+  usePersonalQuery([...meKeys.report, window], (scope) => readMeReport(scope, window));
+export const useMeNotificationsQuery = () => usePersonalQuery(meKeys.notifications, readMeNotifications);
+export const useMeRecommendedModelsQuery = (enabled: boolean) =>
+  usePersonalQuery(meKeys.recommendedModels, readMeModels, enabled);
+export const useMeRequestsQuery = (limit: number, enabled: boolean) =>
+  usePersonalQuery([...meKeys.requests, limit], (scope) => readMeRequests(scope, limit), enabled);
+export const useMeReceiptQuery = (id: string, enabled: boolean) =>
+  usePersonalQuery(["me", "receipt", id], (scope) => readMeReceipt(scope, id), enabled);
+export const useMeSkillsQuery = (enabled: boolean) => usePersonalQuery(meKeys.skills, readMeSkills, enabled);
+export const useMeRecommendationsQuery = () =>
+  usePersonalQuery(meKeys.recommendations, (scope) => readMeRecommendations(scope));
 
 export function useMeSessionsQuery(enabled: boolean, owner?: string) {
   return useMeQuery(

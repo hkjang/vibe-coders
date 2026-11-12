@@ -62,6 +62,11 @@ func potentialSavingsKRW(month store.UserUsageTotals, models []store.UserModelCo
 // templates, and recent prompt products. Read-only, scoped to the caller.
 // GET /me/dashboard
 func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	userID, ok := s.meUserID(r)
 	if !ok {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -74,43 +79,43 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 
 	today, err := s.db.UserUsageTotalsSince(ctx, userID, startToday)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "dashboard_failed")
 		return
 	}
 	month, err := s.db.UserUsageTotalsSince(ctx, userID, startMonth)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "dashboard_failed")
 		return
 	}
 	models, err := s.db.UserModelCosts(ctx, userID, startMonth)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "dashboard_failed")
 		return
 	}
 	profile, err := s.db.BuildPersonalProfile(ctx, userID, startMonth)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "dashboard_failed")
 		return
 	}
 	failures, err := s.db.UserRecentFailures(ctx, userID, 5)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "dashboard_failed")
 		return
 	}
 	templates, err := s.db.ListPromptTemplates(ctx, true)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "dashboard_failed")
 		return
 	}
 	products, err := s.db.ListPromptProducts(ctx)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "dashboard_failed")
 		return
 	}
 
 	keyAlerts, err := s.db.KeyHealthAlerts(ctx, time.Now().UTC(), 30, 7, userID)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "dashboard_failed")
 		return
 	}
 
@@ -126,6 +131,7 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 		products = products[:5]
 	}
 
+	partialFailures := []string{}
 	// Recent policy blocks for the caller — "왜 막혔나" without exposing raw prompt.
 	recentBlocks := []map[string]any{}
 	if blocks, err := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{UserID: userID, Decision: "block", Limit: 5}); err == nil {
@@ -135,6 +141,8 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 				"endpoint": b.Endpoint, "created_at": b.CreatedAt,
 			})
 		}
+	} else {
+		personalReadFailed(&partialFailures, "blocks", err)
 	}
 
 	// The caller's own saved Text2SQL reports (metadata only — no raw SQL).
@@ -150,6 +158,8 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 				"created_at": rep.CreatedAt,
 			})
 		}
+	} else {
+		personalReadFailed(&partialFailures, "reports", err)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -166,6 +176,7 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 		"key_alerts":              keyAlerts,
 		"recent_blocks":           recentBlocks,
 		"my_saved_reports":        mySavedReports,
+		"partial_failures":        partialFailures,
 	})
 }
 
@@ -196,24 +207,40 @@ func (s *Server) mcpAffinityAllowedForRecommendation(ctx context.Context, server
 // affinity), derived from their own usage.
 // GET /me/recommendations
 func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	userID, ok := s.meUserID(r)
 	if !ok {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	ctx := r.Context()
+	// Legacy callers regenerate by default. The new console explicitly opts into
+	// a read of stored recommendations so polling and feedback never replace IDs.
+	if r.URL.Query().Get("refresh") == "false" {
+		stored, err := s.db.ListUserRecommendations(ctx, userID)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "could not read personal recommendations", "server_error", "recommendations_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "recommendations": stored})
+		return
+	}
 	startMonth := time.Now().UTC()
 	startMonth = time.Date(startMonth.Year(), startMonth.Month(), 1, 0, 0, 0, 0, time.UTC)
 	recommendationSince := time.Now().UTC().Add(-30 * 24 * time.Hour)
 
 	month, err := s.db.UserUsageTotalsSince(ctx, userID, startMonth)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "recommendations_failed")
 		return
 	}
 	models, err := s.db.UserModelCosts(ctx, userID, startMonth)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "recommendations_failed")
 		return
 	}
 	recs := []store.PersonalRecommendation{}
@@ -234,7 +261,7 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 	// Template adoption recommendations: a couple of enabled standard templates.
 	templates, err := s.db.ListPromptTemplates(ctx, true)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "recommendations_failed")
 		return
 	}
 	for i, t := range templates {
@@ -252,7 +279,7 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 
 	text2sqlCandidates, err := s.db.UserText2SQLReportCandidates(ctx, userID, recommendationSince, 3, 2)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "recommendations_failed")
 		return
 	}
 	for _, c := range text2sqlCandidates {
@@ -273,7 +300,7 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 
 	mcpAffinities, err := s.db.UserMCPAffinities(ctx, userID, recommendationSince, 2, 3)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "recommendations_failed")
 		return
 	}
 	for _, a := range mcpAffinities {
@@ -290,12 +317,12 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := s.db.ReplaceUserRecommendations(ctx, userID, recs); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "recommendations_failed")
 		return
 	}
 	stored, err := s.db.ListUserRecommendations(ctx, userID)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "recommendations_failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "recommendations": stored})
@@ -334,6 +361,7 @@ func (s *Server) handleMyRecommendationFeedbackByPath(w http.ResponseWriter, r *
 }
 
 func (s *Server) handleMyRecommendationFeedbackWithID(w http.ResponseWriter, r *http.Request, recIDFromPath string) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -362,7 +390,7 @@ func (s *Server) handleMyRecommendationFeedbackWithID(w http.ResponseWriter, r *
 	}
 	rec, found, err := s.db.GetUserRecommendation(r.Context(), userID, strings.TrimSpace(payload.ID))
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "feedback_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "feedback_failed")
 		return
 	}
 	if !found {
@@ -372,7 +400,7 @@ func (s *Server) handleMyRecommendationFeedbackWithID(w http.ResponseWriter, r *
 	if err := s.db.InsertRecommendationFeedback(r.Context(), store.RecommendationFeedback{
 		ID: newID("rfb"), UserID: userID, Kind: rec.Kind, Ref: rec.Ref, Title: rec.Title, Action: action, Reason: strings.TrimSpace(payload.Reason),
 	}); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "feedback_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "personal operation failed", "server_error", "feedback_failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "recorded", "kind": rec.Kind, "action": action})

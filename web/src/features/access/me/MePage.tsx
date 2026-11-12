@@ -11,6 +11,8 @@ import { Button } from "@/shared/components/ui/Button";
 import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import "@/features/access/access.css";
+import { MeBoundary } from "./MeBoundary";
+import "./me-console.css";
 
 const tabIds = ["home", "requests", "skills", "keys"] as const;
 type TabId = (typeof tabIds)[number];
@@ -23,6 +25,14 @@ const tabs: ReadonlyArray<TabItem<TabId>> = [
 ];
 
 export function MePage(): React.JSX.Element {
+  return (
+    <MeBoundary>
+      <MeContent />
+    </MeBoundary>
+  );
+}
+
+function MeContent(): React.JSX.Element {
   const auth = useAuth();
   const queryClient = useQueryClient();
   const [tab, setTab] = useTabParam<TabId>(tabIds);

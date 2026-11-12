@@ -146,6 +146,7 @@ const hardDeleteQuery = z.object({ hard: z.number().int().optional() });
 /** `DELETE /admin/roles` takes the role in the query string, not the path. */
 const deleteRoleQuery = z.object({ role: z.string().min(1) });
 const meReportQuery = z.object({ window: z.enum(["weekly", "monthly"]).optional() });
+const meRecommendationsQuery = z.object({ refresh: z.boolean().optional() });
 const meRequestsQuery = z.object({ limit: z.number().int().positive().max(100).optional() });
 const onboardingPackQuery = z.object({ client: z.string().optional() });
 const effectivePermissionsQuery = z.object({ role: z.string().optional() });
@@ -482,11 +483,10 @@ export const accessEndpoints = {
       "/me/connection-doctor",
       meConnectionDoctorSchema,
     ),
-    recommendations: operation<GetMeRecommendationsData, unknown>()(
-      "GET",
-      "/me/recommendations",
-      meRecommendationsSchema,
-    ),
+    recommendations: operation<
+      WithQuery<GetMeRecommendationsData, z.infer<typeof meRecommendationsQuery>>,
+      unknown
+    >()("GET", "/me/recommendations", meRecommendationsSchema, meRecommendationsQuery),
     recommendationFeedback: operation<
       WithBody<PostMeRecommendationsIdFeedbackData, RecommendationFeedbackBody>,
       unknown
