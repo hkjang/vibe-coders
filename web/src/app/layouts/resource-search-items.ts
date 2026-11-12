@@ -24,6 +24,12 @@ export const resourceSearchTargets = {
     path: "/governance/policies/detail",
     parameter: "policy",
   },
+  team: {
+    featureId: "access.users",
+    title: "등록 팀",
+    path: "/access/users",
+    parameter: "registered_team",
+  },
 } satisfies Record<ResourceKind, { featureId: string; title: string; path: string; parameter: string }>;
 
 export function resourceSearchReadScope(kind: ResourceKind): string {
@@ -39,11 +45,13 @@ export function resourceSearchPath(
   if (!id || [...id].length > 512 || containsPotentialSecret(id, prefixes)) return undefined;
   if (kind === "provider" && !isProviderRef(id)) return undefined;
   if (kind === "mcp_upstream" && !/^[a-z0-9_][a-z0-9_-]*$/u.test(id)) return undefined;
+  if (kind === "team" && /\p{C}/u.test(id)) return undefined;
   const target = resourceSearchTargets[kind];
   const params = new URLSearchParams({ [target.parameter]: id });
   // Skills have more than one tab; the detail belongs to the registry tab.
   if (kind === "skill") params.set("tab", "catalog");
   if (kind === "mcp_upstream") params.set("tab", "upstreams");
   if (kind === "policy") params.set("tab", "safety");
+  if (kind === "team") params.set("tab", "teams");
   return `${target.path}?${params}`;
 }

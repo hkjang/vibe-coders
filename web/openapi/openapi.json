@@ -8705,11 +8705,12 @@
                 "app",
                 "skill",
                 "mcp_upstream",
-                "policy"
+                "policy",
+                "team"
               ],
               "type": "string"
             },
-            "maxItems": 6,
+            "maxItems": 7,
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
@@ -8749,7 +8750,8 @@
                           "app",
                           "skill",
                           "mcp_upstream",
-                          "policy"
+                          "policy",
+                          "team"
                         ],
                         "type": "string"
                       },
@@ -8776,7 +8778,8 @@
                     "app",
                     "skill",
                     "mcp_upstream",
-                    "policy"
+                    "policy",
+                    "team"
                   ],
                   "type": "string"
                 },
@@ -8800,7 +8803,7 @@
               ],
               "type": "object"
             },
-            "maxItems": 6,
+            "maxItems": 7,
             "type": "array"
           },
           "request_id": {
@@ -11377,7 +11380,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.78"
+    "version": "v0.86.79"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -23205,7 +23208,7 @@
     },
     "/admin/resource-search": {
       "post": {
-        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies; all other kinds require admin:read. MCP upstream search additionally requires observability:read, exposes only canonical slug IDs and safe display names, and never fetches discovery data. A security-only reader must request the policy kind; other groups remain forbidden. No admin:write required. Query is trimmed, 2–128 Unicode characters, literal name substring (ASCII case-insensitive; non-ASCII case behavior follows database collation). Six supported configuration kinds: provider, workflow, app, skill, mcp_upstream and policy; no model/upstream calls or business execution. At most ten metadata rows per kind ordered by stored title then ID. Unsafe or oversized IDs/titles are omitted for every role. Definitions, policy conditions/actions, instructions, credentials, URLs and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
+        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies; all other kinds require admin:read. MCP upstream search additionally requires observability:read, exposes only canonical slug IDs and safe display names, and never fetches discovery data. A security-only reader must request the policy kind; other groups remain forbidden. No admin:write required. Team search requires access.users and applies the same exact authenticated team_admin TeamID scope as GET /admin/teams?view=registered, including an empty team scope. It searches registered team names, not usage groups, IDs or members. Query is trimmed, 2–128 Unicode characters, literal name substring; SQLite uses the embedded Unicode lowercase function and PostgreSQL uses LOWER for both stored names and query. Seven supported configuration kinds: provider, workflow, app, skill, mcp_upstream, policy and team; no model/upstream calls or business execution. At most ten metadata rows per kind ordered by stored title then ID. IDs are bounded to 512 Unicode characters/2048 UTF-8 bytes and titles to 256 characters/1024 bytes before selection. Unsafe or oversized IDs/titles are omitted for every role without truncating IDs; full team metadata remains available in the registered-team screen. Definitions, policy conditions/actions, instructions, credentials, URLs, members and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
         "operationId": "post__admin_resource_search",
         "requestBody": {
           "content": {

@@ -8,16 +8,32 @@ import { endpoints } from "@/shared/api/endpoints";
 import { resourceSearchPath } from "./resource-search-items";
 import { AppError } from "@/shared/api/error";
 
-const runtime = vi.hoisted(() => ({ id: "admin-a", hidden: false, scopes: ["admin:read"] }));
+const runtime = vi.hoisted(() => ({
+  id: "admin-a",
+  teamId: "team-a",
+  backendVersion: "v0.86.56",
+  hidden: false,
+  teamHidden: false,
+  scopes: ["admin:read"],
+}));
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     mode: "authenticated",
-    backendVersion: "v0.86.56",
+    backendVersion: runtime.backendVersion,
     legacyFallback: true,
     credentialPrefixes: ["vc_sk_", "corp_"],
-    user: { id: runtime.id, role: "admin", roles: ["admin"], team_id: "team-a", scopes: runtime.scopes },
+    user: {
+      id: runtime.id,
+      role: "admin",
+      roles: ["admin"],
+      team_id: runtime.teamId,
+      scopes: runtime.scopes,
+    },
     features: migrationRegistry.map((feature) =>
-      runtime.hidden && feature.featureId === "agents.workflows" ? { ...feature, status: "hidden" } : feature,
+      (runtime.hidden && feature.featureId === "agents.workflows") ||
+      (runtime.teamHidden && feature.featureId === "access.users")
+        ? { ...feature, status: "hidden" }
+        : feature,
     ),
   }),
 }));
@@ -47,6 +63,9 @@ function setup() {
 describe("permission-scoped resource search", () => {
   beforeEach(() => {
     runtime.id = "admin-a";
+    runtime.teamId = "team-a";
+    runtime.backendVersion = "v0.86.56";
+    runtime.teamHidden = false;
     runtime.hidden = false;
     runtime.scopes = ["admin:read"];
   });
@@ -322,5 +341,70 @@ describe("permission-scoped resource search", () => {
       "/mcp?upstream=search-server&tab=upstreams",
     );
     expect(resourceSearchPath("mcp_upstream", "server/path", [])).toBeUndefined();
+    expect(resourceSearchPath("team", "팀/%_!", [])).toBe(
+      "/access/users?registered_team=%ED%8C%80%2F%25_%21&tab=teams",
+    );
+    expect(resourceSearchPath("team", "team\nname", [])).toBeUndefined();
+    expect(resourceSearchPath("team", "team\u200bname", [])).toBeUndefined();
+    expect(resourceSearchPath("team", "x".repeat(513), [])).toBeUndefined();
   });
+
+  it("팀 이름 검색은 조회 권한으로 정확한 등록 정보에 이동하고 팀 변경 뒤 결과를 폐기한다", async () => {
+    runtime.backendVersion = "v0.86.79";
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+      request_id: "team-search-request",
+      groups: [
+        {
+          kind: "team",
+          status: "ok",
+          limited: false,
+          items: [{ kind: "team", id: "team/a&b", title: "정산 팀" }],
+        },
+      ],
+    });
+    const view = setup();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "정산" } });
+    expect(await screen.findByRole("option", { name: /정산 팀/ })).toBeVisible();
+    expect(request).toHaveBeenCalledWith(
+      endpoints.admin.resourceSearch,
+      expect.objectContaining({
+        body: { query: "정산", kinds: ["provider", "workflow", "app", "skill", "team"] },
+      }),
+    );
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    expect(view.go).toHaveBeenCalledWith("/access/users?registered_team=team%2Fa%26b&tab=teams");
+    runtime.teamId = "team-b";
+    view.rerender(view.tree());
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["old-backend", "hidden-feature", "security-only"])(
+    "팀 검색을 허용하지 않는 %s 상태에서 결과와 이동을 차단한다",
+    async (reason) => {
+      runtime.backendVersion = reason === "old-backend" ? "v0.86.78" : "v0.86.79";
+      runtime.teamHidden = reason === "hidden-feature";
+      if (reason === "security-only") runtime.scopes = ["security:read"];
+      const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+        request_id: "team-search-request",
+        groups: [
+          {
+            kind: "team",
+            status: "ok",
+            limited: false,
+            items: [{ kind: "team", id: "team-a", title: "정산 팀" }],
+          },
+        ],
+      });
+      const view = setup();
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "정산" } });
+      await waitFor(() => expect(request).toHaveBeenCalled());
+      const options = request.mock.calls.at(-1)?.[1] as { body?: { kinds?: string[] } };
+      expect(options.body?.kinds).not.toContain("team");
+      expect(screen.queryByRole("option")).not.toBeInTheDocument();
+      fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+      expect(view.go).not.toHaveBeenCalled();
+    },
+  );
 });

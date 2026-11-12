@@ -2,8 +2,8 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "vibe-coders-v0.86.78-integrated-source-sbom",
-  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.78",
+  "name": "vibe-coders-v0.86.79-integrated-source-sbom",
+  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.79",
   "creationInfo": {
     "created": "2026-11-12T14:59:11Z",
     "creators": [
@@ -20,8 +20,8 @@
     {
       "name": "vibe-coders",
       "SPDXID": "SPDXRef-Package-vibe-coders",
-      "versionInfo": "0.86.78",
-      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@v0.86.78",
+      "versionInfo": "0.86.79",
+      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@v0.86.79",
       "filesAnalyzed": false,
       "licenseConcluded": "AGPL-3.0-only",
       "licenseDeclared": "AGPL-3.0-only",
@@ -30,7 +30,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/vibe-coders@0.86.78"
+          "referenceLocator": "pkg:golang/vibe-coders@0.86.79"
         }
       ]
     },

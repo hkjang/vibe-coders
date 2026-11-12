@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"vibe-coders/internal/store"
 )
 
 var resourceSearchFeatures = map[string]string{
@@ -16,6 +18,7 @@ var resourceSearchFeatures = map[string]string{
 	"app": "agents.apps", "skill": "agents.skills",
 	"mcp_upstream": "mcp.overview",
 	"policy":       "governance.policies",
+	"team":         "access.users",
 }
 
 type resourceSearchItem struct {
@@ -116,7 +119,20 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			canRead = securityRead
 		}
 		if allowed[resourceSearchFeatures[kind]] && canRead {
-			rows, more, err := s.db.SearchResourceMetadata(ctx, kind, input.Query, 10)
+			var rows []store.ResourceMetadata
+			var more bool
+			var err error
+			if kind == "team" {
+				var scopeTeam *string
+				if user.Role == "team_admin" {
+					// Reuse the already verified identity. A later failed token
+					// lookup must never turn a scoped request into an unscoped one.
+					scopeTeam = &user.TeamID
+				}
+				rows, more, err = s.db.SearchAuthTeamMetadata(ctx, input.Query, 10, scopeTeam)
+			} else {
+				rows, more, err = s.db.SearchResourceMetadata(ctx, kind, input.Query, 10)
+			}
 			group.Status = "ok"
 			if err != nil {
 				group.Status = "unavailable"
