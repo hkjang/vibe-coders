@@ -35,6 +35,9 @@ func seedBrowserResourceSearchFixture(t *testing.T, db *store.SQLStore, upstream
 	if err := db.UpsertPolicyWithRules(ctx, store.Policy{ID: "browser-search-policy", Name: "검색검증 정책", Priority: 100, RolloutPercent: 25}, nil); err != nil {
 		t.Fatal("synthetic resource search policy could not be prepared")
 	}
+	if err := db.UpsertAuthTeam(ctx, store.AuthTeam{ID: "browser-search-team", Name: "검색검증 등록 팀"}); err != nil {
+		t.Fatal("synthetic resource search team could not be prepared")
+	}
 }
 
 func TestResourceSearchRequiresSameSessionAsAdminLists(t *testing.T) {
@@ -56,7 +59,7 @@ func TestResourceSearchRequiresSameSessionAsAdminLists(t *testing.T) {
 	if s.authorizeAdmin(r) {
 		t.Fatal("existing admin list unexpectedly accepts an unexchanged upstream token")
 	}
-	w := resourceSearchRequest(s, `{"query":"검색검증","kinds":["provider"]}`, token)
+	w := resourceSearchRequest(s, `{"query":"검색검증","kinds":["provider","team"]}`, token)
 	if w.Code != http.StatusUnauthorized || strings.Contains(w.Body.String(), token) {
 		t.Fatal("search must require the same active gateway session as existing admin lists")
 	}

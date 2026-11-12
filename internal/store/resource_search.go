@@ -36,11 +36,23 @@ func (s *SQLStore) SearchResourceMetadata(ctx context.Context, kind, query strin
 	default:
 		return nil, false, errors.New("unsupported resource kind")
 	}
+	return s.searchResourceMetadata(ctx, table, id, title, query, limit, nil)
+}
+
+// SearchAuthTeamMetadata uses the same exact authenticated team-ID boundary as
+// ListAuthTeamPage. Keep it separate from the unscoped resource-kind API so a
+// caller cannot accidentally request team metadata without considering scope.
+func (s *SQLStore) SearchAuthTeamMetadata(ctx context.Context, query string, limit int, scopeTeam *string) ([]ResourceMetadata, bool, error) {
+	return s.searchResourceMetadata(ctx, "teams", "id", "name", query, limit, scopeTeam)
+}
+
+// All SQL identifiers come from the fixed sources above, never request input.
+func (s *SQLStore) searchResourceMetadata(ctx context.Context, table, id, title, query string, limit int, scopeID *string) ([]ResourceMetadata, bool, error) {
 	if !utf8.ValidString(query) || utf8.RuneCountInString(query) < 2 || utf8.RuneCountInString(query) > 128 || limit < 1 || limit > 50 {
 		return nil, false, errors.New("invalid resource search bounds")
 	}
 	// Escape SQL LIKE metacharacters; search text is never SQL syntax.
-	pattern := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(strings.ToLower(query)) + "%"
+	pattern := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(query) + "%"
 	byteLength := func(column string) string { return "LENGTH(CAST(" + column + " AS BLOB))" }
 	if s.dialect == "postgres" {
 		byteLength = func(column string) string { return "OCTET_LENGTH(" + column + ")" }
@@ -50,8 +62,15 @@ func (s *SQLStore) SearchResourceMetadata(ctx context.Context, kind, query strin
 		// Byte bounds also cover SQLite legacy text containing embedded NUL, for
 		// which character LENGTH alone does not bound the value returned to Go.
 		" AND " + byteLength(id) + " <= 2048 AND " + byteLength(title) + " <= 1024" +
-		" AND LOWER(" + title + ") LIKE ? ESCAPE '!' ORDER BY " + title + ", " + id + " LIMIT ?"
-	rows, err := s.db.QueryContext(ctx, s.bind(statement), pattern, limit+1)
+		" AND " + s.metadataLowerSQL(title) + " LIKE " + s.metadataLowerSQL("?") + " ESCAPE '!'"
+	args := []any{pattern}
+	if scopeID != nil {
+		statement += " AND " + id + " = ?"
+		args = append(args, *scopeID)
+	}
+	statement += " ORDER BY " + title + ", " + id + " LIMIT ?"
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, s.bind(statement), args...)
 	if err != nil {
 		return nil, false, err
 	}

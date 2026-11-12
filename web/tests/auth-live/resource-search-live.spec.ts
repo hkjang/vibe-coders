@@ -22,6 +22,7 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     { title: "검색검증 스킬", path: "/app/agents/skills", parameter: "skill" },
     { title: "검색검증 MCP 서버", path: "/app/mcp", parameter: "upstream" },
     { title: "검색검증 정책", path: "/app/governance/policies/detail", parameter: "policy" },
+    { title: "검색검증 등록 팀", path: "/app/access/users", parameter: "registered_team" },
   ];
   for (const target of targets) {
     await page.keyboard.press("Control+k");
@@ -65,16 +66,23 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     await expect(palette.getByRole("option")).toHaveCount(targets.length);
     await palette.getByRole("option", { name: new RegExp(target.title) }).click();
     const panel = page.getByRole("dialog", {
-      name: target.parameter === "policy" ? "정책 상세" : target.title,
+      name:
+        target.parameter === "policy"
+          ? "정책 상세"
+          : target.parameter === "registered_team"
+            ? "등록 팀 상세"
+            : target.title,
       exact: true,
     });
     await expect(panel).toBeVisible();
     if (target.parameter === "policy")
       await expect(panel.getByRole("heading", { name: target.title })).toBeVisible();
+    if (target.parameter === "registered_team") await expect(panel).toContainText(target.title);
     const destination = new URL(page.url());
     expect(destination.pathname).toBe(target.path);
     expect(Boolean(destination.searchParams.get(target.parameter))).toBe(true);
     expect(destination.searchParams.has("q")).toBe(false);
+    if (target.parameter === "registered_team") expect(destination.searchParams.get("tab")).toBe("teams");
     await page.reload();
     await expect(panel).toBeVisible();
     if (target.parameter === "policy")
