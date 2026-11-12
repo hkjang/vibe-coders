@@ -73,7 +73,11 @@ func authAccountOrder(sorts []AuthAccountSort, prefix string) (string, error) {
 		if sort.Desc {
 			direction = " DESC"
 		}
-		parts = append(parts, prefix+sort.Field+direction)
+		field := prefix + sort.Field
+		if sort.Field == "created_at" {
+			field = metadataTimestampOrderSQL(field)
+		}
+		parts = append(parts, field+direction)
 	}
 	if !seen["id"] {
 		parts = append(parts, prefix+"id ASC")
@@ -123,7 +127,7 @@ func (s *SQLStore) ListAuthAccountPage(ctx context.Context, query AuthAccountQue
 		fields := []string{"id", "email", "name", "role", "team_id", "team_name"}
 		matches := make([]string, 0, len(fields))
 		for _, field := range fields {
-			matches = append(matches, "LOWER("+field+") LIKE LOWER(?) ESCAPE '!'")
+			matches = append(matches, s.metadataLowerSQL(field)+" LIKE "+s.metadataLowerSQL("?")+" ESCAPE '!'")
 			args = append(args, pattern)
 		}
 		where = append(where, "("+strings.Join(matches, " OR ")+")")
