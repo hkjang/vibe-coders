@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -24,6 +25,7 @@ var mcpClients = map[string]bool{"roo": true, "cline": true, "cursor": true, "cl
 // tools/list. Read-only; returns per-check pass/warn/fail + a fix hint. Anonymous calls report
 // auth=fail rather than 401 so the tool can explain the problem. POST /me/connection-doctor
 func (s *Server) handleConnectionDoctor(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -51,11 +53,12 @@ func (s *Server) handleConnectionDoctor(w http.ResponseWriter, r *http.Request) 
 	// doctor`) → full live checks; or with a browser JWT session → diagnose against the user's
 	// issued keys (we can't replay /v1 or /mcp as a key whose secret we don't hold).
 	var (
-		scopes        []string
-		allowedModels []string
-		apiKeyID      string
-		liveReplay    bool
-		authMode      string
+		scopes              []string
+		allowedModels       []string
+		apiKeyID            string
+		liveReplay          bool
+		authMode            string
+		keyInspectionFailed bool
 	)
 	keyID, authCtx, ok := s.authenticateProxyContext(r)
 	if ok && authCtx != nil {
@@ -63,8 +66,13 @@ func (s *Server) handleConnectionDoctor(w http.ResponseWriter, r *http.Request) 
 		add(doctorCheck{"authorization", "pass", "Proxy API Key 인증 성공.", ""})
 	} else if claims, jok := s.currentAccessClaims(r); jok && strings.TrimSpace(claims.Subject) != "" {
 		authMode = "jwt"
-		rep, n, found := s.newestActiveUserKey(r, claims.Subject)
-		if !found {
+		rep, n, found, keyErr := s.newestActiveUserKey(r, claims.Subject)
+		if keyErr != nil {
+			keyInspectionFailed = true
+			scopes = claims.Scopes
+			add(doctorCheck{"authorization", "pass", "브라우저 로그인 세션을 확인했습니다.", ""})
+			add(doctorCheck{"issued_keys", "fail", "발급된 키 목록을 확인하지 못했습니다.", "잠시 후 다시 진단하거나 관리자에게 확인을 요청하세요."})
+		} else if !found {
 			scopes = claims.Scopes
 			add(doctorCheck{"authorization", "warn", "브라우저 세션(JWT)으로 로그인됨. 발급된 활성 API Key가 없습니다.", "'내 키'에서 키를 발급한 뒤 개발도구에 Authorization: Bearer 로 설정하세요."})
 		} else {
@@ -79,7 +87,9 @@ func (s *Server) handleConnectionDoctor(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Scope.
-	if len(scopes) == 0 {
+	if keyInspectionFailed {
+		add(doctorCheck{"scope", "skip", "발급 키 조회 실패로 키 권한을 확인하지 못했습니다.", "키 목록을 조회한 뒤 다시 진단하세요."})
+	} else if len(scopes) == 0 {
 		add(doctorCheck{"scope", "warn", "부여된 scope가 없습니다.", "필요한 scope(mcp:use 등)를 키/역할에 부여하세요."})
 	} else if isMCP && !hasScope(scopes, "mcp:use") {
 		add(doctorCheck{"scope", "warn", "MCP 사용에 mcp:use scope가 권장됩니다.", "키에 mcp:use scope를 추가하세요."})
@@ -88,20 +98,26 @@ func (s *Server) handleConnectionDoctor(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Model allowlist.
-	if len(allowedModels) > 0 {
+	if keyInspectionFailed {
+		add(doctorCheck{"model_allowlist", "skip", "발급 키의 모델 허용 범위를 확인하지 못했습니다.", "키 목록을 조회한 뒤 다시 진단하세요."})
+	} else if len(allowedModels) > 0 {
 		add(doctorCheck{"model_allowlist", "pass", "허용 모델: " + strings.Join(allowedModels, ", "), ""})
 	} else {
 		add(doctorCheck{"model_allowlist", "pass", "모델 제한 없음(deny 목록만 적용).", ""})
 	}
 
 	// Quota (needs a resolved key).
-	if apiKeyID != "" {
+	if apiKeyID == "" {
+		add(doctorCheck{"quota", "skip", "진단할 활성 키가 없어 키별 사용 한도를 확인하지 못했습니다.", "활성 키를 확인한 뒤 다시 진단하세요."})
+	} else {
 		if dec, err := s.checkQuotas(r.Context(), apiKeyID, "", nil); err == nil {
 			if dec.Allowed {
 				add(doctorCheck{"quota", "pass", "한도 내 사용 중(사용 " + ftoa(dec.CostKRW) + " KRW).", ""})
 			} else {
 				add(doctorCheck{"quota", "fail", "한도 초과: " + dec.Reason, "관리자에게 한도 상향을 요청하거나 사용량을 줄이세요."})
 			}
+		} else {
+			add(doctorCheck{"quota", "fail", "사용 한도를 확인하지 못했습니다.", "잠시 후 다시 진단하거나 관리자에게 확인을 요청하세요."})
 		}
 	}
 
@@ -126,24 +142,31 @@ func (s *Server) handleConnectionDoctor(w http.ResponseWriter, r *http.Request) 
 
 // newestActiveUserKey returns the caller's most recently created active (non-revoked) API key,
 // the active-key count, and whether any was found. Used by the doctor in JWT/browser mode.
-func (s *Server) newestActiveUserKey(r *http.Request, userID string) (store.APIKeyPublic, int, bool) {
+func (s *Server) newestActiveUserKey(r *http.Request, userID string) (store.APIKeyPublic, int, bool, error) {
 	all, err := s.db.ListAPIKeys(r.Context())
 	if err != nil {
-		return store.APIKeyPublic{}, 0, false
+		return store.APIKeyPublic{}, 0, false, err
 	}
 	var best store.APIKeyPublic
 	count := 0
 	found := false
+	now := time.Now().UTC()
 	for _, k := range all {
 		if k.UserID != userID || k.Status != "active" || k.RevokedAt != "" {
 			continue
+		}
+		if k.ExpiresAt != "" {
+			expiry, err := time.Parse(time.RFC3339Nano, k.ExpiresAt)
+			if err != nil || !expiry.After(now) {
+				continue
+			}
 		}
 		count++
 		if !found || k.CreatedAt > best.CreatedAt {
 			best, found = k, true
 		}
 	}
-	return best, count, found
+	return best, count, found, nil
 }
 
 // doctorProbe replays an in-process request to check an endpoint is reachable under the caller's auth.

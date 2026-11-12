@@ -245,14 +245,27 @@ func (s *SQLStore) ListActiveAuthSessionsForUser(ctx context.Context, userID str
 // a row was affected), so users can't revoke other people's sessions.
 func (s *SQLStore) RevokeAuthSessionOwned(ctx context.Context, sessionID, userID string) (bool, error) {
 	now := formatTime(time.Now().UTC())
-	res, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL`), now, sessionID, userID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
-	n, _ := res.RowsAffected()
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL`), now, sessionID, userID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
 	if n > 0 {
 		// Also revoke refresh tokens bound to that session.
-		_, _ = s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`), now, sessionID)
+		if _, err := tx.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`), now, sessionID); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
 	}
 	return n > 0, nil
 }
@@ -261,12 +274,25 @@ func (s *SQLStore) RevokeAuthSessionOwned(ctx context.Context, sessionID, userID
 // ("log out everywhere else"). Returns the number of sessions revoked.
 func (s *SQLStore) RevokeOtherAuthSessionsForUser(ctx context.Context, userID, keepSessionID string) (int, error) {
 	now := formatTime(time.Now().UTC())
-	res, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND id <> ? AND revoked_at IS NULL`), now, userID, keepSessionID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
-	_, _ = s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND session_id <> ? AND revoked_at IS NULL`), now, userID, keepSessionID)
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND id <> ? AND revoked_at IS NULL`), now, userID, keepSessionID)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND session_id <> ? AND revoked_at IS NULL`), now, userID, keepSessionID); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	return int(n), nil
 }
 

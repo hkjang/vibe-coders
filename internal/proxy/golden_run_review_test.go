@@ -19,7 +19,7 @@ type goldenReviewedFixture struct {
 	reader string
 	mu     sync.Mutex
 	bodies []map[string]any
-	onCall func()
+	onCall func(context.Context)
 }
 
 func newGoldenReviewedFixture(t *testing.T) *goldenReviewedFixture {
@@ -34,7 +34,7 @@ func newGoldenReviewedFixture(t *testing.T) *goldenReviewedFixture {
 		f.bodies = append(f.bodies, body)
 		f.mu.Unlock()
 		if f.onCall != nil {
-			f.onCall()
+			f.onCall(r.Context())
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"public answer"}}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
@@ -179,7 +179,7 @@ func TestGoldenReviewedWorkflowUsesReviewedSnapshotAndOutputLimit(t *testing.T) 
 	f := newGoldenReviewedFixture(t)
 	revs := f.revisions(t, true)
 	var once sync.Once
-	f.onCall = func() {
+	f.onCall = func(context.Context) {
 		once.Do(func() {
 			if err := f.db.UpsertGoldenWorkflow(context.Background(), store.GoldenWorkflow{ID: "gwf_public", Name: "later edit", Steps: []store.GoldenWorkflowStep{{Prompt: "later prompt"}}}); err != nil {
 				t.Error(err)
@@ -216,7 +216,10 @@ func TestGoldenReviewedCancellationStopsRemainingCallsAndMarksIncomplete(t *test
 	revs := f.revisions(t, true)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	f.onCall = cancel
+	f.onCall = func(upstream context.Context) {
+		cancel()
+		<-upstream.Done()
+	}
 	body := goldenRunBody(t, map[string]any{"id": "gwf_public", "models": []string{"public-model-a", "public-model-b"}, "min_pass_rate": 0, "review": goldenRunReview{Definitions: revs, MaxCalls: 4, MaxOutputTokens: 128}})
 	r := httptest.NewRequest(http.MethodPost, "/admin/golden-workflows/run?fail_on_regression=1", strings.NewReader(body)).WithContext(ctx)
 	r.Header.Set("Authorization", "Bearer "+f.adminToken)
@@ -300,7 +303,13 @@ func TestGoldenReviewedPromptCancellationReportsUnstoredResult(t *testing.T) {
 	revs := f.revisions(t, false)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	f.onCall = cancel
+	// Wait for transport cancellation before the fixture writes a success body.
+	// Otherwise a fully read response can legitimately win the cancellation race
+	// and produce no execution error, despite stopping further calls/persistence.
+	f.onCall = func(upstream context.Context) {
+		cancel()
+		<-upstream.Done()
+	}
 	body := goldenRunBody(t, map[string]any{"models": []string{"public-model"}, "review": goldenRunReview{Definitions: revs, MaxCalls: 2, MaxOutputTokens: 128}})
 	r := httptest.NewRequest(http.MethodPost, "/admin/golden-prompts/run", strings.NewReader(body)).WithContext(ctx)
 	r.Header.Set("Authorization", "Bearer "+f.adminToken)

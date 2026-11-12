@@ -206,7 +206,13 @@ it("읽기 전용 전환은 초안을 유지하되 전송을 막는다", async (
 it("읽기 전용에서는 개인 키·세션·연결 진단 변경 버튼이 비활성화된다", async () => {
   runtime.readOnly = true;
   const view = setup({
-    "GET /me/sessions": () => ({ sessions: [{ id: "current", current: true }, { id: "other" }] }),
+    "GET /me/sessions": () => ({
+      current_session_id: "current",
+      sessions: [
+        { id: "current", current: true },
+        { id: "other", current: false },
+      ],
+    }),
   });
   await screen.findByRole("button", { name: "회전" });
   for (const name of ["키 발급", "권한 수정", "회전", "폐기", "다른 세션 모두 종료", "진단 실행"])
@@ -225,7 +231,13 @@ it.each([
 ])("%s 확인 중 읽기 전용이 되면 제출을 차단한다", async (trigger, title, submit, write) => {
   const user = userEvent.setup();
   const view = setup({
-    "GET /me/sessions": () => ({ sessions: [{ id: "current", current: true }, { id: "other" }] }),
+    "GET /me/sessions": () => ({
+      current_session_id: "current",
+      sessions: [
+        { id: "current", current: true },
+        { id: "other", current: false },
+      ],
+    }),
   });
   await screen.findByRole("button", { name: "회전" });
   const button = screen

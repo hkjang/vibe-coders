@@ -505,32 +505,14 @@ export {
 } from "./me-console.schemas";
 export type { MeDashboard, MeAction, MeRequest, MeSkill, MeRecommendation } from "./me-console.schemas";
 
-export const meSessionsSchema = looseObject({
-  current_session_id: text,
-  sessions: list({
-    id: z.string(),
-    ip: text,
-    user_agent: text,
-    created_at: text,
-    expires_at: text,
-    sso_linked: orDefault(z.boolean(), false),
-    current: orDefault(z.boolean(), false),
-  }),
-});
-export type MeSession = z.output<typeof meSessionsSchema>["sessions"][number];
-
-export const meSessionRevokedSchema = looseObject({ status: text, session_id: text });
-export const meSessionsRevokedSchema = looseObject({ status: text, revoked_count: count });
-
-export const meConnectionDoctorSchema = looseObject({
-  client: text,
-  overall: text,
-  base_url: text,
-  mcp_url: text,
-  auth_mode: text,
-  note: text,
-  checks: list({ name: text, status: text, detail: text, fix: text }),
-});
+export {
+  meSessionsSchema,
+  meSessionRevokedSchema,
+  meSessionsRevokedSchema,
+  meConnectionDoctorSchema,
+  meOnboardingPackSchema,
+  type MeSession,
+} from "./me-access.schemas";
 
 export const meKeysSchema = looseObject({
   api_keys: orDefault(z.array(apiKeyPublicSchema), []),
@@ -550,21 +532,6 @@ export const meKeyCreatedSchema = looseObject({
     status: text,
   }).nullish(),
   secret: text,
-});
-
-export const meOnboardingPackSchema = looseObject({
-  client: text,
-  base_url: text,
-  mcp_url: text,
-  available_models: stringList,
-  recommended_models: stringList,
-  scopes: stringList,
-  budget_limit_krw: count,
-  mcp_config: z.unknown(),
-  sample_curl: text,
-  note: text,
-  config_label: text,
-  config: z.unknown(),
 });
 
 /* ------------------------------------------------------------------ /team */

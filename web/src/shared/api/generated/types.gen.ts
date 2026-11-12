@@ -1005,6 +1005,78 @@ export type McpTopologyResponse = {
     nodes: Array<McpTopologyNode>;
 };
 
+export type MeAccessDoctor = {
+    /**
+     * Absent for anonymous authentication failure.
+     */
+    auth_mode?: 'jwt' | 'proxy_key';
+    base_url: string;
+    checks: Array<{
+        detail: string;
+        fix?: string;
+        name: string;
+        status: 'pass' | 'warn' | 'fail' | 'skip';
+    }>;
+    client: string;
+    mcp_url: string;
+    note?: string;
+    overall: 'pass' | 'warn' | 'fail';
+};
+
+export type MeAccessDoctorInput = {
+    /**
+     * Trimmed and lowercased; recognized MCP clients also request MCP probes when a proxy key is present.
+     */
+    client?: string;
+};
+
+export type MeAccessOnboarding = {
+    available_models: Array<string>;
+    base_url: string;
+    budget_limit_krw: number;
+    client: string;
+    config: string;
+    config_label: string;
+    mcp_config: {
+        mcpServers: {
+            'vibe-gateway': {
+                headers: {
+                    Authorization: 'Bearer <YOUR_API_KEY>';
+                };
+                url: string;
+            };
+        };
+    };
+    mcp_url: string;
+    note: string;
+    recommended_models: Array<string>;
+    sample_curl: string;
+    scopes: Array<string> | null;
+};
+
+export type MeAccessSessionRevoked = {
+    session_id: string;
+    status: 'revoked';
+};
+
+export type MeAccessSessions = {
+    current_session_id: string;
+    sessions: Array<{
+        created_at: string;
+        current: boolean;
+        expires_at: string;
+        id: string;
+        ip: string;
+        sso_linked: boolean;
+        user_agent: string;
+    }>;
+};
+
+export type MeAccessSessionsRevoked = {
+    revoked_count: number;
+    status: 'revoked';
+};
+
 export type MeConsoleActions = {
     actions?: Array<{
         button_href?: string;
@@ -13781,18 +13853,33 @@ export type GetMeAppRunsResponses = {
 };
 
 export type PostMeConnectionDoctorData = {
-    body?: never;
+    body?: MeAccessDoctorInput;
     path?: never;
     query?: never;
     url: '/me/connection-doctor';
 };
 
+export type PostMeConnectionDoctorErrors = {
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostMeConnectionDoctorError = PostMeConnectionDoctorErrors[keyof PostMeConnectionDoctorErrors];
+
 export type PostMeConnectionDoctorResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeAccessDoctor;
 };
+
+export type PostMeConnectionDoctorResponse = PostMeConnectionDoctorResponses[keyof PostMeConnectionDoctorResponses];
 
 export type GetMeDashboardData = {
     body?: never;
@@ -14076,16 +14163,40 @@ export type GetMeNotificationsResponse = GetMeNotificationsResponses[keyof GetMe
 export type GetMeOnboardingPackData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Trimmed and lowercased; supports openai-sdk, cursor, roo, cline, claude, claude-desktop-mcp and mcp. Unknown clients retain generic connection metadata.
+         */
+        client?: string;
+    };
     url: '/me/onboarding-pack';
 };
+
+export type GetMeOnboardingPackErrors = {
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeOnboardingPackError = GetMeOnboardingPackErrors[keyof GetMeOnboardingPackErrors];
 
 export type GetMeOnboardingPackResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeAccessOnboarding;
 };
+
+export type GetMeOnboardingPackResponse = GetMeOnboardingPackResponses[keyof GetMeOnboardingPackResponses];
 
 export type GetMeOverlayData = {
     body?: never;
@@ -14484,12 +14595,35 @@ export type GetMeSessionsData = {
     url: '/me/sessions';
 };
 
+export type GetMeSessionsErrors = {
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Session operation failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeSessionsError = GetMeSessionsErrors[keyof GetMeSessionsErrors];
+
 export type GetMeSessionsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeAccessSessions;
 };
+
+export type GetMeSessionsResponse = GetMeSessionsResponses[keyof GetMeSessionsResponses];
 
 export type PostMeSessionsRevokeOthersData = {
     body?: never;
@@ -14498,12 +14632,35 @@ export type PostMeSessionsRevokeOthersData = {
     url: '/me/sessions/revoke-others';
 };
 
+export type PostMeSessionsRevokeOthersErrors = {
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Session operation failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostMeSessionsRevokeOthersError = PostMeSessionsRevokeOthersErrors[keyof PostMeSessionsRevokeOthersErrors];
+
 export type PostMeSessionsRevokeOthersResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeAccessSessionsRevoked;
 };
+
+export type PostMeSessionsRevokeOthersResponse = PostMeSessionsRevokeOthersResponses[keyof PostMeSessionsRevokeOthersResponses];
 
 export type DeleteMeSessionsIdData = {
     body?: never;
@@ -14514,12 +14671,43 @@ export type DeleteMeSessionsIdData = {
     url: '/me/sessions/{id}';
 };
 
+export type DeleteMeSessionsIdErrors = {
+    /**
+     * Invalid session identifier
+     */
+    400: AppError;
+    /**
+     * Caller not identified
+     */
+    401: AppError;
+    /**
+     * Session not found, already revoked or owned by another user
+     */
+    404: AppError;
+    /**
+     * Unsupported method
+     */
+    405: AppError;
+    /**
+     * Session operation failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteMeSessionsIdError = DeleteMeSessionsIdErrors[keyof DeleteMeSessionsIdErrors];
+
 export type DeleteMeSessionsIdResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: MeAccessSessionRevoked;
 };
+
+export type DeleteMeSessionsIdResponse = DeleteMeSessionsIdResponses[keyof DeleteMeSessionsIdResponses];
 
 export type GetMeSkillsData = {
     body?: never;

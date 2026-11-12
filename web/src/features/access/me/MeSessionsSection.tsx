@@ -1,151 +1,204 @@
 import { useRef, useState } from "react";
-import type { MeSession } from "@/shared/api/domains/access.schemas";
-import { meKeys, type useMeSessionsQuery } from "./use-me-queries";
-import { apiClient } from "@/shared/api/client";
-import { endpoints } from "@/shared/api/endpoints";
-import { withPathParams } from "@/shared/api/endpoint-factory";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
-import { QueryNotice } from "@/features/access/access-ui";
+import { useAuth } from "@/app/auth/AuthProvider";
+import type { MeSession } from "@/shared/api/domains/me-access.schemas";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
-import { EmptyState } from "@/shared/components/ui/EmptyState";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
+import { UpdatedAt } from "@/features/access/access-ui";
+import type { useMeSessionsQuery } from "./use-me-queries";
+import { MeTable, type MeColumn } from "./MeTable";
+import { MeQueryContent, MeOperationNotice } from "./me-console-ui";
+import { meError, safeMeMessage } from "./me-console-model";
+import {
+  currentSessionKnown,
+  requireSessionTarget,
+  sessionReview,
+  type PersonalSessions,
+} from "./me-access-model";
+import { useMeRevokeSession, useMeRevokeOtherSessions } from "./me-session-actions";
 
-const routeId = "me.home";
 interface Props {
   sessions: ReturnType<typeof useMeSessionsQuery>;
   canWrite: boolean;
   ownsResult: () => boolean;
   assertCurrent: () => void;
 }
-export function MeSessionsSection({
-  sessions,
-  canWrite,
-  ownsResult,
-  assertCurrent,
-}: Props): React.JSX.Element {
-  const sessionRows = sessions.data?.sessions ?? [];
-  const [revokingSession, setRevokingSession] = useState<MeSession | undefined>();
-  const [revokingOthers, setRevokingOthers] = useState(false);
-  const rowTrigger = useRef<HTMLElement>(null);
-  const othersTrigger = useRef<HTMLButtonElement>(null);
-  const revokeSession = useMutationFeedback({
-    ownsResult,
-    mutate: (id: string) => {
-      assertCurrent();
-      return apiClient.request(withPathParams(endpoints.domains.access.me.revokeSession, { id }), {
-        routeId,
-        retryUnauthorized: false,
-      });
+type Review = { source: PersonalSessions; row?: MeSession };
+export function MeSessionsSection({ sessions, canWrite, ownsResult, assertCurrent }: Props) {
+  const { credentialPrefixes } = useAuth();
+  const revoke = useMeRevokeSession(),
+    others = useMeRevokeOtherSessions();
+  const [review, setReview] = useState<Review>();
+  const [changed, setChanged] = useState(false);
+  const trigger = useRef<HTMLElement>(null);
+  const data = sessions.data;
+  const rows = data?.sessions ?? [];
+  const known = currentSessionKnown(data) && rows.every((row) => row.current !== undefined);
+  const disabled =
+    !canWrite || !known || sessions.isFetching || sessions.isError || revoke.disabled || others.disabled;
+  const remaining = rows.filter((row) => !row.current).length;
+  const columns: readonly MeColumn<MeSession>[] = [
+    { id: "ip", header: "접속 IP", value: (row) => row.ip || "미확인" },
+    { id: "agent", header: "기기·브라우저", value: (row) => row.user_agent || "미확인" },
+    {
+      id: "current",
+      header: "사용 상태",
+      value: (row) => (row.current === undefined ? "미확인" : row.current ? "현재 세션" : "다른 세션"),
+      cell: (row) => (
+        <Badge tone={row.current ? "success" : "muted"}>
+          {row.current === undefined ? "미확인" : row.current ? "현재 세션" : "다른 세션"}
+        </Badge>
+      ),
     },
-    invalidates: [meKeys.sessions],
-    successMessage: "세션을 종료했습니다.",
-  });
-  const revokeOthers = useMutationFeedback({
-    ownsResult,
-    mutate: () => {
-      assertCurrent();
-      return apiClient.request(endpoints.domains.access.me.revokeOtherSessions, {
-        routeId,
-        retryUnauthorized: false,
-      });
+    {
+      id: "sso",
+      header: "통합 로그인",
+      value: (row) => (row.sso_linked === undefined ? "미확인" : row.sso_linked ? "연결됨" : "연결 안 됨"),
     },
-    invalidates: [meKeys.sessions],
-    successMessage: (result) => `다른 세션 ${formatNumber(result.revoked_count)}개를 종료했습니다.`,
-  });
-
+    {
+      id: "created",
+      header: "로그인 시각",
+      value: (row) => row.created_at,
+      cell: (row) => formatDateTime(row.created_at),
+    },
+    {
+      id: "expires",
+      header: "만료 시각",
+      value: (row) => row.expires_at,
+      cell: (row) => formatDateTime(row.expires_at),
+    },
+    { id: "id", header: "세션 ID", value: (row) => row.id },
+    {
+      id: "actions",
+      header: "작업",
+      cell: (row) => (
+        <Button
+          size="small"
+          variant="danger"
+          disabled={disabled || row.current !== false}
+          title={row.current ? "현재 세션은 사용자 메뉴에서 로그아웃하세요." : undefined}
+          onClick={(event) => {
+            if (!data) return;
+            trigger.current = event.currentTarget;
+            setChanged(false);
+            setReview({ source: data, row });
+          }}
+        >
+          종료
+        </Button>
+      ),
+    },
+  ];
+  const confirm = async () => {
+    assertCurrent();
+    if (!review || !canWrite || !ownsResult()) throw meError("changed");
+    const fresh = await sessions.refetch({ throwOnError: true });
+    assertCurrent();
+    if (
+      !fresh.data ||
+      review.source.current_session_id !== fresh.data.current_session_id ||
+      (!review.row && sessionReview(fresh.data) !== sessionReview(review.source))
+    ) {
+      setReview(undefined);
+      setChanged(true);
+      return;
+    }
+    if (review.row) {
+      requireSessionTarget(fresh.data, review.row.id, credentialPrefixes);
+      await revoke.execute({ id: review.row.id, current: fresh.data.current_session_id });
+    } else {
+      if (!currentSessionKnown(fresh.data) || fresh.data.sessions.some((row) => row.current === undefined))
+        throw meError("changed");
+      await others.execute({ current: fresh.data.current_session_id });
+    }
+    setReview(undefined);
+  };
   return (
     <>
       <SectionCard
         title="로그인 세션"
-        description="현재 로그인된 기기와 세션입니다. 낯선 세션은 즉시 종료하세요."
+        description="활성 로그인 세션을 확인하고 다른 기기의 세션을 종료합니다. 현재 세션은 유지합니다."
         actions={
           <Button
-            ref={othersTrigger}
             variant="secondary"
-            disabled={!canWrite || sessionRows.length <= 1}
-            onClick={() => setRevokingOthers(true)}
+            disabled={disabled || remaining === 0}
+            onClick={(event) => {
+              if (!data) return;
+              trigger.current = event.currentTarget;
+              setChanged(false);
+              setReview({ source: data });
+            }}
           >
             다른 세션 모두 종료
           </Button>
         }
       >
-        {sessions.isError ? (
-          <QueryNotice
-            error={sessions.error}
-            hasData={Boolean(sessions.data)}
-            label="세션 목록"
-            onRetry={() => void sessions.refetch()}
-          />
+        <MeOperationNotice
+          pending={revoke.pending || others.pending}
+          uncertain={revoke.uncertain || others.uncertain}
+        />
+        {changed ? (
+          <InlineNotice tone="warning">
+            세션 목록이 변경됐습니다. 최신 목록에서 종료 대상을 다시 확인하세요.
+          </InlineNotice>
         ) : null}
-        {sessionRows.length === 0 ? (
-          <EmptyState title="표시할 세션이 없습니다." description="로그인하면 세션이 기록됩니다." />
-        ) : (
-          <ul className="access-list">
-            {sessionRows.map((row) => (
-              <li key={row.id}>
-                <span className="access-list-title">
-                  {row.ip || "IP 미상"}
-                  {row.current ? <Badge tone="success">현재 세션</Badge> : null}
-                  {row.sso_linked ? <Badge tone="info">SSO</Badge> : null}
-                </span>
-                <span className="access-list-detail truncate">{row.user_agent}</span>
-                <span className="access-inline-actions">
-                  <span className="access-list-detail">
-                    로그인 {formatDateTime(row.created_at)} · 만료 {formatDateTime(row.expires_at)}
-                  </span>
-                  <Button
-                    size="small"
-                    variant="danger"
-                    disabled={!canWrite || row.current}
-                    title={row.current ? "현재 세션은 종료할 수 없습니다." : undefined}
-                    onClick={(event) => {
-                      rowTrigger.current = event.currentTarget;
-                      setRevokingSession(row);
-                    }}
-                  >
-                    종료
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <MeQueryContent query={sessions} label="로그인 세션">
+          {!known && rows.length > 0 ? (
+            <InlineNotice tone="warning">
+              현재 세션을 확인하지 못해 종료 작업을 잠갔습니다. 다시 로그인하거나 목록을 새로 조회하세요.
+            </InlineNotice>
+          ) : null}
+          <MeTable
+            id="login_sessions"
+            caption="로그인 세션"
+            rows={rows}
+            columns={columns}
+            getRowId={(row) => row.id}
+            loading={sessions.isFetching}
+            description="조회한 활성 세션 목록에서 검색·정렬·페이지 이동과 CSV 저장을 제공합니다."
+          />
+          <UpdatedAt at={sessions.dataUpdatedAt} />
+        </MeQueryContent>
       </SectionCard>
-
       <ConfirmDialog
-        open={revokingSession !== undefined}
+        open={Boolean(review)}
         onOpenChange={(open) => {
-          if (!open) setRevokingSession(undefined);
+          if (!open) setReview(undefined);
         }}
-        returnFocusRef={rowTrigger}
+        returnFocusRef={trigger}
         tone="danger"
-        confirmDisabled={!canWrite}
-        title="세션 종료"
-        description={`${revokingSession?.ip ?? ""} 세션을 종료합니다. 해당 기기는 다시 로그인해야 합니다.`}
-        confirmLabel="종료"
-        onConfirm={async () => {
-          if (revokingSession) await revokeSession.mutateAsync(revokingSession.id);
-          setRevokingSession(undefined);
-        }}
-      />
-
-      <ConfirmDialog
-        open={revokingOthers}
-        onOpenChange={setRevokingOthers}
-        returnFocusRef={othersTrigger}
-        tone="danger"
-        confirmDisabled={!canWrite}
-        title="다른 세션 모두 종료"
-        description="현재 세션을 제외한 모든 로그인 세션을 종료합니다."
-        confirmLabel="모두 종료"
-        onConfirm={async () => {
-          await revokeOthers.mutateAsync(undefined);
-          setRevokingOthers(false);
-        }}
-      />
+        title={review?.row ? "세션 종료" : "다른 세션 모두 종료"}
+        confirmLabel={review?.row ? "종료" : "모두 종료"}
+        confirmDisabled={!canWrite || !known || revoke.disabled || others.disabled}
+        errorFormatter={safeMeMessage}
+        scrollBody
+        scrollBodyLabel="종료할 세션 상세"
+        description={
+          review?.row
+            ? "선택한 기기는 다시 로그인해야 합니다. API 키는 폐기하지 않습니다."
+            : "현재 세션을 제외한 모든 로그인 세션을 종료합니다. 확인 직후 새로 로그인한 세션도 종료될 수 있습니다."
+        }
+        onConfirm={confirm}
+      >
+        {review?.row ? (
+          <dl className="access-stack">
+            <dt>접속 IP</dt>
+            <dd>{review.row.ip || "미확인"}</dd>
+            <dt>기기·브라우저</dt>
+            <dd>{review.row.user_agent || "미확인"}</dd>
+            <dt>세션 ID</dt>
+            <dd>{review.row.id}</dd>
+          </dl>
+        ) : review ? (
+          <p>
+            확인한 활성 세션 {formatNumber(review.source.sessions.filter((row) => !row.current).length)}개 ·
+            현재 세션 {review.source.current_session_id} 유지
+          </p>
+        ) : null}
+      </ConfirmDialog>
     </>
   );
 }

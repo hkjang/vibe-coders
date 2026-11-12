@@ -43,7 +43,7 @@ export function OwnedMeKeysPanel({ owner }: { owner: string }): React.JSX.Elemen
   const keys = useMeKeysQuery(true, owner);
   const keyRows = keys.data?.api_keys ?? emptyKeys;
   const now = useKeyExpiryClock(keyRows);
-  const sessions = useMeSessionsQuery(true, owner);
+  const sessions = useMeSessionsQuery(true);
   const catalogKey = [...meKeys.keys, owner];
   const access = useFeatureMutationAccess([routeId], true);
   const mounted = useRef(false);
@@ -304,12 +304,7 @@ export function OwnedMeKeysPanel({ owner }: { owner: string }): React.JSX.Elemen
         assertCurrent={assertCurrent}
       />
 
-      <MeConnectionTools
-        owner={owner}
-        canWrite={access.allowed}
-        ownsResult={ownsResult}
-        assertCurrent={assertCurrent}
-      />
+      <MeConnectionTools canWrite={access.allowed} ownsResult={ownsResult} assertCurrent={assertCurrent} />
 
       {createOpen ? (
         <MeKeyCreateDialog

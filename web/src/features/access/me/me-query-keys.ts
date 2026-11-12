@@ -8,6 +8,7 @@ export const meTableIds = [
   "reports",
   "templates",
   "products",
+  "login_sessions",
 ] as const;
 export type MeTableId = (typeof meTableIds)[number];
 export const meQueryKeys = [
@@ -17,5 +18,6 @@ export const meQueryKeys = [
   "limit",
   "request_status",
   "skill_kind",
+  "connection_client",
   ...meTableIds.flatMap((id) => ["q", "page", "size", "sort", "direction"].map((key) => id + "_" + key)),
 ];
