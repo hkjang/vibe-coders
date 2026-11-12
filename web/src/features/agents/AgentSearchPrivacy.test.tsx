@@ -1,3 +1,4 @@
+import { workflowReadFixture } from "@/test/workflow-fixtures";
 import { fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppPage } from "./apps/AppPage";
@@ -42,7 +43,7 @@ describe.each(screens)("$id 검색 개인정보 경계", ({ id, label, page: Pag
   function setup() {
     mockApi({
       "GET /admin/apps": () => ({ apps: [] }),
-      "GET /admin/workflows": () => ({ workflows: [] }),
+      "GET /admin/workflows": ({ query }) => workflowReadFixture([], query),
       "GET /admin/skills": () => ({ skills: [] }),
       "GET /admin/skills/stats": () => ({ stats: [] }),
     });
@@ -74,7 +75,9 @@ describe.each(screens)("$id 검색 개인정보 경계", ({ id, label, page: Pag
     }
     fireEvent.change(input, { target: { value: "분기 보고" } });
     fireEvent.submit(form);
-    expect(runtime.updates).toHaveBeenCalledWith({ q: "분기 보고" });
+    expect(runtime.updates).toHaveBeenCalledWith(
+      id === "workflows" ? { q: "분기 보고", page: undefined } : { q: "분기 보고" },
+    );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

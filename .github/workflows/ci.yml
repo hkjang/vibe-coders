@@ -248,6 +248,8 @@ jobs:
         run: go test -race ./internal/store ./internal/proxy -run '^Test(AuthAccountPage|AdminAccountPage)' -count=1 -timeout=5m
       - name: Verify PostgreSQL registered team pagination, exact scope and legacy parity
         run: go test -race ./internal/store ./internal/proxy -run '^Test(AuthTeamPage|AdminTeamPage)' -count=1 -timeout=5m
+      - name: Verify PostgreSQL workflow pagination, independent detail and existing authorization
+        run: go test -race ./internal/store ./internal/proxy -run '^Test(Workflow(Page|Roundtrip)|AdminWorkflowPage)' -count=1 -timeout=5m
       - name: Verify PostgreSQL UI telemetry concurrency and retention
         run: go test -race ./internal/store -run '^TestAppUITelemetry' -count=1 -timeout=5m
       - name: Verify PostgreSQL startup lock waiters and concurrent migrations
@@ -328,7 +330,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.88
+      SOURCE_SBOM_VERSION: v0.86.89
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

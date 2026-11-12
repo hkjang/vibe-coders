@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -27,6 +28,12 @@ func (s *Server) handleAdminWorkflows(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	switch r.Method {
 	case http.MethodGet:
+		values, queryErr := url.ParseQuery(r.URL.RawQuery)
+		views, present := values["view"]
+		if queryErr != nil || (present && (len(views) != 1 || views[0] != "")) {
+			s.handleWorkflowReadView(w, r, values.Get("view"))
+			return
+		}
 		wfs, err := s.db.ListWorkflows(ctx)
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "list_failed")

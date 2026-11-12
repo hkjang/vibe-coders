@@ -90,6 +90,7 @@ export type WorkflowVersion = NonNullable<z.output<typeof workflowVersionListSch
 export const workflowRunSchema = looseObject({
   id: z.string(),
   workflow_id: optionalText,
+  workflow_name: optionalText,
   user_id: optionalText,
   team: optionalText,
   status: optionalText,

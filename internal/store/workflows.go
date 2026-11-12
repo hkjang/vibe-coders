@@ -169,18 +169,20 @@ func (s *SQLStore) ListWorkflowVersions(ctx context.Context, workflowID string) 
 
 // WorkflowRun is one execution (or planned execution) of a workflow — safe metadata only.
 type WorkflowRun struct {
-	ID         string  `json:"id"`
-	WorkflowID string  `json:"workflow_id"`
-	UserID     string  `json:"user_id"`
-	Team       string  `json:"team"`
-	Status     string  `json:"status"` // planned | ok | error
-	StepsTotal int     `json:"steps_total"`
-	StepsOK    int     `json:"steps_ok"`
-	LatencyMS  int64   `json:"latency_ms"`
-	CostKRW    float64 `json:"cost_krw"`
-	ErrorClass string  `json:"error_class"`
-	TraceID    string  `json:"trace_id"`
-	CreatedAt  string  `json:"created_at"`
+	ID         string `json:"id"`
+	WorkflowID string `json:"workflow_id"`
+	// Current definition name for bounded personal history; never raw steps.
+	WorkflowName string  `json:"workflow_name,omitempty"`
+	UserID       string  `json:"user_id"`
+	Team         string  `json:"team"`
+	Status       string  `json:"status"` // planned | ok | error
+	StepsTotal   int     `json:"steps_total"`
+	StepsOK      int     `json:"steps_ok"`
+	LatencyMS    int64   `json:"latency_ms"`
+	CostKRW      float64 `json:"cost_krw"`
+	ErrorClass   string  `json:"error_class"`
+	TraceID      string  `json:"trace_id"`
+	CreatedAt    string  `json:"created_at"`
 }
 
 func (s *SQLStore) RecordWorkflowRun(ctx context.Context, run WorkflowRun) error {
@@ -263,14 +265,14 @@ func (s *SQLStore) ListWorkflowRuns(ctx context.Context, userID, workflowID stri
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, trace_id, created_at
-		FROM workflow_runs WHERE user_id = ?`
+	q := `SELECT r.id, r.workflow_id, r.user_id, r.team, r.status, r.steps_total, r.steps_ok, r.latency_ms, r.cost_krw, r.error_class, r.trace_id, r.created_at, COALESCE(w.name, '')
+		FROM workflow_runs r LEFT JOIN workflows w ON w.id = r.workflow_id WHERE r.user_id = ?`
 	args := []any{userID}
 	if workflowID != "" {
-		q += ` AND workflow_id = ?`
+		q += ` AND r.workflow_id = ?`
 		args = append(args, workflowID)
 	}
-	q += ` ORDER BY created_at DESC LIMIT ?`
+	q += ` ORDER BY r.created_at DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, s.bind(q), args...)
 	if err != nil {
@@ -280,7 +282,7 @@ func (s *SQLStore) ListWorkflowRuns(ctx context.Context, userID, workflowID stri
 	out := []WorkflowRun{}
 	for rows.Next() {
 		var run WorkflowRun
-		if err := rows.Scan(&run.ID, &run.WorkflowID, &run.UserID, &run.Team, &run.Status, &run.StepsTotal, &run.StepsOK, &run.LatencyMS, &run.CostKRW, &run.ErrorClass, &run.TraceID, &run.CreatedAt); err != nil {
+		if err := rows.Scan(&run.ID, &run.WorkflowID, &run.UserID, &run.Team, &run.Status, &run.StepsTotal, &run.StepsOK, &run.LatencyMS, &run.CostKRW, &run.ErrorClass, &run.TraceID, &run.CreatedAt, &run.WorkflowName); err != nil {
 			return nil, err
 		}
 		out = append(out, run)

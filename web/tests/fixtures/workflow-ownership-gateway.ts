@@ -1,3 +1,4 @@
+import { workflowReadFixture } from "../../src/test/workflow-fixtures";
 import { expect, test as base, type BrowserContext } from "@playwright/test";
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 
@@ -91,7 +92,8 @@ async function install(context: BrowserContext) {
     if (call === "GET /admin/ui-bootstrap") return json(bootstrap(mode));
     if (call === "GET /health") return json({ status: "ok" });
     if (call === "GET /ready") return json({ status: "ready" });
-    if (call === "GET /admin/workflows") return json({ workflows: [first, second] });
+    if (call === "GET /admin/workflows")
+      return json(workflowReadFixture([first, second], Object.fromEntries(url.searchParams)));
     if (request.method() === "POST" && /^\/admin\/workflows\/wf_(first|second)\/dry-run$/.test(path)) {
       const id = path.split("/")[3];
       simulations.push(id ?? "");

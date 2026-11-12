@@ -8,6 +8,7 @@ import type { Workflow, WorkflowStep } from "@/shared/api/domains/agents.schemas
 import { AppError, isAppError } from "@/shared/api/error";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
+import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -18,6 +19,10 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 interface WorkflowDetailSheetProps {
+  loading?: boolean;
+  detailError?: unknown;
+  invalidAddress?: boolean;
+  onRetry?: () => void;
   canWrite: boolean;
   onDelete: () => void;
   onEdit: () => void;
@@ -76,6 +81,10 @@ function StepTable({ steps }: { steps: readonly WorkflowStep[] }): React.JSX.Ele
 }
 
 export function WorkflowDetailSheet({
+  loading,
+  detailError,
+  invalidAddress,
+  onRetry,
   canWrite,
   onDelete,
   onEdit,
@@ -130,7 +139,20 @@ export function WorkflowDetailSheet({
       size="wide"
       title={workflow?.name ?? "워크플로"}
     >
-      {!workflow ? (
+      {invalidAddress ? (
+        <InlineNotice tone="danger" title="워크플로 상세 주소를 확인하세요.">
+          ID는 하나만 지정할 수 있습니다. 비어 있거나 너무 길거나 보호가 필요한 ID는 상세 조회하지 않습니다.
+        </InlineNotice>
+      ) : loading ? (
+        <LoadingState label="워크플로 정의를 불러오는 중입니다." />
+      ) : detailError ? (
+        <ErrorState
+          message={safeAppErrorMessage(detailError, "워크플로 정의를 불러오지 못했습니다.")}
+          requestId={isAppError(detailError) ? detailError.requestId : undefined}
+          onRetry={onRetry}
+          legacyHref="/admin#/workflows"
+        />
+      ) : !workflow ? (
         <EmptyState title="워크플로를 찾을 수 없습니다." description="목록에서 다시 선택하세요." />
       ) : (
         <div className="agents-detail-stack">

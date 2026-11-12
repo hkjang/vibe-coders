@@ -32,6 +32,7 @@
     "tests/e2e/code-editor-compare.spec.ts",
     "tests/e2e/mcp-contract-review.spec.ts",
     "tests/e2e/mcp-call-review.spec.ts",
+    "tests/e2e/workflow-pagination.spec.ts",
     "tests/fixtures/agent-code-editor.ts",
     "eslint.config.js"
   ]
