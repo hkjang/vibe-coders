@@ -25,6 +25,7 @@ import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import { FormField } from "@/shared/components/form/FormField";
 import { formatNumber } from "@/shared/utils/format";
 
@@ -231,11 +232,13 @@ function SingleChatPanel({ access }: { access: ChatAccess }): React.JSX.Element 
         />
         <FormField label="프롬프트" id={`${fieldPrefix}-prompt`} required>
           {(control) => (
-            <Textarea
+            <CodeEditor
               {...control}
+              label="프롬프트"
+              language="prompt"
               rows={5}
               value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
+              onChange={setPrompt}
             />
           )}
         </FormField>

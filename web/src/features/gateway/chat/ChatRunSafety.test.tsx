@@ -81,7 +81,7 @@ describe("단일 채팅 실제 전송·수신 경계", () => {
     const fetch = vi.fn(async () => stream.response);
     globalThis.fetch = fetch;
     const view = await setup(true);
-    const prompt = screen.getByLabelText(/^프롬프트/u);
+    const prompt = screen.getByRole("textbox", { name: "프롬프트" });
     await view.user.clear(prompt);
     await view.user.type(prompt, "유지할 공개 입력");
     const send = screen.getByRole("button", { name: /Chat 호출|모델 호출/u });
