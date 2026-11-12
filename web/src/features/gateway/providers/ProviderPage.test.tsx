@@ -769,7 +769,7 @@ describe("ProviderPage", () => {
     expect(settingsButton).toBeVisible();
 
     await user.click(settingsButton);
-    const providerColumn = screen.getByRole("checkbox", { name: /공급자/ });
+    const providerColumn = await screen.findByRole("checkbox", { name: /공급자/ });
     const adminColumn = screen.getByRole("checkbox", { name: /관리/ });
     expect(providerColumn).toBeChecked();
     expect(providerColumn).toBeDisabled();
