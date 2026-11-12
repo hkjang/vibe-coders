@@ -149,9 +149,9 @@ test("접힌 사이드바에서도 즐겨찾기 이름과 관리 작업을 사�
   await page.getByRole("button", { name: "사이드바 접기", exact: true }).click();
   const pinned = page
     .getByRole("list", { name: "즐겨찾기" })
-    .getByRole("link", { name: "통합 현황", exact: true });
+    .getByRole("link", { name: "통합 현황 읽기 전용 미리보기", exact: true });
   await expect(pinned).toBeInViewport();
-  await expect(pinned).toHaveAttribute("title", "통합 현황");
+  await expect(pinned).toHaveAttribute("title", "통합 현황 읽기 전용 미리보기");
   await page.getByRole("button", { name: "즐겨찾기 관리" }).click();
   await expect(page.getByRole("dialog", { name: "즐겨찾기 관리" })).toBeVisible();
   await page.getByRole("button", { name: "완료", exact: true }).click();

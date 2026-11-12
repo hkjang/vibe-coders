@@ -5,7 +5,7 @@ import { NavLink } from "react-router";
 
 import { featurePath } from "@/config/migration-registry";
 import { navigationGroups } from "@/config/navigation";
-import { uiLabels } from "@/config/ui-labels";
+import { migrationStatusLabels, uiLabels } from "@/config/ui-labels";
 import { MigrationStatusBadge } from "@/shared/components/page/MigrationStatus";
 import { Button } from "@/shared/components/ui/Button";
 import { usePreferences } from "@/shared/stores/preferences";
@@ -33,7 +33,10 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
     <li key={feature.featureId}>
       <NavLink
         to={featurePath(feature)}
-        title={!mobile && collapsed ? feature.title : undefined}
+        aria-label={`${feature.title} ${migrationStatusLabels[effective.status]}`}
+        title={
+          !mobile && collapsed ? `${feature.title} ${migrationStatusLabels[effective.status]}` : undefined
+        }
         onClick={() => {
           if (mobile) setMobileOpen(false);
         }}
@@ -41,8 +44,10 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
         <span className="nav-icon" aria-hidden="true">
           {feature.title.slice(0, 1)}
         </span>
-        <span className="nav-copy">{feature.title}</span>
-        {effective.status !== "stable" ? <MigrationStatusBadge status={effective.status} /> : null}
+        <span className="nav-copy sidebar-item-copy">
+          <span className="sidebar-item-title">{feature.title}</span>
+          {effective.status !== "stable" ? <MigrationStatusBadge status={effective.status} /> : null}
+        </span>
       </NavLink>
     </li>
   );
@@ -154,7 +159,7 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
               openingFavorites.current = false;
             }}
           >
-            <aside className="app-sidebar app-sidebar-mobile">{content(true)}</aside>
+            <div className="app-sidebar app-sidebar-mobile">{content(true)}</div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

@@ -113,6 +113,7 @@ export async function installIpUsage(page: Page, requestAccess = true) {
     return json({ error: { message: "unexpected fixture request" } }, 500);
   });
   return {
+    bootstrap,
     state,
     reads,
     check: () => {
