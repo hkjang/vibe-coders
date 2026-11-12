@@ -1,4 +1,5 @@
 import { useEffect, useState, type RefObject } from "react";
+import { Controller } from "react-hook-form";
 
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
@@ -17,6 +18,7 @@ import {
 } from "@/features/agents/workflows/workflow-form";
 import { WorkflowStepsEditor } from "@/features/agents/workflows/WorkflowStepsEditor";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import "@/features/agents/agents.css";
 
 interface WorkflowFormDialogProps {
@@ -62,6 +64,8 @@ export function WorkflowFormDialog({
       returnFocusRef={returnFocusRef}
       submitLabel={workflow ? "수정 저장" : "워크플로 만들기"}
       submitDisabled={!canWrite}
+      scrollBody
+      scrollHint="단계 정의는 위아래로 스크롤해 확인할 수 있습니다."
       title={workflow ? "워크플로 수정" : "새 워크플로"}
     >
       {!canWrite ? <InlineNotice tone="warning">{writeDisabledReason}</InlineNotice> : null}
@@ -86,7 +90,22 @@ export function WorkflowFormDialog({
             required
             error={errors.steps?.message}
           >
-            {(control) => <Textarea {...control} rows={12} className="mono" {...form.register("steps")} />}
+            {(control) => (
+              <Controller
+                control={form.control}
+                name="steps"
+                render={({ field }) => (
+                  <CodeEditor
+                    {...control}
+                    {...field}
+                    label="단계 정의 (JSON 배열)"
+                    language="json"
+                    rows={12}
+                    disabled={!canWrite || form.formState.isSubmitting}
+                  />
+                )}
+              />
+            )}
           </FormField>
         ) : (
           // A group rather than a form field: the editor is a set of controls, and a label

@@ -297,7 +297,7 @@ describe("WorkflowPage", () => {
     await user.type(within(dialog).getByLabelText("1번째 단계 이름"), "담당자 승인");
 
     await user.click(within(dialog).getByRole("button", { name: "JSON으로 편집" }));
-    const json = within(dialog).getByLabelText(/단계 정의/);
+    const json = within(dialog).getByRole("textbox", { name: "단계 정의 (JSON 배열)" });
     expect(JSON.parse((json as HTMLTextAreaElement).value)).toEqual([
       { name: "담당자 승인", type: "approval" },
     ]);

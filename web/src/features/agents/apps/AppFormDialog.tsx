@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from "react";
+import { Controller } from "react-hook-form";
 import { useAppOperationAccess } from "./app-scope";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AppDefinitionReview } from "./AppDefinitionReview";
@@ -23,6 +24,7 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 
 interface AppFormDialogProps {
   app?: WorkApp;
@@ -104,7 +106,22 @@ export function AppFormDialog({
         required
         error={errors.components?.message}
       >
-        {(control) => <Textarea {...control} rows={10} className="mono" {...form.register("components")} />}
+        {(control) => (
+          <Controller
+            control={form.control}
+            name="components"
+            render={({ field }) => (
+              <CodeEditor
+                {...control}
+                {...field}
+                label="구성 요소 (JSON 배열)"
+                language="json"
+                rows={10}
+                disabled={!access.allowed || form.formState.isSubmitting}
+              />
+            )}
+          />
+        )}
       </FormField>
       <div className="agents-detail-actions">
         <Button
