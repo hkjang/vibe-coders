@@ -11,6 +11,7 @@ import (
 // SDK). It never re-exposes an API key secret — only a placeholder. Any authenticated user.
 // GET /me/onboarding-pack?client=mcp|cursor|roo|cline|openai-sdk
 func (s *Server) handleMyOnboardingPack(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -74,7 +75,7 @@ func (s *Server) handleMyOnboardingPack(w http.ResponseWriter, r *http.Request) 
 	case "openai-sdk":
 		pack["config_label"] = "OpenAI 호환 SDK"
 		pack["config"] = "from openai import OpenAI\nclient = OpenAI(\n    base_url=\"" + origin + "/v1\",\n    api_key=\"<YOUR_API_KEY>\",\n)\n# model: \"vibe/auto\" 또는 /v1/models 조회"
-	case "cursor", "roo", "cline", "claude", "mcp":
+	case "cursor", "roo", "cline", "claude", "claude-desktop-mcp", "mcp":
 		pack["config_label"] = "MCP 클라이언트 (" + client + ")"
 		pack["config"] = "mcp_config 필드의 JSON을 클라이언트 MCP 설정에 추가하세요."
 	default:

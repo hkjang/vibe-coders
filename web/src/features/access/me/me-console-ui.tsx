@@ -7,8 +7,10 @@ import { safeMeMessage } from "./me-console-model";
 export function MeQueryNotice({
   query,
   label,
+  retryDisabled = false,
 }: {
   label: string;
+  retryDisabled?: boolean;
   query: { isError: boolean; error: unknown; refetch: () => unknown };
 }) {
   if (!query.isError) return null;
@@ -18,7 +20,7 @@ export function MeQueryNotice({
       {isAppError(query.error) && query.error.requestId ? (
         <span className="request-id"> 요청 ID: {query.error.requestId}</span>
       ) : null}
-      <Button size="small" onClick={() => void query.refetch()}>
+      <Button size="small" disabled={retryDisabled} onClick={() => void query.refetch()}>
         다시 조회
       </Button>
     </InlineNotice>
@@ -28,15 +30,17 @@ export function MeQueryContent({
   query,
   label,
   children,
+  retryDisabled = false,
 }: {
   label: string;
+  retryDisabled?: boolean;
   query: { isPending: boolean; isError: boolean; data: unknown; error: unknown; refetch: () => unknown };
   children: ReactNode;
 }) {
   return (
     <>
       {query.isPending && !query.data ? <LoadingState label={label + " 불러오는 중입니다."} /> : null}
-      <MeQueryNotice query={query} label={label} />
+      <MeQueryNotice query={query} label={label} retryDisabled={retryDisabled} />
       {query.isError && query.data ? (
         <p className="access-note">마지막으로 정상 조회한 결과입니다. 현재 상태는 다시 조회해 확인하세요.</p>
       ) : null}

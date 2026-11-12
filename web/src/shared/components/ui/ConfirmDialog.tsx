@@ -25,6 +25,7 @@ interface ConfirmDialogProps {
   /** Exact local confirmation phrase; never sent to an API by this component. */
   requireTarget?: string;
   scrollBody?: boolean;
+  scrollBodyLabel?: string;
   returnFocusRef: RefObject<HTMLElement | null>;
   title: string;
   tone?: "danger" | "primary";
@@ -58,6 +59,7 @@ function Confirmation({
   requireReason = false,
   requireTarget,
   scrollBody,
+  scrollBodyLabel,
   returnFocusRef,
   title,
   tone = "primary",
@@ -129,6 +131,7 @@ function Confirmation({
     <Dialog
       open={open}
       scrollBody={scrollBody}
+      scrollBodyLabel={scrollBodyLabel}
       onOpenChange={(next) => {
         if (!pending) close(next);
       }}

@@ -4,6 +4,7 @@ import { tokenStore } from "@/shared/auth/token-store";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { OwnedMeKeysPanel } from "./OwnedMeKeysPanel";
+import { MeBoundary } from "./MeBoundary";
 
 export function MeKeysTab(): React.JSX.Element {
   const auth = useAuth();
@@ -26,5 +27,9 @@ export function MeKeysTab(): React.JSX.Element {
   ]);
   if (!readable)
     return <InlineNotice tone="warning">현재 계정과 화면에서 내 키를 조회할 수 없습니다.</InlineNotice>;
-  return <OwnedMeKeysPanel key={owner} owner={owner} />;
+  return (
+    <MeBoundary kind="access">
+      <OwnedMeKeysPanel key={owner} owner={owner} />
+    </MeBoundary>
+  );
 }

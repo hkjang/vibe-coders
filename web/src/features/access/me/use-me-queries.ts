@@ -7,6 +7,8 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 import { useMeOwner } from "./me-console-context";
 import { safeMeError } from "./me-console-model";
+import { readMeSessions, readMeOnboarding, inspectMeConnection } from "./me-access-api";
+import type { ConnectionClient } from "./me-access-model";
 import {
   readMeDashboard,
   readMeActions,
@@ -36,6 +38,7 @@ export const meKeys = {
   recommendations: ["me", "recommendations"] as const,
   keys: ["me", "keys"] as const,
   onboarding: ["me", "onboarding-pack"] as const,
+  doctor: ["me", "connection-doctor"] as const,
 };
 
 function useMeQuery<Result>(
@@ -99,12 +102,8 @@ export const useMeSkillsQuery = (enabled: boolean) => usePersonalQuery(meKeys.sk
 export const useMeRecommendationsQuery = () =>
   usePersonalQuery(meKeys.recommendations, (scope) => readMeRecommendations(scope));
 
-export function useMeSessionsQuery(enabled: boolean, owner?: string) {
-  return useMeQuery(
-    owner === undefined ? meKeys.sessions : [...meKeys.sessions, owner],
-    (signal) => apiClient.request(access.me.sessions, { signal, routeId }),
-    enabled,
-  );
+export function useMeSessionsQuery(enabled: boolean) {
+  return usePersonalQuery(meKeys.sessions, readMeSessions, enabled);
 }
 
 export function useMeKeysQuery(enabled: boolean, owner?: string) {
@@ -115,10 +114,15 @@ export function useMeKeysQuery(enabled: boolean, owner?: string) {
   );
 }
 
-export function useMeOnboardingPackQuery(client: string, enabled: boolean, owner?: string) {
-  return useMeQuery(
-    owner === undefined ? [...meKeys.onboarding, client] : [...meKeys.onboarding, client, owner],
-    (signal) => apiClient.request(access.me.onboardingPack, { query: { client }, signal, routeId }),
+export function useMeOnboardingPackQuery(client: ConnectionClient, enabled: boolean) {
+  return usePersonalQuery(
+    [...meKeys.onboarding, client],
+    (scope) => readMeOnboarding(scope, client),
     enabled,
   );
+}
+export function useMeDoctorQuery(client: ConnectionClient) {
+  // Disabled queries do not poll or refetch on focus/invalidation. This POST
+  // runs only when the guarded inspection button calls refetch().
+  return usePersonalQuery([...meKeys.doctor, client], (scope) => inspectMeConnection(scope, client), false);
 }

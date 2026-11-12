@@ -8,6 +8,7 @@ import (
 // handleMeSessions lists the caller's active login sessions, flagging the one in use.
 // GET /me/sessions
 func (s *Server) handleMeSessions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	claims, ok := s.currentAccessClaims(r)
 	if !ok || claims.Subject == "" {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -19,7 +20,7 @@ func (s *Server) handleMeSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	sessions, err := s.db.ListActiveAuthSessionsForUser(r.Context(), claims.Subject)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "sessions_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "could not list personal sessions", "server_error", "sessions_failed")
 		return
 	}
 	out := make([]map[string]any, 0, len(sessions))
@@ -39,6 +40,7 @@ func (s *Server) handleMeSessions(w http.ResponseWriter, r *http.Request) {
 
 // handleMeSessionByID revokes one of the caller's own sessions. DELETE /me/sessions/{id}
 func (s *Server) handleMeSessionByID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	claims, ok := s.currentAccessClaims(r)
 	if !ok || claims.Subject == "" {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -55,7 +57,7 @@ func (s *Server) handleMeSessionByID(w http.ResponseWriter, r *http.Request) {
 	}
 	revoked, err := s.db.RevokeAuthSessionOwned(r.Context(), sessionID, claims.Subject)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "revoke_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "could not revoke personal session", "server_error", "revoke_failed")
 		return
 	}
 	if !revoked {
@@ -69,6 +71,7 @@ func (s *Server) handleMeSessionByID(w http.ResponseWriter, r *http.Request) {
 // handleMeSessionsRevokeOthers revokes every session except the current one ("log out
 // everywhere else"). POST /me/sessions/revoke-others
 func (s *Server) handleMeSessionsRevokeOthers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	claims, ok := s.currentAccessClaims(r)
 	if !ok || claims.Subject == "" {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
@@ -80,7 +83,7 @@ func (s *Server) handleMeSessionsRevokeOthers(w http.ResponseWriter, r *http.Req
 	}
 	n, err := s.db.RevokeOtherAuthSessionsForUser(r.Context(), claims.Subject, claims.SessionID)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "revoke_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "could not revoke personal sessions", "server_error", "revoke_failed")
 		return
 	}
 	s.auditAuthEvent(r.Context(), "session_revoked_others", claims.Subject, "", claims.TeamID, "self-service revoke others count="+itoaProxy(n))

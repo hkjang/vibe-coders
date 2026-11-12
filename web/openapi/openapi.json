@@ -3544,6 +3544,278 @@
         ],
         "type": "object"
       },
+      "MeAccessDoctor": {
+        "properties": {
+          "auth_mode": {
+            "description": "Absent for anonymous authentication failure.",
+            "enum": [
+              "jwt",
+              "proxy_key"
+            ],
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "fix": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "pass",
+                    "warn",
+                    "fail",
+                    "skip"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "status",
+                "detail"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "client": {
+            "type": "string"
+          },
+          "mcp_url": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "overall": {
+            "enum": [
+              "pass",
+              "warn",
+              "fail"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "client",
+          "overall",
+          "checks",
+          "base_url",
+          "mcp_url"
+        ],
+        "type": "object"
+      },
+      "MeAccessDoctorInput": {
+        "properties": {
+          "client": {
+            "default": "openai-sdk",
+            "description": "Trimmed and lowercased; recognized MCP clients also request MCP probes when a proxy key is present.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MeAccessOnboarding": {
+        "properties": {
+          "available_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "budget_limit_krw": {
+            "type": "number"
+          },
+          "client": {
+            "type": "string"
+          },
+          "config": {
+            "type": "string"
+          },
+          "config_label": {
+            "type": "string"
+          },
+          "mcp_config": {
+            "properties": {
+              "mcpServers": {
+                "properties": {
+                  "vibe-gateway": {
+                    "properties": {
+                      "headers": {
+                        "properties": {
+                          "Authorization": {
+                            "enum": [
+                              "Bearer <YOUR_API_KEY>"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "Authorization"
+                        ],
+                        "type": "object"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "headers"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "vibe-gateway"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "mcpServers"
+            ],
+            "type": "object"
+          },
+          "mcp_url": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "recommended_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sample_curl": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "client",
+          "base_url",
+          "mcp_url",
+          "available_models",
+          "recommended_models",
+          "scopes",
+          "budget_limit_krw",
+          "mcp_config",
+          "sample_curl",
+          "note",
+          "config_label",
+          "config"
+        ],
+        "type": "object"
+      },
+      "MeAccessSessionRevoked": {
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "revoked"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "MeAccessSessions": {
+        "properties": {
+          "current_session_id": {
+            "type": "string"
+          },
+          "sessions": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "current": {
+                  "type": "boolean"
+                },
+                "expires_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "ip": {
+                  "type": "string"
+                },
+                "sso_linked": {
+                  "type": "boolean"
+                },
+                "user_agent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "ip",
+                "user_agent",
+                "created_at",
+                "expires_at",
+                "sso_linked",
+                "current"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "current_session_id",
+          "sessions"
+        ],
+        "type": "object"
+      },
+      "MeAccessSessionsRevoked": {
+        "properties": {
+          "revoked_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "revoked"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "revoked_count"
+        ],
+        "type": "object"
+      },
       "MeConsoleActions": {
         "properties": {
           "actions": {
@@ -10549,7 +10821,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.71"
+    "version": "v0.86.72"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -27859,17 +28131,61 @@
     },
     "/me/connection-doctor": {
       "post": {
+        "description": "Existing explicit read-only connection inspection. A proxy key probes the model-list endpoint and, for MCP clients, initialize/tools-list. JWT mode inspects key metadata and skips endpoint probes. Anonymous callers receive HTTP 200 with failed authentication, not private key metadata. No model completion or configuration write. Responses are no-store; do not automatically repeat the POST.",
         "operationId": "post__me_connection_doctor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeAccessDoctorInput"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeAccessDoctor"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
+        "security": [],
         "summary": "Diagnose client connection setup (auth/scope/model/quota/v1/mcp); body {client}",
         "tags": [
           "self-service"
@@ -28412,10 +28728,70 @@
     },
     "/me/onboarding-pack": {
       "get": {
+        "description": "Existing connection metadata and placeholder examples. Accepts an identified JWT or proxy API key. Key allow/deny rules filter the priced model catalog when a key is used. JWT metadata is not a test of a particular issued key. No secret is re-exposed. Responses are no-store.",
         "operationId": "get__me_onboarding_pack",
+        "parameters": [
+          {
+            "description": "Trimmed and lowercased; supports openai-sdk, cursor, roo, cline, claude, claude-desktop-mcp and mcp. Unknown clients retain generic connection metadata.",
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "default": "mcp",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeAccessOnboarding"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -29298,10 +29674,68 @@
     },
     "/me/sessions": {
       "get": {
+        "description": "Existing personal JWT-session API. Requires an identified JWT subject, not an administrator scope or proxy API key. Responses are no-store. Session and associated refresh-token revocation commit together; success does not imply an atomic client review or cross-tab idempotency.",
         "operationId": "get__me_sessions",
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeAccessSessions"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Session operation failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -29317,10 +29751,68 @@
     },
     "/me/sessions/revoke-others": {
       "post": {
+        "description": "Existing personal JWT-session API. Requires an identified JWT subject, not an administrator scope or proxy API key. Responses are no-store. Session and associated refresh-token revocation commit together; success does not imply an atomic client review or cross-tab idempotency. Keeps the JWT session ID and revokes this user's other unrevoked records, including expired records. The count can exceed the active-session list. No request body is required.",
         "operationId": "post__me_sessions_revoke_others",
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeAccessSessionsRevoked"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Session operation failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -29336,6 +29828,7 @@
     },
     "/me/sessions/{id}": {
       "delete": {
+        "description": "Existing personal JWT-session API. Requires an identified JWT subject, not an administrator scope or proxy API key. Responses are no-store. Session and associated refresh-token revocation commit together; success does not imply an atomic client review or cross-tab idempotency.",
         "operationId": "delete__me_sessions_id",
         "parameters": [
           {
@@ -29349,7 +29842,84 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeAccessSessionRevoked"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid session identifier"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Caller not identified"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Session not found, already revoked or owned by another user"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Unsupported method"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Session operation failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

@@ -14,6 +14,8 @@ interface DialogProps {
   title: string;
   /** Opt-in bounded body scrolling with actions kept outside the scroll area. */
   scrollBody?: boolean;
+  /** A named keyboard scroll region for read-only content without form controls. */
+  scrollBodyLabel?: string;
   /** Use available desktop width for comparison tables; mobile sizing is shared. */
   wide?: boolean;
 }
@@ -27,6 +29,7 @@ export function Dialog({
   returnFocusRef,
   title,
   scrollBody = false,
+  scrollBodyLabel,
   wide = false,
 }: DialogProps): React.JSX.Element {
   return (
@@ -62,7 +65,14 @@ export function Dialog({
               </Button>
             </DialogPrimitive.Close>
           </header>
-          <div className="dialog-body">{children}</div>
+          <div
+            className="dialog-body"
+            role={scrollBodyLabel ? "region" : undefined}
+            aria-label={scrollBodyLabel}
+            tabIndex={scrollBodyLabel ? 0 : undefined}
+          >
+            {children}
+          </div>
           {footer ? <footer className="dialog-footer">{footer}</footer> : null}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
