@@ -11,6 +11,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { usePreferences } from "@/shared/stores/preferences";
 import { navigationLabels as labels } from "./navigation-labels";
 import { orderedNavigationItems, useNavigationItems, type NavigationItem } from "./use-navigation-items";
+import { SidebarNavigation } from "./SidebarNavigation";
 
 interface SidebarProps {
   mobileTriggerRef: RefObject<HTMLButtonElement | null>;
@@ -27,6 +28,9 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
   const favoriteIds = usePreferences((state) => state.favoriteFeatures);
   const available = useNavigationItems();
   const favorites = orderedNavigationItems(favoriteIds, available);
+  const menuSignature = JSON.stringify(
+    available.map(({ feature, effective }) => [feature.featureId, feature.title, effective.status]),
+  );
   const openingFavorites = useRef(false);
 
   const renderItem = ({ feature, effective }: NavigationItem, mobile: boolean) => (
@@ -86,7 +90,7 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
         ) : null}
       </div>
 
-      <nav className="sidebar-nav" aria-label={mobile ? "모바일 주 메뉴" : undefined}>
+      <SidebarNavigation mobile={mobile} collapsed={!mobile && collapsed} menuSignature={menuSignature}>
         <div className="sidebar-favorites-heading">
           <span className="nav-copy">{labels.favorites}</span>
           <Button
@@ -126,7 +130,7 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
             </Fragment>
           );
         })}
-      </nav>
+      </SidebarNavigation>
 
       {!mobile ? (
         <div className="sidebar-footer">

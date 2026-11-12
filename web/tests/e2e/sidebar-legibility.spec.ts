@@ -5,6 +5,69 @@ import { installIpUsage } from "../fixtures/ip-usage-browser";
 const title = "사용자와 팀의 계정·접근 권한 및 IP 사용량 관리";
 const accessibleName = title + " 읽기 전용 미리보기";
 
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 844, height: 390 },
+]) {
+  test(`많은 메뉴에서 현재 화면을 찾고 사용자의 스크롤을 유지한다 ${viewport.width}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const fixture = await installIpUsage(page);
+    const registry = fixture.bootstrap.migration_registry;
+    const access = registry?.find((item) => item.feature_id === "access.users");
+    if (!registry || !access) throw new Error("Missing public registry fixture");
+    for (const [featureId, path, label] of [
+      ["gateway.health", "gateway/health", "게이트웨이 상태"],
+      ["gateway.providers", "gateway/providers", "AI 공급자"],
+      ["gateway.models", "gateway/models", "모델"],
+      ["gateway.chat", "gateway/chat", "채팅 테스트"],
+      ["routing.rules", "routing/rules", "라우팅"],
+      ["observability.traces", "observability/traces", "추적 탐색기"],
+      ["observability.sessions", "observability/sessions", "세션 탐색기"],
+      ["observability.io", "observability/io", "요청 입출력"],
+      ["observability.xview", "observability/xview", "요청 분포"],
+      ["observability.llm", "observability/llm", "모델 관측"],
+      ["observability.probes", "observability/probes", "연결 진단"],
+      ["prompts.lab", "prompts/lab", "프롬프트 실험실"],
+      ["prompts.library", "prompts/library", "프롬프트 보관함"],
+      ["prompts.regression", "prompts/regression", "회귀 검증"],
+    ] as const) {
+      registry.push({ ...access, feature_id: featureId, app_path: "/app/" + path, title: label });
+    }
+    fixture.bootstrap.allowed_features = registry.map((feature) => feature.feature_id);
+    const mobile = viewport.width < 1024;
+    const sidebar = page.locator(mobile ? ".app-sidebar-mobile" : ".app-sidebar-desktop");
+    const nav = sidebar.locator(".sidebar-nav");
+    await page.goto("access/users/ips");
+    for (let entry = 0; entry < 2; entry += 1) {
+      await expect(page.getByRole("table", { name: "IP별 사용량" })).toBeVisible();
+      if (mobile) await page.getByRole("button", { name: "탐색 메뉴 열기" }).click();
+      await expect
+        .poll(() =>
+          nav.evaluate((element) => {
+            const active = element.querySelector('[aria-current="page"]');
+            if (!active) return false;
+            const bounds = element.getBoundingClientRect(),
+              selected = active.getBoundingClientRect();
+            return selected.top >= bounds.top && selected.bottom <= bounds.bottom && element.scrollTop > 0;
+          }),
+        )
+        .toBe(true);
+      if (entry === 0) await page.reload();
+    }
+    // A metadata refresh must not pull the user back to the selected item.
+    await nav.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    const refreshed = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+    );
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await (await refreshed).finished();
+    await expect.poll(() => nav.evaluate((element) => element.scrollTop)).toBe(0);
+    fixture.check();
+  });
+}
+
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of [
     { width: 1440, height: 900 },
