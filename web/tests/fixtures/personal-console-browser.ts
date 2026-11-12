@@ -88,6 +88,8 @@ export async function installPersonalConsole(page: Page, readOnly = false, backe
     created_at: created,
   };
   const state = {
+    availableName: personalSkill.name,
+    requestableName: "공개 분석 도우미",
     requests: [personalRequest],
     dashboardStatus: 200,
     wrong: false,
@@ -265,11 +267,11 @@ export async function installPersonalConsole(page: Page, readOnly = false, backe
       if (path === "/me/skills")
         return json({
           team: user.team_id,
-          available: [personalSkill],
+          available: [{ ...personalSkill, name: state.availableName }],
           requestable: [
             {
               ...personalSkill,
-              name: "공개 분석 도우미",
+              name: state.requestableName,
               description: "승인을 받은 뒤 데이터 분석을 지원합니다.",
               risk_level: "medium",
             },

@@ -5,7 +5,7 @@ import * as schema from "@/shared/api/domains/me-console.schemas";
 import type { RecommendationFeedbackBody } from "@/shared/api/domains/access";
 import { useMeOperation } from "./use-me-operation";
 import { readMeRecommendations } from "./me-console-api";
-import { assertMeIDs, meError, meRouteId, validMeText } from "./me-console-model";
+import { assertMeIDs, meError, meRouteId, validMeText, validMeSkillActionName } from "./me-console-model";
 const api = endpoints.domains.access.me;
 const options = { routeId: meRouteId, cache: "no-store" as const, retryUnauthorized: false };
 function checkText(value: string, prefixes: readonly string[], max = 500) {
@@ -66,7 +66,7 @@ export function useMeSkillRequest() {
     invalidates: ["skills"],
     message: "스킬 접근 신청을 접수했습니다.",
     validate: (input: { name: string; reason: string }, prefixes) => {
-      assertMeIDs([input.name], prefixes);
+      if (!validMeSkillActionName(input.name, prefixes)) throw meError("input");
       checkText(input.reason, prefixes);
     },
     run: async (input) =>
@@ -85,7 +85,7 @@ export function useMeSkillFeedback() {
     invalidates: ["skills"],
     message: "스킬 평가를 기록했습니다.",
     validate: (input: { name: string; rating: number; comment: string }, prefixes) => {
-      assertMeIDs([input.name], prefixes);
+      if (!validMeSkillActionName(input.name, prefixes)) throw meError("input");
       if (input.comment) checkText(input.comment, prefixes);
       if (!Number.isInteger(input.rating) || input.rating < 1 || input.rating > 5) throw meError("input");
     },

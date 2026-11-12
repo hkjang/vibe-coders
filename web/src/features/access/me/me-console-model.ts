@@ -69,6 +69,15 @@ export function validMePathID(value: string, prefixes: readonly string[]) {
   // Encoded path parameters still normalize a literal dot segment in fetch URLs.
   return validMeText(value, prefixes, 512) && value !== "." && value !== ".." && !/[\\/]/u.test(value);
 }
+export function validMeSkillActionName(value: string, prefixes: readonly string[]) {
+  // Skill names may contain slashes; withPathParams encodes the whole name.
+  // A standalone dot segment is still normalized by fetch before sending.
+  return validMeText(value, prefixes, 512) && value !== "." && value !== "..";
+}
+export function assertMeSkillNames(values: readonly string[], prefixes: readonly string[]) {
+  if (new Set(values).size !== values.length || values.some((value) => !validMeText(value, prefixes, 512)))
+    throw meError();
+}
 export function meError(code: "invalid" | "changed" | "unknown" | "busy" | "input" = "invalid") {
   return new AppError(
     messages["me_console_" + code] ?? messages.me_console_invalid ?? "개인 데이터를 확인하세요.",

@@ -119,6 +119,27 @@ test("스킬 신청 확인과 잘못된 응답의 중복 전송 보호", async (
   expect(fixture.writes).toHaveLength(1);
   fixture.check();
 });
+test("슬래시가 있는 스킬 이름의 신청과 평가", async ({ page }) => {
+  const fixture = await installPersonalConsole(page);
+  fixture.state.availableName = "검토/skill";
+  fixture.state.requestableName = "분석/skill";
+  await page.goto("me?tab=skills");
+  await expect(page.getByRole("table", { name: "내 팀 스킬" })).toContainText("검토/skill");
+  await page.getByRole("button", { name: "접근 신청" }).click();
+  const request = page.getByRole("dialog", { name: "스킬 접근 신청" });
+  await request.getByLabel("신청 사유").fill("공개 검토 사유");
+  await request.getByRole("button", { name: "신청", exact: true }).click();
+  await expect(request).toBeHidden();
+  await page.getByRole("button", { name: "평가하기" }).click();
+  const feedback = page.getByRole("dialog", { name: "스킬 평가", exact: true });
+  await feedback.getByRole("button", { name: "평가 보내기" }).click();
+  await expect(feedback).toBeHidden();
+  expect(fixture.writes.map((write) => write.path)).toEqual([
+    `/me/skills/${encodeURIComponent("분석/skill")}/request-access`,
+    `/me/skills/${encodeURIComponent("검토/skill")}/feedback`,
+  ]);
+  fixture.check();
+});
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of [
     { width: 1440, height: 900 },

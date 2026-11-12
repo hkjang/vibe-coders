@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -150,7 +151,8 @@ func TestPersonalConsoleSkillPercentAndAcknowledgments(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()
 	server, token := personalConsoleFixture(t, db)
-	if _, err := db.UpsertSkill(t.Context(), store.Skill{Name: "public-skill", Status: "production"}, "fixture"); err != nil {
+	const skillName = "검토/skill"
+	if _, err := db.UpsertSkill(t.Context(), store.Skill{Name: skillName, Status: "production"}, "fixture"); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 100 {
@@ -158,7 +160,7 @@ func TestPersonalConsoleSkillPercentAndAcknowledgments(t *testing.T) {
 		if i == 0 {
 			status = "ok"
 		}
-		if err := db.RecordSkillRun(t.Context(), store.SkillRun{ID: fmt.Sprintf("personal-run-%d", i), SkillName: "public-skill", Actor: "personal-own", Status: status}); err != nil {
+		if err := db.RecordSkillRun(t.Context(), store.SkillRun{ID: fmt.Sprintf("personal-run-%d", i), SkillName: skillName, Actor: "personal-own", Status: status}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -175,9 +177,9 @@ func TestPersonalConsoleSkillPercentAndAcknowledgments(t *testing.T) {
 		t.Fatal("skill success must be a percentage, including 1%")
 	}
 	for _, tc := range []struct{ action, body, status string }{{"request-access", `{"reason":"공개 신청 사유"}`, "requested"}, {"feedback", `{"rating":4,"comment":"공개 평가"}`, "recorded"}} {
-		response = teamConsoleRequest(t, routes, "POST", "/me/skills/public-skill/"+tc.action, token, tc.body)
+		response = teamConsoleRequest(t, routes, "POST", "/me/skills/"+url.PathEscape(skillName)+"/"+tc.action, token, tc.body)
 		var ack struct{ Status, Skill string }
-		if response.Code != 201 || json.Unmarshal(response.Body.Bytes(), &ack) != nil || ack.Status != tc.status || ack.Skill != "public-skill" {
+		if response.Code != 201 || json.Unmarshal(response.Body.Bytes(), &ack) != nil || ack.Status != tc.status || ack.Skill != skillName {
 			t.Fatalf("skill write status=%d", response.Code)
 		}
 	}

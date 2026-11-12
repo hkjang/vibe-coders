@@ -11,8 +11,11 @@ describe("personal API path boundaries", () => {
       expect(api.calls).toHaveLength(0);
     },
   );
-  it("rejects skill names that would change the action route", async () => {
-    mockApi({ "GET /me/skills": () => ({ team: scope.team, available: [{ name: ".." }] }) });
-    await expect(readMeSkills(scope)).rejects.toMatchObject({ code: "me_console_invalid" });
-  });
+  it.each(["검토/skill", "..", "그룹\\스킬"])(
+    "keeps supported display names in the catalog: %s",
+    async (name) => {
+      mockApi({ "GET /me/skills": () => ({ team: scope.team, available: [{ name }] }) });
+      await expect(readMeSkills(scope)).resolves.toMatchObject({ available: [{ name }] });
+    },
+  );
 });

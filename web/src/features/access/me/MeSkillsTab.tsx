@@ -16,7 +16,14 @@ import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useMeSkillsQuery } from "./use-me-queries";
 import { useMeSkillRequest, useMeSkillFeedback } from "./me-console-actions";
 import { MeQueryContent, MePartial, MeOperationNotice } from "./me-console-ui";
-import { meLabel, meNumber, mePercent, safeMeMessage, validMeText } from "./me-console-model";
+import {
+  meLabel,
+  meNumber,
+  mePercent,
+  safeMeMessage,
+  validMeText,
+  validMeSkillActionName,
+} from "./me-console-model";
 import { MeRecommendations } from "./MeRecommendations";
 import { MeTable, type MeColumn } from "./MeTable";
 
@@ -93,7 +100,9 @@ export function MeSkillsTab() {
       id: "actions",
       header: "작업",
       cell: (row) =>
-        row.available ? (
+        !validMeSkillActionName(row.name, credentialPrefixes) ? (
+          <span>작업 주소로 사용할 수 없는 이름입니다. 관리자에게 이름 변경을 요청하세요.</span>
+        ) : row.available ? (
           <Button
             size="small"
             disabled={feedback.disabled || query.isFetching}

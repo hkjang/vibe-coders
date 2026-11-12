@@ -129,6 +129,16 @@ describe("personal console ownership and data contracts", () => {
     expect(within(dialog).getByRole("textbox", { name: /신청 사유/u })).toHaveValue("공개 검토 사유");
     expect(app.api.bodies("POST /me/skills/public-skill/request-access")).toHaveLength(1);
   });
+  it("keeps dot-named skills visible without offering normalized action paths", async () => {
+    const app = setup("/me?tab=skills", {
+      "GET /me/skills": () => ({ team: runtime.team, available: [skill, { ...skill, name: ".." }] }),
+    });
+    await screen.findByText("..");
+    expect(screen.getByText("public-skill")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "평가하기" })).toHaveLength(1);
+    expect(screen.getByText(/작업 주소로 사용할 수 없는 이름/u)).toBeVisible();
+    expect(app.api.calls.filter((call) => call.key.startsWith("POST"))).toHaveLength(0);
+  });
   it("does not display a failed statistics component as a zero success rate", async () => {
     setup("/me?tab=skills", {
       "GET /me/skills": () => ({

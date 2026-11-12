@@ -2,7 +2,15 @@ import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import * as s from "@/shared/api/domains/me-console.schemas";
-import { assertMeIDs, meError, meRouteId, projectMe, validMeText, validMePathID } from "./me-console-model";
+import {
+  assertMeIDs,
+  assertMeSkillNames,
+  meError,
+  meRouteId,
+  projectMe,
+  validMeText,
+  validMePathID,
+} from "./me-console-model";
 export interface MeRead {
   user: string;
   team: string;
@@ -83,7 +91,7 @@ export async function readMeModels(value: MeRead) {
 export async function readMeSkills(value: MeRead) {
   const data = s.meSkillsSchema.parse(await apiClient.request(api.skills, options(value)));
   if (data.team !== value.team) throw meError();
-  assertMeIDs(
+  assertMeSkillNames(
     [...data.available, ...data.requestable].map((row) => row.name),
     value.prefixes,
   );
