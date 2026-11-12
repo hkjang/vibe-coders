@@ -119,7 +119,7 @@ async function setup(handlers: Readonly<Record<string, ApiHandler>> = {}) {
   const models = await screen.findByLabelText(/^비교할 모델/u);
   await user.clear(models);
   await user.type(models, "public-model:public-provider");
-  await user.type(screen.getByLabelText(/^사용자 질문/u), promptA);
+  await user.type(screen.getByRole("textbox", { name: "사용자 질문" }), promptA);
   return {
     api,
     user,
@@ -219,7 +219,7 @@ describe("비교 실행의 고정 결과와 전송 승인 재현", () => {
         ++runCount === 1 ? response("public-run-a", "public-model", "공개 실행 A의 응답") : heldC,
     });
     await runComparison(view);
-    const prompt = screen.getByLabelText(/^사용자 질문/u);
+    const prompt = screen.getByRole("textbox", { name: "사용자 질문" });
     await view.user.clear(prompt);
     await view.user.type(prompt, promptB);
     const models = screen.getByLabelText(/^비교할 모델/u);
@@ -262,7 +262,7 @@ describe("비교 실행의 고정 결과와 전송 승인 재현", () => {
   it("실행 A 뒤 질문 B를 편집해도 골든에는 실행 A의 질문을 전송한다", async () => {
     const view = await setup();
     await runComparison(view);
-    const prompt = screen.getByLabelText(/^사용자 질문/u);
+    const prompt = screen.getByRole("textbox", { name: "사용자 질문" });
     await view.user.clear(prompt);
     await view.user.type(prompt, promptB);
     const dialog = await openGolden(view);
@@ -290,7 +290,7 @@ describe("비교 실행의 고정 결과와 전송 승인 재현", () => {
       view.mode(mode);
       // Real user click, not a disabled-attribute override or captured-handler claim.
       await view.user.click(screen.getByRole("button", { name: "멀티 실행" }));
-      expect(screen.getByLabelText(/^사용자 질문/u)).toHaveValue(promptA);
+      expect(screen.getByRole("textbox", { name: "사용자 질문" })).toHaveValue(promptA);
       expect(view.api.bodies(runEndpoint)).toHaveLength(0);
     },
   );

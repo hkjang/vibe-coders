@@ -36,6 +36,8 @@
     "tests/e2e/code-editor-skill.spec.ts",
     "tests/e2e/code-editor-library.spec.ts",
     "tests/e2e/code-editor-lab.spec.ts",
+    "tests/e2e/code-editor-chat.spec.ts",
+    "tests/e2e/code-editor-compare.spec.ts",
     "tests/e2e/mcp-contract-review.spec.ts",
     "tests/e2e/mcp-call-review.spec.ts",
     "tests/fixtures/agent-code-editor.ts"

@@ -22,6 +22,7 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Textarea } from "@/shared/components/ui/Textarea";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import { FormField } from "@/shared/components/form/FormField";
 import { formatKRW, formatNumber } from "@/shared/utils/format";
 
@@ -156,21 +157,25 @@ function ComparisonSession({
         ) : null}
         <FormField label="시스템 지침" id={`${fieldPrefix}-system`}>
           {(control) => (
-            <Textarea
+            <CodeEditor
               {...control}
+              label="시스템 지침"
+              language="prompt"
               rows={3}
               value={systemPrompt}
-              onChange={(event) => setSystemPrompt(event.target.value)}
+              onChange={setSystemPrompt}
             />
           )}
         </FormField>
         <FormField label="사용자 질문" id={`${fieldPrefix}-user`} required>
           {(control) => (
-            <Textarea
+            <CodeEditor
               {...control}
+              label="사용자 질문"
+              language="prompt"
               rows={5}
               value={userPrompt}
-              onChange={(event) => setUserPrompt(event.target.value)}
+              onChange={setUserPrompt}
             />
           )}
         </FormField>
