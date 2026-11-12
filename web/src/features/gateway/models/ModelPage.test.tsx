@@ -932,7 +932,7 @@ describe("ModelPage", () => {
     expect(settingsButton).toBeVisible();
 
     await user.click(settingsButton);
-    const modelColumn = screen.getByRole("checkbox", { name: /모델/ });
+    const modelColumn = await screen.findByRole("checkbox", { name: /모델/ });
     const providerColumn = screen.getByRole("checkbox", { name: /공급자/ });
     expect(modelColumn).toBeChecked();
     expect(modelColumn).toBeDisabled();

@@ -13,6 +13,8 @@ export const ROUTE_RAW_LIMIT = 250_000;
 // their original limit. Browser tests verify the activation boundary.
 export const INTERACTIVE_FEATURES = {
   "src/shared/code-editor/MonacoEditor.tsx": { rawBytes: 6_000_000, wireBytes: 1_500_000 },
+  "src/shared/data-table/TableRowMenu.tsx": { rawBytes: 8_000, wireBytes: 4_000 },
+  "src/shared/data-table/DataTableSettingsDialog.tsx": { rawBytes: 12_000, wireBytes: 6_000 },
 };
 
 // Keep this allowlist aligned with internal/appui/handler.go: compressibleAsset.

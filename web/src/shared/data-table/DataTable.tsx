@@ -5,7 +5,9 @@ import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEven
 import { Button } from "@/shared/components/ui/Button";
 import { Select } from "@/shared/components/ui/Select";
 import { type DataTableColumn } from "@/shared/data-table/columns";
-import { DataTableSettingsDialog } from "@/shared/data-table/DataTableSettingsDialog";
+import { DataTableSettingsLoader } from "@/shared/data-table/DataTableSettingsLoader";
+import { DataTableContextMenu } from "@/shared/data-table/DataTableContextMenu";
+import { interactiveRowTarget } from "@/shared/data-table/row-interaction";
 import {
   dataTableColumnLabel,
   useDataTableLayout,
@@ -94,16 +96,8 @@ export function DataTable<TData extends RowData>({
   const rows = table.getRowModel().rows;
   const currentPage = Math.min(Math.max(pageIndex, 0), Math.max(pageCount - 1, 0));
 
-  const targetIsInteractive = (target: EventTarget | null, row: HTMLTableRowElement): boolean => {
-    if (!(target instanceof Element)) return false;
-    const interactive = target.closest(
-      'a, button, input, select, textarea, label, summary, [contenteditable="true"], [role="button"], [role="link"], [tabindex]',
-    );
-    return interactive !== null && row.contains(interactive);
-  };
-
   const activateRow = (event: ReactMouseEvent<HTMLTableRowElement>, original: TData): void => {
-    if (!onRowClick || event.defaultPrevented || targetIsInteractive(event.target, event.currentTarget))
+    if (!onRowClick || event.defaultPrevented || interactiveRowTarget(event.target, event.currentTarget))
       return;
     onRowClick(original);
   };
@@ -140,194 +134,207 @@ export function DataTable<TData extends RowData>({
           데이터를 불러오는 중입니다.
         </span>
       ) : null}
-      <div
-        className="data-table-scroll-frame"
-        data-at-end={scrollState.atEnd || undefined}
-        data-at-start={scrollState.atStart || undefined}
-        data-overflow={scrollState.overflowing || undefined}
+      <DataTableContextMenu
+        rows={rows}
+        enabled={!loading && !error}
+        getActionLabel={getRowActionLabel}
+        onAction={onRowClick}
       >
         <div
-          ref={scrollRef}
-          className="data-table-scroll"
-          tabIndex={layout.configurable ? (scrollState.overflowing ? 0 : undefined) : 0}
-          aria-label={
-            scrollState.overflowing
-              ? `${caption} 표 영역. 좌우로 스크롤하면 추가 열을 볼 수 있습니다.`
-              : `${caption} 표 영역`
-          }
-          onScroll={updateScrollState}
+          className="data-table-scroll-frame"
+          data-at-end={scrollState.atEnd || undefined}
+          data-at-start={scrollState.atStart || undefined}
+          data-overflow={scrollState.overflowing || undefined}
         >
-          <table className="data-table" style={configuredTableStyle}>
-            <caption className="sr-only">{caption}</caption>
-            <thead>
-              {table.getHeaderGroups().map((group) => (
-                <tr key={group.id}>
-                  {group.headers.map((header) => {
-                    const resizable =
-                      layout.configurable && header.subHeaders.length === 0 && header.column.getCanResize();
-                    const size = header.getSize();
-                    const label = dataTableColumnLabel(header.column);
-                    const sortOption =
-                      header.subHeaders.length === 0 && !header.isPlaceholder
-                        ? sorting?.columns.find((column) => column.id === header.column.id)
-                        : undefined;
-                    const direction =
-                      sortOption && sorting?.value?.columnId === header.column.id
-                        ? sorting.value.direction
-                        : undefined;
-                    const nextDirection =
-                      direction === "asc"
-                        ? "desc"
-                        : direction === "desc"
-                          ? "asc"
-                          : (sortOption?.initialDirection ?? "asc");
-                    const heading = header.isPlaceholder ? null : <table.FlexRender header={header} />;
-                    return (
-                      <th
-                        key={header.id}
-                        className={resizable ? "data-table-resizable-heading" : undefined}
-                        colSpan={header.colSpan}
-                        scope="col"
-                        aria-sort={
-                          direction === "asc" ? "ascending" : direction === "desc" ? "descending" : undefined
-                        }
-                        style={layout.configurable ? { width: size } : undefined}
-                      >
-                        <span className="data-table-header-content">
-                          {sortOption ? (
-                            <button
-                              type="button"
-                              className="data-table-sort-button"
-                              aria-label={`${sortOption.sortLabel ?? label} ${nextDirection === "asc" ? "오름차순" : "내림차순"} 정렬`}
-                              onClick={() =>
-                                sorting?.onChange({ columnId: header.column.id, direction: nextDirection })
-                              }
-                            >
-                              <span>{heading}</span>
-                              {direction === "asc" ? (
-                                <ArrowUp aria-hidden="true" />
-                              ) : direction === "desc" ? (
-                                <ArrowDown aria-hidden="true" />
-                              ) : (
-                                <ArrowUpDown aria-hidden="true" />
-                              )}
-                            </button>
-                          ) : (
-                            heading
-                          )}
-                        </span>
-                        {resizable ? (
-                          <div
-                            className="data-table-resizer"
-                            role="separator"
-                            tabIndex={0}
-                            aria-label={`${label} 열 너비 조절`}
-                            aria-orientation="vertical"
-                            aria-valuemax={maximumDataTableColumnWidth}
-                            aria-valuemin={minimumDataTableColumnWidth}
-                            aria-valuenow={Math.round(size)}
-                            title="드래그하거나 왼쪽·오른쪽 화살표로 너비 조절"
-                            onDoubleClick={() => header.column.resetSize()}
-                            onKeyDown={(event) => {
-                              if (layout.resizeColumnByKey(header.column.id, size, event.key)) {
-                                event.preventDefault();
-                              }
-                            }}
-                            onMouseDown={header.getResizeHandler()}
-                            onTouchStart={header.getResizeHandler()}
-                          >
-                            <GripVertical aria-hidden="true" />
-                          </div>
-                        ) : null}
-                      </th>
-                    );
-                  })}
-                  {onRowClick ? (
-                    <th scope="col" className="data-table-action-heading">
-                      <span className="sr-only">행 작업</span>
-                    </th>
-                  ) : null}
-                </tr>
-              ))}
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({ length: skeletonRowCount }, (_, rowIndex) => (
-                  <tr className="data-table-skeleton-row" aria-hidden="true" key={`skeleton-${rowIndex}`}>
-                    {layout.visibleLeafColumns.length === 0 ? (
-                      <td colSpan={columnCount}>
-                        <span className="skeleton data-table-skeleton-line" />
-                      </td>
-                    ) : (
-                      layout.visibleLeafColumns.map((column) => (
-                        <td
-                          key={column.id}
-                          style={layout.configurable ? { width: column.getSize() } : undefined}
+          <div
+            ref={scrollRef}
+            className="data-table-scroll"
+            tabIndex={layout.configurable ? (scrollState.overflowing ? 0 : undefined) : 0}
+            aria-label={
+              scrollState.overflowing
+                ? `${caption} 표 영역. 좌우로 스크롤하면 추가 열을 볼 수 있습니다.`
+                : `${caption} 표 영역`
+            }
+            onScroll={updateScrollState}
+          >
+            <table className="data-table" style={configuredTableStyle}>
+              <caption className="sr-only">{caption}</caption>
+              <thead>
+                {table.getHeaderGroups().map((group) => (
+                  <tr key={group.id}>
+                    {group.headers.map((header) => {
+                      const resizable =
+                        layout.configurable && header.subHeaders.length === 0 && header.column.getCanResize();
+                      const size = header.getSize();
+                      const label = dataTableColumnLabel(header.column);
+                      const sortOption =
+                        header.subHeaders.length === 0 && !header.isPlaceholder
+                          ? sorting?.columns.find((column) => column.id === header.column.id)
+                          : undefined;
+                      const direction =
+                        sortOption && sorting?.value?.columnId === header.column.id
+                          ? sorting.value.direction
+                          : undefined;
+                      const nextDirection =
+                        direction === "asc"
+                          ? "desc"
+                          : direction === "desc"
+                            ? "asc"
+                            : (sortOption?.initialDirection ?? "asc");
+                      const heading = header.isPlaceholder ? null : <table.FlexRender header={header} />;
+                      return (
+                        <th
+                          key={header.id}
+                          className={resizable ? "data-table-resizable-heading" : undefined}
+                          colSpan={header.colSpan}
+                          scope="col"
+                          aria-sort={
+                            direction === "asc"
+                              ? "ascending"
+                              : direction === "desc"
+                                ? "descending"
+                                : undefined
+                          }
+                          style={layout.configurable ? { width: size } : undefined}
                         >
+                          <span className="data-table-header-content">
+                            {sortOption ? (
+                              <button
+                                type="button"
+                                className="data-table-sort-button"
+                                aria-label={`${sortOption.sortLabel ?? label} ${nextDirection === "asc" ? "오름차순" : "내림차순"} 정렬`}
+                                onClick={() =>
+                                  sorting?.onChange({ columnId: header.column.id, direction: nextDirection })
+                                }
+                              >
+                                <span>{heading}</span>
+                                {direction === "asc" ? (
+                                  <ArrowUp aria-hidden="true" />
+                                ) : direction === "desc" ? (
+                                  <ArrowDown aria-hidden="true" />
+                                ) : (
+                                  <ArrowUpDown aria-hidden="true" />
+                                )}
+                              </button>
+                            ) : (
+                              heading
+                            )}
+                          </span>
+                          {resizable ? (
+                            <div
+                              className="data-table-resizer"
+                              role="separator"
+                              tabIndex={0}
+                              aria-label={`${label} 열 너비 조절`}
+                              aria-orientation="vertical"
+                              aria-valuemax={maximumDataTableColumnWidth}
+                              aria-valuemin={minimumDataTableColumnWidth}
+                              aria-valuenow={Math.round(size)}
+                              title="드래그하거나 왼쪽·오른쪽 화살표로 너비 조절"
+                              onDoubleClick={() => header.column.resetSize()}
+                              onKeyDown={(event) => {
+                                if (layout.resizeColumnByKey(header.column.id, size, event.key)) {
+                                  event.preventDefault();
+                                }
+                              }}
+                              onMouseDown={header.getResizeHandler()}
+                              onTouchStart={header.getResizeHandler()}
+                            >
+                              <GripVertical aria-hidden="true" />
+                            </div>
+                          ) : null}
+                        </th>
+                      );
+                    })}
+                    {onRowClick ? (
+                      <th scope="col" className="data-table-action-heading">
+                        <span className="sr-only">행 작업</span>
+                      </th>
+                    ) : null}
+                  </tr>
+                ))}
+              </thead>
+              <tbody>
+                {loading ? (
+                  Array.from({ length: skeletonRowCount }, (_, rowIndex) => (
+                    <tr className="data-table-skeleton-row" aria-hidden="true" key={`skeleton-${rowIndex}`}>
+                      {layout.visibleLeafColumns.length === 0 ? (
+                        <td colSpan={columnCount}>
                           <span className="skeleton data-table-skeleton-line" />
                         </td>
-                      ))
-                    )}
-                    {onRowClick && layout.visibleLeafColumns.length > 0 ? (
-                      <td className="data-table-action-cell">
-                        <span className="skeleton data-table-skeleton-action" />
-                      </td>
-                    ) : null}
-                  </tr>
-                ))
-              ) : error ? (
-                <tr>
-                  <td colSpan={columnCount} className="data-table-state data-table-error">
-                    <div role="alert">
-                      <span>{error}</span>
-                      {onRetry ? (
-                        <Button size="small" onClick={onRetry}>
-                          다시 시도
-                        </Button>
+                      ) : (
+                        layout.visibleLeafColumns.map((column) => (
+                          <td
+                            key={column.id}
+                            style={layout.configurable ? { width: column.getSize() } : undefined}
+                          >
+                            <span className="skeleton data-table-skeleton-line" />
+                          </td>
+                        ))
+                      )}
+                      {onRowClick && layout.visibleLeafColumns.length > 0 ? (
+                        <td className="data-table-action-cell">
+                          <span className="skeleton data-table-skeleton-action" />
+                        </td>
                       ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td colSpan={columnCount} className="data-table-state">
-                    {emptyMessage}
-                  </td>
-                </tr>
-              ) : (
-                rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className={onRowClick ? "data-table-row-action" : undefined}
-                    onClick={onRowClick ? (event) => activateRow(event, row.original) : undefined}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td
-                        key={cell.id}
-                        style={layout.configurable ? { width: cell.column.getSize() } : undefined}
-                      >
-                        <table.FlexRender cell={cell} />
-                      </td>
-                    ))}
-                    {onRowClick && getRowActionLabel ? (
-                      <td className="data-table-action-cell">
-                        <Button
-                          size="small"
-                          variant="ghost"
-                          aria-label={getRowActionLabel(row.original)}
-                          onClick={() => onRowClick(row.original)}
-                        >
-                          상세
-                        </Button>
-                      </td>
-                    ) : null}
+                    </tr>
+                  ))
+                ) : error ? (
+                  <tr>
+                    <td colSpan={columnCount} className="data-table-state data-table-error">
+                      <div role="alert">
+                        <span>{error}</span>
+                        {onRetry ? (
+                          <Button size="small" onClick={onRetry}>
+                            다시 시도
+                          </Button>
+                        ) : null}
+                      </div>
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={columnCount} className="data-table-state">
+                      {emptyMessage}
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((row, rowIndex) => (
+                    <tr
+                      key={row.id}
+                      data-table-row-index={rowIndex}
+                      className={onRowClick ? "data-table-row-action" : undefined}
+                      onClick={onRowClick ? (event) => activateRow(event, row.original) : undefined}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <td
+                          key={cell.id}
+                          style={layout.configurable ? { width: cell.column.getSize() } : undefined}
+                        >
+                          <table.FlexRender cell={cell} />
+                        </td>
+                      ))}
+                      {onRowClick && getRowActionLabel ? (
+                        <td className="data-table-action-cell">
+                          <Button
+                            size="small"
+                            variant="ghost"
+                            aria-label={getRowActionLabel(row.original)}
+                            data-table-row-action
+                            onClick={() => onRowClick(row.original)}
+                          >
+                            상세
+                          </Button>
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      </DataTableContextMenu>
       {scrollState.overflowing ? (
         <div className="data-table-overflow-hint" aria-hidden="true">
           <MoveHorizontal /> 좌우로 이동해 추가 열 보기
@@ -386,8 +393,8 @@ export function DataTable<TData extends RowData>({
         </nav>
       ) : null}
 
-      {layout.configurable ? (
-        <DataTableSettingsDialog
+      {layout.configurable && settingsOpen ? (
+        <DataTableSettingsLoader
           announcement={layout.settingsAnnouncement}
           columns={layout.settingsColumns}
           onMove={layout.moveColumn}

@@ -38,7 +38,10 @@ export function Dialog({
         <DialogPrimitive.Overlay className="dialog-overlay" />
         <DialogPrimitive.Content
           onEscapeKeyDown={(event) => {
-            if (event.target instanceof Element && event.target.closest("[data-code-editor-surface]"))
+            if (
+              event.target instanceof Element &&
+              event.target.closest("[data-code-editor-surface],[data-table-row-menu]")
+            )
               event.preventDefault();
           }}
           className={[
