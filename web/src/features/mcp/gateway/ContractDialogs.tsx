@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { Controller } from "react-hook-form";
 import { riskLabel } from "@/features/mcp/mcp-utils";
 import type { McpContract } from "@/shared/api/domains/mcp.schemas";
 import { FormDialog } from "@/shared/components/form/FormDialog";
@@ -10,6 +11,7 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import {
   contractBody,
@@ -73,6 +75,7 @@ export function ContractEditor({ owner, original, onClose, returnFocusRef }: Pro
       description="입력·출력 스키마와 변경 전후 값을 확인한 뒤 저장합니다."
       returnFocusRef={returnFocusRef}
       scrollBody
+      scrollHint="계약과 변경 내용을 위아래로 스크롤해 확인할 수 있습니다."
       submitLabel="검토한 계약 저장"
       submitDisabled={!operation.allowed || changes.length === 0}
       onSubmit={async (values) => {
@@ -116,10 +119,40 @@ export function ContractEditor({ owner, original, onClose, returnFocusRef }: Pro
         {(control) => <Textarea {...control} {...form.register("description")} rows={2} />}
       </FormField>
       <FormField label="입력 스키마 (JSON)" error={form.formState.errors.input_schema?.message}>
-        {(control) => <Textarea {...control} {...form.register("input_schema")} rows={4} className="mono" />}
+        {(control) => (
+          <Controller
+            control={form.control}
+            name="input_schema"
+            render={({ field }) => (
+              <CodeEditor
+                {...control}
+                {...field}
+                label="입력 스키마 (JSON)"
+                language="json"
+                rows={4}
+                disabled={!operation.allowed || form.formState.isSubmitting}
+              />
+            )}
+          />
+        )}
       </FormField>
       <FormField label="출력 스키마 (JSON)" error={form.formState.errors.output_schema?.message}>
-        {(control) => <Textarea {...control} {...form.register("output_schema")} rows={4} className="mono" />}
+        {(control) => (
+          <Controller
+            control={form.control}
+            name="output_schema"
+            render={({ field }) => (
+              <CodeEditor
+                {...control}
+                {...field}
+                label="출력 스키마 (JSON)"
+                language="json"
+                rows={4}
+                disabled={!operation.allowed || form.formState.isSubmitting}
+              />
+            )}
+          />
+        )}
       </FormField>
       <Checkbox label="사용 (활성화)" {...form.register("enabled")} />
 

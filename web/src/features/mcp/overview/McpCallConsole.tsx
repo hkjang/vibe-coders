@@ -9,7 +9,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
-import { Textarea } from "@/shared/components/ui/Textarea";
+import { CodeEditor } from "@/shared/code-editor/CodeEditor";
 import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { formatNumber } from "@/shared/utils/format";
@@ -141,14 +141,15 @@ export function McpCallConsole({
         {argsEnabled ? (
           <div>
             <label htmlFor="mcp-call-arguments">JSON 인수</label>
-            <Textarea
+            <CodeEditor
               id="mcp-call-arguments"
+              label="JSON 인수"
+              language="json"
               aria-invalid={errorField === "arguments"}
               value={draft.arguments}
               disabled={run.isPending}
-              onChange={(event) => edit("arguments", event.target.value)}
+              onChange={(value) => edit("arguments", value)}
               rows={4}
-              spellCheck={false}
               aria-describedby={
                 errorField === "arguments"
                   ? "mcp-call-arguments-help mcp-call-error"

@@ -1,8 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import type axe from "axe-core";
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
+import { activateEditor, replaceCode, watchEditorAssets } from "../fixtures/agent-code-editor";
 
 async function install(page: Page, holdCall?: Promise<void>) {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   const user = {
     id: "public-call-admin",
     email: "policy@example.invalid",
@@ -114,7 +117,7 @@ async function install(page: Page, holdCall?: Promise<void>) {
     unexpected.push(url.pathname);
     return route.fulfill({ status: 500, json: {} });
   });
-  return { state, writes, unexpected, bootstrap, user };
+  return { state, writes, unexpected, bootstrap, user, errors };
 }
 async function inspect(page: Page) {
   await page.goto("/app/mcp");
@@ -271,27 +274,131 @@ test("잘못된 JSON은 해당 입력으로 초점을 옮기고 API를 호출하
   expect(fixture.state.calls).toBe(0);
   expect(new URL(page.url()).search).toBe("");
 });
-test("390px 어두운 호출 검토창의 키보드·초점·접근성과 내부 스크롤", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
-  const fixture = await install(page);
-  const review = await open(page);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
-  expect(
-    await page.evaluate(async () =>
-      (
-        await (window as unknown as { axe: typeof axe }).axe.run(document, {
-          runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"] },
-        })
-      ).violations.map((v) => v.id),
-    ),
-  ).toEqual([]);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  const footer = review.getByRole("button", { name: "검토한 호출 실행", exact: true });
-  await expect(footer).toBeInViewport();
-  await page.screenshot({ path: test.info().outputPath("mcp-call-review-mobile.png"), fullPage: true });
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("button", { name: "테스트 호출 검토", exact: true })).toBeFocused();
-  expect(fixture.writes).toEqual([]);
-  expect(fixture.unexpected).toEqual([]);
+for (const colorScheme of ["light", "dark"] as const)
+  test(`390px ${colorScheme} 호출 코드 입력·검토창의 키보드·초점·접근성과 내부 스크롤`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+    await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+    const fixture = await install(page);
+    await watchEditorAssets(page);
+    await inspect(page);
+    await activateEditor(page.locator("main"), "JSON 인수");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(
+      await page.evaluate(async () =>
+        (await (window as unknown as { axe: typeof axe }).axe.run(document)).violations.map((v) => v.id),
+      ),
+    ).toEqual([]);
+    await page.screenshot({
+      path: test.info().outputPath(`mcp-call-code-${colorScheme}.png`),
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "테스트 호출 검토", exact: true }).click();
+    const review = dialog(page);
+    expect(
+      await page.evaluate(async () =>
+        (
+          await (window as unknown as { axe: typeof axe }).axe.run(document, {
+            runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"] },
+          })
+        ).violations.map((v) => v.id),
+      ),
+    ).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const footer = review.getByRole("button", { name: "검토한 호출 실행", exact: true });
+    await expect(footer).toBeInViewport();
+    await page.screenshot({ path: test.info().outputPath("mcp-call-review-mobile.png"), fullPage: true });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "테스트 호출 검토", exact: true })).toBeFocused();
+    expect(fixture.writes).toEqual([]);
+    expect(fixture.unexpected).toEqual([]);
+    expect(fixture.errors).toEqual([]);
+  });
+
+test("호출 코드 입력의 잘못된 객체는 초점을 복원하고 변경하면 이전 경로 검토를 폐기한다", async ({
+  page,
+}) => {
+  const f = await install(page);
+  const assets = await watchEditorAssets(page);
+  await inspect(page);
+  assets.expectDeferred();
+  const editor = await activateEditor(page.locator("main"), "JSON 인수");
+  await replaceCode(editor, "[]");
+  await expect(page.getByText("확인한 메서드", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "테스트 호출 검토", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "적용 경로 확인", exact: true }).click();
+  await expect(editor.locator("textarea.inputarea")).toBeFocused();
+  await expect(editor.locator("textarea.inputarea")).toHaveAttribute("aria-invalid", "true");
+  expect(f.state.calls).toBe(1);
+  await replaceCode(editor, '  {"text":"수정한 요청"}  ');
+  await editor.getByRole("button", { name: "JSON 인수 기본 입력으로 전환", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "JSON 인수", exact: true })).toHaveValue(
+    '  {"text":"수정한 요청"}  ',
+  );
+  await page.getByRole("button", { name: "적용 경로 확인", exact: true }).click();
+  await expect(page.getByText("확인한 메서드", { exact: true })).toBeVisible();
+  expect(f.state.calls).toBe(2);
+  expect(f.writes).toEqual([]);
+  expect(new URL(page.url()).search).toBe("");
+  expect(f.unexpected).toEqual([]);
+  expect(f.errors).toEqual([]);
+});
+
+test("읽기 전용에서도 코드 인수로 경로만 확인하고 실제 호출은 차단한다", async ({ page }) => {
+  const f = await install(page);
+  const feature = f.bootstrap.migration_registry[0];
+  if (!feature) throw new Error("missing public feature");
+  feature.read_only = true;
+  await watchEditorAssets(page);
+  await inspect(page);
+  const editor = await activateEditor(page.locator("main"), "JSON 인수");
+  await replaceCode(editor, '{"text":"읽기 전용 확인"}');
+  await page.getByRole("button", { name: "적용 경로 확인", exact: true }).click();
+  await expect(page.getByText("확인한 메서드", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "테스트 호출 검토", exact: true })).toBeDisabled();
+  expect(f.state.calls).toBe(2);
+  expect(f.writes).toEqual([]);
+  expect(f.unexpected).toEqual([]);
+  expect(f.errors).toEqual([]);
+});
+
+test("코드 인수를 검토하고 호출하는 동안 입력을 잠그며 정확한 객체를 한 번 전송한다", async ({ page }) => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = await install(page, pending);
+  await watchEditorAssets(page);
+  await inspect(page);
+  const editor = await activateEditor(page.locator("main"), "JSON 인수");
+  await replaceCode(editor, '{"text":"검토한 요청","count":2}');
+  await page.getByRole("button", { name: "적용 경로 확인", exact: true }).click();
+  await page.getByRole("button", { name: "테스트 호출 검토", exact: true }).click();
+  const review = dialog(page);
+  await review.getByText("전송할 JSON 인수 확인", { exact: true }).click();
+  await expect(review).toContainText("검토한 요청");
+  expect(f.writes).toEqual([]);
+  await review.getByLabel(/확인 문구/).fill("실제 호출");
+  try {
+    await review.getByRole("button", { name: "검토한 호출 실행", exact: true }).click();
+    await expect.poll(() => f.writes.length).toBe(1);
+    // The confirmation dialog hides the background from the accessibility tree.
+    await expect(page.locator("#mcp-call-arguments")).not.toBeEditable();
+    expect(f.writes).toEqual([
+      {
+        method: "tools/call",
+        name: "public__read",
+        uri: "",
+        upstream_id: "public-id",
+        arguments: { text: "검토한 요청", count: 2 },
+      },
+    ]);
+  } finally {
+    release();
+  }
+  await expect(page.getByText("호출 성공", { exact: true })).toBeVisible();
+  expect(f.writes).toHaveLength(1);
+  expect(f.state.calls).toBe(3);
+  expect(f.unexpected).toEqual([]);
+  expect(f.errors).toEqual([]);
 });
