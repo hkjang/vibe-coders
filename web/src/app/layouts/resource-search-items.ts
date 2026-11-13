@@ -3,6 +3,12 @@ import { containsPotentialSecret } from "@/shared/security/secrets";
 import { isProviderRef } from "@/shared/api/provider-ref";
 
 export const resourceSearchTargets = {
+  setting: {
+    featureId: "system.settings",
+    title: "시스템 설정",
+    path: "/system/settings",
+    parameter: "setting",
+  },
   prompt_asset: {
     featureId: "prompts.library",
     title: "프롬프트 자산",
@@ -68,6 +74,7 @@ export function resourceSearchPath(
     (id.length > 512 || id.trim() !== id || /\p{C}/u.test(id))
   )
     return undefined;
+  if (kind === "setting" && !/^[a-z][a-z0-9._-]{0,255}$/u.test(id)) return undefined;
   if (kind === "provider" && !isProviderRef(id)) return undefined;
   if (kind === "mcp_upstream" && !/^[a-z0-9_][a-z0-9_-]*$/u.test(id)) return undefined;
   if ((kind === "team" || kind === "account") && /\p{C}/u.test(id)) return undefined;
@@ -88,6 +95,7 @@ export function resourceSearchPath(
     params.set("tab", "tools");
     params.set("mcp_only", "1");
   }
+  if (kind === "setting") params.set("tab", id.startsWith("ui.app.") ? "console" : "runtime");
   if (kind === "prompt_asset") params.set("tab", "assets");
   // Skills have more than one tab; the detail belongs to the registry tab.
   if (kind === "skill") params.set("tab", "catalog");

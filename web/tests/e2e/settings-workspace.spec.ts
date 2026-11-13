@@ -6,7 +6,7 @@ const direct = `system/settings?tab=runtime&q=목록밖&setting=${runtimeKey}`;
 
 test("목록과 독립적인 설정 상세 주소·새로고침·키보드와 뒤로 이동", async ({ page }) => {
   const state = await installSettingsWorkspace(page);
-  await page.goto("system/settings?tab=runtime");
+  await page.goto("system/settings?tab=runtime&q=cache&category=cache");
   const link = page.getByRole("link", { name: runtimeKey, exact: true });
   await link.focus();
   await link.press("Enter");
@@ -16,6 +16,11 @@ test("목록과 독립적인 설정 상세 주소·새로고침·키보드와 �
   await page.keyboard.press("Escape");
   await expect(sheet).toBeHidden();
   await expect(link).toBeFocused();
+  expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
+    tab: "runtime",
+    q: "cache",
+    category: "cache",
+  });
   await link.press("Enter");
   await expect(sheet).toBeVisible();
   await page.goBack();
@@ -127,3 +132,25 @@ for (const theme of ["light", "dark"] as const)
       expect(state.unexpected).toEqual([]);
     });
   }
+
+test("설정 초안 폐기 뒤로가기는 필터 주소를 보존하고 앞으로 이동에서 초기 값을 연다", async ({ page }) => {
+  const state = await installSettingsWorkspace(page);
+  await page.goto("system/settings?tab=runtime&q=cache&category=cache");
+  const before = page.url();
+  await page.getByRole("link", { name: runtimeKey, exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: runtimeKey, exact: true });
+  await sheet.getByLabel("새 값", { exact: true }).selectOption("false");
+  await page.goBack();
+  await page.getByRole("button", { name: "계속 편집", exact: true }).click();
+  await expect(sheet.getByLabel("새 값", { exact: true })).toHaveValue("false");
+  await page.goBack();
+  await page.getByRole("button", { name: "변경 버리기", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page).toHaveURL(before);
+  await expect(page.locator("#main-content")).toBeFocused();
+  await page.goForward();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByLabel("새 값", { exact: true })).toHaveValue("true");
+  expect(state.writes).toEqual([]);
+  expect(state.unexpected).toEqual([]);
+});

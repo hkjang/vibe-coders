@@ -66,3 +66,28 @@ test("AUTH-LIVE-044 실제 조회 역할의 설정 상세와 서버 쓰기 거�
   });
   expect(status).toBe(401);
 });
+
+test("AUTH-LIVE-045 실제 설정 검색·콘솔 상세 주소·읽기 권한", async ({ page }) => {
+  await login(page, reader, "/app/system/settings?tab=runtime");
+  for (const key of ["cache.chat_enabled", "ui.app.enabled", "ui.app.feature.system.settings.rollout"]) {
+    await page.keyboard.press("Control+k");
+    const palette = page.getByRole("dialog", { name: "명령 팔레트", exact: true });
+    await palette.getByRole("button", { name: "자원 검색", exact: true }).click();
+    const search = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/admin/resource-search",
+    );
+    await palette.getByRole("combobox").fill(key);
+    expect((await search).status()).toBe(200);
+    await expect(palette.getByRole("option").filter({ hasText: `시스템 설정 · ${key}` })).toBeVisible();
+    await palette.getByRole("combobox").press("Enter");
+    await expect(page).toHaveURL(new RegExp(`setting=${key.replaceAll(".", "\\.")}`));
+    const name = key.includes(".feature.") ? "시스템 설정 전환 설정" : key;
+    const dialog = page.getByRole("dialog", { name, exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
+    await page.reload();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  }
+});

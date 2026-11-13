@@ -54,6 +54,7 @@ function ConsoleFeatureEditor({
   pending: externalPending,
   returnFocusRef,
   row: initialRow,
+  selectedKey,
   title,
 }: ConsoleFeatureDialogProps & { row: ConsoleFeatureRow }): React.JSX.Element {
   const formId = useId();
@@ -73,7 +74,15 @@ function ConsoleFeatureEditor({
       readOnly !== normalizedBoolean(row.readonly?.value ?? "false") ||
       reason !== "",
     externalPending,
-    onDiscard: () => onOpenChange(false),
+    onDiscard: (reason) => {
+      // The router owns a confirmed departure. A second URL update here would
+      // replace the destination or change the browser history index.
+      if (reason === "navigation") {
+        // Radix closes after the route commits. Restore the same destination
+        // as the navigation coordinator instead of racing its focus with the old trigger.
+        returnFocusRef.current = document.getElementById("main-content");
+      } else onOpenChange(false);
+    },
   });
 
   const submit = async (): Promise<void> => {
@@ -101,6 +110,8 @@ function ConsoleFeatureEditor({
 
   return (
     <Dialog
+      scrollBody
+      scrollBodyLabel={!editable || guard.pending ? "콘솔 전환 설정 상세" : undefined}
       open
       onOpenChange={(next) => {
         if (!next) guard.requestClose();
@@ -119,6 +130,11 @@ function ConsoleFeatureEditor({
         </>
       }
     >
+      {selectedKey ? (
+        <p className="settings-selected-key">
+          선택한 설정: <code>{selectedKey}</code>
+        </p>
+      ) : null}
       {disabledReason ? (
         <InlineNotice tone="info" title="변경할 수 없습니다.">
           {disabledReason}
@@ -228,6 +244,7 @@ interface ConsoleFeatureDialogProps {
   pending: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
   row: ConsoleFeatureRow | undefined;
+  selectedKey?: string;
   title: string;
 }
 
@@ -236,7 +253,7 @@ export function ConsoleFeatureDialog(props: ConsoleFeatureDialogProps): React.JS
   const coordinator = useUnsavedChanges();
   const editor =
     props.open && props.row ? (
-      <ConsoleFeatureEditor key={props.row.featureId} {...props} row={props.row} />
+      <ConsoleFeatureEditor key={props.selectedKey ?? props.row.featureId} {...props} row={props.row} />
     ) : null;
   return coordinator ? <>{editor}</> : <UnsavedChangesProvider>{editor}</UnsavedChangesProvider>;
 }

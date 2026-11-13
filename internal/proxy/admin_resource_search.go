@@ -24,6 +24,7 @@ var resourceSearchFeatures = map[string]string{
 	"account":           "access.users",
 	"prompt_asset":      "prompts.library",
 	"prompt_experiment": "prompts.lab",
+	"setting":           "system.settings",
 }
 
 type resourceSearchItem struct {
@@ -125,6 +126,10 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			canRead = securityRead
 		}
 		if allowed[resourceSearchFeatures[kind]] && canRead {
+			if kind == "setting" {
+				groups = append(groups, s.searchSettingNavigation(ctx, input.Query, settingRegistry, settingDescriptions))
+				continue
+			}
 			if kind == "mcp_tool" {
 				groups = append(groups, s.searchMCPToolNavigation(ctx, input.Query))
 				continue
