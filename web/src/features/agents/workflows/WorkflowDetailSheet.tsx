@@ -119,7 +119,7 @@ export function WorkflowDetailSheet({
       return result;
     },
   );
-  const dryRun = simulation.data;
+  const dryRun = simulation.isSuccess && !simulation.isFetching ? simulation.data : undefined;
   const dryRunError = simulation.error;
   const dryRunPending = simulation.isFetching;
   const versions = useWorkflowRead(

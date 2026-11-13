@@ -56,6 +56,26 @@ beforeEach(() => {
   runtime.team = "first-team";
 });
 
+it("새 드라이런이 실패하면 이전 성공 결과를 현재 결과로 표시하지 않는다", async () => {
+  const user = userEvent.setup();
+  let calls = 0;
+  mockApi({
+    ...base,
+    "POST /admin/workflows/wf_one/dry-run": () => {
+      if (++calls > 1) throw apiFailure("검사 실패", 500);
+      return { workflow_id: workflow.id, ok: true, note: "이전 검사 근거" };
+    },
+  });
+  setup();
+  await user.click(await screen.findByRole("button", { name: "드라이런" }));
+  expect(await screen.findByText("이전 검사 근거")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "드라이런" }));
+  expect(await screen.findByText("드라이런에 실패했습니다.")).toBeVisible();
+  expect(screen.queryByText("이전 검사 근거")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "드라이런 결과" })).not.toBeInTheDocument();
+  expect(calls).toBe(2);
+});
+
 it.each(["계정 변경", "팀 변경"])("%s 후 이전 버전 이력을 다시 표시하지 않는다", async (change) => {
   const user = userEvent.setup();
   let calls = 0;
