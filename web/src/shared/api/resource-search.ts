@@ -10,6 +10,7 @@ export const resourceKindSchema = z.enum([
   "mcp_upstream",
   "policy",
   "team",
+  "account",
 ]);
 export type ResourceKind = z.infer<typeof resourceKindSchema>;
 const boundedText = (characters: number) =>
@@ -37,7 +38,7 @@ export const resourceSearchSchema = z.strictObject({
           .max(10),
       }),
     )
-    .max(7),
+    .max(8),
 }) satisfies z.ZodType<PostAdminResourceSearchResponse>;
 
 export const resourceSearchEndpoint = operation<

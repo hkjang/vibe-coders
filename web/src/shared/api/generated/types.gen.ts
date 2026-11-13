@@ -2520,7 +2520,7 @@ export type RequestNoteWriteRequest = {
 } | null;
 
 export type ResourceSearchRequest = {
-    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team'>;
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account'>;
     query: string;
 };
 
@@ -2528,10 +2528,10 @@ export type ResourceSearchResponse = {
     groups: Array<{
         items: Array<{
             id: string;
-            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team';
+            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account';
             title: string;
         }>;
-        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team';
+        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account';
         limited: boolean;
         status: 'ok' | 'forbidden' | 'unavailable';
     }>;
