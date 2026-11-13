@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
 import type { RefObject } from "react";
+import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
+import { useWorkflowRead } from "./use-workflow-queries";
 
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { apiClient } from "@/shared/api/client";
@@ -13,6 +14,7 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
 
 interface WorkflowReceiptDialogProps {
+  owner: FeatureReadOwner;
   onOpenChange: (open: boolean) => void;
   returnFocusRef: RefObject<HTMLElement | null>;
   runId: string;
@@ -20,19 +22,17 @@ interface WorkflowReceiptDialogProps {
 
 /** Safe receipt for one workflow run: step status and sizes, never raw prompts or output. */
 export function WorkflowReceiptDialog({
+  owner,
   onOpenChange,
   returnFocusRef,
   runId,
 }: WorkflowReceiptDialogProps): React.JSX.Element {
-  const receipt = useQuery({
-    queryKey: ["agents", "workflows", "receipt", runId],
-    enabled: runId !== "",
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.workflows.runReceipt, { run_id: runId }), {
-        signal,
-        routeId: "agents.workflows",
-      }),
-  });
+  const receipt = useWorkflowRead(owner, ["receipt", runId], runId !== "", (signal) =>
+    apiClient.request(withPathParams(endpoints.domains.agents.workflows.runReceipt, { run_id: runId }), {
+      signal,
+      routeId: "agents.workflows",
+    }),
+  );
 
   return (
     <Dialog

@@ -1,5 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useRef, useState, type RefObject } from "react";
+import { useId, useRef, useState, type RefObject } from "react";
+import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
+import { useWorkflowRead } from "./use-workflow-queries";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { Tabs, TabPanel } from "@/shared/components/ui/Tabs";
 import { WorkflowFlow } from "./WorkflowFlow";
@@ -22,6 +23,7 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 interface WorkflowDetailSheetProps {
+  owner: FeatureReadOwner;
   loading?: boolean;
   detailError?: unknown;
   invalidAddress?: boolean;
@@ -79,6 +81,7 @@ function StepTable({ steps }: { steps: readonly WorkflowStep[] }): React.JSX.Ele
 }
 
 export function WorkflowDetailSheet({
+  owner,
   loading,
   detailError,
   invalidAddress,
@@ -100,31 +103,35 @@ export function WorkflowDetailSheet({
   const workflowId = workflow?.id ?? "";
   // The parent keys this detail lifetime by the selected definition and session.
   // A late response from an unmounted selection never belongs to its replacement.
-  const simulation = useMutation({
-    retry: false,
-    mutationFn: async () => {
+  const simulationInstance = useId();
+  const simulation = useWorkflowRead(
+    owner,
+    ["dry-run", workflowId, simulationInstance],
+    false,
+    async (signal) => {
       const result = await apiClient.request(
         withPathParams(endpoints.domains.agents.workflows.dryRun, { id: workflowId }),
-        { routeId: "agents.workflows" },
+        { signal, routeId: "agents.workflows", retryUnauthorized: false },
       );
       if (result.workflow_id !== workflowId) {
         throw new AppError("검사 대상이 일치하지 않습니다. 다시 조회하세요.", { kind: "contract" });
       }
       return result;
     },
-  });
-  const dryRun = simulation.data;
+  );
+  const dryRun = simulation.isSuccess && !simulation.isFetching ? simulation.data : undefined;
   const dryRunError = simulation.error;
-  const dryRunPending = simulation.isPending;
-  const versions = useQuery({
-    queryKey: ["agents", "workflows", workflowId, "versions"],
-    enabled: open && showVersions && workflowId !== "",
-    queryFn: ({ signal }) =>
+  const dryRunPending = simulation.isFetching;
+  const versions = useWorkflowRead(
+    owner,
+    ["versions", workflowId],
+    open && showVersions && workflowId !== "",
+    (signal) =>
       apiClient.request(withPathParams(endpoints.domains.agents.workflows.versions, { id: workflowId }), {
         signal,
         routeId: "agents.workflows",
       }),
-  });
+  );
   const steps = workflow?.steps ?? [];
 
   return (
@@ -176,7 +183,7 @@ export function WorkflowDetailSheet({
           />
 
           <div className="agents-detail-actions">
-            <Button variant="primary" onClick={() => simulation.mutate()} disabled={dryRunPending}>
+            <Button variant="primary" onClick={() => void simulation.refetch()} disabled={dryRunPending}>
               {dryRunPending ? "검증 중" : "드라이런"}
             </Button>
             <Button
