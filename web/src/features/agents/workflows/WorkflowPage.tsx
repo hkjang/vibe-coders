@@ -12,7 +12,7 @@ import { apiClient } from "@/shared/api/client";
 import type { Workflow } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { PageHeader } from "@/shared/components/page/PageHeader";
-import { ErrorState } from "@/shared/components/state/PageStates";
+import { ErrorState, PermissionDenied } from "@/shared/components/state/PageStates";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -41,12 +41,13 @@ const writeScope = "admin:write";
 const scopeWriteDisabledReason = "워크플로를 변경하려면 admin:write 권한이 필요합니다.";
 export function WorkflowPage(): React.JSX.Element {
   const owner = useFeatureReadOwner("agents.workflows", "workflow-management");
-  if (!owner.readable || owner.denied)
+  if (!owner.readable) return <PermissionDenied permission="admin:read" />;
+  if (owner.denied)
     return (
       <ErrorState
         message="워크플로 조회 권한이 없거나 인증 상태가 변경되었습니다. 권한을 확인하고 다시 조회하세요."
-        onRetry={owner.denied ? owner.restart : undefined}
-        legacyHref="/admin#/workflows"
+        onRetry={owner.restart}
+        showLegacy={false}
       />
     );
   return <WorkflowPageContent key={owner.id} owner={owner} />;
@@ -243,6 +244,7 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
       )}
 
       <WorkflowReceiptDialog
+        owner={owner}
         onOpenChange={(open) => {
           if (!open) setReceiptRunId("");
         }}
@@ -251,6 +253,7 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
       />
 
       <WorkflowDetailSheet
+        owner={owner}
         key={JSON.stringify([selectedId, selected])}
         canWrite={canWrite}
         onDelete={() => setDeleteTarget(selected)}

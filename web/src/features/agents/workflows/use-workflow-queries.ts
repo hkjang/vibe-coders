@@ -11,6 +11,29 @@ import {
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import { workflowsKey } from "./use-workflow-mutations";
 
+/** Detail reads share the page's account/team lifetime and authorization boundary. */
+export function useWorkflowRead<T>(
+  owner: FeatureReadOwner,
+  key: readonly unknown[],
+  enabled: boolean,
+  read: (signal: AbortSignal) => Promise<T>,
+) {
+  return useQuery({
+    queryKey: featureOwnedKey([...workflowsKey, ...key], owner),
+    enabled: enabled && owner.readable && !owner.denied,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const result = await read(signal);
+      assertFeatureRead(owner, signal);
+      return result;
+    },
+  });
+}
+
 export function useWorkflowPageQuery(query: WorkflowPageQuery, owner: FeatureReadOwner) {
   const interval = useRefreshInterval();
   return useQuery({

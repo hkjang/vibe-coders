@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { first, second, test } from "../fixtures/workflow-ownership-gateway";
+import { bootstrap, first, second, test } from "../fixtures/workflow-ownership-gateway";
 
 async function open(page: Page) {
   await page.goto("agents/workflows");
@@ -96,18 +96,82 @@ test("늦은 모의 검사 결과가 다른 업무 상세에 섞이지 않는다
   await open(page);
   await page.getByRole("button", { name: "드라이런", exact: true }).click();
   await expect.poll(() => gateway.simulations.length).toBe(1);
+  const canceled = page.waitForEvent(
+    "requestfailed",
+    (request) => new URL(request.url()).pathname === "/admin/workflows/wf_first/dry-run",
+  );
   await page.keyboard.press("Escape");
+  expect((await canceled).failure()?.errorText).toContain("ERR_ABORTED");
   await page.getByRole("button", { name: `${second.name} 상세 열기`, exact: true }).click();
   const detail = page.getByRole("dialog", { name: second.name, exact: true });
   await expect(detail).toBeVisible();
-  const response = page.waitForResponse(
-    (item) => new URL(item.url()).pathname === "/admin/workflows/wf_first/dry-run",
-  );
   gateway.releaseSimulation();
-  await (await response).finished();
   await detail.getByRole("button", { name: "드라이런", exact: true }).click();
   await expect(detail.getByText("두 번째 업무 검사 근거", { exact: true })).toBeVisible();
   await expect(detail.getByText("첫 번째 업무 검사 근거", { exact: true })).toHaveCount(0);
   expect(gateway.simulations).toEqual([first.id, second.id]);
+  expect(gateway.writes).toEqual([]);
+});
+
+test("팀이 바뀌면 버전 이력을 다시 읽고 이전 메모를 제거한다", async ({ page, gateway }) => {
+  let team = "first-team";
+  let reads = 0;
+  await page.route("**/admin/ui-bootstrap", (route) => {
+    const value = bootstrap("writable");
+    if (!value.user) throw new Error("합성 사용자 누락");
+    value.user = { ...value.user, team_id: team };
+    return route.fulfill({ json: value });
+  });
+  await page.route("**/admin/workflows/wf_first/versions", (route) => {
+    reads++;
+    return route.fulfill({
+      json: {
+        workflow_id: first.id,
+        versions: [
+          {
+            id: "version-one",
+            version: 1,
+            note: team === "first-team" ? "이전 팀 게시 메모" : "새 팀 게시 메모",
+          },
+        ],
+      },
+    });
+  });
+  await open(page);
+  await page.getByRole("button", { name: "버전 이력", exact: true }).click();
+  await expect(page.getByText("이전 팀 게시 메모", { exact: true })).toBeVisible();
+  team = "second-team";
+  await runtime(page);
+  await expect(page.getByText("이전 팀 게시 메모", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "버전 이력", exact: true }).click();
+  await expect(page.getByText("새 팀 게시 메모", { exact: true })).toBeVisible();
+  expect(reads).toBe(2);
+  expect(gateway.writes).toEqual([]);
+});
+
+test("버전 조회 권한이 거부되면 닫고 수동 재조회 후 이력을 다시 연다", async ({ page, gateway }) => {
+  let reads = 0;
+  await page.route("**/admin/workflows/wf_first/versions", (route) => {
+    reads++;
+    return reads === 1
+      ? route.fulfill({ status: 403, json: { error: { message: "권한 없음" } } })
+      : route.fulfill({
+          json: {
+            workflow_id: first.id,
+            versions: [{ id: "version-one", version: 1, note: "복구한 게시 메모" }],
+          },
+        });
+  });
+  await open(page);
+  await page.getByRole("button", { name: "버전 이력", exact: true }).click();
+  await expect(page.getByText(/워크플로 조회 권한이 없거나 인증 상태가 변경되었습니다/)).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(reads).toBe(1);
+  await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: first.name, exact: true })).toBeVisible();
+  expect(reads).toBe(1);
+  await page.getByRole("button", { name: "버전 이력", exact: true }).click();
+  await expect(page.getByText("복구한 게시 메모", { exact: true })).toBeVisible();
+  expect(reads).toBe(2);
   expect(gateway.writes).toEqual([]);
 });
