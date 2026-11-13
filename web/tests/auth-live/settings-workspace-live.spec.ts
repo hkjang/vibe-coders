@@ -91,3 +91,35 @@ test("AUTH-LIVE-045 실제 설정 검색·콘솔 상세 주소·읽기 권한", 
     await expect(dialog).toBeHidden();
   }
 });
+
+test("AUTH-LIVE-046 실제 종류 선택 검색·읽기 전용 상세·팔레트 상태 초기화", async ({ page }) => {
+  await login(page, reader, "/app/system/settings?tab=runtime");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "명령 팔레트", exact: true });
+  await palette.getByRole("button", { name: "자원 검색", exact: true }).click();
+  await palette.getByRole("button", { name: "검색 대상: 전체 자원" }).click();
+  await palette
+    .getByRole("group", { name: "검색할 자원 종류" })
+    .getByRole("button", { name: "시스템 설정", exact: true })
+    .click();
+  const input = palette.getByRole("combobox");
+  await expect(input).toBeFocused();
+  const searched = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/resource-search",
+  );
+  await input.fill(key);
+  const response = await searched;
+  expect(response.status()).toBe(200);
+  const body: { kinds: string[]; query: string } = response.request().postDataJSON();
+  expect(body.kinds.length === 1 && body.kinds[0] === "setting" && body.query === key).toBe(true);
+  await expect(palette.getByRole("option")).toHaveCount(1);
+  await input.press("Enter");
+  const detail = page.getByRole("dialog", { name: key, exact: true });
+  await expect(detail.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(detail).toBeHidden();
+  await page.keyboard.press("Control+k");
+  await palette.getByRole("button", { name: "자원 검색", exact: true }).click();
+  await expect(input).toHaveValue("");
+  await expect(palette.getByRole("button", { name: "검색 대상: 전체 자원" })).toBeVisible();
+});
