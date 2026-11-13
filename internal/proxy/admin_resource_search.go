@@ -19,6 +19,7 @@ var resourceSearchFeatures = map[string]string{
 	"mcp_upstream": "mcp.overview",
 	"policy":       "governance.policies",
 	"team":         "access.users",
+	"account":      "access.users",
 }
 
 type resourceSearchItem struct {
@@ -122,14 +123,18 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			var rows []store.ResourceMetadata
 			var more bool
 			var err error
-			if kind == "team" {
+			if kind == "team" || kind == "account" {
 				var scopeTeam *string
 				if user.Role == "team_admin" {
 					// Reuse the already verified identity. A later failed token
 					// lookup must never turn a scoped request into an unscoped one.
 					scopeTeam = &user.TeamID
 				}
-				rows, more, err = s.db.SearchAuthTeamMetadata(ctx, input.Query, 10, scopeTeam)
+				if kind == "account" {
+					rows, more, err = s.db.SearchAuthAccountMetadata(ctx, input.Query, 10, scopeTeam)
+				} else {
+					rows, more, err = s.db.SearchAuthTeamMetadata(ctx, input.Query, 10, scopeTeam)
+				}
 			} else {
 				rows, more, err = s.db.SearchResourceMetadata(ctx, kind, input.Query, 10)
 			}

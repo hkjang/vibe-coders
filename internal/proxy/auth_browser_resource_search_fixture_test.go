@@ -38,6 +38,9 @@ func seedBrowserResourceSearchFixture(t *testing.T, db *store.SQLStore, upstream
 	if err := db.UpsertAuthTeam(ctx, store.AuthTeam{ID: "browser-search-team", Name: "검색검증 등록 팀"}); err != nil {
 		t.Fatal("synthetic resource search team could not be prepared")
 	}
+	if err := db.CreateAuthUser(ctx, store.AuthUser{ID: "browser-search-account", Email: "search-account@example.invalid", Name: "검색검증 로그인 계정", Role: "viewer", Status: "active"}); err != nil {
+		t.Fatal("synthetic resource search account could not be prepared")
+	}
 }
 
 func TestResourceSearchRequiresSameSessionAsAdminLists(t *testing.T) {

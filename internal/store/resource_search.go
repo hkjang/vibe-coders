@@ -43,11 +43,36 @@ func (s *SQLStore) SearchResourceMetadata(ctx context.Context, kind, query strin
 // ListAuthTeamPage. Keep it separate from the unscoped resource-kind API so a
 // caller cannot accidentally request team metadata without considering scope.
 func (s *SQLStore) SearchAuthTeamMetadata(ctx context.Context, query string, limit int, scopeTeam *string) ([]ResourceMetadata, bool, error) {
-	return s.searchResourceMetadata(ctx, "teams", "id", "name", query, limit, scopeTeam)
+	var scope *resourceMetadataScope
+	if scopeTeam != nil {
+		scope = &resourceMetadataScope{expression: "id", value: *scopeTeam}
+	}
+	return s.searchResourceMetadata(ctx, "teams", "id", "name", query, limit, scope)
+}
+
+// SearchAuthAccountMetadata selects names and IDs only. Primary-team selection
+// matches ListAuthAccountPage and PrimaryTeamForUser, including unassigned users.
+// This cannot be requested through the generic unscoped resource-kind API.
+func (s *SQLStore) SearchAuthAccountMetadata(ctx context.Context, query string, limit int, scopeTeam *string) ([]ResourceMetadata, bool, error) {
+	var scope *resourceMetadataScope
+	if scopeTeam != nil {
+		scope = &resourceMetadataScope{
+			expression: "COALESCE((SELECT m.team_id FROM user_team_memberships m WHERE m.user_id = u.id ORDER BY m.created_at ASC LIMIT 1), '')",
+			value:      *scopeTeam,
+		}
+	}
+	return s.searchResourceMetadata(ctx, "users u", "u.id", "u.name", query, limit, scope)
+}
+
+// expression is trusted SQL supplied only by the fixed callers above; the
+// authenticated scope value is always bound, including empty or legacy IDs.
+type resourceMetadataScope struct {
+	expression string
+	value      string
 }
 
 // All SQL identifiers come from the fixed sources above, never request input.
-func (s *SQLStore) searchResourceMetadata(ctx context.Context, table, id, title, query string, limit int, scopeID *string) ([]ResourceMetadata, bool, error) {
+func (s *SQLStore) searchResourceMetadata(ctx context.Context, table, id, title, query string, limit int, scope *resourceMetadataScope) ([]ResourceMetadata, bool, error) {
 	if !utf8.ValidString(query) || utf8.RuneCountInString(query) < 2 || utf8.RuneCountInString(query) > 128 || limit < 1 || limit > 50 {
 		return nil, false, errors.New("invalid resource search bounds")
 	}
@@ -64,9 +89,9 @@ func (s *SQLStore) searchResourceMetadata(ctx context.Context, table, id, title,
 		" AND " + byteLength(id) + " <= 2048 AND " + byteLength(title) + " <= 1024" +
 		" AND " + s.metadataLowerSQL(title) + " LIKE " + s.metadataLowerSQL("?") + " ESCAPE '!'"
 	args := []any{pattern}
-	if scopeID != nil {
-		statement += " AND " + id + " = ?"
-		args = append(args, *scopeID)
+	if scope != nil {
+		statement += " AND " + scope.expression + " = ?"
+		args = append(args, scope.value)
 	}
 	statement += " ORDER BY " + title + ", " + id + " LIMIT ?"
 	args = append(args, limit+1)

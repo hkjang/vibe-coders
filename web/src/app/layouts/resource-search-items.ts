@@ -30,6 +30,12 @@ export const resourceSearchTargets = {
     path: "/access/users",
     parameter: "registered_team",
   },
+  account: {
+    featureId: "access.users",
+    title: "로그인 계정",
+    path: "/access/users/accounts",
+    parameter: "account_id",
+  },
 } satisfies Record<ResourceKind, { featureId: string; title: string; path: string; parameter: string }>;
 
 export function resourceSearchReadScope(kind: ResourceKind): string {
@@ -45,7 +51,7 @@ export function resourceSearchPath(
   if (!id || [...id].length > 512 || containsPotentialSecret(id, prefixes)) return undefined;
   if (kind === "provider" && !isProviderRef(id)) return undefined;
   if (kind === "mcp_upstream" && !/^[a-z0-9_][a-z0-9_-]*$/u.test(id)) return undefined;
-  if (kind === "team" && /\p{C}/u.test(id)) return undefined;
+  if ((kind === "team" || kind === "account") && /\p{C}/u.test(id)) return undefined;
   const target = resourceSearchTargets[kind];
   const params = new URLSearchParams({ [target.parameter]: id });
   // Skills have more than one tab; the detail belongs to the registry tab.

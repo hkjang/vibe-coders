@@ -23,6 +23,7 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     { title: "검색검증 MCP 서버", path: "/app/mcp", parameter: "upstream" },
     { title: "검색검증 정책", path: "/app/governance/policies/detail", parameter: "policy" },
     { title: "검색검증 등록 팀", path: "/app/access/users", parameter: "registered_team" },
+    { title: "검색검증 로그인 계정", path: "/app/access/users/accounts", parameter: "account_id" },
   ];
   for (const target of targets) {
     await page.keyboard.press("Control+k");
@@ -71,14 +72,19 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
           ? "정책 상세"
           : target.parameter === "registered_team"
             ? "등록 팀 상세"
-            : target.title,
+            : target.parameter === "account_id"
+              ? "로그인 계정 상세"
+              : target.title,
       exact: true,
     });
     await expect(panel).toBeVisible();
     if (target.parameter === "policy")
       await expect(panel.getByRole("heading", { name: target.title })).toBeVisible();
     if (target.parameter === "registered_team") await expect(panel).toContainText(target.title);
+    if (target.parameter === "account_id") await expect(panel).toContainText(target.title);
     const destination = new URL(page.url());
+    if (target.parameter === "account_id")
+      expect(destination.searchParams.get("account_id")).toBe("browser-search-account");
     expect(destination.pathname).toBe(target.path);
     expect(Boolean(destination.searchParams.get(target.parameter))).toBe(true);
     expect(destination.searchParams.has("q")).toBe(false);

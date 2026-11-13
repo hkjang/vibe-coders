@@ -1,20 +1,20 @@
 package proxy
 
 func resourceSearchOpenAPISchemas() map[string]any {
-	kind := map[string]any{"type": "string", "enum": []string{"provider", "workflow", "app", "skill", "mcp_upstream", "policy", "team"}}
+	kind := map[string]any{"type": "string", "enum": []string{"provider", "workflow", "app", "skill", "mcp_upstream", "policy", "team", "account"}}
 	return map[string]any{
 		"ResourceSearchRequest": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"query", "kinds"},
 			"properties": map[string]any{
 				"query": map[string]any{"type": "string", "minLength": 2, "maxLength": 128},
-				"kinds": map[string]any{"type": "array", "items": kind, "minItems": 1, "maxItems": 7, "uniqueItems": true},
+				"kinds": map[string]any{"type": "array", "items": kind, "minItems": 1, "maxItems": 8, "uniqueItems": true},
 			},
 		},
 		"ResourceSearchResponse": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"groups", "request_id"},
 			"properties": map[string]any{
 				"request_id": map[string]any{"type": "string"},
-				"groups": map[string]any{"type": "array", "maxItems": 7, "items": map[string]any{
+				"groups": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{
 					"type": "object", "additionalProperties": false, "required": []string{"kind", "items", "limited", "status"},
 					"properties": map[string]any{
 						"kind": kind, "limited": map[string]any{"type": "boolean"},
@@ -32,7 +32,7 @@ func resourceSearchOpenAPISchemas() map[string]any {
 
 func enrichResourceSearchOpenAPI(op, responses map[string]any) {
 	op["description"] = "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies; all other kinds require admin:read. MCP upstream search additionally requires observability:read, exposes only canonical slug IDs and safe display names, and never fetches discovery data. A security-only reader must request the policy kind; other groups remain forbidden. No admin:write required. " +
-		"Team search requires access.users and applies the same exact authenticated team_admin TeamID scope as GET /admin/teams?view=registered, including an empty team scope. It searches registered team names, not usage groups, IDs or members. Query is trimmed, 2–128 Unicode characters, literal name substring; SQLite uses the embedded Unicode lowercase function and PostgreSQL uses LOWER for both stored names and query. Seven supported configuration kinds: provider, workflow, app, skill, mcp_upstream, policy and team; no model/upstream calls or business execution. " +
+		"Team search requires access.users and applies the same exact authenticated team_admin TeamID scope as GET /admin/teams?view=registered, including an empty team scope. It searches registered team names, not usage groups, IDs or members. Account search also requires access.users and matches GET /admin/users?view=accounts primary-team scope, including unassigned accounts for an empty authenticated team. It selects and searches stored login names only, never email, roles, credentials, membership lists or usage identities. Query is trimmed, 2–128 Unicode characters, literal name substring; SQLite uses the embedded Unicode lowercase function and PostgreSQL uses LOWER for both stored names and query. Eight supported navigation kinds: provider, workflow, app, skill, mcp_upstream, policy, team and account; no model/upstream calls or business execution. " +
 		"At most ten metadata rows per kind ordered by stored title then ID. IDs are bounded to 512 Unicode characters/2048 UTF-8 bytes and titles to 256 characters/1024 bytes before selection. Unsafe or oversized IDs/titles are omitted for every role without truncating IDs; full team metadata remains available in the registered-team screen. Definitions, policy conditions/actions, instructions, credentials, URLs, members and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store."
 	op["requestBody"] = requestBody("ResourceSearchRequest")
 	responses["200"] = successResponse("ResourceSearchResponse")

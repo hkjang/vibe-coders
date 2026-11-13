@@ -393,7 +393,7 @@ describe("independent ModelPage received-list ordering contract", () => {
     noAdditionalReadsOrWrites(calls);
   });
 
-  it("supports local 10/25/50 sizes, resets page on size changes and restores the original compound order", async () => {
+  it("supports local 10/25/50 sizes and resets the page on size changes", async () => {
     const user = userEvent.setup();
     const { calls } = mount();
     await loaded(calls);
@@ -409,12 +409,20 @@ describe("independent ModelPage received-list ordering contract", () => {
     expect(ids()).toEqual(ordinaryIds.slice(25, 50));
     await user.selectOptions(size, "50");
     expect(ids()).toEqual(ordinaryIds.slice(0, 50));
+    await user.selectOptions(size, "10");
+    expect(ids()).toEqual(ordinaryIds.slice(0, 10));
+    noAdditionalReadsOrWrites(calls);
+  });
+
+  it("restores the original compound order after sorting a fifty-row page", async () => {
+    const user = userEvent.setup();
+    const { calls } = mount("/gateway/models?page_size=50");
+    await loaded(calls);
+    expect(ids()).toEqual(ordinaryIds.slice(0, 50));
     await sortBy(user, "품질", "descending");
     expect(ids()[0]).toBe("z-best");
     await user.click(screen.getByRole("button", { name: "기본 순서" }));
     expect(ids()).toEqual(ordinaryIds.slice(0, 50));
-    await user.selectOptions(size, "10");
-    expect(ids()).toEqual(ordinaryIds.slice(0, 10));
     noAdditionalReadsOrWrites(calls);
   });
 
