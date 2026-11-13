@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useSkillRead } from "./skill-scope";
 
 import { severityTone, skillStatusLabels } from "@/features/agents/skills/skill-form";
 import { apiClient } from "@/shared/api/client";
@@ -26,7 +26,7 @@ export function SkillReadinessPanel({
   skillName,
   writeDisabledReason,
 }: SkillReadinessPanelProps): React.JSX.Element {
-  const readiness = useQuery({
+  const readiness = useSkillRead({
     queryKey: ["agents", "skills", skillName, "readiness"],
     enabled: skillName !== "",
     queryFn: ({ signal }) =>

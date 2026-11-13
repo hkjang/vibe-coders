@@ -3,7 +3,8 @@ import { act, renderHook } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { emptyFitnessForm, fitnessKey } from "./skill-fitness-state";
+import { emptyFitnessForm } from "./skill-fitness-state";
+import { SkillScopeBoundary } from "./skill-scope";
 import { useSkillFitnessEditor } from "./use-skill-fitness-editor";
 import { tokenStore } from "@/shared/auth/token-store";
 import { UnsavedChangesContext } from "@/shared/unsaved/context";
@@ -35,17 +36,19 @@ function setup(write: ApiHandler = () => ({ skill_name: "skill" })) {
   // while deferred mutations exercise the instance/session boundary.
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   const coordinator = new UnsavedChangesCoordinator();
-  client.setQueryData(fitnessKey("skill", tokenStore.getSessionEpoch()), data);
   function Wrapper({ children }: PropsWithChildren) {
     return (
       <QueryClientProvider client={client}>
         <FeatureAccessHarness featureId="agents.skills" readOnly={access.readOnly}>
-          <UnsavedChangesContext.Provider value={coordinator}>{children}</UnsavedChangesContext.Provider>
+          <SkillScopeBoundary>
+            <UnsavedChangesContext.Provider value={coordinator}>{children}</UnsavedChangesContext.Provider>
+          </SkillScopeBoundary>
         </FeatureAccessHarness>
       </QueryClientProvider>
     );
   }
   const hook = renderHook(() => useSkillFitnessEditor(), { wrapper: Wrapper });
+  client.setQueryData(hook.result.current.queryKey("skill", tokenStore.getSessionEpoch()), data);
   act(() =>
     hook.result.current.open({ name: "skill", description: "original" }, document.createElement("button")),
   );
@@ -71,7 +74,7 @@ describe("스킬 근거 실제 제출 경계", () => {
     expect(Object.isFrozen(target)).toBe(true);
     expect(Object.isFrozen(target.skill)).toBe(true);
     expect(Object.isFrozen(target.baseline)).toBe(true);
-    act(() => client.setQueryData(fitnessKey("skill", target.epoch), { ...data, required: 3 }));
+    act(() => client.setQueryData(result.current.queryKey("skill", target.epoch), { ...data, required: 3 }));
     expect(target.baseline.required).toBe(2);
     await expect(
       result.current.submit({ ...target, skill: { name: "other" } }, values),
@@ -94,13 +97,13 @@ describe("스킬 근거 실제 제출 경계", () => {
       await act(async () => {
         if (boundary === "invalidation")
           await client.invalidateQueries({
-            queryKey: fitnessKey("skill", target.epoch),
+            queryKey: result.current.queryKey("skill", target.epoch),
             refetchType: "none",
           });
         if (boundary === "identity")
-          client.setQueryData(fitnessKey("skill", target.epoch), { ...data, skill: "other" });
+          client.setQueryData(result.current.queryKey("skill", target.epoch), { ...data, skill: "other" });
         if (boundary === "malformed")
-          client.setQueryData(fitnessKey("skill", target.epoch), { ...data, evidence: null });
+          client.setQueryData(result.current.queryKey("skill", target.epoch), { ...data, evidence: null });
         if (boundary === "session") tokenStore.clearAll();
         await expect(submit(target, values)).rejects.toBeDefined();
       });
@@ -153,7 +156,7 @@ describe("스킬 근거 실제 제출 경계", () => {
         else result.current.close(target.instance);
       });
       act(() => {
-        client.setQueryData(fitnessKey("skill", tokenStore.getSessionEpoch()), data);
+        client.setQueryData(result.current.queryKey("skill", tokenStore.getSessionEpoch()), data);
         result.current.open({ name: "skill" }, document.createElement("button"));
       });
       const newer = result.current.target;
@@ -198,7 +201,7 @@ describe("스킬 근거 실제 제출 경계", () => {
       const { result, target, client } = setup();
       act(() => result.current.close(target.instance));
       act(() => {
-        client.setQueryData(fitnessKey(name, target.epoch), { ...data, skill: name });
+        client.setQueryData(result.current.queryKey(name, target.epoch), { ...data, skill: name });
         result.current.open({ name }, document.createElement("button"));
       });
       expect(result.current.target).toBeUndefined();

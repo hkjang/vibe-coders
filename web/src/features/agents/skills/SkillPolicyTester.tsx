@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState } from "react";
+import { useSkillReadAction } from "./skill-scope";
 
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
@@ -17,22 +18,32 @@ export function SkillPolicyTester({ skillName }: { skillName: string }): React.J
   const [model, setModel] = useState("");
   const [tools, setTools] = useState("");
   const [team, setTeam] = useState("");
+  const readAction = useSkillReadAction();
+  const body = {
+    name: skillName,
+    model: model.trim(),
+    tools: tools
+      .split(",")
+      .map((tool) => tool.trim())
+      .filter(Boolean),
+    team: team.trim(),
+  };
 
   const evaluate = useMutation({
-    mutationFn: () =>
-      apiClient.request(endpoints.domains.agents.skills.evaluate, {
-        body: {
-          name: skillName,
-          model: model.trim(),
-          tools: tools
-            .split(",")
-            .map((tool) => tool.trim())
-            .filter((tool) => tool !== ""),
-          team: team.trim(),
-        },
-        routeId: "agents.skills",
-      }),
+    gcTime: 0,
+    retry: false,
+    mutationFn: (input: typeof body) =>
+      readAction((signal) =>
+        apiClient.request(endpoints.domains.agents.skills.evaluate, {
+          body: input,
+          signal,
+          retryUnauthorized: false,
+          routeId: "agents.skills",
+        }),
+      ),
   });
+  const current = JSON.stringify(evaluate.variables) === JSON.stringify(body);
+  const result = current ? evaluate.data : undefined;
 
   return (
     <SectionCard
@@ -44,7 +55,7 @@ export function SkillPolicyTester({ skillName }: { skillName: string }): React.J
         className="form-grid"
         onSubmit={(event) => {
           event.preventDefault();
-          evaluate.mutate();
+          evaluate.mutate(body);
         }}
       >
         <div className="form-field">
@@ -79,12 +90,12 @@ export function SkillPolicyTester({ skillName }: { skillName: string }): React.J
         </Button>
       </form>
 
-      {evaluate.isError ? (
+      {current && evaluate.isError ? (
         <InlineNotice tone="danger" title="정책을 확인하지 못했습니다.">
           {safeAppErrorMessage(evaluate.error, "정책을 확인하지 못했습니다.")}
         </InlineNotice>
       ) : null}
-      {evaluate.data ? (
+      {result ? (
         <>
           <KeyValueList
             columns={3}
@@ -92,18 +103,18 @@ export function SkillPolicyTester({ skillName }: { skillName: string }): React.J
               {
                 label: "판정",
                 value: (
-                  <Badge tone={evaluate.data.allowed ? "success" : "danger"}>
-                    {evaluate.data.allowed ? "허용" : "차단"}
+                  <Badge tone={result.allowed ? "success" : "danger"}>
+                    {result.allowed ? "허용" : "차단"}
                   </Badge>
                 ),
               },
-              { label: "적용 모드", value: evaluate.data.enforcement },
-              { label: "차단 여부", value: evaluate.data.would_block ? "차단됨" : "경고만" },
+              { label: "적용 모드", value: result.enforcement },
+              { label: "차단 여부", value: result.would_block ? "차단됨" : "경고만" },
             ]}
           />
-          {(evaluate.data.violations ?? []).length > 0 ? (
+          {(result.violations ?? []).length > 0 ? (
             <ul className="agents-checklist" aria-label="정책 위반 목록">
-              {(evaluate.data.violations ?? []).map((violation) => (
+              {(result.violations ?? []).map((violation) => (
                 <li key={violation} data-ok="false">
                   <span className="agents-checklist-copy">{violation}</span>
                 </li>

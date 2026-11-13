@@ -186,7 +186,10 @@ describe("스킬 적합성 근거 공통 폼", () => {
     const { dialog } = await open(user);
     await user.type(within(dialog).getByRole("textbox", { name: "참조 ID" }), "고정 참조");
     act(() =>
-      client.setQueryData(fitnessKey(skill.name, tokenStore.getSessionEpoch()), { ...data, required: 3 }),
+      client.setQueriesData(
+        { queryKey: fitnessKey(skill.name, tokenStore.getSessionEpoch()) },
+        { ...data, required: 3 },
+      ),
     );
     select({ name: "other", description: "바뀐 스킬" });
     expect(within(dialog).getByText("대상 스킬: 검토/skill")).toBeVisible();
@@ -381,15 +384,14 @@ describe("스킬 적합성 근거 공통 폼", () => {
   });
   it("보안 로그아웃은 dirty 확인 없이 초안을 없애고 새 세션에는 빈 입력을 연다", async () => {
     const { user, api } = setup();
-    const { dialog, trigger } = await open(user);
+    const { dialog } = await open(user);
     await user.type(within(dialog).getByRole("textbox", { name: "참조 ID" }), "이전 계정 초안");
     act(() => tokenStore.clearAll());
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    await waitFor(() => expect(trigger).toBeEnabled());
-    await user.click(trigger);
-    const newer = await screen.findByRole("dialog", { name: "스킬 적합성 근거 기록" });
+    const { dialog: newer } = await open(user);
     expect(within(newer).getByRole("textbox", { name: "참조 ID" })).toHaveValue("");
+    expect(api.calls.filter((call) => call.key === get)).toHaveLength(2);
     expect(api.bodies(post)).toEqual([]);
   });
 });

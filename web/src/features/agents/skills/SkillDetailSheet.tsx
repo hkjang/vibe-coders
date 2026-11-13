@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useSkillRead } from "./skill-scope";
 import { useState, type RefObject } from "react";
 
 import { SkillFitnessBoundary } from "./SkillFitnessBoundary";
@@ -69,7 +69,7 @@ function SkillDetailContent({
   const [panel, setPanel] = useState<DetailPanel | undefined>();
   const name = skill?.name ?? "";
 
-  const runs = useQuery({
+  const runs = useSkillRead({
     queryKey: ["agents", "skills", name, "runs"],
     enabled: open && panel === "runs" && name !== "",
     queryFn: ({ signal }) =>
@@ -80,7 +80,7 @@ function SkillDetailContent({
       }),
   });
 
-  const promotions = useQuery({
+  const promotions = useSkillRead({
     queryKey: ["agents", "skills", name, "promotions"],
     enabled: open && panel === "history" && name !== "",
     queryFn: ({ signal }) =>

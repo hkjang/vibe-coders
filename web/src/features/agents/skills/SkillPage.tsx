@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { skillsKey, useSkillRead, useSkillOperationAccess } from "./skill-scope";
 import { Plus, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 
@@ -8,8 +8,6 @@ import { SkillAdoptDialog } from "@/features/agents/skills/SkillAdoptDialog";
 import { SkillDetailSheet } from "@/features/agents/skills/SkillDetailSheet";
 import { SkillFitnessBoundary } from "./SkillFitnessBoundary";
 import { useSkillFitnessContext } from "./skill-fitness-context";
-import { skillMutationOwners } from "@/shared/feature-access/policy";
-import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { SkillFormDialog } from "@/features/agents/skills/SkillFormDialog";
 import { SkillGraphView } from "@/features/agents/skills/SkillGraphView";
 import { SkillReadinessPanel } from "@/features/agents/skills/SkillReadinessPanel";
@@ -56,7 +54,6 @@ import "@/features/agents/agents.css";
 
 const tabIds = ["catalog", "studio", "graph"] as const;
 type TabId = (typeof tabIds)[number];
-const skillsKey = ["agents", "skills"] as const;
 const scopeWriteDisabledReason = "스킬을 변경하려면 admin:write 권한이 필요합니다.";
 
 export function SkillPage(): React.JSX.Element {
@@ -69,8 +66,7 @@ export function SkillPage(): React.JSX.Element {
 function SkillPageContent(): React.JSX.Element {
   const fitnessEditor = useSkillFitnessContext();
   const auth = useAuth();
-  const mutationAccess = useFeatureMutationAccess(
-    skillMutationOwners,
+  const mutationAccess = useSkillOperationAccess(
     auth.user?.scopes.includes("admin:write") ?? false,
     scopeWriteDisabledReason,
   );
@@ -98,8 +94,8 @@ function SkillPageContent(): React.JSX.Element {
   const dialogReturnRef = useRef<HTMLElement | null>(null);
 
   const listQuery = status === "all" ? {} : { status };
-  const list = useQuery({
-    queryKey: [...skillsKey, status],
+  const list = useSkillRead({
+    queryKey: [...skillsKey, "catalog", "list", status],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.agents.skills.list, {
         query: listQuery,
@@ -107,10 +103,9 @@ function SkillPageContent(): React.JSX.Element {
         routeId: "agents.skills",
       }),
     refetchInterval: refreshInterval,
-    refetchIntervalInBackground: false,
   });
 
-  const stats = useQuery({
+  const stats = useSkillRead({
     queryKey: [...skillsKey, "stats"],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.agents.skills.stats, {
@@ -120,7 +115,7 @@ function SkillPageContent(): React.JSX.Element {
       }),
   });
 
-  const candidates = useQuery({
+  const candidates = useSkillRead({
     queryKey: [...skillsKey, "candidates"],
     enabled: tab === "studio",
     queryFn: ({ signal }) =>
@@ -131,7 +126,7 @@ function SkillPageContent(): React.JSX.Element {
       }),
   });
 
-  const graph = useQuery({
+  const graph = useSkillRead({
     queryKey: [...skillsKey, "graph"],
     enabled: tab === "graph",
     queryFn: ({ signal }) =>
@@ -148,54 +143,70 @@ function SkillPageContent(): React.JSX.Element {
   const closeSheet = useCallback((): void => updateSearch({ skill: undefined }), [updateSearch]);
 
   const save = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: mutationAccess.ownsResult,
     mutate: (values: SkillFormOutput) => {
       mutationAccess.assertCurrent();
-      return apiClient.request(endpoints.domains.agents.skills.upsert, {
-        body: skillWriteBody(values),
-        routeId: "agents.skills",
-      });
+      return apiClient
+        .request(endpoints.domains.agents.skills.upsert, {
+          body: skillWriteBody(values),
+          routeId: "agents.skills",
+          retryUnauthorized: false,
+        })
+        .then(mutationAccess.refreshReads);
     },
-    invalidates: [skillsKey],
     successMessage: "스킬을 저장했습니다.",
     errorMessage: "스킬을 저장하지 못했습니다.",
   });
 
   const promote = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: mutationAccess.ownsResult,
     mutate: (variables: { name: string; to_status: string; note: string }) => {
       mutationAccess.assertCurrent();
-      return apiClient.request(endpoints.domains.agents.skills.promote, {
-        body: variables,
-        routeId: "agents.skills",
-      });
+      return apiClient
+        .request(endpoints.domains.agents.skills.promote, {
+          body: variables,
+          routeId: "agents.skills",
+          retryUnauthorized: false,
+        })
+        .then(mutationAccess.refreshReads);
     },
-    invalidates: [skillsKey],
     successMessage: (_result, variables) =>
       `스킬을 ${skillStatusLabels[variables.to_status] ?? variables.to_status} 상태로 승격했습니다.`,
     errorMessage: "스킬을 승격하지 못했습니다.",
   });
 
   const remove = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: mutationAccess.ownsResult,
     mutate: (name: string) => {
       mutationAccess.assertCurrent();
-      return apiClient.request(withPathParams(endpoints.domains.agents.skills.remove, { name }), {
-        routeId: "agents.skills",
-      });
+      return apiClient
+        .request(withPathParams(endpoints.domains.agents.skills.remove, { name }), {
+          routeId: "agents.skills",
+          retryUnauthorized: false,
+        })
+        .then(mutationAccess.refreshReads);
     },
-    invalidates: [skillsKey],
     successMessage: "스킬을 삭제했습니다.",
     errorMessage: "스킬을 삭제하지 못했습니다.",
     onSuccess: () => closeSheet(),
   });
 
   const adopt = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: mutationAccess.ownsResult,
     mutate: (body: SkillAdoptBody) => {
       mutationAccess.assertCurrent();
-      return apiClient.request(endpoints.domains.agents.skills.studioAdopt, {
-        body,
-        routeId: "agents.skills",
-      });
+      return apiClient
+        .request(endpoints.domains.agents.skills.studioAdopt, {
+          body,
+          routeId: "agents.skills",
+          retryUnauthorized: false,
+        })
+        .then(mutationAccess.refreshReads);
     },
-    invalidates: [skillsKey],
     successMessage: "후보를 초안 스킬로 채택했습니다.",
     errorMessage: "후보를 채택하지 못했습니다.",
     onSuccess: (_result, body) => updateSearch({ skill: body.name }),
@@ -409,12 +420,7 @@ function SkillPageContent(): React.JSX.Element {
             </label>
           </Toolbar>
 
-          <SkillToolbox
-            canWrite={canWrite}
-            skillsKey={skillsKey}
-            statusFilter={status}
-            writeDisabledReason={writeDisabledReason}
-          />
+          <SkillToolbox canWrite={canWrite} statusFilter={status} writeDisabledReason={writeDisabledReason} />
 
           {skills.length === 0 ? (
             <EmptyState
