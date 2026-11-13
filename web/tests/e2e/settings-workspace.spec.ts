@@ -147,6 +147,7 @@ test("설정 초안 폐기 뒤로가기는 필터 주소를 보존하고 앞으�
   await page.getByRole("button", { name: "변경 버리기", exact: true }).click();
   await expect(sheet).toBeHidden();
   await expect(page).toHaveURL(before);
+  await expect(page.locator("#main-content")).toBeFocused();
   await page.goForward();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByLabel("새 값", { exact: true })).toHaveValue("true");

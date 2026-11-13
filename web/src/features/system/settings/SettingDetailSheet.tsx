@@ -100,7 +100,11 @@ function SettingEditor({
     onDiscard: (reason) => {
       // The router owns a confirmed departure. A second URL update here would
       // replace the destination or change the browser history index.
-      if (reason !== "navigation") onOpenChange(false);
+      if (reason === "navigation") {
+        // Radix closes after the route commits. Restore the same destination
+        // as the navigation coordinator instead of racing its focus with the old trigger.
+        returnFocusRef.current = document.getElementById("main-content");
+      } else onOpenChange(false);
     },
   });
 
