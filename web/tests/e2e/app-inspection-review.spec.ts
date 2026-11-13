@@ -1,3 +1,4 @@
+import { workAppReadFixture } from "../../src/test/work-app-fixtures";
 import { expect, type Page } from "@playwright/test";
 import { alpha, beta, firstEmail, readerEmail, targetUrl, test } from "../fixtures/app-permission-gateway";
 
@@ -32,7 +33,11 @@ async function open(page: Page, title = alpha.title) {
 }
 test.beforeEach(async ({ page, gateway }) => {
   expect(gateway.unexpected).toEqual([]);
-  await page.route("**/admin/apps", (route) => route.fulfill({ json: { apps } }));
+  await page.route(/\/admin\/apps(?:\?.*)?$/u, (route) =>
+    route.fulfill({
+      json: workAppReadFixture(apps, Object.fromEntries(new URL(route.request().url()).searchParams)),
+    }),
+  );
 });
 
 for (const colorScheme of ["light", "dark"] as const)

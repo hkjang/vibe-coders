@@ -724,8 +724,22 @@ describe("ProviderPage", () => {
     expect(screen.getByTestId("location")).not.toHaveTextContent("private-value");
 
     await user.keyboard("{Escape}");
+    // Radix restores focus asynchronously after unmount. Finish that keyboard
+    // transition before starting a new interaction in the search input.
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("link", { name: /공급자 이름 비공개/ })
+          .find(
+            (link) =>
+              link.getAttribute("data-provider-trigger") ===
+              firstRedactedLink.getAttribute("data-provider-trigger"),
+          ),
+      ).toHaveFocus(),
+    );
     const input = screen.getByRole("textbox", { name: "공급자 검색" });
     await user.type(input, "first-private");
+    expect(input).toHaveValue("first-private");
     await user.click(screen.getByRole("button", { name: "검색" }));
     expect(await screen.findByText("검색 및 필터 조건에 맞는 공급자가 없습니다.")).toBeVisible();
   });

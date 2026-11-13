@@ -1,3 +1,4 @@
+import { workAppReadFixture } from "../../src/test/work-app-fixtures";
 import { expect, test as base, type BrowserContext } from "@playwright/test";
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 
@@ -191,7 +192,9 @@ async function installGateway(context: BrowserContext) {
       }
       if (call === "GET /admin/apps") {
         listReads += 1;
-        return json({ apps: structuredClone(apps) });
+        return json(
+          workAppReadFixture(structuredClone(apps), Object.fromEntries(new URL(request.url()).searchParams)),
+        );
       }
       if (call === "GET /admin/app-templates") return json({ templates: [] });
       if (call === "GET /me/app-runs") return json({ runs: [] });

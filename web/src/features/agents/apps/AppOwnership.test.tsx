@@ -1,3 +1,4 @@
+import { workAppReadFixture } from "@/test/work-app-fixtures";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -74,7 +75,7 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
   it("발행 후 열려 있는 현재 계정의 버전 이력을 갱신한다", async () => {
     let version = 1;
     const api = mockApi({
-      "GET /admin/apps": () => ({ apps: [first] }),
+      "GET /admin/apps": ({ query }) => workAppReadFixture([first], query),
       "GET /admin/apps/first/versions": () => ({ versions: [{ version, note: `발행 기록 ${version}` }] }),
       "POST /admin/apps/first/publish": () => ({ version: ++version }),
     });
@@ -93,9 +94,11 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
   });
   it("계정 변경 시 이전 목록을 재사용하지 않고 다시 조회한다", async () => {
     mockApi({
-      "GET /admin/apps": () => ({
-        apps: [{ ...first, title: runtime.id === "one" ? first.title : "두 번째 계정 앱" }],
-      }),
+      "GET /admin/apps": ({ query }) =>
+        workAppReadFixture(
+          [{ ...first, title: runtime.id === "one" ? first.title : "두 번째 계정 앱" }],
+          query,
+        ),
     });
     const user = userEvent.setup();
     setup();
@@ -107,9 +110,9 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
   it("목록 갱신의 403은 이전 목록도 숨긴다", async () => {
     let denied = false;
     mockApi({
-      "GET /admin/apps": () => {
+      "GET /admin/apps": ({ query }) => {
         if (denied) throw apiFailure("denied", 403);
-        return { apps: [first] };
+        return workAppReadFixture([first], query);
       },
     });
     const user = userEvent.setup();
@@ -123,7 +126,10 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
     expect(await screen.findByText("업무 앱 조회 권한을 다시 확인하세요.")).toBeVisible();
   });
   it.each(["읽기 전용 전환", "쓰기 권한 회수"])("%s 시 초안을 보존하고 제출을 막는다", async (action) => {
-    const api = mockApi({ "GET /admin/apps": () => ({ apps: [first] }), "POST /admin/apps": () => first });
+    const api = mockApi({
+      "GET /admin/apps": ({ query }) => workAppReadFixture([first], query),
+      "POST /admin/apps": () => first,
+    });
     const user = userEvent.setup();
     setup();
     await user.click(await screen.findByRole("button", { name: "새 업무 앱" }));
@@ -132,7 +138,7 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
     await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
     await user.click(within(dialog).getByRole("checkbox", { name: "변경 내용과 적용 범위를 확인했습니다." }));
     expect(within(dialog).getByRole("button", { name: "앱 만들기" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: action, hidden: true }));
+    fireEvent.click(screen.getByText(action, { selector: "button" }));
     expect(within(dialog).getByRole("textbox", { name: /제목/u })).toHaveValue("보존할 초안");
     expect(within(dialog).getByRole("button", { name: "앱 만들기" })).toBeDisabled();
     fireEvent.submit(dialogForm(dialog));
@@ -140,12 +146,12 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
     expect(api.bodies("POST /admin/apps")).toEqual([]);
   });
   it("계정 변경은 이전 초안을 폐기한다", async () => {
-    mockApi({ "GET /admin/apps": () => ({ apps: [first] }) });
+    mockApi({ "GET /admin/apps": ({ query }) => workAppReadFixture([first], query) });
     const user = userEvent.setup();
     setup();
     await user.click(await screen.findByRole("button", { name: "새 업무 앱" }));
     await screen.findByRole("dialog", { name: "새 AI 업무 앱" });
-    fireEvent.click(screen.getByRole("button", { name: "계정 변경", hidden: true }));
+    fireEvent.click(screen.getByText("계정 변경", { selector: "button" }));
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "새 AI 업무 앱" })).not.toBeInTheDocument(),
     );
@@ -155,7 +161,13 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
     async (action) => {
       const held = deferred();
       let calls = 0;
-      mockApi({ "GET /admin/apps": () => (++calls === 1 ? held.promise : { apps: [] }) });
+      mockApi({
+        "GET /admin/apps": async ({ query }) => {
+          const firstCall = ++calls === 1;
+          if (firstCall) await held.promise;
+          return workAppReadFixture(firstCall ? [first] : [], query);
+        },
+      });
       const { client } = setup();
       await waitFor(() => expect(calls).toBe(1));
       fireEvent.click(screen.getByRole("button", { name: action }));
@@ -176,7 +188,7 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
     async (action) => {
       const held = deferred();
       const api = mockApi({
-        "GET /admin/apps": () => ({ apps: [first] }),
+        "GET /admin/apps": ({ query }) => workAppReadFixture([first], query),
         "POST /admin/apps": () => held.promise,
       });
       const user = userEvent.setup();
@@ -193,7 +205,7 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
       expect(api.spy.mock.calls.find(([endpoint]) => endpoint.method === "POST")?.[1]).toEqual(
         expect.objectContaining({ retryUnauthorized: false }),
       );
-      fireEvent.click(screen.getByRole("button", { name: action, hidden: true }));
+      fireEvent.click(screen.getByText(action, { selector: "button" }));
       await act(async () => undefined);
       const reads = api.calls.filter((c) => c.key === "GET /admin/apps").length;
       await act(async () => held.resolve(first));
@@ -208,7 +220,7 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
     "%s 확인 중 읽기 전용 전환은 요청을 보내지 않는다",
     async (action) => {
       const api = mockApi({
-        "GET /admin/apps": () => ({ apps: [first] }),
+        "GET /admin/apps": ({ query }) => workAppReadFixture([first], query),
         "GET /admin/apps/first": () => ({
           ...first,
           description: "",
@@ -231,7 +243,7 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
         await user.type(target, first.id);
       }
       const confirm = screen.getByRole("dialog", { name: `업무 앱 ${action}` });
-      fireEvent.click(screen.getByRole("button", { name: "읽기 전용 전환", hidden: true }));
+      fireEvent.click(screen.getByText("읽기 전용 전환", { selector: "button" }));
       expect(within(confirm).getByRole("button", { name: action })).toBeDisabled();
       fireEvent.click(within(confirm).getByRole("button", { name: action }));
       expect(api.calls.filter((c) => c.key.startsWith("POST") || c.key.startsWith("DELETE"))).toEqual([]);
@@ -241,7 +253,7 @@ describe("업무 앱 조회·변경의 계정 경계", () => {
     "불완전한 발행 차단 응답은 강제 발행으로 연결하지 않는다: %j",
     async (details) => {
       mockApi({
-        "GET /admin/apps": () => ({ apps: [first] }),
+        "GET /admin/apps": ({ query }) => workAppReadFixture([first], query),
         "POST /admin/apps/first/publish": () => {
           throw new AppError("blocked", { status: 422, kind: "http", details });
         },

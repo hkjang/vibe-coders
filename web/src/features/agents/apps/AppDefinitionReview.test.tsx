@@ -1,3 +1,4 @@
+import { workAppReadFixture } from "@/test/work-app-fixtures";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -51,7 +52,7 @@ describe("업무 앱 정의 검토", () => {
     "%s의 폼 검증 도중 입력 변경은 이전 스냅샷을 사용하지 않는다",
     async (action) => {
       const api = mockApi({
-        "GET /admin/apps": () => ({ apps: [app] }),
+        "GET /admin/apps": ({ query }) => workAppReadFixture([app], query),
         "POST /admin/apps/onboarding-check": () => checklist,
       });
       const user = userEvent.setup();
@@ -86,7 +87,7 @@ describe("업무 앱 정의 검토", () => {
   });
   it("변경 전후를 확인하기 전 저장하지 않고 검토한 정규화 본문만 저장한다", async () => {
     const api = mockApi({
-      "GET /admin/apps": () => ({ apps: [app] }),
+      "GET /admin/apps": ({ query }) => workAppReadFixture([app], query),
       "PATCH /admin/apps/review-app": () => app,
     });
     const user = userEvent.setup();
@@ -108,7 +109,7 @@ describe("업무 앱 정의 검토", () => {
     );
   });
   it("검토 후 값을 바꿨다가 복원해도 다시 검토해야 한다", async () => {
-    const api = mockApi({ "GET /admin/apps": () => ({ apps: [app] }) });
+    const api = mockApi({ "GET /admin/apps": ({ query }) => workAppReadFixture([app], query) });
     const user = userEvent.setup();
     render();
     const form = await edit(user);
@@ -126,7 +127,7 @@ describe("업무 앱 정의 검토", () => {
     expect(api.calls.filter((c) => c.key.startsWith("PATCH"))).toEqual([]);
   });
   it("검토 시 잘못된 JSON을 필드 오류로 표시한다", async () => {
-    mockApi({ "GET /admin/apps": () => ({ apps: [app] }) });
+    mockApi({ "GET /admin/apps": ({ query }) => workAppReadFixture([app], query) });
     const user = userEvent.setup();
     render();
     const form = await edit(user);
@@ -139,7 +140,7 @@ describe("업무 앱 정의 검토", () => {
   });
   it("입력 변경 후 이전 준비도 성공 결과는 즉시 숨긴다", async () => {
     mockApi({
-      "GET /admin/apps": () => ({ apps: [app] }),
+      "GET /admin/apps": ({ query }) => workAppReadFixture([app], query),
       "POST /admin/apps/onboarding-check": () => checklist,
     });
     const user = userEvent.setup();
@@ -154,7 +155,7 @@ describe("업무 앱 정의 검토", () => {
   it("요청 중 입력 변경 뒤 늦은 준비도 응답을 받아들이지 않는다", async () => {
     const held = deferred();
     const api = mockApi({
-      "GET /admin/apps": () => ({ apps: [app] }),
+      "GET /admin/apps": ({ query }) => workAppReadFixture([app], query),
       "POST /admin/apps/onboarding-check": () => held.promise,
     });
     const user = userEvent.setup();
@@ -174,7 +175,7 @@ describe("업무 앱 정의 검토", () => {
     { ...checklist, ready: false },
   ])("불완전하거나 모순된 준비도 응답을 성공으로 표시하지 않는다: %j", async (result) => {
     mockApi({
-      "GET /admin/apps": () => ({ apps: [app] }),
+      "GET /admin/apps": ({ query }) => workAppReadFixture([app], query),
       "POST /admin/apps/onboarding-check": () => result,
     });
     const user = userEvent.setup();

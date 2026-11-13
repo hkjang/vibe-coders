@@ -3548,6 +3548,81 @@ export type UserSummary = {
     tokens: number;
 };
 
+export type WorkAppComponent = {
+    kind: string;
+    label: string;
+    ref: string;
+};
+
+export type WorkAppDefinition = {
+    allowed_roles: string;
+    allowed_teams: string;
+    components: Array<WorkAppComponent>;
+    created_at: string;
+    description: string;
+    icon: string;
+    id: string;
+    owner: string;
+    status: string;
+    title: string;
+    updated_at: string;
+};
+
+export type WorkAppDetail = {
+    app: WorkAppDefinition | null;
+};
+
+export type WorkAppLegacyList = {
+    apps: Array<WorkAppDefinition>;
+};
+
+export type WorkAppMetadata = {
+    allowed_roles: string;
+    allowed_teams: string;
+    component_count: number;
+    created_at: string;
+    description: string;
+    icon: string;
+    id: string;
+    owner: string;
+    status: string;
+    title: string;
+    updated_at: string;
+};
+
+export type WorkAppPage = {
+    apps: Array<WorkAppMetadata>;
+    limit: number;
+    offset: number;
+    summary: {
+        active: number;
+        archived: number;
+        total: number;
+        unscoped: number;
+    };
+    total: number;
+};
+
+export type WorkAppRunList = {
+    runs: Array<WorkAppRunMetadata>;
+};
+
+export type WorkAppRunMetadata = {
+    app_id: string;
+    app_title?: string;
+    cost_krw: number;
+    created_at: string;
+    error_class: string;
+    id: string;
+    input_hash: string;
+    latency_ms: number;
+    output_summary: string;
+    status: string;
+    team: string;
+    trace_id: string;
+    user_id: string;
+};
+
 export type WorkflowDefinition = {
     allowed_teams: string;
     created_at: string;
@@ -4262,16 +4337,56 @@ export type PostAdminApprovalsIdRejectResponses = {
 export type GetAdminAppsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: '' | 'page' | 'detail';
+        /**
+         * Detail only. Exact nonempty UTF-8 identifier, at most 4096 bytes, no control characters. Whitespace and reserved characters are preserved. Cannot be combined with page filters.
+         */
+        id?: string;
+        /**
+         * Page-only literal case-insensitive substring of ID, title, description, owner, allowed teams or roles. Percent and underscore are literal. No control characters; at most 200 Unicode characters and 800 bytes.
+         */
+        q?: string;
+        status?: '' | 'all' | 'active' | 'archived';
+        /**
+         * Page-only, at most three unique comma-separated field:asc or field:desc entries. Fields: id,title,owner,status,created_at,updated_at. Default title:asc. ID ascending breaks ties; timestamps retain nanosecond precision.
+         */
+        sort?: string;
+        limit?: number;
+        offset?: number;
+    };
     url: '/admin/apps';
 };
 
+export type GetAdminAppsErrors = {
+    /**
+     * Invalid view, filter, identifier or duplicate known parameter
+     */
+    400: AppError;
+    /**
+     * Invalid authentication or missing administrator read scope
+     */
+    401: AppError;
+    /**
+     * Work app query failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminAppsError = GetAdminAppsErrors[keyof GetAdminAppsErrors];
+
 export type GetAdminAppsResponses = {
     /**
-     * OK
+     * Response selected by view; new views use Cache-Control: no-store
      */
-    200: unknown;
+    200: WorkAppLegacyList | WorkAppPage | WorkAppDetail;
 };
+
+export type GetAdminAppsResponse = GetAdminAppsResponses[keyof GetAdminAppsResponses];
 
 export type PostAdminAppsData = {
     body?: never;
@@ -14386,16 +14501,33 @@ export type PostMeActionsSnoozeResponse = PostMeActionsSnoozeResponses[keyof Pos
 export type GetMeAppRunsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        app_id?: string;
+        /**
+         * Nonpositive or greater than 200 uses the existing default of 50.
+         */
+        limit?: number;
+    };
     url: '/me/app-runs';
 };
+
+export type GetMeAppRunsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeAppRunsError = GetMeAppRunsErrors[keyof GetMeAppRunsErrors];
 
 export type GetMeAppRunsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: WorkAppRunList;
 };
+
+export type GetMeAppRunsResponse = GetMeAppRunsResponses[keyof GetMeAppRunsResponses];
 
 export type PostMeConnectionDoctorData = {
     body?: MeAccessDoctorInput;

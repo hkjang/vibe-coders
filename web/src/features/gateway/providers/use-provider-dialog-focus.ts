@@ -39,6 +39,20 @@ export function useProviderDialogFocus(
             ? document.getElementById("provider-list-title")
             : null);
       returnFocusRef.current = returnTarget;
+      // The operator may already be typing or navigating after closing. A late
+      // restoration must not pull focus away from that new interaction.
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        active.isConnected &&
+        active !== document.body &&
+        active !== document.documentElement &&
+        active.id !== "main-content" &&
+        active.id !== "provider-list-title" &&
+        active !== returnTarget &&
+        !active.hasAttribute("data-radix-focus-guard")
+      )
+        return;
       if (returnTarget?.isConnected && !returnTarget.matches(":disabled")) returnTarget.focus();
     }, 50);
     return () => clearTimeout(timer);

@@ -135,6 +135,8 @@ test("390px 다크에서 한글 정렬·건수 선택을 키보드로 조작하�
 }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  // Inject test instrumentation before navigation; preserve the production CSP.
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await page.goto("gateway/providers");
   await ready(page, 10);
   const sort = page.getByRole("button", { name: "공급자 오름차순 정렬", exact: true });
@@ -159,7 +161,6 @@ test("390px 다크에서 한글 정렬·건수 선택을 키보드로 조작하�
     expect(box.x + box.width).toBeLessThanOrEqual(390);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: unknown[] }> } }

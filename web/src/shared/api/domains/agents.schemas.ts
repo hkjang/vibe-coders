@@ -294,6 +294,7 @@ export type AppRunPlan = z.output<typeof appRunPlanSchema>;
 export const appRunSchema = looseObject({
   id: z.string(),
   app_id: optionalText,
+  app_title: optionalText,
   user_id: optionalText,
   team: optionalText,
   status: optionalText,

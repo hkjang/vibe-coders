@@ -1,3 +1,4 @@
+import { workAppReadFixture } from "@/test/work-app-fixtures";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
@@ -33,7 +34,7 @@ const app = {
   updated_at: "2026-09-05T02:00:00Z",
 };
 
-const listHandler = () => ({ apps: [app] });
+const listHandler = ({ query }: { query?: object }) => workAppReadFixture([app], query);
 
 function renderPage(route = "/agents/apps"): ReturnType<typeof renderScreen> {
   return renderScreen(
@@ -56,16 +57,16 @@ describe("AppPage", () => {
     renderPage();
 
     const table = await screen.findByRole("table", { name: "AI 업무 앱 목록" });
-    expect(within(table).getByText(/코드 리뷰 어시스턴트/u)).toBeVisible();
+    expect(await within(table).findByText(/코드 리뷰 어시스턴트/u)).toBeVisible();
     expect(within(table).getByText("활성")).toBeVisible();
     expect(within(table).getByText("platform · 전체 역할")).toBeVisible();
   });
 
   it("shows an empty state when no app exists", async () => {
-    mockApi({ "GET /admin/apps": () => ({ apps: [] }) });
+    mockApi({ "GET /admin/apps": ({ query }) => workAppReadFixture([], query) });
     renderPage();
 
-    expect(await screen.findByText("아직 업무 앱이 없습니다.")).toBeVisible();
+    expect(await screen.findByText(/아직 업무 앱이 없습니다/u)).toBeVisible();
   });
 
   it("shows the request id when the list fails", async () => {
@@ -216,6 +217,7 @@ describe("AppPage", () => {
           {
             id: "apprun_1",
             app_id: "app_review",
+            app_title: "코드 리뷰 어시스턴트",
             user_id: "usr_test",
             team: "platform",
             status: "planned",
@@ -233,7 +235,7 @@ describe("AppPage", () => {
     renderPage("/agents/apps?tab=runs");
 
     const table = await screen.findByRole("table", { name: "내 업무 앱 실행 이력" });
-    expect(within(table).getByText("코드 리뷰 어시스턴트")).toBeVisible();
+    expect(await within(table).findByText("코드 리뷰 어시스턴트")).toBeVisible();
     expect(within(table).getByText("2 components planned")).toBeVisible();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "실행 apprun_1 영수증 열기" }));

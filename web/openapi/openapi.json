@@ -11575,6 +11575,303 @@
         ],
         "type": "object"
       },
+      "WorkAppComponent": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "ref"
+        ],
+        "type": "object"
+      },
+      "WorkAppDefinition": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_roles": {
+            "type": "string"
+          },
+          "allowed_teams": {
+            "type": "string"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/WorkAppComponent"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "allowed_roles",
+          "allowed_teams",
+          "components",
+          "created_at",
+          "description",
+          "icon",
+          "id",
+          "owner",
+          "status",
+          "title",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "WorkAppDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "app": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkAppDefinition"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "app"
+        ],
+        "type": "object"
+      },
+      "WorkAppLegacyList": {
+        "additionalProperties": false,
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/WorkAppDefinition"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "apps"
+        ],
+        "type": "object"
+      },
+      "WorkAppMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_roles": {
+            "type": "string"
+          },
+          "allowed_teams": {
+            "type": "string"
+          },
+          "component_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "allowed_roles",
+          "allowed_teams",
+          "component_count",
+          "created_at",
+          "description",
+          "icon",
+          "id",
+          "owner",
+          "status",
+          "title",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "WorkAppPage": {
+        "additionalProperties": false,
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/WorkAppMetadata"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "summary": {
+            "additionalProperties": false,
+            "properties": {
+              "active": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "archived": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "unscoped": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "active",
+              "archived",
+              "total",
+              "unscoped"
+            ],
+            "type": "object"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "apps",
+          "limit",
+          "offset",
+          "summary",
+          "total"
+        ],
+        "type": "object"
+      },
+      "WorkAppRunList": {
+        "additionalProperties": false,
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/WorkAppRunMetadata"
+            },
+            "maxItems": 200,
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "type": "object"
+      },
+      "WorkAppRunMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          },
+          "app_title": {
+            "type": "string"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "error_class": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_hash": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "type": "integer"
+          },
+          "output_summary": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_id",
+          "cost_krw",
+          "created_at",
+          "error_class",
+          "id",
+          "input_hash",
+          "latency_ms",
+          "output_summary",
+          "status",
+          "team",
+          "trace_id",
+          "user_id"
+        ],
+        "type": "object"
+      },
       "WorkflowDefinition": {
         "additionalProperties": false,
         "properties": {
@@ -11882,7 +12179,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.92"
+    "version": "v0.86.93"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -12870,10 +13167,142 @@
     },
     "/admin/apps": {
       "get": {
+        "description": "Existing administrator work app list. Omit view (or use an empty view) for the unchanged full Legacy list. view=page returns bounded metadata without component definitions, filtered count and global total/active/archived/unscoped counts from one statement snapshot. view=detail returns one exact full definition or null. End-user team/role grants do not restrict administrator list visibility. New views are no-store; writes and their authorization are unchanged.",
         "operationId": "get__admin_apps",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "",
+                "page",
+                "detail"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Detail only. Exact nonempty UTF-8 identifier, at most 4096 bytes, no control characters. Whitespace and reserved characters are preserved. Cannot be combined with page filters.",
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page-only literal case-insensitive substring of ID, title, description, owner, allowed teams or roles. Percent and underscore are literal. No control characters; at most 200 Unicode characters and 800 bytes.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "",
+                "all",
+                "active",
+                "archived"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page-only, at most three unique comma-separated field:asc or field:desc entries. Fields: id,title,owner,status,created_at,updated_at. Default title:asc. ID ascending breaks ties; timestamps retain nanosecond precision.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkAppLegacyList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WorkAppPage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WorkAppDetail"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Response selected by view; new views use Cache-Control: no-store"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid view, filter, identifier or duplicate known parameter"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid authentication or missing administrator read scope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Work app query failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -29963,10 +30392,46 @@
     },
     "/me/app-runs": {
       "get": {
+        "description": "Existing authenticated caller's own app run history. Includes current app_title when the definition exists, independent of the administrator list page. User ownership, default limit 50 and maximum 200 are unchanged. No component definitions or raw inputs/outputs.",
         "operationId": "get__me_app_runs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "app_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Nonpositive or greater than 200 uses the existing default of 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkAppRunList"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

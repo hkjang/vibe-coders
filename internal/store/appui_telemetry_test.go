@@ -206,6 +206,14 @@ func TestAppUITelemetryRetentionAndSummaryWindow(t *testing.T) {
 
 func TestAppUITelemetryConcurrentPeersAndPurge(t *testing.T) {
 	stores := appUITelemetryStores(t, 4)
+	for _, peer := range stores {
+		if peer.dialect == "postgres" {
+			// Four production-sized pools can consume all 100 CI connections,
+			// leaving no slot for the fixture's admin connection. Keep 104
+			// concurrent callers and independent multi-connection peer pools.
+			peer.db.SetMaxOpenConns(8)
+		}
+	}
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 	start := make(chan struct{})
