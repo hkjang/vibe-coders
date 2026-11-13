@@ -210,7 +210,10 @@ jobs:
           POSTGRES_DB: vibe
         ports:
           - 5432:5432
+        # Migration/index and autovacuum workers exceed Docker's default 64 MiB
+        # shared memory during the full PostgreSQL contract sequence.
         options: >-
+          --shm-size 256m
           --health-cmd "pg_isready -U postgres -d vibe"
           --health-interval 5s
           --health-timeout 5s
