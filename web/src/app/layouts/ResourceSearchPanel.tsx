@@ -1,3 +1,5 @@
+import "./resource-search.css";
+import { ResourceSearchScope, type SearchScope } from "./ResourceSearchScope";
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -68,6 +70,11 @@ function ResourceSearchContent({
   onComposingChange,
 }: Props & { owner: string; allowed: ResourceKind[] }): React.JSX.Element {
   const auth = useAuth();
+  const [scope, setScope] = useState<SearchScope>("all");
+  const kinds = useMemo(
+    () => (scope === "all" ? allowed : allowed.filter((kind) => kind === scope)),
+    [allowed, scope],
+  );
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [active, setActive] = useState(0);
@@ -82,12 +89,12 @@ function ResourceSearchContent({
     const timer = window.setTimeout(() => setDebounced(value), 300);
     return () => window.clearTimeout(timer);
   }, [value]);
-  const ready = valid && !composing && value === debounced && allowed.length > 0;
+  const ready = valid && !composing && value === debounced && kinds.length > 0;
   const result = useQuery({
-    queryKey: ["resource-search", owner, debounced, allowed],
+    queryKey: ["resource-search", owner, debounced, kinds],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.admin.resourceSearch, {
-        body: { query: debounced, kinds: allowed },
+        body: { query: debounced, kinds },
         signal,
       }),
     enabled: ready,
@@ -98,11 +105,14 @@ function ResourceSearchContent({
   });
   // Query retains the last success during refetch and after refetch errors.
   // Those rows are no longer current navigation authority (including 401/403).
-  const groups = ready && result.isSuccess && !result.isFetching ? result.data.groups : undefined;
+  const groups =
+    ready && result.isSuccess && !result.isFetching
+      ? kinds.flatMap((kind) => result.data.groups.filter((group) => group.kind === kind))
+      : undefined;
   const items = useMemo(
     () =>
       (groups ?? []).flatMap((group) => {
-        if (group.status !== "ok" || !allowed.includes(group.kind)) return [];
+        if (group.status !== "ok" || !kinds.includes(group.kind)) return [];
         return group.items.flatMap((item) => {
           if (item.kind !== group.kind || containsPotentialSecret(item.title, auth.credentialPrefixes))
             return [];
@@ -110,7 +120,7 @@ function ResourceSearchContent({
           return path ? [{ ...item, path }] : [];
         });
       }),
-    [groups, allowed, auth.credentialPrefixes],
+    [groups, kinds, auth.credentialPrefixes],
   );
   const index = Math.min(active, Math.max(0, items.length - 1));
   const optionId = items.length ? `${listId}-${index}` : undefined;
@@ -135,15 +145,17 @@ function ResourceSearchContent({
       : undefined;
   return (
     <>
-      <p className="command-footer">
-        공급자·워크플로·업무 앱·스킬·MCP 서버·정책·등록 팀{allowed.includes("account") ? "·로그인 계정" : ""}
-        {allowed.includes("mcp_tool") ? "·관측된 MCP 도구" : ""}
-        {allowed.includes("prompt_asset") ? "·프롬프트 자산" : ""}
-        {allowed.includes("prompt_experiment") ? "·프롬프트 실험" : ""}의 이름을 검색합니다. 종류별 최대
-        10개이며 업무 본문은 검색하지 않습니다.
-        {allowed.includes("setting")
-          ? " 설정은 키·범주·한글 설명으로 찾을 수 있으며 실제 값은 검색하지 않습니다."
-          : ""}
+      <ResourceSearchScope
+        allowed={allowed}
+        value={scope}
+        onChange={(value) => {
+          setScope(value);
+          setActive(0);
+          inputRef.current?.focus();
+        }}
+      />
+      <p className="command-footer resource-search-help">
+        종류별 최대 10개 · 이름 검색{kinds.includes("setting") ? " · 설정 키·범주·설명 검색" : ""}
       </p>
       <label className="command-search">
         <span className="sr-only">자원 이름 검색</span>
@@ -211,23 +223,36 @@ function ResourceSearchContent({
                 : result.isError
                   ? "자원 검색에 실패했습니다. 다시 시도하세요."
                   : `${items.length}개의 자원을 찾았습니다.`}
-        {partial ? " 일부 종류는 권한이 없거나 조회에 실패했습니다." : ""}
-        {limited ? " 결과가 더 있습니다. 이름을 더 구체적으로 입력하세요." : ""}
+        {partial
+          ? ` 일부 종류: ${groups
+              ?.filter((group) => group.status !== "ok")
+              .map(
+                (group) =>
+                  `${resourceSearchTargets[group.kind].title} (${group.status === "forbidden" ? "권한 없음" : "조회 실패"})`,
+              )
+              .join(", ")}.`
+          : ""}
+        {limited
+          ? ` 더 구체적으로 검색: ${groups
+              ?.filter((group) => group.limited)
+              .map((group) => resourceSearchTargets[group.kind].title)
+              .join(", ")}`
+          : ""}
       </div>
       {ready && (result.isError || partial) ? (
-        <Button
-          variant="secondary"
-          disabled={result.isFetching}
-          onClick={() => {
-            inputRef.current?.focus();
-            void result.refetch();
-          }}
-        >
-          자원 검색 다시 시도
-        </Button>
-      ) : null}
-      {ready && (result.isError || partial) && requestId ? (
-        <p className="command-footer">요청 ID: {requestId}</p>
+        <div className="resource-search-recovery">
+          <Button
+            variant="secondary"
+            disabled={result.isFetching}
+            onClick={() => {
+              inputRef.current?.focus();
+              void result.refetch();
+            }}
+          >
+            자원 검색 다시 시도
+          </Button>
+          {requestId ? <p>요청 ID: {requestId}</p> : null}
+        </div>
       ) : null}
       <div
         id={listId}
@@ -236,31 +261,49 @@ function ResourceSearchContent({
         aria-label="자원 검색 결과"
         hidden={!items.length}
       >
-        {items.map((item, position) => (
-          <button
-            key={JSON.stringify([item.kind, item.server_label, item.id])}
-            id={`${listId}-${position}`}
-            type="button"
-            className="command-result resource-search-result"
-            role="option"
-            tabIndex={-1}
-            aria-selected={position === index}
-            onPointerMove={() => setActive(position)}
-            onClick={() => go(item.path)}
-          >
-            <span>
-              <strong>{item.title}</strong>
-              <small>
-                {resourceSearchTargets[item.kind].title}
-                {item.kind === "setting" ? ` · ${item.id}` : ""}
-                {item.kind === "mcp_tool"
-                  ? ` · ${item.server_label === "(none)" ? "서버 미지정" : item.server_label}`
-                  : ""}
-              </small>
-            </span>
-            <span>자원</span>
-          </button>
-        ))}
+        {kinds.map((kind) => {
+          const positions = items
+            .map((item, position) => ({ item, position }))
+            .filter(({ item }) => item.kind === kind);
+          if (!positions.length) return null;
+          const labelId = `${listId}-group-${kind}`;
+          return (
+            <div key={kind} role="group" aria-labelledby={labelId}>
+              <div id={labelId} className="resource-search-group-label">
+                <strong>{resourceSearchTargets[kind].title}</strong>{" "}
+                <span>
+                  {positions.length}개
+                  {groups?.some((group) => group.kind === kind && group.limited) ? " · 일부 결과" : ""}
+                </span>
+              </div>
+              {positions.map(({ item, position }) => (
+                <button
+                  key={JSON.stringify([item.kind, item.server_label, item.id])}
+                  id={`${listId}-${position}`}
+                  type="button"
+                  className="command-result resource-search-result"
+                  role="option"
+                  tabIndex={-1}
+                  aria-selected={position === index}
+                  onPointerMove={() => setActive(position)}
+                  onClick={() => go(item.path)}
+                >
+                  <span>
+                    <strong>{item.title}</strong>
+                    <small>
+                      {resourceSearchTargets[item.kind].title}
+                      {item.kind === "setting" ? ` · ${item.id}` : ""}
+                      {item.kind === "mcp_tool"
+                        ? ` · ${item.server_label === "(none)" ? "서버 미지정" : item.server_label}`
+                        : ""}
+                    </small>
+                  </span>
+                  <span>자원</span>
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </div>
     </>
   );
