@@ -4,11 +4,19 @@ import { SkillFitnessContext } from "./skill-fitness-context";
 import { useSkillFitnessEditor } from "./use-skill-fitness-editor";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
 import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
+import { SkillScopeBoundary } from "./skill-scope";
 
 export function SkillFitnessBoundary({ children }: { children: ReactNode }): React.JSX.Element {
   const inherited = useContext(SkillFitnessContext);
-  const coordinator = useUnsavedChanges();
   if (inherited) return <>{children}</>;
+  return (
+    <SkillScopeBoundary>
+      <DraftOwner>{children}</DraftOwner>
+    </SkillScopeBoundary>
+  );
+}
+function DraftOwner({ children }: { children: ReactNode }) {
+  const coordinator = useUnsavedChanges();
   return coordinator ? (
     <Owner>{children}</Owner>
   ) : (

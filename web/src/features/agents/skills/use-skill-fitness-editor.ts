@@ -1,4 +1,6 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSkillRead, useSkillScope, useSkillOperationAccess } from "./skill-scope";
+import { featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
@@ -16,10 +18,9 @@ import { endpoints } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
-import { skillMutationOwners } from "@/shared/feature-access/policy";
-import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 
 const routeId = "agents.skills";
+let nextDraftInstance = 0;
 export interface SkillFitnessDraft {
   skill: Skill;
   baseline: Pick<SkillFitness, "passing_count" | "required">;
@@ -28,26 +29,32 @@ export interface SkillFitnessDraft {
 }
 export function useSkillFitnessQuery(name: string, epoch: number) {
   const client = useQueryClient();
-  const query = useQuery({
+  const owner = useSkillScope();
+  const query = useSkillRead({
     queryKey: fitnessKey(name, epoch),
     enabled: exactFitnessSkillName(name),
-    retry: false,
-    gcTime: 0,
     refetchOnMount: "always",
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.agents.skills.fitness, { query: { skill: name }, signal, routeId }),
   });
   const state = useSyncExternalStore(
     useCallback((listener) => client.getQueryCache().subscribe(listener), [client]),
-    useCallback(() => client.getQueryState<SkillFitness>(fitnessKey(name, epoch)), [client, epoch, name]),
+    useCallback(
+      () => client.getQueryState<SkillFitness>(featureOwnedKey(fitnessKey(name, epoch), owner)),
+      [client, epoch, name, owner],
+    ),
   );
   return { query, confirmed: confirmedFitness(state, name) };
 }
 
 export function useSkillFitnessEditor() {
   const auth = useAuth();
-  const mutationAccess = useFeatureMutationAccess(
-    skillMutationOwners,
+  const ownerScope = useSkillScope();
+  const queryKey = useCallback(
+    (name: string, epoch: number) => featureOwnedKey(fitnessKey(name, epoch), ownerScope),
+    [ownerScope],
+  );
+  const mutationAccess = useSkillOperationAccess(
     auth.user?.scopes.includes("admin:write") ?? false,
     "스킬 근거 기록에는 admin:write 권한이 필요합니다.",
   );
@@ -61,7 +68,6 @@ export function useSkillFitnessEditor() {
   const target = selection?.epoch === epoch ? selection : undefined;
   const active = useRef<SkillFitnessDraft | undefined>(undefined);
   const flight = useRef<SkillFitnessDraft | undefined>(undefined);
-  const sequence = useRef(0);
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);
   const [committed, setCommitted] = useState<{ name: string; epoch: number }>();
@@ -118,33 +124,32 @@ export function useSkillFitnessEditor() {
         setCommitted((previous) =>
           previous &&
           event.query ===
-            client
-              .getQueryCache()
-              .find({ queryKey: fitnessKey(previous.name, previous.epoch), exact: true }) &&
+            client.getQueryCache().find({ queryKey: queryKey(previous.name, previous.epoch), exact: true }) &&
           confirmedFitness(event.query.state, previous.name)
             ? undefined
             : previous,
         );
       }),
-    [client],
+    [client, queryKey],
   );
   const current = (draft: SkillFitnessDraft): boolean =>
-    active.current === draft && draft.epoch === tokenStore.getSessionEpoch();
+    ownerScope.isCurrent() && active.current === draft && draft.epoch === tokenStore.getSessionEpoch();
   const open = (skill: Skill, trigger: HTMLElement): void => {
     if (
       !access.current ||
+      !ownerScope.isCurrent() ||
       active.current ||
       epoch !== tokenStore.getSessionEpoch() ||
       !exactFitnessSkillName(skill.name)
     )
       return;
-    const latest = confirmedFitness(client.getQueryState(fitnessKey(skill.name, epoch)), skill.name);
+    const latest = confirmedFitness(client.getQueryState(queryKey(skill.name, epoch)), skill.name);
     if (!latest) return;
     const draft: SkillFitnessDraft = Object.freeze({
       skill: Object.freeze({ ...skill }),
       baseline: Object.freeze({ passing_count: latest.passing_count, required: latest.required }),
       epoch,
-      instance: ++sequence.current,
+      instance: ++nextDraftInstance,
     });
     active.current = draft;
     setSelection(draft);
@@ -168,7 +173,7 @@ export function useSkillFitnessEditor() {
       throw new AppError("현재 세션의 스킬 쓰기 권한을 확인하세요.", { kind: "permission" });
     if (
       !exactFitnessSkillName(draft.skill.name) ||
-      !confirmedFitness(client.getQueryState(fitnessKey(draft.skill.name, draft.epoch)), draft.skill.name)
+      !confirmedFitness(client.getQueryState(queryKey(draft.skill.name, draft.epoch)), draft.skill.name)
     )
       throw new AppError("현재 스킬의 적합성 근거를 다시 조회한 뒤 시도하세요.", { kind: "contract" });
     if (flight.current?.instance === draft.instance)
@@ -178,21 +183,26 @@ export function useSkillFitnessEditor() {
     setPending(true);
     setCommitted(undefined);
     try {
-      const saved = await apiClient.request(endpoints.domains.agents.skills.recordFitness, { body, routeId });
-      if (!current(draft)) return;
+      const saved = await apiClient.request(endpoints.domains.agents.skills.recordFitness, {
+        body,
+        routeId,
+        retryUnauthorized: false,
+      });
+      if (!current(draft) || !mutationAccess.ownsResult()) return;
       if (saved.skill_name !== draft.skill.name)
         throw new AppError("기록 응답의 스킬을 확인할 수 없습니다. 다시 전송하기 전에 목록을 조회하세요.", {
           kind: "contract",
         });
       setCommitted({ name: draft.skill.name, epoch: draft.epoch });
       toast.success("적합성 근거를 기록했습니다.");
-      void client.invalidateQueries({ queryKey: ["agents", "skills"] }).catch(() => undefined);
+      void mutationAccess.refreshReads(saved).catch(() => undefined);
     } finally {
       if (flight.current?.instance === draft.instance) flight.current = undefined;
       if (current(draft)) setPending(false);
     }
   };
   return {
+    queryKey,
     epoch,
     target,
     writable,

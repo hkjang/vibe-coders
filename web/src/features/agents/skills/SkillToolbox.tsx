@@ -1,4 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useSkillScope, useSkillReadAction, useSkillOperationAccess } from "./skill-scope";
 import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -16,12 +17,9 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { downloadText } from "@/shared/utils/csv";
 import { formatNumber } from "@/shared/utils/format";
-import { skillMutationOwners } from "@/shared/feature-access/policy";
-import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 
 interface SkillToolboxProps {
   canWrite: boolean;
-  skillsKey: readonly unknown[];
   statusFilter: string;
   writeDisabledReason: string;
 }
@@ -32,14 +30,14 @@ interface SkillToolboxProps {
  */
 export function SkillToolbox({
   canWrite: authorized,
-  skillsKey,
   statusFilter,
   writeDisabledReason: permissionReason,
 }: SkillToolboxProps): React.JSX.Element {
-  const mutationAccess = useFeatureMutationAccess(skillMutationOwners, authorized, permissionReason);
+  const mutationAccess = useSkillOperationAccess(authorized, permissionReason);
+  const owner = useSkillScope();
+  const readAction = useSkillReadAction();
   const canWrite = mutationAccess.allowed;
   const writeDisabledReason = mutationAccess.reason ?? permissionReason;
-  const queryClient = useQueryClient();
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [seedOpen, setSeedOpen] = useState(false);
@@ -50,58 +48,88 @@ export function SkillToolbox({
   const statusQuery = statusFilter === "all" ? {} : { status: statusFilter };
 
   const scan = useMutation({
-    mutationFn: () => apiClient.request(endpoints.domains.agents.skills.scan, { routeId: "agents.skills" }),
+    gcTime: 0,
+    retry: false,
+    mutationFn: () =>
+      readAction((signal) =>
+        apiClient.request(endpoints.domains.agents.skills.scan, {
+          signal,
+          routeId: "agents.skills",
+          retryUnauthorized: false,
+        }),
+      ),
   });
 
   const exportBundle = useMutation({
+    gcTime: 0,
+    retry: false,
     mutationFn: () =>
-      apiClient.request(endpoints.domains.agents.skills.export, {
-        query: statusQuery,
-        routeId: "agents.skills",
-      }),
+      readAction((signal) =>
+        apiClient.request(endpoints.domains.agents.skills.export, {
+          signal,
+          retryUnauthorized: false,
+          query: statusQuery,
+          routeId: "agents.skills",
+        }),
+      ),
     onSuccess: (bundle) => {
+      if (!owner.isCurrent()) return;
       downloadText("skills-bundle.json", JSON.stringify(bundle, null, 2), "application/json;charset=utf-8");
       toast.success("스킬 번들을 내려받았습니다.");
     },
-    onError: (error) => toast.error(safeAppErrorMessage(error, "스킬 번들을 내보내지 못했습니다.")),
+    onError: (error) => {
+      if (owner.isCurrent()) toast.error(safeAppErrorMessage(error, "스킬 번들을 내보내지 못했습니다."));
+    },
   });
 
   const recommend = useMutation({
+    gcTime: 0,
+    retry: false,
     mutationFn: (apply: boolean) => {
-      if (apply) mutationAccess.assertCurrent();
-      return apiClient.request(endpoints.domains.agents.skills.recommend, {
-        body: {},
-        query: { min_count: 3, ...(apply ? { apply: "1" as const } : {}) },
-        routeId: "agents.skills",
-      });
-    },
-    onSuccess: (_result, apply) => {
-      if (apply) void queryClient.invalidateQueries({ queryKey: skillsKey });
+      const request = (signal?: AbortSignal) =>
+        apiClient.request(endpoints.domains.agents.skills.recommend, {
+          signal,
+          retryUnauthorized: false,
+          body: {},
+          query: { min_count: 3, ...(apply ? { apply: "1" as const } : {}) },
+          routeId: "agents.skills",
+        });
+      if (!apply) return readAction(request);
+      mutationAccess.assertCurrent();
+      return request().then(mutationAccess.refreshReads);
     },
   });
 
   const seed = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: mutationAccess.ownsResult,
     mutate: () => {
       mutationAccess.assertCurrent();
-      return apiClient.request(endpoints.domains.agents.skills.seedRecommended, {
-        routeId: "agents.skills",
-      });
+      return apiClient
+        .request(endpoints.domains.agents.skills.seedRecommended, {
+          retryUnauthorized: false,
+          routeId: "agents.skills",
+        })
+        .then(mutationAccess.refreshReads);
     },
-    invalidates: [skillsKey],
     successMessage: (result) =>
       `추천 스킬 ${formatNumber(result.seeded?.length ?? 0)}건을 초안으로 만들었습니다.`,
     errorMessage: "추천 스킬을 추가하지 못했습니다.",
   });
 
   const importBundle = useMutationFeedback({
+    gcTime: 0,
+    ownsResult: mutationAccess.ownsResult,
     mutate: (body: { version?: string; skills: ReadonlyArray<Record<string, unknown>> }) => {
       mutationAccess.assertCurrent();
-      return apiClient.request(endpoints.domains.agents.skills.import, {
-        body,
-        routeId: "agents.skills",
-      });
+      return apiClient
+        .request(endpoints.domains.agents.skills.import, {
+          retryUnauthorized: false,
+          body,
+          routeId: "agents.skills",
+        })
+        .then(mutationAccess.refreshReads);
     },
-    invalidates: [skillsKey],
     successMessage: "스킬 번들을 가져왔습니다.",
     errorMessage: "스킬 번들을 가져오지 못했습니다.",
     onSuccess: (result) => setImportResult(result),
