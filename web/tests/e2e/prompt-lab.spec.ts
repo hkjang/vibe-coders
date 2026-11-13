@@ -166,9 +166,9 @@ for (const theme of ["light", "dark"] as const) {
     test(`실험실 실행·이력 접근성 ${theme} ${viewport.width}×${viewport.height}`, async ({ page }, info) => {
       await page.setViewportSize(viewport);
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
       const fixture = await installPromptLab(page),
         dialog = await openRun(page);
-      await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
       await expect.poll(() => violations(page)).toEqual([]);
       await page.screenshot({ path: info.outputPath("lab-run-review.png") });
       await expect(dialog.getByRole("button", { name: "실행", exact: true })).toBeInViewport();

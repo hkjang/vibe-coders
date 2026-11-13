@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"vibe-coders/internal/store"
@@ -16,11 +17,13 @@ import (
 var resourceSearchFeatures = map[string]string{
 	"provider": "gateway.providers", "workflow": "agents.workflows",
 	"app": "agents.apps", "skill": "agents.skills",
-	"mcp_upstream": "mcp.overview",
-	"mcp_tool":     "mcp.overview",
-	"policy":       "governance.policies",
-	"team":         "access.users",
-	"account":      "access.users",
+	"mcp_upstream":      "mcp.overview",
+	"mcp_tool":          "mcp.overview",
+	"policy":            "governance.policies",
+	"team":              "access.users",
+	"account":           "access.users",
+	"prompt_asset":      "prompts.library",
+	"prompt_experiment": "prompts.lab",
 }
 
 type resourceSearchItem struct {
@@ -150,6 +153,10 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			} else {
 				group.Limited = more
 				for _, row := range rows {
+					// Existing prompt detail routes accept at most 512 UTF-16 code units.
+					if (kind == "prompt_asset" || kind == "prompt_experiment") && len(utf16.Encode([]rune(row.ID))) > 512 {
+						continue
+					}
 					if kind == "provider" && !s.modelsProviderLabelSafeForConfig(row.Title) {
 						continue
 					}

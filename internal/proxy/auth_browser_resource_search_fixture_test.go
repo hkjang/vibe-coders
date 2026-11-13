@@ -32,6 +32,12 @@ func seedBrowserResourceSearchFixture(t *testing.T, db *store.SQLStore, upstream
 	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{ID: "browser-search-mcp", Name: "검색검증 MCP 서버", URL: upstream, Enabled: false}); err != nil {
 		t.Fatal("synthetic resource search MCP server could not be prepared")
 	}
+	if err := db.UpsertPromptTemplate(ctx, store.PromptTemplate{ID: "browser-search-asset", Name: "검색검증 프롬프트 자산", Category: "custom", Body: "Synthetic isolated asset.", Enabled: true}); err != nil {
+		t.Fatal("synthetic search asset could not be prepared")
+	}
+	if err := db.CreatePromptExperiment(ctx, store.PromptExperiment{ID: "browser-search-experiment", Title: "검색검증 프롬프트 실험"}); err != nil {
+		t.Fatal("synthetic search experiment could not be prepared")
+	}
 	now := time.Now().UTC()
 	if err := db.InsertLogRecord(ctx, store.LogRecord{
 		Request: store.RequestLog{ID: "browser-search-tool", TraceID: "browser-search-tool", StatusCode: 200, CreatedAt: now},

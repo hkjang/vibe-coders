@@ -2520,7 +2520,7 @@ export type RequestNoteWriteRequest = {
 } | null;
 
 export type ResourceSearchRequest = {
-    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool'>;
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment'>;
     query: string;
 };
 
@@ -2528,14 +2528,14 @@ export type ResourceSearchResponse = {
     groups: Array<{
         items: Array<{
             id: string;
-            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool';
+            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment';
             /**
              * Present for mcp_tool only; pair with id to identify the observed tool.
              */
             server_label?: string;
             title: string;
         }>;
-        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool';
+        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment';
         limited: boolean;
         status: 'ok' | 'forbidden' | 'unavailable';
     }>;
