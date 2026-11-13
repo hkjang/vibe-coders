@@ -22,6 +22,18 @@ export default defineConfig({
     manifest: true,
     sourcemap: false,
     reportCompressedSize: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "routing-editing-shared",
+              test: /[\\/]features[\\/]routing[\\/]rules[\\/](routing-toggle-state|routing-rule-create-state|routing-rule-create-operation|RoutingRuleCreateFields)\.(ts|tsx)$/u,
+            },
+          ],
+        },
+      },
+    },
   },
   server: {
     host: "127.0.0.1",

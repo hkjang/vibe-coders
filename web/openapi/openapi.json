@@ -9441,6 +9441,200 @@
         ],
         "type": "object"
       },
+      "RoutingOrderDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "matched_rule_id": {
+            "type": "string"
+          },
+          "target_model": {
+            "type": "string"
+          },
+          "target_provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "matched_rule_id",
+          "applied",
+          "target_model",
+          "target_provider"
+        ],
+        "type": "object"
+      },
+      "RoutingOrderPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "complexity": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "rule_order": {
+            "items": {
+              "description": "Exact stored ID, at most 2048 UTF-8 bytes, without Unicode control or format characters.",
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "minItems": 2,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "rule_revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "complexity",
+          "rule_order",
+          "rule_revision"
+        ],
+        "type": "object"
+      },
+      "RoutingOrderPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/RoutingOrderDecision"
+          },
+          "ambiguous_before_order": {
+            "type": "boolean"
+          },
+          "before": {
+            "$ref": "#/components/schemas/RoutingOrderDecision"
+          },
+          "revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "complexity_rules"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "revision",
+          "ambiguous_before_order",
+          "before",
+          "after"
+        ],
+        "type": "object"
+      },
+      "RoutingOrderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "order": {
+            "items": {
+              "description": "Exact stored ID, at most 2048 UTF-8 bytes, without Unicode control or format characters.",
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "minItems": 2,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "reason": {
+            "description": "Required nonblank reason, trimmed before auditing; limit is Unicode code points.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "expected_revision",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "RoutingOrderSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguous_ties": {
+            "type": "boolean"
+          },
+          "revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RoutingRuleView"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "rules",
+          "revision",
+          "ambiguous_ties"
+        ],
+        "type": "object"
+      },
+      "RoutingPreviewRequest": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RoutingOrderPreviewRequest"
+          },
+          {
+            "additionalProperties": true,
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "rule_order"
+                  ]
+                },
+                {
+                  "required": [
+                    "rule_revision"
+                  ]
+                }
+              ]
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "RoutingPreviewResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RoutingOrderPreviewResponse"
+          },
+          {
+            "additionalProperties": true,
+            "description": "Existing ordinary intelligent routing preview response, unchanged.",
+            "not": {
+              "required": [
+                "stage"
+              ]
+            },
+            "type": "object"
+          }
+        ]
+      },
       "RoutingRuleCreateRequest": {
         "additionalProperties": true,
         "description": "Eight known optional/nullable fields describe the existing Go decoder input; after decoding, target_model must be nonblank. Canonical required keys are not imposed because existing case-insensitive aliases remain accepted. Absent fields or fields supplied only as null begin with Go zero values, except enabled defaults to true; these are create defaults, not preservation of an existing row. ID and created_at are server-assigned and unknown input fields are ignored. No new string-length limit, provider/model existence check or strict JSON parser is introduced.",
@@ -9576,6 +9770,16 @@
           }
         },
         "type": "object"
+      },
+      "RoutingRuleReadResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RoutingRuleListResponse"
+          },
+          {
+            "$ref": "#/components/schemas/RoutingOrderSnapshot"
+          }
+        ]
       },
       "RoutingRuleView": {
         "additionalProperties": false,
@@ -11678,7 +11882,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.90"
+    "version": "v0.86.91"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -23767,18 +23971,40 @@
     },
     "/admin/routing-rules": {
       "get": {
-        "description": "Read stored routing rules with existing routing:read authorization. The unpaginated list includes all ten raw configuration fields for every row and uses [] when empty. This is configuration, not a masked projection, a revision token, or proof that the rule currently selects live traffic.",
+        "description": "Without view=order the existing complete raw routing rule list is unchanged. Exactly view=order and no other query returns a bounded review snapshot in the existing server order (priority, then stored creation timestamp). Its SHA-256 revision compares all configuration fields; it is not a monotonic version or idempotency token. Equal priority and creation timestamp have unspecified legacy order, reported by ambiguous_ties. Order snapshots use no-store.",
         "operationId": "get__admin_routing_rules",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "order"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RoutingRuleListResponse"
+                  "$ref": "#/components/schemas/RoutingRuleReadResponse"
                 }
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB."
           },
           "401": {
             "content": {
@@ -23788,7 +24014,17 @@
                 }
               }
             },
-            "description": "Existing authentication/scope rejection: invalid_api_key. GET requires routing:read; PATCH requires routing:write. Legacy read-only credentials cannot PATCH."
+            "description": "Existing invalid_api_key authentication or routing scope rejection. Reading and comparison require routing:read; order writes require both routing:read and routing:write. Existing legacy readonly tokens permit GET but still reject POST preview."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_order_limit: more than 1000 stored rules or a legacy identifier outside safe order bounds; no partial snapshot or mutation is returned."
           },
           "500": {
             "content": {
@@ -23798,7 +24034,7 @@
                 }
               }
             },
-            "description": "routing_rules_failed: stored list could not be read."
+            "description": "routing_order_failed: read, transaction or audit failed. An unconfirmed response is not evidence that a write was not applied; never automatically retry a mutation."
           },
           "default": {
             "content": {
@@ -23816,7 +24052,102 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List / create routing rules",
+        "summary": "List / create / reorder routing rules",
+        "tags": [
+          "routing"
+        ]
+      },
+      "patch": {
+        "description": "Atomically reorder the complete 2..1000 rule set, including disabled rules, and record the operator, prior/new priorities and required reason in one audit transaction. Priorities become 1..N in the specified exact order; other fields remain unchanged. Under a database write lock the complete configuration revision is checked again, including concurrent ordinary create/update/delete. A conflict never partially applies. Local cache is invalidated after commit; other processes retain the existing five-second TTL. Configured post-change checks run after commit. No query is accepted. Lost responses are not safe to retry automatically.",
+        "operationId": "patch__admin_routing_rules",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingOrderSnapshot"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing invalid_api_key authentication or routing scope rejection. Reading and comparison require routing:read; order writes require both routing:read and routing:write. Existing legacy readonly tokens permit GET but still reject POST preview."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_order_conflict: reviewed configuration differs from current configuration; reload and review again."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_order_limit: more than 1000 stored rules or a legacy identifier outside safe order bounds; no partial snapshot or mutation is returned."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_order_failed: read, transaction or audit failed. An unconfirmed response is not evidence that a write was not applied; never automatically retry a mutation."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List / create / reorder routing rules",
         "tags": [
           "routing"
         ]
@@ -23891,7 +24222,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List / create routing rules",
+        "summary": "List / create / reorder routing rules",
         "tags": [
           "routing"
         ]
@@ -24761,10 +25092,98 @@
         ]
       },
       "post": {
+        "description": "Existing ordinary routing preview is preserved. Presence of rule_order or rule_revision selects strict order comparison: exactly model, complexity, rule_order, rule_revision, with no query. This read-only comparison reuses the live first-match complexity-rule evaluator, including disabled and no-op semantics, and compares only that stage. It does not execute model calls or simulate policy, user/team routing, learning, provider health or failover. ambiguous_before_order warns when the legacy baseline ties are unspecified. It does not mutate rules, cache or audit. Existing raw-read redaction applies.",
         "operationId": "post__admin_routing_preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPreviewResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing invalid_api_key authentication or routing scope rejection. Reading and comparison require routing:read; order writes require both routing:read and routing:write. Existing legacy readonly tokens permit GET but still reject POST preview."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_order_conflict: reviewed configuration changed; no comparison result is returned."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "body_too_large: existing preview request exceeds 4 MiB; order comparisons have an additional 512 KiB limit."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_order_limit: more than 1000 stored rules or a legacy identifier outside safe order bounds; no partial snapshot or mutation is returned."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "routing_order_failed: read, transaction or audit failed. An unconfirmed response is not evidence that a write was not applied; never automatically retry a mutation."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

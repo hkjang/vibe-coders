@@ -292,6 +292,8 @@ jobs:
         run: go test -race ./internal/proxy -run '^TestRoutingDelete' -count=1 -timeout=5m
       - name: Verify PostgreSQL existing routing rule creation and acknowledgment contracts
         run: go test -race ./internal/proxy -run '^TestRoutingCreate' -count=1 -timeout=5m
+      - name: Verify PostgreSQL atomic routing order, concurrent edits and audit rollback
+        run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestRoutingOrder' -count=1 -timeout=5m
       - name: Verify PostgreSQL learning recommendation buckets and rule creation contracts
         run: go test -race ./internal/proxy -run '^TestRoutingLearningRule' -count=1 -timeout=5m
       - name: Verify PostgreSQL domain review status-only, identity and permission contracts
@@ -330,7 +332,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.90
+      SOURCE_SBOM_VERSION: v0.86.91
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

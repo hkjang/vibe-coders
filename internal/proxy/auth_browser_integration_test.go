@@ -120,6 +120,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	seedBrowserMcpRiskFixture(t, db)
 	h.verifyMcpCall = seedBrowserMcpCallFixture(t, db)
 	seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
+	seedBrowserRoutingOrderFixture(t, db)
 	seedBrowserOperationsFixture(t, db, filepath.Join(scratch, "fallback.ndjson"))
 	logger.Start()
 	t.Cleanup(func() {
@@ -259,6 +260,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	verifyBrowserAdminKeyEdits(t, h.db)
 	verifyBrowserUserFixture(t, h.db)
 	verifyBrowserQuotaBudgetFixture(t, h.db)
+	verifyBrowserRoutingOrderFixture(t, h.db)
 }
 
 func browserAuthWebDirectory(t *testing.T) string {

@@ -51,9 +51,10 @@ function bootstrap(
   mode: Mode,
   prefixes: string[],
   rawPromptView: boolean,
+  backendVersion: string,
 ): UiBootstrapResponse {
   return {
-    backend_version: "v0.86.25",
+    backend_version: backendVersion,
     ui_version: "routing-toggle-fixture",
     api_version: "v1",
     ui: {
@@ -99,6 +100,7 @@ function bootstrap(
   };
 }
 async function install(context: BrowserContext) {
+  let backendVersion = "v0.86.25";
   let mode: Mode = "writable",
     read = true,
     write = true,
@@ -152,7 +154,8 @@ async function install(context: BrowserContext) {
         user,
       });
     }
-    if (call === "GET /admin/ui-bootstrap") return json(bootstrap(session, mode, prefixes, rawPromptView));
+    if (call === "GET /admin/ui-bootstrap")
+      return json(bootstrap(session, mode, prefixes, rawPromptView, backendVersion));
     if (call === "GET /auth/me")
       return json({
         version: "v0.86.25",
@@ -244,6 +247,9 @@ async function install(context: BrowserContext) {
     },
     setMode: (next: Mode) => {
       mode = next;
+    },
+    setBackendVersion: (next: string) => {
+      backendVersion = next;
     },
     setWrite: (next: boolean) => {
       write = next;

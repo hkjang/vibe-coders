@@ -1,6 +1,6 @@
 import { Plus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { routingRulesQueryKey, writeScopeMessage } from "@/features/routing/rules/routing-shared";
 import { QueryFailureNotice, ScopeNotice } from "@/features/routing/rules/routing-ui";
@@ -22,10 +22,13 @@ import { RoutingRuleEditDialog } from "./RoutingRuleEditDialog";
 import { RoutingRuleDeleteDialog } from "./RoutingRuleDeleteDialog";
 import { useRoutingDeleteAccess } from "./routing-rule-delete-access";
 import { deleteIdentityReason } from "./routing-rule-delete-state";
-import { RoutingRuleCreateDialog } from "./RoutingRuleCreateDialog";
 import { useRoutingCreateAccess } from "./routing-rule-create-access";
+import { RoutingOrderButton } from "./RoutingOrderButton";
 
 const pageSize = 10;
+const RoutingRuleCreateDialog = lazy(() =>
+  import("./RoutingRuleCreateDialog").then((module) => ({ default: module.RoutingRuleCreateDialog })),
+);
 
 export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
@@ -107,9 +110,8 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
   const renderedCount = renderedQuery?.state.dataUpdateCount;
   const renderedData = renderedQuery?.state.data;
 
-  const rows = [...(rules.data?.rules ?? [])].sort(
-    (left, right) => left.priority - right.priority || left.target_model.localeCompare(right.target_model),
-  );
+  // Keep the backend's creation precedence for equal-priority rules.
+  const rows = rules.data?.rules ?? [];
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const page = Math.min(pageFromParam(searchParams.get("page")), pageCount);
   const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
@@ -140,6 +142,7 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
         description="요청 복잡도 점수와 모델 패턴이 모두 맞는 규칙 중 우선순위가 가장 앞선 규칙이 적용됩니다."
         actions={
           <div className="routing-tab-actions">
+            <RoutingOrderButton canWrite={canWrite} />
             <Button
               ref={createTrigger}
               variant="primary"
@@ -258,16 +261,18 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
       </SectionCard>
 
       {creating !== undefined ? (
-        <RoutingRuleCreateDialog
-          key={`${createAccess.key}:${creating}`}
-          access={createAccess}
-          returnFocusRef={createReturnFocus}
-          onClose={() => {
-            if (createActive.current !== creating) return;
-            createActive.current = undefined;
-            setCreateSelection({ lifetime: createAccess.lifetime });
-          }}
-        />
+        <Suspense fallback={<p role="status">규칙 생성 편집기를 불러오는 중입니다…</p>}>
+          <RoutingRuleCreateDialog
+            key={`${createAccess.key}:${creating}`}
+            access={createAccess}
+            returnFocusRef={createReturnFocus}
+            onClose={() => {
+              if (createActive.current !== creating) return;
+              createActive.current = undefined;
+              setCreateSelection({ lifetime: createAccess.lifetime });
+            }}
+          />
+        </Suspense>
       ) : null}
 
       {editing ? (
