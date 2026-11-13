@@ -1,3 +1,6 @@
+import { connectionTests, testEndpoint, type ConnectionTestKind } from "./runtime-connection-tests";
+import { settingColumns } from "./runtime-setting-columns";
+import { RuntimeSettingUnavailable } from "./RuntimeSettingUnavailable";
 import { Download, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -5,16 +8,15 @@ import { toast } from "sonner";
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
 import { useSettingSaveOutcome } from "@/features/system/settings/setting-save-outcome";
-import {
-  SettingsRecoveryDialog,
-  type SettingRecovery,
-} from "@/features/system/settings/SettingsRecoveryDialog";
+import type { SettingRecovery } from "./SettingsRecoveryDialog";
+import { LazySettingsRecovery } from "./LazySettingsRecovery";
 import {
   filterSettings,
   isConsoleSetting,
   settingCategories,
-  settingDisplayValue,
-  settingSourceLabel,
+  settingEditPermission,
+  settingWithCurrentPermission,
+  runtimeSettingKeyValid,
 } from "@/features/system/settings/settings-utils";
 import {
   routeId,
@@ -25,7 +27,6 @@ import { apiClient } from "@/shared/api/client";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
 import { pathWithParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -33,9 +34,9 @@ import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
-import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useSettingsMutation, useSettingsWriteAccess } from "./use-settings-mutation";
+import { useSettingsWorkspace } from "./settings-workspace-context";
 import { useSettingsReloadNotice } from "@/features/system/settings/use-settings-reload-notice";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
@@ -44,69 +45,21 @@ import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 const system = endpoints.domains.system;
 
-type ConnectionTestKind = "clickhouse" | "text2sql-exec" | "text2sql-twin";
-
-const connectionTests: ReadonlyArray<{ kind: ConnectionTestKind; label: string }> = [
-  { kind: "clickhouse", label: "ClickHouse 연결 테스트" },
-  { kind: "text2sql-exec", label: "Text2SQL 실행 DB 테스트" },
-  { kind: "text2sql-twin", label: "Text2SQL 트윈 DB 테스트" },
-];
-
-function testEndpoint(kind: ConnectionTestKind) {
-  if (kind === "clickhouse") return system.settings.testClickhouse;
-  if (kind === "text2sql-exec") return system.settings.testText2sqlExec;
-  return system.settings.testText2sqlTwin;
-}
-
-function createColumns(): ReadonlyArray<DataTableColumn<EffectiveSetting>> {
-  const column = createDataTableColumnHelper<EffectiveSetting>();
-  return column.columns([
-    column.accessor((row) => row.key, {
-      id: "key",
-      header: "설정 키",
-      cell: ({ row }) => (
-        <div className="settings-key-cell">
-          <span className="mono">{row.original.key}</span>
-          {row.original.description ? <small>{row.original.description}</small> : null}
-        </div>
-      ),
-    }),
-    column.accessor((row) => row.category, { id: "category", header: "범주" }),
-    column.accessor((row) => settingDisplayValue(row), {
-      id: "value",
-      header: "현재 값",
-      cell: ({ row }) => <span className="mono truncate">{settingDisplayValue(row.original)}</span>,
-    }),
-    column.accessor((row) => settingSourceLabel(row.source), { id: "source", header: "적용 출처" }),
-    column.display({
-      id: "flags",
-      header: "상태",
-      cell: ({ row }) => (
-        <span className="badge-list">
-          {row.original.read_only ? <Badge tone="muted">읽기 전용</Badge> : null}
-          {row.original.restart_required ? <Badge tone="warning">재시작 필요</Badge> : null}
-          {row.original.is_secret ? <Badge tone="info">비밀값</Badge> : null}
-        </span>
-      ),
-    }),
-    column.accessor((row) => row.updated_at ?? "", {
-      id: "updated_at",
-      header: "마지막 변경",
-      cell: ({ row }) => formatDateTime(row.original.updated_at),
-    }),
-  ]);
-}
-
-const settingColumns = createColumns();
-
 export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }): React.JSX.Element {
   const [params, updateParams] = useSearchState();
   const settingsQuery = useEffectiveSettings();
   const triggerRef = useRef<HTMLElement | null>(null);
-  const [selected, setSelected] = useState<EffectiveSetting | undefined>();
+  const selectedKey = params.get("setting") ?? "";
+  const validSelectedKey = runtimeSettingKeyValid(selectedKey);
   const [confirm, setConfirm] = useState<SettingRecovery | undefined>();
-  const { reloadPending, setReloadPending } = useSettingsReloadNotice();
-  const settingSaveOutcome = useSettingSaveOutcome();
+  const { owner, principal, effectiveKey, scopedWriter } = useSettingsWorkspace();
+  const access = useSettingsWriteAccess();
+  const { reloadPending, setReloadPending } = useSettingsReloadNotice({
+    effectiveKey,
+    principal,
+    isCurrent: owner.isCurrent,
+  });
+  const settingSaveOutcome = useSettingSaveOutcome(effectiveKey);
   const [testResult, setTestResult] = useState<{ label: string; ok: boolean; detail: string } | undefined>();
   const [searchError, setSearchError] = useState<string | undefined>();
 
@@ -114,6 +67,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
     () => (settingsQuery.data?.settings ?? []).filter((setting) => !isConsoleSetting(setting)),
     [settingsQuery.data?.settings],
   );
+  const selected = validSelectedKey ? allSettings.find((row) => row.key === selectedKey) : undefined;
   const categories = useMemo(() => settingCategories(allSettings), [allSettings]);
   const requestedCategory = params.get("category") ?? "";
   const category = categories.includes(requestedCategory) ? requestedCategory : "";
@@ -129,8 +83,11 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
   const readOnly = allSettings.filter((setting) => setting.read_only).length;
   const pod = settingsQuery.data?.this_pod;
 
-  const saveSetting = useMutationFeedback({
+  const saveSetting = useSettingsMutation({
+    authorized: hasAdminWrite || scopedWriter,
     mutate: async (input: { setting: EffectiveSetting; value: string; reason: string }) => {
+      if (!settingEditPermission(input.setting, hasAdminWrite, access.allowed, scopedWriter).editable)
+        throw new Error("이 설정을 변경할 권한이 없습니다.");
       const endpoint = system.settings.update;
       return settingSaveOutcome(() =>
         apiClient.request(
@@ -157,7 +114,8 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
     errorMessage: "설정을 저장하지 못했습니다.",
   });
 
-  const runTest = useMutationFeedback({
+  const runTest = useSettingsMutation({
+    authorized: hasAdminWrite,
     mutate: async (input: { kind: ConnectionTestKind; label: string }) =>
       apiClient.request(testEndpoint(input.kind), { routeId }),
     errorMessage: "연결 테스트를 실행하지 못했습니다.",
@@ -175,7 +133,8 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
     },
   });
 
-  const exportSettings = useMutationFeedback({
+  const exportSettings = useSettingsMutation({
+    readOnly: true,
     mutate: async () => apiClient.request(system.settings.export, { routeId }),
     successMessage: "설정 백업 파일을 내려받았습니다.",
     errorMessage: "설정 백업을 만들지 못했습니다.",
@@ -189,13 +148,36 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
     },
   });
 
-  const openSetting = useCallback((setting: EffectiveSetting): void => {
-    triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setSelected({ ...setting });
-  }, []);
+  const openSetting = useCallback(
+    (setting: EffectiveSetting): void => {
+      triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      updateParams({ setting: setting.key }, { replace: false });
+    },
+    [updateParams],
+  );
 
   return (
-    <div className="settings-tab-stack">
+    <div
+      className="settings-tab-stack"
+      onClickCapture={(event) => {
+        const link =
+          event.target instanceof Element ? event.target.closest<HTMLElement>("a[data-setting-link]") : null;
+        if (link) triggerRef.current = link;
+      }}
+    >
+      {!access.allowed ? (
+        <InlineNotice tone="info" title="읽기 전용으로 전환됐습니다.">
+          {access.reason} 입력한 초안은 유지됩니다.
+        </InlineNotice>
+      ) : !hasAdminWrite && scopedWriter ? (
+        <InlineNotice tone="info" title="설정별 변경 권한을 적용합니다.">
+          현재 계정에 서버가 허용한 범주의 설정만 변경할 수 있습니다.
+        </InlineNotice>
+      ) : !hasAdminWrite ? (
+        <InlineNotice tone="info" title="변경 권한이 없습니다.">
+          설정 조회만 가능합니다. 변경에는 admin:write 권한이 필요합니다.
+        </InlineNotice>
+      ) : null}
       {reloadPending ? (
         <InlineNotice tone="warning" title="설정은 저장됐으며 런타임 반영을 기다리고 있습니다.">
           다시 저장하지 말고 최신 설정과 서버 반영 상태를 확인하세요.
@@ -310,7 +292,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
           <Button
             key={test.kind}
             size="small"
-            disabled={!hasAdminWrite || runTest.isPending}
+            disabled={!hasAdminWrite || !access.allowed || runTest.isPending}
             onClick={() => runTest.mutate(test)}
           >
             {test.label}
@@ -354,18 +336,29 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
       )}
       <UpdatedAt at={settingsQuery.dataUpdatedAt} />
 
+      {selectedKey && !selected ? (
+        <RuntimeSettingUnavailable
+          loading={settingsQuery.isPending}
+          error={settingsQuery.error}
+          valid={validSelectedKey}
+          onClose={() => updateParams({ setting: undefined })}
+          onRetry={() => void settingsQuery.refetch()}
+          returnFocusRef={triggerRef}
+        />
+      ) : null}
       <SettingDetailSheet
         hasAdminWrite={hasAdminWrite}
+        featureWritable={access.allowed && !settingsQuery.isError}
         open={selected !== undefined}
         onOpenChange={(next) => {
-          if (!next) setSelected(undefined);
+          if (!next) updateParams({ setting: undefined });
         }}
         onRequestRevert={(setting) => {
-          setSelected(undefined);
+          updateParams({ setting: undefined });
           setConfirm({ kind: "revert", setting });
         }}
         onRequestRollback={(setting, historyId, historyCount) => {
-          setSelected(undefined);
+          updateParams({ setting: undefined });
           setConfirm({ kind: "rollback", setting, historyId, historyCount });
         }}
         onSave={async (input) => {
@@ -377,10 +370,15 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
         setting={selected}
       />
 
-      <SettingsRecoveryDialog
-        request={confirm}
+      <LazySettingsRecovery
+        request={
+          confirm
+            ? { ...confirm, setting: settingWithCurrentPermission(confirm.setting, allSettings) }
+            : undefined
+        }
         onClose={() => setConfirm(undefined)}
         hasAdminWrite={hasAdminWrite}
+        featureWritable={access.allowed && !settingsQuery.isError}
         onReloadPending={setReloadPending}
         onSaved={() => setReloadPending(undefined)}
         returnFocusRef={triggerRef}

@@ -1,17 +1,20 @@
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { migrationRegistry } from "@/config/migration-registry";
-import { migrationStatusLabels, roleLabel } from "@/config/ui-labels";
+import {
+  featureTitles,
+  statusTones,
+  statusDisplay,
+  roleDisplay,
+  readOnlyDisplay,
+} from "./console-rollout-display";
 import {
   ConsoleFeatureDialog,
   type ConsoleFeatureEdit,
 } from "@/features/system/settings/ConsoleFeatureDialog";
 import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
-import {
-  SettingsRecoveryDialog,
-  type SettingRecovery,
-} from "@/features/system/settings/SettingsRecoveryDialog";
+import type { SettingRecovery } from "./SettingsRecoveryDialog";
+import { LazySettingsRecovery } from "./LazySettingsRecovery";
 import { ConsoleUsagePanel } from "@/features/system/settings/ConsoleUsagePanel";
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import {
@@ -23,9 +26,9 @@ import {
   consoleGlobalSettings,
   consoleSettingLabels,
   isConsoleSetting,
-  normalizedBoolean,
   settingDisplayValue,
   settingEditPermission,
+  settingWithCurrentPermission,
   type ConsoleFeatureRow,
 } from "@/features/system/settings/settings-utils";
 import {
@@ -41,62 +44,14 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useSettingsMutation, useSettingsWriteAccess } from "./use-settings-mutation";
+import { useSettingsWorkspace } from "./settings-workspace-context";
 import { useSettingsReloadNotice } from "@/features/system/settings/use-settings-reload-notice";
 
 const system = endpoints.domains.system;
 
 const conflictMessage =
   "다른 작업자가 전환 설정을 변경해 저장하지 않았습니다. 입력한 내용을 확인한 뒤 대화상자를 닫고 다시 열어 최신 설정과 비교하세요.";
-
-const featureTitles = new Map(
-  migrationRegistry.map((feature) => [feature.featureId as string, feature.title as string]),
-);
-
-const statusTones: Record<string, "danger" | "info" | "muted" | "success" | "warning"> = {
-  hidden: "muted",
-  legacy: "muted",
-  preview_read_only: "info",
-  preview: "info",
-  stable: "success",
-  deprecated: "warning",
-  retired: "danger",
-};
-
-function statusDisplay(status: string): string {
-  return Object.prototype.hasOwnProperty.call(migrationStatusLabels, status)
-    ? migrationStatusLabels[status as keyof typeof migrationStatusLabels]
-    : "확인 불가";
-}
-
-function roleCodes(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((role) => role.trim())
-    .filter((role) => role !== "");
-}
-
-function roleDisplay(value: string | undefined): React.JSX.Element {
-  const roles = roleCodes(value);
-  if (roles.length === 0) return <span>기능별 기본 역할 제한</span>;
-  return (
-    <span className="settings-key-cell">
-      <span>{roles.map((role) => roleLabel(role)).join(", ")}</span>
-      <small className="mono">{roles.join(", ")}</small>
-    </span>
-  );
-}
-
-function readOnlyDisplay(value: string | undefined): React.JSX.Element {
-  const normalized = normalizedBoolean(value ?? "false");
-  return (
-    <span className="settings-key-cell">
-      <span>{normalized === "true" ? "쓰기 차단" : "쓰기 허용"}</span>
-      <small className="mono">{normalized}</small>
-    </span>
-  );
-}
 
 export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean }): React.JSX.Element {
   const settingsQuery = useEffectiveSettings();
@@ -105,8 +60,14 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   const [selectedGlobal, setSelectedGlobal] = useState<EffectiveSetting | undefined>();
   const [recovery, setRecovery] = useState<SettingRecovery | undefined>();
   const [conflict, setConflict] = useState(false);
-  const { reloadPending, setReloadPending } = useSettingsReloadNotice();
-  const settingSaveOutcome = useSettingSaveOutcome();
+  const { owner, principal, effectiveKey, scopedWriter } = useSettingsWorkspace();
+  const access = useSettingsWriteAccess();
+  const { reloadPending, setReloadPending } = useSettingsReloadNotice({
+    effectiveKey,
+    principal,
+    isCurrent: owner.isCurrent,
+  });
+  const settingSaveOutcome = useSettingSaveOutcome(effectiveKey);
 
   const consoleSettings = useMemo(
     () => (settingsQuery.data?.settings ?? []).filter(isConsoleSetting),
@@ -115,16 +76,38 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   const globals = useMemo(() => consoleGlobalSettings(consoleSettings), [consoleSettings]);
   const featureRows = useMemo(() => buildConsoleFeatureRows(consoleSettings), [consoleSettings]);
 
-  const editableSetting = editing?.status ?? editing?.roles ?? editing?.rollout ?? editing?.readonly;
-  const permission = editableSetting
-    ? settingEditPermission(editableSetting, hasAdminWrite)
-    : { editable: hasAdminWrite, reason: hasAdminWrite ? undefined : "admin:write 권한이 필요합니다." };
+  const reviewedSettings = editing
+    ? [editing.status, editing.roles, editing.rollout, editing.readonly].filter(
+        (row): row is EffectiveSetting => Boolean(row),
+      )
+    : [];
+  const permissions = reviewedSettings.map((row) =>
+    settingEditPermission(
+      settingWithCurrentPermission(row, consoleSettings),
+      hasAdminWrite,
+      access.allowed && !settingsQuery.isError,
+      scopedWriter,
+    ),
+  );
+  const permission = permissions.find((value) => !value.editable) ?? {
+    editable: access.allowed,
+    reason: access.reason,
+  };
 
   const writeSetting = async (
     setting: EffectiveSetting,
     value: string,
     reason: string,
   ): Promise<SettingSaveResult> => {
+    if (
+      !settingEditPermission(
+        settingWithCurrentPermission(setting, consoleSettings),
+        hasAdminWrite,
+        access.allowed,
+        scopedWriter,
+      ).editable
+    )
+      throw new Error("이 설정을 변경할 권한이 없습니다.");
     const endpoint = system.settings.update;
     return settingSaveOutcome(() =>
       apiClient.request(
@@ -141,7 +124,8 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
     );
   };
 
-  const saveFeature = useMutationFeedback({
+  const saveFeature = useSettingsMutation({
+    authorized: hasAdminWrite || scopedWriter,
     mutate: async (input: {
       row: ConsoleFeatureRow;
       changes: ConsoleFeatureEdit;
@@ -153,6 +137,21 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         [input.row.rollout, input.changes.rollout],
         [input.row.readonly, input.changes.readonly],
       ];
+      if (
+        entries.some(
+          ([setting, value]) =>
+            setting &&
+            value !== undefined &&
+            value !== setting.value &&
+            !settingEditPermission(
+              settingWithCurrentPermission(setting, consoleSettings),
+              hasAdminWrite,
+              access.allowed,
+              scopedWriter,
+            ).editable,
+        )
+      )
+        throw new Error("전환 설정을 변경할 권한이 없습니다.");
       const settings = entries.flatMap(([setting, value]) =>
         setting && value !== undefined && value !== setting.value
           ? [{ key: setting.key, value, expected_version: setting.version ?? 0 }]
@@ -179,7 +178,8 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
     errorMessage: "콘솔 전환 설정을 저장하지 못했습니다.",
   });
 
-  const saveGlobal = useMutationFeedback({
+  const saveGlobal = useSettingsMutation({
+    authorized: hasAdminWrite || scopedWriter,
     mutate: async (input: { setting: EffectiveSetting; value: string; reason: string }) =>
       writeSetting(input.setting, input.value, input.reason),
     invalidates: [systemSettingsKeys.effective],
@@ -367,6 +367,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
 
       <SettingDetailSheet
         hasAdminWrite={hasAdminWrite}
+        featureWritable={access.allowed && !settingsQuery.isError}
         open={selectedGlobal !== undefined}
         onOpenChange={(next) => {
           if (!next) setSelectedGlobal(undefined);
@@ -381,12 +382,17 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         }}
         pending={saveGlobal.isPending}
         returnFocusRef={triggerRef}
-        setting={selectedGlobal}
+        setting={selectedGlobal ? settingWithCurrentPermission(selectedGlobal, consoleSettings) : undefined}
       />
-      <SettingsRecoveryDialog
-        request={recovery}
+      <LazySettingsRecovery
+        request={
+          recovery
+            ? { ...recovery, setting: settingWithCurrentPermission(recovery.setting, consoleSettings) }
+            : undefined
+        }
         onClose={() => setRecovery(undefined)}
         hasAdminWrite={hasAdminWrite}
+        featureWritable={access.allowed && !settingsQuery.isError}
         onReloadPending={setReloadPending}
         onSaved={() => setReloadPending(undefined)}
         returnFocusRef={triggerRef}

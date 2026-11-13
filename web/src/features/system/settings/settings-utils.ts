@@ -87,14 +87,21 @@ export interface EditPermission {
  * Why a setting cannot be edited here. The server is the authority (it answers 403
  * per category), so this only disables controls and explains the reason.
  */
-export function settingEditPermission(setting: EffectiveSetting, hasAdminWrite: boolean): EditPermission {
+export function settingEditPermission(
+  setting: EffectiveSetting,
+  hasAdminWrite: boolean,
+  featureWritable = true,
+  scopedWriter = false,
+): EditPermission {
+  if (!featureWritable)
+    return { editable: false, reason: "현재 화면은 읽기 전용입니다. 입력한 초안은 유지됩니다." };
   if (setting.read_only) {
     return { editable: false, reason: "환경변수로만 바꿀 수 있는 읽기 전용 설정입니다." };
   }
   if (setting.can_write === false) {
     return { editable: false, reason: "현재 역할은 이 설정 범주를 변경할 수 없습니다." };
   }
-  if (!hasAdminWrite) {
+  if (!hasAdminWrite && !(scopedWriter && setting.can_write === true)) {
     return { editable: false, reason: "admin:write 권한이 필요합니다." };
   }
   return { editable: true };
@@ -146,4 +153,17 @@ export function isBooleanSetting(setting: EffectiveSetting): boolean {
 
 export function normalizedBoolean(value: string): "true" | "false" {
   return value.trim().toLowerCase() === "true" ? "true" : "false";
+}
+
+/** Refresh permission flags only; never silently upgrade the reviewed value or CAS version. */
+export function settingWithCurrentPermission(
+  snapshot: EffectiveSetting,
+  current: readonly EffectiveSetting[],
+): EffectiveSetting {
+  const latest = current.find((setting) => setting.key === snapshot.key);
+  return { ...snapshot, can_write: latest ? latest.can_write : false, read_only: latest?.read_only ?? true };
+}
+
+export function runtimeSettingKeyValid(key: string): boolean {
+  return /^[a-z][a-z0-9._-]{0,255}$/.test(key);
 }

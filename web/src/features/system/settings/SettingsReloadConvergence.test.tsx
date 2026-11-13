@@ -1,3 +1,4 @@
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
@@ -90,10 +91,15 @@ it.each(writes)("$tab $kind 응답 직후 자동 조회가 반영 완료이면 �
       });
     },
   });
-  renderScreen(<SystemSettingsPage />, {
-    path: "/system/settings",
-    route: `/system/settings?tab=${fixture.tab}`,
-  });
+  renderScreen(
+    <FeatureAccessHarness featureId="system.settings">
+      <SystemSettingsPage />
+    </FeatureAccessHarness>,
+    {
+      path: "/system/settings",
+      route: `/system/settings?tab=${fixture.tab}`,
+    },
+  );
   await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
   if (fixture.kind === "revert" || fixture.kind === "rollback") {
     const action = screen.getByRole("button", {
@@ -101,7 +107,7 @@ it.each(writes)("$tab $kind 응답 직후 자동 조회가 반영 완료이면 �
     });
     await waitFor(() => expect(action).toBeEnabled());
     await user.click(action);
-    await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "복구 검토");
+    await user.type(await screen.findByRole("textbox", { name: "변경 사유" }), "복구 검토");
     await user.click(screen.getByRole("button", { name: fixture.kind === "revert" ? "되돌리기" : "롤백" }));
   } else {
     if (fixture.kind === "feature") {

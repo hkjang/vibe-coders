@@ -7,6 +7,7 @@ import { ChangeSetsTab } from "@/features/system/settings/ChangeSetsTab";
 import { ConsoleRolloutTab } from "@/features/system/settings/ConsoleRolloutTab";
 import { KnowledgeTab } from "@/features/system/settings/KnowledgeTab";
 import { OperationsTab } from "@/features/system/settings/OperationsTab";
+import { SettingsWorkspaceBoundary } from "./SettingsWorkspaceBoundary";
 import { RuntimeSettingsTab } from "@/features/system/settings/RuntimeSettingsTab";
 import { SsoTab } from "@/features/system/settings/SsoTab";
 import { SystemErrorsTab } from "@/features/system/settings/SystemErrorsTab";
@@ -79,7 +80,7 @@ export function SystemSettingsPage(): React.JSX.Element {
       <PageHeader
         title="시스템 설정"
         status="preview"
-        readOnly={!hasAdminWrite}
+        readOnly={tab !== "runtime" && tab !== "console" && !hasAdminWrite}
         description="게이트웨이 런타임 설정, 신규 콘솔 전환 상태, 변경 이력과 운영 작업을 한 곳에서 관리합니다."
         legacyHref="/admin#/settings"
         actions={
@@ -94,7 +95,7 @@ export function SystemSettingsPage(): React.JSX.Element {
         }
       />
 
-      {hasAdminWrite ? null : (
+      {hasAdminWrite || tab === "runtime" || tab === "console" ? null : (
         <InlineNotice tone="info" title="변경 권한이 없습니다.">
           admin:write 권한이 없어 설정을 조회만 할 수 있습니다. 범주별 세부 권한이 부족하면 저장할 때 서버가
           알려 주는 사유가 그대로 표시됩니다.
@@ -110,8 +111,15 @@ export function SystemSettingsPage(): React.JSX.Element {
       />
 
       <TabPanel id={tab} panelIdPrefix="system-settings">
-        {tab === "runtime" ? <RuntimeSettingsTab hasAdminWrite={hasAdminWrite} /> : null}
-        {tab === "console" ? <ConsoleRolloutTab hasAdminWrite={hasAdminWrite} /> : null}
+        {tab === "runtime" || tab === "console" ? (
+          <SettingsWorkspaceBoundary>
+            {tab === "runtime" ? (
+              <RuntimeSettingsTab hasAdminWrite={hasAdminWrite} />
+            ) : (
+              <ConsoleRolloutTab hasAdminWrite={hasAdminWrite} />
+            )}
+          </SettingsWorkspaceBoundary>
+        ) : null}
         {tab === "operations" ? <OperationsTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "knowledge" ? <KnowledgeTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "changesets" ? <ChangeSetsTab hasAdminWrite={hasAdminWrite} /> : null}

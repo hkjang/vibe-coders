@@ -2,6 +2,8 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
+import { useSettingsWorkspace } from "./settings-workspace-context";
+import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 
 export const routeId = "system.settings";
@@ -26,20 +28,40 @@ export const systemSettingsKeys = {
 const system = endpoints.domains.system;
 
 export function useEffectiveSettings() {
+  const { owner, effectiveKey } = useSettingsWorkspace();
   const refetchInterval = useRefreshInterval();
   return useQuery({
-    queryKey: systemSettingsKeys.effective,
-    queryFn: ({ signal }) => apiClient.request(system.settings.effective, { signal, routeId }),
+    queryKey: effectiveKey,
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(system.settings.effective, { signal, routeId, cache: "no-store" });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
     refetchInterval,
     refetchIntervalInBackground: false,
   });
 }
 
 export function useSettingHistory(key: string, enabled: boolean) {
+  const { owner } = useSettingsWorkspace();
   return useQuery({
-    queryKey: systemSettingsKeys.history(key),
-    queryFn: ({ signal }) =>
-      apiClient.request(system.settings.history, { query: { key, limit: 20 }, signal, routeId }),
+    queryKey: featureOwnedKey(systemSettingsKeys.history(key), owner),
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(system.settings.history, {
+        query: { key, limit: 20 },
+        signal,
+        routeId,
+        cache: "no-store",
+      });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
     enabled: enabled && key !== "",
     refetchOnMount: "always",
   });

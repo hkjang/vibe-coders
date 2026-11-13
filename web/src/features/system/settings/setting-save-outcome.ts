@@ -30,8 +30,8 @@ async function settingSaveOutcome(
   }
 }
 
-export function useSettingSaveOutcome() {
+export function useSettingSaveOutcome(effectiveKey: readonly unknown[] = systemSettingsKeys.effective) {
   const client = useQueryClient();
   return (write: () => Promise<unknown>): Promise<SettingSaveResult> =>
-    settingSaveOutcome(write, () => client.getQueryState(systemSettingsKeys.effective)?.dataUpdateCount ?? 0);
+    settingSaveOutcome(write, () => client.getQueryState(effectiveKey)?.dataUpdateCount ?? 0);
 }

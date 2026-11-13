@@ -45,6 +45,8 @@ const scenarios = new Set([
   "AUTH-LIVE-040",
   "AUTH-LIVE-041",
   "AUTH-LIVE-042",
+  "AUTH-LIVE-043",
+  "AUTH-LIVE-044",
 ]);
 const sourceFiles = new Set([
   "auth-live.spec.ts",
@@ -60,6 +62,7 @@ const sourceFiles = new Set([
   "mcp-risk-live.spec.ts",
   "routing-order-live.spec.ts",
   "execution-receipts-live.spec.ts",
+  "settings-workspace-live.spec.ts",
 ]);
 const testStatuses = new Set(["passed", "failed", "timedOut", "skipped", "interrupted"]);
 const runStatuses = new Set(["passed", "failed", "timedout", "interrupted"]);
