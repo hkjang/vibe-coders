@@ -33,6 +33,7 @@ import {
 import { useWorkflowPageQuery, useWorkflowDetailQuery } from "./use-workflow-queries";
 import { readWorkflowPage, validWorkflowDetailId } from "./workflow-page-model";
 import { WorkflowListPanel } from "./WorkflowListPanel";
+import { readRunSelection, validReceiptId } from "../receipts/run-receipt";
 import "@/features/agents/agents.css";
 
 const tabIds = ["list", "runs"] as const;
@@ -73,9 +74,12 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
   const [tab, setTab] = useTabParam<TabId>([...tabIds]);
   const [params, updateSearch] = useSearchState();
   const state = readWorkflowPage(params, auth.credentialPrefixes);
+  const receipt = readRunSelection(params, "workflow", auth.credentialPrefixes);
   const selectedId = params.get("workflow") ?? "";
   const selectedValid =
-    params.getAll("workflow").length === 1 && validWorkflowDetailId(selectedId, auth.credentialPrefixes);
+    !receipt.open &&
+    params.getAll("workflow").length === 1 &&
+    validWorkflowDetailId(selectedId, auth.credentialPrefixes);
   const currentSelection = useRef(selectedId);
   useLayoutEffect(() => {
     currentSelection.current = selectedId;
@@ -84,7 +88,6 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
   const [editing, setEditing] = useState<Workflow | undefined>();
   const [publishTarget, setPublishTarget] = useState<Workflow | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<Workflow | undefined>();
-  const [receiptRunId, setReceiptRunId] = useState("");
   const createButtonRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
   const dialogReturnRef = useRef<HTMLElement | null>(null);
@@ -121,7 +124,10 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
       if (currentSelection.current === id) closeSheet();
     },
   });
-  const { runColumns } = useWorkflowColumns(workflows);
+  const captureReceiptTrigger = useCallback((element: HTMLElement) => {
+    rowTriggerRef.current = element;
+  }, []);
+  const { runColumns } = useWorkflowColumns(workflows, undefined, captureReceiptTrigger);
 
   const enabledCount = list.data?.summary.enabled ?? 0;
   const stepTotal = workflows.reduce((total, workflow) => total + workflow.step_count, 0);
@@ -233,11 +239,16 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
             data={runs.data?.runs ?? []}
             emptyMessage="아직 실행한 워크플로가 없습니다."
             getRowId={(row) => row.id}
-            getRowActionLabel={(row) => `실행 ${row.id} 영수증 열기`}
+            getRowActionLabel={(row) =>
+              validReceiptId(row.id, auth.credentialPrefixes)
+                ? `실행 ${row.id} 영수증 열기`
+                : "영수증 주소 확인 필요"
+            }
             loading={runs.isPending}
             onRowClick={(row) => {
+              if (!validReceiptId(row.id, auth.credentialPrefixes)) return;
               rowTriggerRef.current = document.activeElement as HTMLElement | null;
-              setReceiptRunId(row.id);
+              updateSearch({ run: row.id, workflow: undefined, tab: "runs" }, { replace: false });
             }}
           />
         </TabPanel>
@@ -245,11 +256,13 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
 
       <WorkflowReceiptDialog
         owner={owner}
+        open={receipt.open}
+        invalidAddress={receipt.invalid}
         onOpenChange={(open) => {
-          if (!open) setReceiptRunId("");
+          if (!open) updateSearch({ run: undefined });
         }}
         returnFocusRef={rowTriggerRef}
-        runId={receiptRunId}
+        runId={receipt.id}
       />
 
       <WorkflowDetailSheet
@@ -265,7 +278,7 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
           if (!open) closeSheet();
         }}
         onPublish={() => setPublishTarget(selected)}
-        open={params.has("workflow")}
+        open={!receipt.open && params.has("workflow")}
         loading={selectedValid && (detail.isPending || detail.isFetching)}
         detailError={selectedValid ? detail.error : undefined}
         invalidAddress={params.has("workflow") && !selectedValid}

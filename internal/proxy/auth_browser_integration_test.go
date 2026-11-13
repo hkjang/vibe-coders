@@ -121,6 +121,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	h.verifyMcpCall = seedBrowserMcpCallFixture(t, db)
 	seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
 	seedBrowserRoutingOrderFixture(t, db)
+	seedBrowserExecutionReceipts(t, db)
 	seedBrowserOperationsFixture(t, db, filepath.Join(scratch, "fallback.ndjson"))
 	logger.Start()
 	t.Cleanup(func() {

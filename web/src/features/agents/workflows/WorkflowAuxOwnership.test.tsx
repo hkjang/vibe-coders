@@ -122,9 +122,11 @@ it.each(["versions", "dry-run", "receipt"] as const)(
       kind === "receipt"
         ? "GET /v1/workflow-runs/run_one/receipt"
         : `${kind === "versions" ? "GET" : "POST"} /admin/workflows/wf_one/${kind}`;
+    let reads = 0;
     const api = mockApi({
       ...base,
       [key]: () => {
+        if (++reads > 1 && kind === "receipt") return { run_id: "run_one", status: "ok" };
         throw apiFailure("권한 없음", 403);
       },
     });
@@ -142,10 +144,15 @@ it.each(["versions", "dry-run", "receipt"] as const)(
     ).toHaveLength(0);
     expect(api.bodies(key)).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "다시 시도" }));
-    if (kind === "receipt")
-      expect(await screen.findByRole("heading", { name: "워크플로", level: 1 })).toBeVisible();
-    else expect(await screen.findByRole("dialog", { name: workflow.name })).toBeVisible();
-    expect(api.bodies(key)).toHaveLength(1);
+    if (kind === "receipt") {
+      // Explicit recovery reopens the receipt selected by the preserved URL.
+      const recovered = await screen.findByRole("dialog", { name: "워크플로 실행 영수증" });
+      expect(await within(recovered).findByText("완료")).toBeVisible();
+      expect(api.bodies(key)).toHaveLength(2);
+    } else {
+      expect(await screen.findByRole("dialog", { name: workflow.name })).toBeVisible();
+      expect(api.bodies(key)).toHaveLength(1);
+    }
     if (kind === "dry-run")
       expect(api.spy.mock.calls.find(([endpoint]) => endpoint.path.endsWith("/dry-run"))?.[1]).toMatchObject({
         retryUnauthorized: false,
