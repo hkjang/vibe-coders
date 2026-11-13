@@ -210,7 +210,10 @@ jobs:
           POSTGRES_DB: vibe
         ports:
           - 5432:5432
+        # Migration/index and autovacuum workers exceed Docker's default 64 MiB
+        # shared memory during the full PostgreSQL contract sequence.
         options: >-
+          --shm-size 256m
           --health-cmd "pg_isready -U postgres -d vibe"
           --health-interval 5s
           --health-timeout 5s
@@ -332,7 +335,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.91
+      SOURCE_SBOM_VERSION: v0.86.92
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

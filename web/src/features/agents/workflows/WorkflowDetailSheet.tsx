@@ -1,7 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState, type RefObject } from "react";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { Tabs, TabPanel } from "@/shared/components/ui/Tabs";
+import { WorkflowFlow } from "./WorkflowFlow";
 
-import { workflowStepTypeLabels } from "@/features/agents/workflows/workflow-form";
+import { flowType } from "./workflow-flow";
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { apiClient } from "@/shared/api/client";
 import type { Workflow, WorkflowStep } from "@/shared/api/domains/agents.schemas";
@@ -34,11 +37,6 @@ interface WorkflowDetailSheetProps {
   writeDisabledReason: string;
 }
 
-function stepLabel(step: WorkflowStep): string {
-  const type = step.type ?? "";
-  return workflowStepTypeLabels[type as keyof typeof workflowStepTypeLabels] ?? type ?? "—";
-}
-
 function StepTable({ steps }: { steps: readonly WorkflowStep[] }): React.JSX.Element {
   if (steps.length === 0) {
     return <EmptyState title="단계가 없습니다." description="워크플로를 수정해 단계를 추가하세요." />;
@@ -61,7 +59,7 @@ function StepTable({ steps }: { steps: readonly WorkflowStep[] }): React.JSX.Ele
             <tr key={`${step.name ?? ""}-${index}`}>
               <td className="cell-number">{index + 1}</td>
               <td>{step.name ?? "—"}</td>
-              <td>{stepLabel(step)}</td>
+              <td>{flowType(step)}</td>
               <td className="mono">{step.ref ?? "—"}</td>
               <td>
                 {[
@@ -95,6 +93,8 @@ export function WorkflowDetailSheet({
   workflow,
   writeDisabledReason,
 }: WorkflowDetailSheetProps): React.JSX.Element {
+  const auth = useAuth();
+  const [stepView, setStepView] = useState<"table" | "flow">("table");
   const [showVersions, setShowVersions] = useState(false);
   const versionsButtonRef = useRef<HTMLButtonElement>(null);
   const workflowId = workflow?.id ?? "";
@@ -212,7 +212,23 @@ export function WorkflowDetailSheet({
           ) : null}
 
           <SectionCard title="단계" headingLevel={3}>
-            <StepTable steps={steps} />
+            <Tabs
+              ariaLabel="단계 보기 방식"
+              panelIdPrefix="workflow-step-view"
+              value={stepView}
+              onChange={setStepView}
+              items={[
+                { id: "table", label: "표 보기" },
+                { id: "flow", label: "흐름 보기" },
+              ]}
+            />
+            <TabPanel id={stepView} panelIdPrefix="workflow-step-view">
+              {stepView === "flow" ? (
+                <WorkflowFlow steps={steps} prefixes={auth.credentialPrefixes} />
+              ) : (
+                <StepTable steps={steps} />
+              )}
+            </TabPanel>
           </SectionCard>
 
           {dryRunError ? (
