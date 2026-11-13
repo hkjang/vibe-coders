@@ -181,9 +181,10 @@ describe("워크플로 작업 소유권", () => {
         act(() => move("/agents/workflows?workflow=wf_first"));
       } else {
         act(() =>
-          client.setQueryData(["agents", "workflows"], {
-            workflows: [{ ...first, description: "다른 정의" }, second],
-          }),
+          client.setQueriesData(
+            { queryKey: ["agents", "workflows", "detail", first.id] },
+            { workflow: { ...first, description: "다른 정의" } },
+          ),
         );
       }
       await screen.findByRole("dialog", { name: first.name });
