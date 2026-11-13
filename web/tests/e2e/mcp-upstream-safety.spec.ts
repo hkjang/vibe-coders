@@ -47,6 +47,7 @@ test("없는 MCP 서버의 주소를 정상 중지 상태로 표시하지 않는
 test("모바일 MCP 편집 초안을 읽기 전용 전환 후에도 보존한다", async ({ page, gateway }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await open(page);
   await page.getByRole("button", { name: "수정", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "업스트림 수정", exact: true });
@@ -59,7 +60,6 @@ test("모바일 MCP 편집 초안을 읽기 전용 전환 후에도 보존한다
   expect(gateway.writes).toEqual([]);
   expect(await dialog.evaluate((node) => node.contains(document.activeElement))).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }

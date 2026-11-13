@@ -108,6 +108,10 @@ function McpToolsContent({ owner, scopeCanWrite }: { owner: FeatureReadOwner; sc
     });
   }, [tools.data?.tool_risk, tools.data?.tools]);
 
+  const catalogRows = (catalog.data?.catalog ?? []).filter(
+    (row) => (!tool || row.tool_name === tool) && (!mcpOnly || row.is_mcp),
+  );
+
   const applyFilters = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -262,7 +266,9 @@ function McpToolsContent({ owner, scopeCanWrite }: { owner: FeatureReadOwner; sc
         description="최근 24시간 안에 새로 나타났거나 오랫동안 호출되지 않은 도구를 표시합니다."
         actions={
           catalog.data ? (
-            <span className="mcp-note">신규 {formatNumber(catalog.data.new_count)}개</span>
+            <span className="mcp-note">
+              신규 {formatNumber(catalogRows.filter((row) => row.is_new).length)}개
+            </span>
           ) : null
         }
       >
@@ -277,9 +283,9 @@ function McpToolsContent({ owner, scopeCanWrite }: { owner: FeatureReadOwner; sc
         <DataTable
           caption="MCP 도구 카탈로그"
           columns={catalogColumns}
-          data={catalog.data?.catalog ?? []}
+          data={catalogRows}
           loading={catalog.isPending}
-          error={catalog.isError && !catalog.data ? "도구 카탈로그을 불러오지 못했습니다." : undefined}
+          error={catalog.isError && !catalog.data ? "도구 카탈로그를 불러오지 못했습니다." : undefined}
           onRetry={() => void catalog.refetch()}
           getRowId={(row) => JSON.stringify([row.server_label, row.tool_name])}
           emptyMessage="관측된 도구가 없습니다."
