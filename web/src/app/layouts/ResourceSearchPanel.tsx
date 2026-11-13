@@ -23,6 +23,7 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
   const allowed = (Object.keys(resourceSearchTargets) as ResourceKind[]).filter((kind) => {
     if (kind === "team" && !versionAtLeast(auth.backendVersion, "v0.86.79")) return false;
     if (kind === "account" && !versionAtLeast(auth.backendVersion, "v0.86.90")) return false;
+    if (kind === "mcp_tool" && !versionAtLeast(auth.backendVersion, "v0.86.96")) return false;
     const feature = auth.features.find((item) => item.featureId === resourceSearchTargets[kind].featureId);
     if (!feature || !auth.user) return false;
     if (kind !== "policy" && !auth.user.scopes.includes("admin:read")) return false;
@@ -99,7 +100,7 @@ function ResourceSearchContent({
         return group.items.flatMap((item) => {
           if (item.kind !== group.kind || containsPotentialSecret(item.title, auth.credentialPrefixes))
             return [];
-          const path = resourceSearchPath(item.kind, item.id, auth.credentialPrefixes);
+          const path = resourceSearchPath(item.kind, item.id, auth.credentialPrefixes, item.server_label);
           return path ? [{ ...item, path }] : [];
         });
       }),
@@ -130,7 +131,8 @@ function ResourceSearchContent({
     <>
       <p className="command-footer">
         공급자·워크플로·업무 앱·스킬·MCP 서버·정책·등록 팀{allowed.includes("account") ? "·로그인 계정" : ""}
-        의 이름을 검색합니다. 종류별 최대 10개이며 업무 본문은 검색하지 않습니다.
+        {allowed.includes("mcp_tool") ? "·관측된 MCP 도구" : ""}의 이름을 검색합니다. 종류별 최대 10개이며
+        업무 본문은 검색하지 않습니다.
       </p>
       <label className="command-search">
         <span className="sr-only">자원 이름 검색</span>
@@ -225,10 +227,10 @@ function ResourceSearchContent({
       >
         {items.map((item, position) => (
           <button
-            key={`${item.kind}:${item.id}`}
+            key={JSON.stringify([item.kind, item.server_label, item.id])}
             id={`${listId}-${position}`}
             type="button"
-            className="command-result"
+            className="command-result resource-search-result"
             role="option"
             tabIndex={-1}
             aria-selected={position === index}
@@ -237,7 +239,12 @@ function ResourceSearchContent({
           >
             <span>
               <strong>{item.title}</strong>
-              <small>{resourceSearchTargets[item.kind].title}</small>
+              <small>
+                {resourceSearchTargets[item.kind].title}
+                {item.kind === "mcp_tool"
+                  ? ` · ${item.server_label === "(none)" ? "서버 미지정" : item.server_label}`
+                  : ""}
+              </small>
             </span>
             <span>자원</span>
           </button>

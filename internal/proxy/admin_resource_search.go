@@ -17,15 +17,17 @@ var resourceSearchFeatures = map[string]string{
 	"provider": "gateway.providers", "workflow": "agents.workflows",
 	"app": "agents.apps", "skill": "agents.skills",
 	"mcp_upstream": "mcp.overview",
+	"mcp_tool":     "mcp.overview",
 	"policy":       "governance.policies",
 	"team":         "access.users",
 	"account":      "access.users",
 }
 
 type resourceSearchItem struct {
-	Kind  string `json:"kind"`
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	Kind        string `json:"kind"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	ServerLabel string `json:"server_label,omitempty"`
 }
 
 type resourceSearchGroup struct {
@@ -115,11 +117,15 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 		group := resourceSearchGroup{Kind: kind, Items: []resourceSearchItem{}, Status: "forbidden"}
 		// MCP lists require observability:read as well as the console feature's
 		// admin:read permission. Search must not bypass that existing API boundary.
-		canRead := adminRead && (kind != "mcp_upstream" || hasScope(user.Scopes, "observability:read"))
+		canRead := adminRead && ((kind != "mcp_upstream" && kind != "mcp_tool") || hasScope(user.Scopes, "observability:read"))
 		if kind == "policy" {
 			canRead = securityRead
 		}
 		if allowed[resourceSearchFeatures[kind]] && canRead {
+			if kind == "mcp_tool" {
+				groups = append(groups, s.searchMCPToolNavigation(ctx, input.Query))
+				continue
+			}
 			var rows []store.ResourceMetadata
 			var more bool
 			var err error

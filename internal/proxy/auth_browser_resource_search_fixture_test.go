@@ -32,6 +32,13 @@ func seedBrowserResourceSearchFixture(t *testing.T, db *store.SQLStore, upstream
 	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{ID: "browser-search-mcp", Name: "검색검증 MCP 서버", URL: upstream, Enabled: false}); err != nil {
 		t.Fatal("synthetic resource search MCP server could not be prepared")
 	}
+	now := time.Now().UTC()
+	if err := db.InsertLogRecord(ctx, store.LogRecord{
+		Request: store.RequestLog{ID: "browser-search-tool", TraceID: "browser-search-tool", StatusCode: 200, CreatedAt: now},
+		Tools:   []store.ToolInvocation{{ID: "browser-search-tool-definition", RequestID: "browser-search-tool", TraceID: "browser-search-tool", ServerLabel: "browser-search-catalog", ToolName: "검색검증 관측 도구", Source: "definition", IsMCP: true, CreatedAt: now}},
+	}); err != nil {
+		t.Fatal("synthetic resource search tool catalog could not be prepared")
+	}
 	if err := db.UpsertPolicyWithRules(ctx, store.Policy{ID: "browser-search-policy", Name: "검색검증 정책", Priority: 100, RolloutPercent: 25}, nil); err != nil {
 		t.Fatal("synthetic resource search policy could not be prepared")
 	}

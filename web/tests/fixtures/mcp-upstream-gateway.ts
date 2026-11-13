@@ -12,7 +12,7 @@ export const first = {
 };
 export const second = { ...first, id: "second-server", name: "두 번째 MCP 서버" };
 type Mode = "writable" | "read_only" | "preview_read_only" | "no_read";
-function bootstrap(mode: Mode): UiBootstrapResponse {
+export function bootstrap(mode: Mode): UiBootstrapResponse {
   const scopes = ["admin:read", "mcp:admin", ...(mode === "no_read" ? [] : ["observability:read"])];
   const user = {
     id: "mcp-fixture",

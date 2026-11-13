@@ -1101,6 +1101,13 @@ kbd {
 .command-result > span:first-child {
   display: grid;
 }
+.resource-search-result > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.resource-search-result > span:last-child {
+  flex-shrink: 0;
+}
 .command-result small,
 .command-empty {
   overflow: auto;
