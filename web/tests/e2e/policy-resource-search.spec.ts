@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { AxeResults } from "axe-core";
 import { test, account, policy } from "./fixtures/policy-editor";
 
 const detail = (page: Page) => page.getByRole("dialog", { name: "정책 상세", exact: true });
@@ -93,11 +94,18 @@ test("모바일 정책 상세는 포커스와 가로 넘침 및 자동 접근성
   await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await login(page, true);
   await expect(detail(page).getByRole("heading", { name: policy.name })).toBeVisible();
+  // A visible sheet can still be translucent during its 160ms entrance.
+  // Measure the finished UI without disabling motion, contrast rules or retries.
+  await detail(page).evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  await expect(detail(page)).toHaveCSS("opacity", "1");
   const violations = await page.evaluate(async () => {
-    const axe = (
-      window as unknown as { axe: { run: (target: string) => Promise<{ violations: { id: string }[] }> } }
-    ).axe;
-    return (await axe.run('[role="dialog"]')).violations.map((item) => item.id);
+    const axe = (window as unknown as { axe: { run: (target: string) => Promise<AxeResults> } }).axe;
+    return (await axe.run('[role="dialog"]')).violations.map((item) => ({
+      id: item.id,
+      nodes: item.nodes.map((node) => ({ target: node.target, summary: node.failureSummary })),
+    }));
   });
   expect(violations).toEqual([]);
   expect(await detail(page).evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
