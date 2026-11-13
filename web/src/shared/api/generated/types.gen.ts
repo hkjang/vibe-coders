@@ -3501,6 +3501,81 @@ export type UserSummary = {
     tokens: number;
 };
 
+export type WorkflowDefinition = {
+    allowed_teams: string;
+    created_at: string;
+    created_by: string;
+    description: string;
+    enabled: boolean;
+    id: string;
+    name: string;
+    steps: Array<WorkflowDefinitionStep> | null;
+    updated_at: string;
+};
+
+export type WorkflowDefinitionStep = {
+    allowed_tables?: Array<string>;
+    allowed_tools?: Array<string>;
+    max_cost_krw?: number;
+    max_tokens?: number;
+    name: string;
+    note?: string;
+    ref?: string;
+    timeout_ms?: number;
+    type: string;
+};
+
+export type WorkflowDetail = {
+    workflow: WorkflowDefinition | null;
+};
+
+export type WorkflowLegacyList = {
+    workflows: Array<WorkflowDefinition>;
+};
+
+export type WorkflowMetadata = {
+    allowed_teams: string;
+    created_at: string;
+    created_by: string;
+    description: string;
+    enabled: boolean;
+    id: string;
+    name: string;
+    step_count: number;
+    updated_at: string;
+};
+
+export type WorkflowPage = {
+    limit: number;
+    offset: number;
+    summary: {
+        enabled: number;
+        total: number;
+    };
+    total: number;
+    workflows: Array<WorkflowMetadata>;
+};
+
+export type WorkflowRunList = {
+    runs: Array<WorkflowRunMetadata>;
+};
+
+export type WorkflowRunMetadata = {
+    cost_krw: number;
+    created_at: string;
+    error_class: string;
+    id: string;
+    latency_ms: number;
+    status: string;
+    steps_ok: number;
+    steps_total: number;
+    team: string;
+    trace_id: string;
+    user_id: string;
+    workflow_id: string;
+    workflow_name?: string;
+};
+
 /**
  * Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.
  */
@@ -13528,16 +13603,56 @@ export type DeleteAdminWorkflowsResponses = {
 export type GetAdminWorkflowsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: '' | 'page' | 'detail';
+        /**
+         * Required only for view=detail. Exact nonempty UTF-8 identifier, at most 4096 bytes, without control characters. Whitespace and reserved characters are preserved. Cannot be combined with page filters.
+         */
+        id?: string;
+        /**
+         * Page-only literal case-insensitive substring of ID, name, description or execution team names. Percent and underscore are literal. No control characters; at most 200 Unicode characters and 800 bytes.
+         */
+        q?: string;
+        status?: '' | 'all' | 'enabled' | 'disabled';
+        /**
+         * Page-only, up to three unique comma-separated field:asc or field:desc entries. Fields: id,name,allowed_teams,enabled,created_at,updated_at. Default created_at:desc. ID ascending breaks ties; timestamps retain nanosecond precision.
+         */
+        sort?: string;
+        limit?: number;
+        offset?: number;
+    };
     url: '/admin/workflows';
 };
 
+export type GetAdminWorkflowsErrors = {
+    /**
+     * Invalid view/filter/identifier or duplicate known view parameter
+     */
+    400: AppError;
+    /**
+     * Invalid authentication or missing admin read scope
+     */
+    401: AppError;
+    /**
+     * Workflow query failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkflowsError = GetAdminWorkflowsErrors[keyof GetAdminWorkflowsErrors];
+
 export type GetAdminWorkflowsResponses = {
     /**
-     * OK
+     * Response selected by view; new views use Cache-Control: no-store
      */
-    200: unknown;
+    200: WorkflowLegacyList | WorkflowPage | WorkflowDetail;
 };
+
+export type GetAdminWorkflowsResponse = GetAdminWorkflowsResponses[keyof GetAdminWorkflowsResponses];
 
 export type PostAdminWorkflowsData = {
     body?: never;
@@ -15156,16 +15271,33 @@ export type PostMeSkillsNameRequestAccessResponse = PostMeSkillsNameRequestAcces
 export type GetMeWorkflowRunsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        workflow_id?: string;
+        /**
+         * Nonpositive or greater than 200 uses the existing default of 50.
+         */
+        limit?: number;
+    };
     url: '/me/workflow-runs';
 };
+
+export type GetMeWorkflowRunsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetMeWorkflowRunsError = GetMeWorkflowRunsErrors[keyof GetMeWorkflowRunsErrors];
 
 export type GetMeWorkflowRunsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: WorkflowRunList;
 };
+
+export type GetMeWorkflowRunsResponse = GetMeWorkflowRunsResponses[keyof GetMeWorkflowRunsResponses];
 
 export type GetMetricsData = {
     body?: never;

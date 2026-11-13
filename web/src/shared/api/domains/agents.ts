@@ -25,6 +25,8 @@ import type {
   GetAdminSkillStudioCandidatesData,
   GetAdminSkillStudioReadinessData,
   GetAdminWorkflowsData,
+  WorkflowPage,
+  WorkflowDetail,
   GetAdminWorkflowsIdVersionsData,
   GetMeAppRunsData,
   GetMeWorkflowRunsData,
@@ -119,10 +121,30 @@ import {
   type WorkflowUpsertBody,
 } from "@/shared/api/domains/agents.schemas";
 import { acknowledgementSchema } from "@/shared/api/loose";
+import {
+  workflowPageSchema,
+  workflowPageQuerySchema,
+  workflowDetailSchema,
+  workflowDetailQuerySchema,
+  type WorkflowPageQuery,
+  type WorkflowDetailQuery,
+} from "./workflow-page.schemas";
 
 export const agentsEndpoints = {
   workflows: {
     list: operation<GetAdminWorkflowsData, unknown>()("GET", "/admin/workflows", workflowListSchema),
+    page: operation<WithQuery<GetAdminWorkflowsData, WorkflowPageQuery>, WorkflowPage>()(
+      "GET",
+      "/admin/workflows",
+      workflowPageSchema,
+      workflowPageQuerySchema,
+    ),
+    detail: operation<WithQuery<GetAdminWorkflowsData, WorkflowDetailQuery>, WorkflowDetail>()(
+      "GET",
+      "/admin/workflows",
+      workflowDetailSchema,
+      workflowDetailQuerySchema,
+    ),
     upsert: operation<WithBody<PostAdminWorkflowsData, WorkflowUpsertBody>, unknown>()(
       "POST",
       "/admin/workflows",

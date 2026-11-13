@@ -1,3 +1,4 @@
+import { workflowReadFixture } from "@/test/workflow-fixtures";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLayoutEffect, useState } from "react";
@@ -47,7 +48,7 @@ describe("워크플로 작업 소유권", () => {
   });
 
   it("미리보기 읽기 전용에서는 게시·수정·삭제를 막고 모의 검사는 허용한다", async () => {
-    mockApi({ "GET /admin/workflows": () => ({ workflows: [first] }) });
+    mockApi({ "GET /admin/workflows": ({ query }) => workflowReadFixture([first], query) });
     renderPage(true);
     const detail = await screen.findByRole("dialog", { name: first.name });
     for (const name of ["게시", "수정", "삭제"])
@@ -57,7 +58,7 @@ describe("워크플로 작업 소유권", () => {
 
   it("열린 게시 확인창도 읽기 전용 전환 즉시 제출을 막는다", async () => {
     const user = userEvent.setup();
-    const api = mockApi({ "GET /admin/workflows": () => ({ workflows: [first] }) });
+    const api = mockApi({ "GET /admin/workflows": ({ query }) => workflowReadFixture([first], query) });
     renderPage();
     const detail = await screen.findByRole("dialog", { name: first.name });
     await user.click(within(detail).getByRole("button", { name: "게시" }));
@@ -75,7 +76,7 @@ describe("워크플로 작업 소유권", () => {
       finish = resolve;
     });
     const api = mockApi({
-      "GET /admin/workflows": () => ({ workflows: [first, second] }),
+      "GET /admin/workflows": ({ query }) => workflowReadFixture([first, second], query),
       "POST /admin/workflows/wf_first/dry-run": () => pending,
     });
     renderPage();
@@ -94,7 +95,7 @@ describe("워크플로 작업 소유권", () => {
 
   it("편집 중 읽기 전용으로 바뀌면 초안을 보존하고 저장·입력을 잠근다", async () => {
     const user = userEvent.setup();
-    mockApi({ "GET /admin/workflows": () => ({ workflows: [first] }) });
+    mockApi({ "GET /admin/workflows": ({ query }) => workflowReadFixture([first], query) });
     renderPage();
     await user.click(
       within(await screen.findByRole("dialog", { name: first.name })).getByRole("button", { name: "수정" }),
@@ -120,7 +121,7 @@ describe("워크플로 작업 소유권", () => {
       finish = () => resolve({ published: true, workflow_id: first.id, version: 1 });
     });
     const api = mockApi({
-      "GET /admin/workflows": () => ({ workflows: [first] }),
+      "GET /admin/workflows": ({ query }) => workflowReadFixture([first], query),
       "POST /admin/workflows/wf_first/publish": () => pending,
     });
     renderPage();
@@ -143,7 +144,7 @@ describe("워크플로 작업 소유권", () => {
   it("응답의 업무 ID가 요청과 다르면 검증 성공으로 표시하지 않는다", async () => {
     const user = userEvent.setup();
     mockApi({
-      "GET /admin/workflows": () => ({ workflows: [first] }),
+      "GET /admin/workflows": ({ query }) => workflowReadFixture([first], query),
       "POST /admin/workflows/wf_first/dry-run": () => ({ workflow_id: second.id, ok: true, steps: [] }),
     });
     renderPage();
@@ -165,7 +166,7 @@ describe("워크플로 작업 소유권", () => {
         finish = resolve;
       });
       mockApi({
-        "GET /admin/workflows": () => ({ workflows: [first, second] }),
+        "GET /admin/workflows": ({ query }) => workflowReadFixture([first, second], query),
         "POST /admin/workflows/wf_first/dry-run": () => pending,
       });
       const { client } = renderPage();

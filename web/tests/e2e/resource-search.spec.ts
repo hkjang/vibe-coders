@@ -140,12 +140,12 @@ test("검색 재조회와 실패 동안 이전 결과 이동을 차단하고 명
 test("모바일 자원 검색은 넘침 없이 포커스와 접근성을 유지한다", async ({ page, gateway }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await page.route("**/admin/resource-search", (route) => route.fulfill({ json: result() }));
   const dialog = await openSearch(page);
   await dialog.getByRole("combobox").fill("첫 번째");
   await expect(dialog.getByRole("option")).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const api = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }

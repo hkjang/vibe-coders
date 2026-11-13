@@ -148,7 +148,7 @@ describe("TracePage", () => {
   it("lists recent request-level traces with guidance and safe navigation", async () => {
     const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
     const user = userEvent.setup();
-    const view = renderPage();
+    renderPage();
 
     expect(await screen.findByRole("heading", { name: "추적 ID로 요청 흐름을 좁혀 보세요." })).toBeVisible();
     expect(screen.getByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
@@ -188,10 +188,18 @@ describe("TracePage", () => {
         }),
       );
     });
-    expect((await axe.run(view.container)).violations).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "요청 상세 닫기" }));
     await waitFor(() => expect(detailTrigger).toHaveFocus());
     expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
+  });
+
+  it("keeps the selected request detail accessible", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    const view = renderPage();
+    await user.click(await screen.findByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+    expect(screen.getByRole("region", { name: "1번째 요청 req-001" })).toHaveFocus();
+    expect((await axe.run(view.container)).violations).toHaveLength(0);
   });
 
   it.each(["[값 비공개]", "[값 생략]"])(

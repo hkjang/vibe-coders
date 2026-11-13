@@ -1,9 +1,11 @@
 import { useMemo } from "react";
-import type { Workflow, WorkflowRun } from "@/shared/api/domains/agents.schemas";
+import type { WorkflowRun } from "@/shared/api/domains/agents.schemas";
+import type { WorkflowMetadata } from "@/shared/api/domains/workflow-page.schemas";
 import { Badge } from "@/shared/components/ui/Badge";
 import type { DataTableColumn } from "@/shared/data-table/columns";
 import { displayColumn } from "@/features/agents/table-columns";
 import { formatDateTime, formatDuration, formatNumber } from "@/shared/utils/format";
+import { WorkflowDetailLink } from "./WorkflowDetailLink";
 
 const states = {
   ok: { label: "완료", tone: "success" },
@@ -12,22 +14,27 @@ const states = {
   planned: { label: "계획됨", tone: "info" },
 } as const;
 
-export function useWorkflowColumns(workflows: readonly Workflow[]) {
-  const columns = useMemo<ReadonlyArray<DataTableColumn<Workflow>>>(
+export function useWorkflowColumns(
+  workflows: readonly WorkflowMetadata[],
+  onOpen?: (trigger: HTMLElement) => boolean,
+) {
+  const columns = useMemo<ReadonlyArray<DataTableColumn<WorkflowMetadata>>>(
     () => [
-      displayColumn<Workflow>("name", "이름", (row) => (
-        <span className="truncate">{row.name ?? row.id}</span>
+      displayColumn<WorkflowMetadata>("name", "이름", (row) => (
+        <WorkflowDetailLink row={row} onOpen={onOpen} />
       )),
-      displayColumn<Workflow>("steps", "단계", (row) => (
-        <span className="cell-number">{formatNumber(row.steps?.length ?? 0)}</span>
+      displayColumn<WorkflowMetadata>("steps", "단계", (row) => (
+        <span className="cell-number">{formatNumber(row.step_count)}</span>
       )),
-      displayColumn<Workflow>("teams", "허용 팀", (row) => row.allowed_teams || "전체"),
-      displayColumn<Workflow>("enabled", "상태", (row) => (
+      displayColumn<WorkflowMetadata>("allowed_teams", "허용 팀", (row) => row.allowed_teams || "전체"),
+      displayColumn<WorkflowMetadata>("enabled", "상태", (row) => (
         <Badge tone={row.enabled ? "success" : "muted"}>{row.enabled ? "사용" : "중지"}</Badge>
       )),
-      displayColumn<Workflow>("updated_at", "수정일", (row) => formatDateTime(row.updated_at)),
+      displayColumn<WorkflowMetadata>("created_at", "생성일", (row) => formatDateTime(row.created_at)),
+      displayColumn<WorkflowMetadata>("updated_at", "수정일", (row) => formatDateTime(row.updated_at)),
+      displayColumn<WorkflowMetadata>("id", "ID", (row) => row.id),
     ],
-    [],
+    [onOpen],
   );
   const runColumns = useMemo<ReadonlyArray<DataTableColumn<WorkflowRun>>>(
     () => [
@@ -36,7 +43,10 @@ export function useWorkflowColumns(workflows: readonly Workflow[]) {
         "workflow",
         "워크플로",
         (row) =>
-          workflows.find((workflow) => workflow.id === row.workflow_id)?.name ?? row.workflow_id ?? "—",
+          row.workflow_name ||
+          workflows.find((workflow) => workflow.id === row.workflow_id)?.name ||
+          row.workflow_id ||
+          "—",
       ),
       displayColumn<WorkflowRun>("status", "상태", (row) => {
         const state = Object.hasOwn(states, row.status ?? "")

@@ -46,6 +46,7 @@ test("모바일 편집 초안을 보존하고 읽기 전용 전환 뒤 직접 �
 }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await open(page);
   await page.getByRole("button", { name: "수정", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "워크플로 수정", exact: true });
@@ -59,7 +60,6 @@ test("모바일 편집 초안을 보존하고 읽기 전용 전환 뒤 직접 �
   expect(await dialog.evaluate((node) => node.contains(document.activeElement))).toBe(true);
   await expect(dialog.getByRole("button", { name: "취소", exact: true })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const api = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }

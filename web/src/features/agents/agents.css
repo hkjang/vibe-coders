@@ -40,6 +40,10 @@
   gap: var(--space-4);
 }
 
+.agents-detail-link {
+  overflow-wrap: anywhere;
+}
+
 .agents-detail-actions {
   display: flex;
   flex-wrap: wrap;

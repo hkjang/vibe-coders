@@ -1,14 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
-import {
-  useCallback,
-  useContext,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { useWorkflowMutations, workflowsKey } from "./use-workflow-mutations";
@@ -16,63 +8,51 @@ import { useWorkflowColumns } from "./workflow-tables";
 import { WorkflowDetailSheet } from "@/features/agents/workflows/WorkflowDetailSheet";
 import { WorkflowFormDialog } from "@/features/agents/workflows/WorkflowFormDialog";
 import { WorkflowReceiptDialog } from "@/features/agents/workflows/WorkflowReceiptDialog";
-import { matchesWorkflowQuery } from "@/features/agents/workflows/workflow-form";
 import { apiClient } from "@/shared/api/client";
 import type { Workflow } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
 import { PageHeader } from "@/shared/components/page/PageHeader";
-import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
+import { ErrorState } from "@/shared/components/state/PageStates";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
-import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { Input } from "@/shared/components/ui/Input";
-import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Tabs, TabPanel } from "@/shared/components/ui/Tabs";
-import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
-import { tokenStore } from "@/shared/auth/token-store";
-import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
-import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
-import { formatDateTime, formatNumber } from "@/shared/utils/format";
+import { formatNumber } from "@/shared/utils/format";
+import {
+  assertFeatureRead,
+  featureOwnedKey,
+  useFeatureReadOwner,
+  type FeatureReadOwner,
+} from "@/shared/hooks/use-feature-read-owner";
+import { useWorkflowPageQuery, useWorkflowDetailQuery } from "./use-workflow-queries";
+import { readWorkflowPage, validWorkflowDetailId } from "./workflow-page-model";
+import { WorkflowListPanel } from "./WorkflowListPanel";
 import "@/features/agents/agents.css";
 
 const tabIds = ["list", "runs"] as const;
 type TabId = (typeof tabIds)[number];
 const writeScope = "admin:write";
 const scopeWriteDisabledReason = "워크플로를 변경하려면 admin:write 권한이 필요합니다.";
-const statusFilters = [
-  { value: "all", label: "전체 상태" },
-  { value: "enabled", label: "사용" },
-  { value: "disabled", label: "중지" },
-];
-
 export function WorkflowPage(): React.JSX.Element {
-  const auth = useAuth();
-  const context = useContext(FeatureAccessContext);
-  const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
-  const owner = JSON.stringify([
-    epoch,
-    auth.mode,
-    auth.user?.id,
-    auth.user?.role,
-    auth.user?.roles,
-    auth.user?.team_id,
-    context?.featureId,
-    context?.permitted,
-    auth.user?.scopes.includes("admin:read"),
-  ]);
-  return <WorkflowPageContent key={owner} />;
+  const owner = useFeatureReadOwner("agents.workflows", "workflow-management");
+  if (!owner.readable || owner.denied)
+    return (
+      <ErrorState
+        message="워크플로 조회 권한이 없거나 인증 상태가 변경되었습니다. 권한을 확인하고 다시 조회하세요."
+        onRetry={owner.denied ? owner.restart : undefined}
+        legacyHref="/admin#/workflows"
+      />
+    );
+  return <WorkflowPageContent key={owner.id} owner={owner} />;
 }
 
-function WorkflowPageContent(): React.JSX.Element {
+function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.Element {
   const auth = useAuth();
   const alive = useRef(false);
   useLayoutEffect(() => {
@@ -81,7 +61,7 @@ function WorkflowPageContent(): React.JSX.Element {
       alive.current = false;
     };
   }, []);
-  const ownsResult = useCallback(() => alive.current, []);
+  const ownsResult = useCallback(() => alive.current && owner.isCurrent(), [owner]);
   const mutationAccess = useFeatureMutationAccess(
     ["agents.workflows"],
     auth.user?.scopes.includes(writeScope) === true && auth.user.scopes.includes("admin:read"),
@@ -91,18 +71,14 @@ function WorkflowPageContent(): React.JSX.Element {
   const writeDisabledReason = mutationAccess.reason ?? scopeWriteDisabledReason;
   const [tab, setTab] = useTabParam<TabId>([...tabIds]);
   const [params, updateSearch] = useSearchState();
-  const refreshInterval = useRefreshInterval();
-  const rawQuery = params.get("q") ?? "";
-  const query = containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? "" : rawQuery;
-  const status = params.get("status") ?? "all";
+  const state = readWorkflowPage(params, auth.credentialPrefixes);
   const selectedId = params.get("workflow") ?? "";
+  const selectedValid =
+    params.getAll("workflow").length === 1 && validWorkflowDetailId(selectedId, auth.credentialPrefixes);
   const currentSelection = useRef(selectedId);
   useLayoutEffect(() => {
     currentSelection.current = selectedId;
   }, [selectedId]);
-  const [searchError, setSearchError] = useState<string | undefined>(
-    containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? secretSearchMessage : undefined,
-  );
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Workflow | undefined>();
   const [publishTarget, setPublishTarget] = useState<Workflow | undefined>();
@@ -112,41 +88,26 @@ function WorkflowPageContent(): React.JSX.Element {
   const rowTriggerRef = useRef<HTMLElement | null>(null);
   const dialogReturnRef = useRef<HTMLElement | null>(null);
 
-  const list = useQuery({
-    queryKey: workflowsKey,
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.agents.workflows.list, {
-        signal,
-        routeId: "agents.workflows",
-      }),
-    refetchInterval: refreshInterval,
-    refetchIntervalInBackground: false,
-  });
-
+  const list = useWorkflowPageQuery(state.query, owner);
+  const detail = useWorkflowDetailQuery(selectedValid ? selectedId : undefined, owner);
+  const selected =
+    selectedValid && detail.isSuccess && !detail.isFetching ? (detail.data.workflow ?? undefined) : undefined;
   const runs = useQuery({
-    queryKey: [...workflowsKey, "runs"],
-    enabled: tab === "runs",
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.agents.workflows.runs, {
+    queryKey: featureOwnedKey([...workflowsKey, "runs"], owner),
+    enabled: tab === "runs" && owner.readable && !owner.denied,
+    gcTime: 0,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const result = await apiClient.request(endpoints.domains.agents.workflows.runs, {
         query: { limit: 50 },
         signal,
         routeId: "agents.workflows",
-      }),
+      });
+      assertFeatureRead(owner, signal);
+      return result;
+    },
   });
-
   const workflows = useMemo(() => list.data?.workflows ?? [], [list.data?.workflows]);
-  const rows = useMemo(
-    () =>
-      workflows.filter(
-        (workflow) =>
-          matchesWorkflowQuery(workflow, query) &&
-          (status === "all" ||
-            (status === "enabled" && workflow.enabled === true) ||
-            (status === "disabled" && workflow.enabled !== true)),
-      ),
-    [query, status, workflows],
-  );
-  const selected = workflows.find((workflow) => workflow.id === selectedId);
 
   const closeSheet = useCallback((): void => {
     updateSearch({ workflow: undefined });
@@ -159,42 +120,11 @@ function WorkflowPageContent(): React.JSX.Element {
       if (currentSelection.current === id) closeSheet();
     },
   });
-  const { columns, runColumns } = useWorkflowColumns(workflows);
+  const { runColumns } = useWorkflowColumns(workflows);
 
-  const enabledCount = workflows.filter((workflow) => workflow.enabled === true).length;
-  const stepTotal = workflows.reduce((total, workflow) => total + (workflow.steps?.length ?? 0), 0);
+  const enabledCount = list.data?.summary.enabled ?? 0;
+  const stepTotal = workflows.reduce((total, workflow) => total + workflow.step_count, 0);
   const summaryUnavailable = list.isPending || (list.isError && !list.data);
-
-  if (list.isPending && !list.data) {
-    return (
-      <div className="page-stack">
-        <PageHeader
-          title="워크플로"
-          description="여러 단계를 묶어 업무를 자동화하는 워크플로 체인을 정의하고 검증·게시합니다."
-          legacyHref="/admin#/workflows"
-        />
-        <LoadingState label="워크플로 목록을 불러오는 중입니다." />
-      </div>
-    );
-  }
-
-  if (list.isError && !list.data) {
-    return (
-      <div className="page-stack">
-        <PageHeader
-          title="워크플로"
-          description="여러 단계를 묶어 업무를 자동화하는 워크플로 체인을 정의하고 검증·게시합니다."
-          legacyHref="/admin#/workflows"
-        />
-        <ErrorState
-          message={safeAppErrorMessage(list.error, "워크플로 목록을 불러오지 못했습니다.")}
-          requestId={isAppError(list.error) ? list.error.requestId : undefined}
-          onRetry={() => void list.refetch()}
-          legacyHref="/admin#/workflows"
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="page-stack">
@@ -225,13 +155,16 @@ function WorkflowPageContent(): React.JSX.Element {
       />
 
       <StatGrid label="워크플로 요약">
-        <StatCard label="전체 워크플로" value={summaryUnavailable ? "—" : formatNumber(workflows.length)} />
+        <StatCard
+          label="전체 워크플로"
+          value={summaryUnavailable ? "—" : formatNumber(list.data?.summary.total ?? 0)}
+        />
         <StatCard
           label="사용 중"
           tone="success"
           value={summaryUnavailable ? "—" : formatNumber(enabledCount)}
         />
-        <StatCard label="총 단계" value={summaryUnavailable ? "—" : formatNumber(stepTotal)} />
+        <StatCard label="현재 페이지 단계" value={summaryUnavailable ? "—" : formatNumber(stepTotal)} />
         <StatCard
           label="최근 실행"
           value={runs.data ? formatNumber(runs.data.runs?.length ?? 0) : "—"}
@@ -256,7 +189,7 @@ function WorkflowPageContent(): React.JSX.Element {
       <Tabs
         ariaLabel="워크플로 화면"
         items={[
-          { id: "list", label: "워크플로", badge: formatNumber(workflows.length) },
+          { id: "list", label: "워크플로", badge: formatNumber(list.data?.summary.total ?? 0) },
           { id: "runs", label: "실행 이력" },
         ]}
         onChange={setTab}
@@ -266,86 +199,13 @@ function WorkflowPageContent(): React.JSX.Element {
 
       {tab === "list" ? (
         <TabPanel id="list" panelIdPrefix="workflows">
-          <Toolbar label="워크플로 필터">
-            <form
-              className="agents-toolbar-field"
-              role="search"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const submitted = new FormData(event.currentTarget).get("q");
-                const next = typeof submitted === "string" ? submitted.trim() : "";
-                if (containsPotentialSecret(next, auth.credentialPrefixes)) {
-                  setSearchError(secretSearchMessage);
-                  event.currentTarget.querySelector<HTMLInputElement>('[name="q"]')?.focus();
-                  return;
-                }
-                setSearchError(undefined);
-                updateSearch({ q: next || undefined });
-              }}
-            >
-              <label htmlFor="workflow-search">워크플로 검색</label>
-              <Input
-                id="workflow-search"
-                key={query}
-                name="q"
-                defaultValue={query}
-                placeholder="이름, 설명, 팀"
-                aria-invalid={searchError ? "true" : undefined}
-                aria-describedby={searchError ? "workflow-search-error" : undefined}
-              />
-              {searchError ? (
-                <span id="workflow-search-error" className="field-error" role="alert">
-                  {searchError}
-                </span>
-              ) : null}
-            </form>
-            <label className="agents-toolbar-field" htmlFor="workflow-status">
-              <span>상태</span>
-              <Select
-                id="workflow-status"
-                value={status}
-                options={statusFilters}
-                onChange={(event) =>
-                  updateSearch({ status: event.target.value === "all" ? undefined : event.target.value })
-                }
-              />
-            </label>
-          </Toolbar>
-
-          {workflows.length === 0 ? (
-            <EmptyState
-              title="아직 워크플로가 없습니다."
-              description="단계를 묶어 워크플로를 만들면 여기에서 검증하고 게시할 수 있습니다."
-              actions={
-                <Button
-                  variant="primary"
-                  disabled={!canWrite}
-                  title={canWrite ? undefined : writeDisabledReason}
-                  onClick={() => {
-                    setEditing(undefined);
-                    setFormOpen(true);
-                  }}
-                >
-                  새 워크플로
-                </Button>
-              }
-            />
-          ) : (
-            <DataTable
-              caption="정의된 워크플로 목록"
-              columns={columns}
-              data={rows}
-              emptyMessage="조건에 맞는 워크플로가 없습니다."
-              getRowId={(row) => row.id}
-              getRowActionLabel={(row) => `${row.name ?? row.id} 상세 열기`}
-              loading={list.isFetching && !list.data}
-              onRowClick={(row) => {
-                rowTriggerRef.current = document.activeElement as HTMLElement | null;
-                updateSearch({ workflow: row.id });
-              }}
-            />
-          )}
-          <p className="agents-updated">마지막 갱신 {formatDateTime(list.dataUpdatedAt)}</p>
+          <WorkflowListPanel
+            state={state}
+            result={list}
+            owner={owner}
+            update={updateSearch}
+            returnFocusRef={rowTriggerRef}
+          />
         </TabPanel>
       ) : (
         <TabPanel id="runs" panelIdPrefix="workflows">
@@ -402,7 +262,11 @@ function WorkflowPageContent(): React.JSX.Element {
           if (!open) closeSheet();
         }}
         onPublish={() => setPublishTarget(selected)}
-        open={selectedId !== ""}
+        open={params.has("workflow")}
+        loading={selectedValid && (detail.isPending || detail.isFetching)}
+        detailError={selectedValid ? detail.error : undefined}
+        invalidAddress={params.has("workflow") && !selectedValid}
+        onRetry={() => void detail.refetch()}
         returnFocusRef={rowTriggerRef}
         workflow={selected}
         writeDisabledReason={writeDisabledReason}

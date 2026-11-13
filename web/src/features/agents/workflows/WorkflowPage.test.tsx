@@ -1,3 +1,4 @@
+import { workflowReadFixture } from "@/test/workflow-fixtures";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
@@ -30,7 +31,7 @@ const workflow = {
   updated_at: "2026-09-05T02:00:00Z",
 };
 
-const listHandler = () => ({ workflows: [workflow] });
+const listHandler = ({ query }: { query?: object }) => workflowReadFixture([workflow], query);
 
 function renderPage(route = "/agents/workflows"): ReturnType<typeof renderScreen> {
   return renderScreen(
@@ -52,16 +53,16 @@ describe("WorkflowPage", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "워크플로" })).toBeVisible();
     const table = await screen.findByRole("table", { name: "정의된 워크플로 목록" });
-    expect(within(table).getByText("주간 보고 자동화")).toBeVisible();
+    expect(await within(table).findByText("주간 보고 자동화")).toBeVisible();
     expect(within(table).getByText("platform")).toBeVisible();
     expect(within(table).getByText("사용")).toBeVisible();
   });
 
   it("shows an empty state when no workflow is defined", async () => {
-    mockApi({ "GET /admin/workflows": () => ({ workflows: [] }) });
+    mockApi({ "GET /admin/workflows": ({ query }) => workflowReadFixture([], query) });
     renderPage();
 
-    expect(await screen.findByText("아직 워크플로가 없습니다.")).toBeVisible();
+    expect(await screen.findByText(/아직 워크플로가 없습니다/u)).toBeVisible();
   });
 
   it("shows the request id when the list fails", async () => {
@@ -164,7 +165,7 @@ describe("WorkflowPage", () => {
     renderPage("/agents/workflows?tab=runs");
 
     const table = await screen.findByRole("table", { name: "내 워크플로 실행 이력" });
-    expect(within(table).getByText("주간 보고 자동화")).toBeVisible();
+    expect(await within(table).findByText("주간 보고 자동화")).toBeVisible();
     expect(within(table).getByText("2/2")).toBeVisible();
     expect(table.querySelector(".badge")).toHaveTextContent(label ?? "—");
   });

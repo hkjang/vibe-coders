@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
+import { workflowReadFixture } from "../../src/test/workflow-fixtures";
 
 // Public synthetic keys only; this verifies pre-history browser boundaries, not backend auth.
 for (const [id, label] of [
@@ -90,7 +91,8 @@ for (const [id, label] of [
         if (call === "GET /admin/ui-bootstrap") return json(bootstrap);
         if (call === "GET /health" || call === "GET /ready") return json({ status: "ok" });
         if (call === "GET /admin/apps") return json({ apps: [] });
-        if (call === "GET /admin/workflows") return json({ workflows: [] });
+        if (call === "GET /admin/workflows")
+          return json(workflowReadFixture([], Object.fromEntries(url.searchParams)));
         if (call === "GET /admin/skills") return json({ skills: [] });
         if (call === "GET /admin/skills/stats") return json({ stats: [] });
         if (/^\/(admin|auth|me|v1)(\/|$)/u.test(url.pathname)) {
