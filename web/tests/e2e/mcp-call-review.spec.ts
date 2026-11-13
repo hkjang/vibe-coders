@@ -139,15 +139,19 @@ test("다른 탭의 호출이 진행 중이면 대기 실행 없이 중복 전�
     release = resolve;
   });
   const first = await install(page, pending);
+  // Finish the first tab's review before opening another tab. On CI Chromium
+  // stalled waiting for the background tab's first click to become stable.
+  const firstReview = await open(page);
+  await firstReview.getByLabel(/확인 문구/).fill("실제 호출");
   const secondPage = await context.newPage();
   const second = await install(secondPage);
   try {
-    const firstReview = await open(page);
     const secondReview = await open(secondPage);
-    await firstReview.getByLabel(/확인 문구/).fill("실제 호출");
     await secondReview.getByLabel(/확인 문구/).fill("실제 호출");
+    await page.bringToFront();
     await firstReview.getByRole("button", { name: "검토한 호출 실행", exact: true }).click();
     await expect.poll(() => first.writes.length).toBe(1);
+    await secondPage.bringToFront();
     await secondReview.getByRole("button", { name: "검토한 호출 실행", exact: true }).click();
     await expect(
       secondReview.getByText("다른 탭에서 MCP 호출이 진행 중입니다. 완료 후 다시 검토하세요.", {
