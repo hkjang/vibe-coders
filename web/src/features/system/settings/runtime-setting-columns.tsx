@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { SettingKeyLink } from "./SettingKeyLink";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
 import { Badge } from "@/shared/components/ui/Badge";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
@@ -13,14 +13,7 @@ function createSettingColumns(): ReadonlyArray<DataTableColumn<EffectiveSetting>
       header: "설정 키",
       cell: ({ row }) => (
         <div className="settings-key-cell">
-          <Link
-            className="mono"
-            to={`/system/settings?${new URLSearchParams({ tab: "runtime", setting: row.original.key })}`}
-            data-setting-link
-            onClick={(event) => event.stopPropagation()}
-          >
-            {row.original.key}
-          </Link>
+          <SettingKeyLink settingKey={row.original.key} />
           {row.original.description ? <small>{row.original.description}</small> : null}
         </div>
       ),

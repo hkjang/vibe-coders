@@ -97,7 +97,11 @@ function SettingEditor({
         ? normalizedBoolean(value) !== normalizedBoolean(initialValue)
         : value !== initialValue) || reason !== "",
     externalPending,
-    onDiscard: () => onOpenChange(false),
+    onDiscard: (reason) => {
+      // The router owns a confirmed departure. A second URL update here would
+      // replace the destination or change the browser history index.
+      if (reason !== "navigation") onOpenChange(false);
+    },
   });
 
   const submit = async (): Promise<void> => {

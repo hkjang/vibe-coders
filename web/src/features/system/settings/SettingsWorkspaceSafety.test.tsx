@@ -117,6 +117,7 @@ describe("설정 작업 공간 권한과 수명", () => {
       await userEvent.selectOptions(await open(), "false");
       await userEvent.click(screen.getByRole("button", { name: "저장" }));
       await waitFor(() => expect(api.bodies(update)).toEqual([{ value: "false", expected_version: 3 }]));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(screen.getByRole("button", { name: "ClickHouse 연결 테스트" })).toBeDisabled();
     },
   );
@@ -291,12 +292,22 @@ describe("런타임 설정 상세 주소", () => {
     expect(await screen.findByRole("dialog", { name: "cache.chat_enabled" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "새 값" })).toHaveValue("true");
   });
-  it("키 링크로 상세를 열고 뒤로·앞으로 이동 시 선택을 복원한다", async () => {
-    setup();
+  it("키 링크가 검색·범주를 보존하고 닫기·뒤로·앞으로 이동 시 선택을 복원한다", async () => {
+    setup({}, "/system/settings?tab=runtime&q=cache&category=cache");
     await userEvent.click(await screen.findByRole("link", { name: "cache.chat_enabled" }));
     expect(await screen.findByRole("dialog", { name: "cache.chat_enabled" })).toBeVisible();
+    expect(screen.getByLabelText("현재 주소")).toHaveTextContent(
+      "q=cache&category=cache&setting=cache.chat_enabled",
+    );
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("현재 주소")).toHaveTextContent(
+      "/system/settings?tab=runtime&q=cache&category=cache",
+    );
+    await userEvent.click(screen.getByRole("link", { name: "cache.chat_enabled" }));
     fireEvent.click(screen.getByRole("button", { name: "뒤로", hidden: true }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("현재 주소")).toHaveTextContent("q=cache&category=cache");
     await userEvent.click(screen.getByRole("button", { name: "앞으로" }));
     expect(await screen.findByRole("dialog", { name: "cache.chat_enabled" })).toBeVisible();
   });
