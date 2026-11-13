@@ -11,6 +11,7 @@ import (
 type AIAppRun struct {
 	ID            string  `json:"id"`
 	AppID         string  `json:"app_id"`
+	AppTitle      string  `json:"app_title,omitempty"` // current title, populated only for own run history
 	UserID        string  `json:"user_id"`
 	Team          string  `json:"team"`
 	Status        string  `json:"status"` // planned | ok | error
@@ -58,14 +59,14 @@ func (s *SQLStore) ListAIAppRuns(ctx context.Context, userID, appID string, limi
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, trace_id, created_at
-		FROM ai_app_runs WHERE user_id = ?`
+	q := `SELECT r.id, r.app_id, r.user_id, r.team, r.status, r.input_hash, r.output_summary, r.error_class, r.latency_ms, r.cost_krw, r.trace_id, r.created_at, COALESCE(a.title, '')
+		FROM ai_app_runs r LEFT JOIN work_apps a ON a.id = r.app_id WHERE r.user_id = ?`
 	args := []any{userID}
 	if appID != "" {
-		q += ` AND app_id = ?`
+		q += ` AND r.app_id = ?`
 		args = append(args, appID)
 	}
-	q += ` ORDER BY created_at DESC LIMIT ?`
+	q += ` ORDER BY r.created_at DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, s.bind(q), args...)
 	if err != nil {
@@ -75,7 +76,7 @@ func (s *SQLStore) ListAIAppRuns(ctx context.Context, userID, appID string, limi
 	out := []AIAppRun{}
 	for rows.Next() {
 		var a AIAppRun
-		if err := rows.Scan(&a.ID, &a.AppID, &a.UserID, &a.Team, &a.Status, &a.InputHash, &a.OutputSummary, &a.ErrorClass, &a.LatencyMS, &a.CostKRW, &a.TraceID, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.AppID, &a.UserID, &a.Team, &a.Status, &a.InputHash, &a.OutputSummary, &a.ErrorClass, &a.LatencyMS, &a.CostKRW, &a.TraceID, &a.CreatedAt, &a.AppTitle); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

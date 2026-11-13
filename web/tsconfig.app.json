@@ -41,6 +41,7 @@
     "tests/e2e/mcp-contract-review.spec.ts",
     "tests/e2e/mcp-call-review.spec.ts",
     "tests/e2e/workflow-pagination.spec.ts",
+    "tests/e2e/work-app-pagination.spec.ts",
     "tests/e2e/account-resource-search.spec.ts",
     "tests/fixtures/agent-code-editor.ts"
   ]

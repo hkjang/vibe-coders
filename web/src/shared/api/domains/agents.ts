@@ -9,6 +9,8 @@ import type {
   DeleteAdminSkillsByNameNameData,
   DeleteAdminWorkflowsData,
   GetAdminAppsData,
+  WorkAppPage,
+  WorkAppDetail,
   GetAdminAppsIdData,
   GetAdminAppsIdPermissionsData,
   GetAdminAppsIdVersionsData,
@@ -122,6 +124,14 @@ import {
 } from "@/shared/api/domains/agents.schemas";
 import { acknowledgementSchema } from "@/shared/api/loose";
 import {
+  workAppPageSchema,
+  workAppReadDetailSchema,
+  workAppPageQuerySchema,
+  workAppDetailQuerySchema,
+  type WorkAppPageQuery,
+  type WorkAppDetailQuery,
+} from "./work-app-page.schemas";
+import {
   workflowPageSchema,
   workflowPageQuerySchema,
   workflowDetailSchema,
@@ -185,6 +195,18 @@ export const agentsEndpoints = {
   },
   apps: {
     list: operation<GetAdminAppsData, unknown>()("GET", "/admin/apps", workAppListSchema),
+    page: operation<WithQuery<GetAdminAppsData, WorkAppPageQuery>, WorkAppPage>()(
+      "GET",
+      "/admin/apps",
+      workAppPageSchema,
+      workAppPageQuerySchema,
+    ),
+    detail: operation<WithQuery<GetAdminAppsData, WorkAppDetailQuery>, WorkAppDetail>()(
+      "GET",
+      "/admin/apps",
+      workAppReadDetailSchema,
+      workAppDetailQuerySchema,
+    ),
     get: operation<GetAdminAppsIdData, unknown>()("GET", "/admin/apps/{id}", workAppDetailSchema),
     create: operation<WithBody<PostAdminAppsData, WorkAppWriteBody>, unknown>()(
       "POST",

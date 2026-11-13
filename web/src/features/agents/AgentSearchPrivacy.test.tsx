@@ -1,3 +1,4 @@
+import { workAppReadFixture } from "@/test/work-app-fixtures";
 import { workflowReadFixture } from "@/test/workflow-fixtures";
 import { fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,7 +43,7 @@ const screens = [
 describe.each(screens)("$id 검색 개인정보 경계", ({ id, label, page: Page }) => {
   function setup() {
     mockApi({
-      "GET /admin/apps": () => ({ apps: [] }),
+      "GET /admin/apps": ({ query }) => workAppReadFixture([], query),
       "GET /admin/workflows": ({ query }) => workflowReadFixture([], query),
       "GET /admin/skills": () => ({ skills: [] }),
       "GET /admin/skills/stats": () => ({ stats: [] }),

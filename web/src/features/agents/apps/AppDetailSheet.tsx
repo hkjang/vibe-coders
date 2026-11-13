@@ -1,3 +1,6 @@
+import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
+import { isAppError } from "@/shared/api/error";
+import { workAppStatusLabel } from "./work-app-tables";
 import { useAppRead } from "./app-scope";
 import { useRef, useState, type RefObject } from "react";
 
@@ -24,6 +27,10 @@ import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 interface AppDetailSheetProps {
   app: WorkApp | undefined;
+  loading?: boolean;
+  detailError?: unknown;
+  invalidAddress?: boolean;
+  onRetry?: () => void;
   canWrite: boolean;
   onDelete: () => void;
   onDeprecate: () => void;
@@ -48,6 +55,10 @@ export function AppDetailSheet(props: AppDetailSheetProps): React.JSX.Element {
 
 function AppDetailSheetContent({
   app: selectedApp,
+  loading,
+  detailError,
+  invalidAddress,
+  onRetry,
   canWrite,
   onDelete,
   onDeprecate,
@@ -95,7 +106,25 @@ function AppDetailSheetContent({
       title={app ? `${app.icon ?? ""} ${app.title ?? app.id}`.trim() : "AI 업무 앱"}
     >
       {!app ? (
-        <EmptyState title="앱을 찾을 수 없습니다." description="목록에서 다시 선택하세요." />
+        invalidAddress ? (
+          <InlineNotice tone="danger" title="업무 앱 상세 주소를 확인하세요.">
+            정확한 앱 ID를 선택하세요. 비밀값이나 제어 문자는 주소에 사용할 수 없습니다.
+          </InlineNotice>
+        ) : loading ? (
+          <LoadingState label="업무 앱 상세를 불러오는 중입니다." />
+        ) : detailError ? (
+          <ErrorState
+            message={safeAppErrorMessage(detailError, "업무 앱 상세를 불러오지 못했습니다.")}
+            requestId={isAppError(detailError) ? detailError.requestId : undefined}
+            onRetry={onRetry}
+            legacyHref="/admin#/apps"
+          />
+        ) : (
+          <EmptyState
+            title="앱을 찾을 수 없습니다."
+            description="앱이 삭제되었거나 주소가 변경되었습니다. 목록에서 다시 선택하세요."
+          />
+        )
       ) : (
         <div className="agents-detail-stack">
           <KeyValueList
@@ -105,7 +134,7 @@ function AppDetailSheetContent({
                 label: "상태",
                 value: (
                   <Badge tone={app.status === "active" ? "success" : "muted"}>
-                    {app.status === "active" ? "활성" : (app.status ?? "—")}
+                    {workAppStatusLabel(app.status)}
                   </Badge>
                 ),
               },
@@ -179,7 +208,7 @@ function AppDetailSheetContent({
             {components.length === 0 ? (
               <EmptyState
                 title="구성 요소가 없습니다."
-                description="Skill, 프롬프트 상품, Text2SQL 리포트 등을 추가하면 실행 계획이 만들어집니다."
+                description="스킬, 프롬프트 상품, 텍스트 SQL 리포트 등을 추가하면 실행 계획이 만들어집니다."
               />
             ) : (
               <div className="data-table-scroll" tabIndex={0} aria-label="앱 구성 요소 표 영역">
@@ -196,11 +225,11 @@ function AppDetailSheetContent({
                     {components.map((component, index) => (
                       <tr key={`${component.kind ?? ""}-${component.ref ?? ""}-${index}`}>
                         <td>
-                          {appComponentKindLabels[
-                            (component.kind ?? "") as keyof typeof appComponentKindLabels
-                          ] ??
-                            component.kind ??
-                            "—"}
+                          {Object.hasOwn(appComponentKindLabels, component.kind ?? "")
+                            ? appComponentKindLabels[
+                                (component.kind ?? "") as keyof typeof appComponentKindLabels
+                              ]
+                            : "기타 구성 요소"}
                         </td>
                         <td className="mono">{component.ref || "—"}</td>
                         <td>{component.label || "—"}</td>

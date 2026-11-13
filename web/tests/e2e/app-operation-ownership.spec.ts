@@ -1,3 +1,4 @@
+import { workAppReadFixture } from "../../src/test/work-app-fixtures";
 import { expect, type Page } from "@playwright/test";
 import { alpha, firstEmail, secondEmail, targetUrl, test } from "../fixtures/app-permission-gateway";
 
@@ -16,10 +17,12 @@ async function login(page: Page) {
 test("목록의 권한 거부는 이전 앱을 숨기고 명시적 재시도로 복구한다", async ({ page, gateway }) => {
   expect(gateway.unexpected).toEqual([]);
   let denied = false;
-  await page.route("**/admin/apps", (route) =>
+  await page.route(/\/admin\/apps(?:\?.*)?$/u, (route) =>
     route.fulfill({
       status: denied ? 403 : 200,
-      json: denied ? { error: { message: "denied" } } : { apps: [alpha] },
+      json: denied
+        ? { error: { message: "denied" } }
+        : workAppReadFixture([alpha], Object.fromEntries(new URL(route.request().url()).searchParams)),
     }),
   );
   await login(page);

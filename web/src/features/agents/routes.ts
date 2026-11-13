@@ -10,7 +10,7 @@ export const agentsFeatureModules = defineFeatureModules([
   {
     featureId: "agents.apps",
     load: () => import("@/features/agents/apps/AppPage").then((module) => module.AppPage),
-    queryKeys: ["app", "q", "status", "tab"],
+    queryKeys: ["app", "q", "status", "tab", "page", "size", "sort"],
   },
   {
     featureId: "agents.skills",

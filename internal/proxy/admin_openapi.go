@@ -637,8 +637,17 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "get /admin/apps":
+		enrichWorkAppPageOpenAPI(op, responses)
 	case "get /admin/workflows":
 		enrichWorkflowPageOpenAPI(op, responses)
+	case "get /me/app-runs":
+		op["description"] = "Existing authenticated caller's own app run history. Includes current app_title when the definition exists, independent of the administrator list page. User ownership, default limit 50 and maximum 200 are unchanged. No component definitions or raw inputs/outputs."
+		op["parameters"] = []any{
+			map[string]any{"name": "app_id", "in": "query", "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "default": 50}, "description": "Nonpositive or greater than 200 uses the existing default of 50."},
+		}
+		responses["200"] = successResponse("WorkAppRunList")
 	case "get /me/workflow-runs":
 		op["description"] = "Existing authenticated caller's own workflow run history. Includes current workflow_name when the definition still exists, so names do not depend on the administrator's current list page. No step definitions or raw inputs/outputs. Ownership filters and default limit 50 (maximum 200) are unchanged."
 		op["parameters"] = []any{
@@ -1122,6 +1131,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range workflowPageOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range workAppPageOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range teamPageOpenAPISchemas() {

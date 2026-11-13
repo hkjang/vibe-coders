@@ -3,12 +3,15 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { useAuth } from "@/app/auth/AuthProvider";
-import { AppScopeBoundary, appsKey, useAppRead, useAppOperationAccess } from "./app-scope";
+import { AppScopeBoundary, appsKey, useAppRead, useAppOperationAccess, useAppScope } from "./app-scope";
+import { WorkAppListPanel } from "./WorkAppListPanel";
+import { readWorkAppPage, validWorkAppDetailId } from "./work-app-page-model";
+import { useWorkAppPageQuery, useWorkAppDetailQuery } from "./use-work-app-queries";
 import { AppDetailSheet } from "@/features/agents/apps/AppDetailSheet";
 import { AppDeleteDialog } from "@/features/agents/apps/AppDeleteDialog";
 import { AppFormDialog } from "@/features/agents/apps/AppFormDialog";
 import { AppReceiptDialog } from "@/features/agents/apps/AppReceiptDialog";
-import { appWriteBody, matchesAppQuery, type AppFormOutput } from "@/features/agents/apps/app-form";
+import { appWriteBody, type AppFormOutput } from "@/features/agents/apps/app-form";
 import { OnboardingChecklist } from "@/features/agents/apps/OnboardingChecklist";
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { displayColumn } from "@/features/agents/table-columns";
@@ -18,36 +21,25 @@ import { onboardingCheckSchema } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { PageHeader } from "@/shared/components/page/PageHeader";
-import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
+import { LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { Input } from "@/shared/components/ui/Input";
-import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Tabs, TabPanel } from "@/shared/components/ui/Tabs";
-import { Toolbar } from "@/shared/components/ui/Toolbar";
 import type { DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
-import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
-import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { formatDateTime, formatDuration, formatNumber } from "@/shared/utils/format";
 import "@/features/agents/agents.css";
 
 const tabIds = ["apps", "templates", "runs"] as const;
 type TabId = (typeof tabIds)[number];
-const statusFilters = [
-  { value: "all", label: "전체 상태" },
-  { value: "active", label: "활성" },
-  { value: "archived", label: "보관" },
-];
-
 const publishGateSchema = z.object({ checks: z.array(onboardingCheckSchema).min(1) });
 
 /** The publish gate answers 422 with the readiness checklist; surface it instead of a bare error. */
@@ -74,22 +66,19 @@ function AppPageContent(): React.JSX.Element {
   const client = useQueryClient();
   const auth = useAuth();
   const operations = useAppOperationAccess();
+  const owner = useAppScope();
   const canWrite = operations.allowed;
   const writeDisabledReason = operations.reason ?? "";
   const [tab, setTab] = useTabParam<TabId>([...tabIds]);
   const [params, updateSearch] = useSearchState();
-  const refreshInterval = useRefreshInterval();
-  const rawQuery = params.get("q") ?? "";
-  const query = containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? "" : rawQuery;
-  const status = params.get("status") ?? "all";
+  const state = readWorkAppPage(params, auth.credentialPrefixes);
   const selectedId = params.get("app") ?? "";
+  const selectedValid =
+    params.getAll("app").length === 1 && validWorkAppDetailId(selectedId, auth.credentialPrefixes);
   const selection = useRef(selectedId);
   useLayoutEffect(() => {
     selection.current = selectedId;
   }, [selectedId]);
-  const [searchError, setSearchError] = useState<string | undefined>(
-    containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? secretSearchMessage : undefined,
-  );
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<WorkApp | undefined>();
   const [publishTarget, setPublishTarget] = useState<WorkApp | undefined>();
@@ -104,12 +93,10 @@ function AppPageContent(): React.JSX.Element {
   const deleteReturnRef = useRef<HTMLElement | null>(null);
   const dialogReturnRef = useRef<HTMLElement | null>(null);
 
-  const list = useAppRead({
-    queryKey: appsKey,
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.agents.apps.list, { signal, routeId: "agents.apps" }),
-    refetchInterval: refreshInterval,
-  });
+  const list = useWorkAppPageQuery(state.query);
+  const detail = useWorkAppDetailQuery(selectedValid ? selectedId : undefined);
+  const selected =
+    selectedValid && detail.isSuccess && !detail.isFetching ? (detail.data.app ?? undefined) : undefined;
 
   const templates = useAppRead({
     queryKey: [...appsKey, "templates"],
@@ -129,16 +116,6 @@ function AppPageContent(): React.JSX.Element {
       }),
   });
 
-  const apps = useMemo(() => list.data?.apps ?? [], [list.data?.apps]);
-  const rows = useMemo(
-    () =>
-      apps.filter(
-        (app) => matchesAppQuery(app, query) && (status === "all" || (app.status ?? "") === status),
-      ),
-    [apps, query, status],
-  );
-  const selected = apps.find((app) => app.id === selectedId);
-
   const closeSheet = useCallback((): void => {
     updateSearch({ app: undefined });
   }, [updateSearch]);
@@ -148,17 +125,20 @@ function AppPageContent(): React.JSX.Element {
     ownsResult: operations.ownsResult,
     mutate: (variables: { values: AppFormOutput; id?: string }) =>
       variables.id === undefined
-        ? apiClient.request(endpoints.domains.agents.apps.create, {
-            body: appWriteBody(variables.values),
-            retryUnauthorized: false,
-            routeId: "agents.apps",
-          })
-        : apiClient.request(withPathParams(endpoints.domains.agents.apps.update, { id: variables.id }), {
-            body: appWriteBody(variables.values),
-            retryUnauthorized: false,
-            routeId: "agents.apps",
-          }),
-    invalidates: [operations.listKey],
+        ? apiClient
+            .request(endpoints.domains.agents.apps.create, {
+              body: appWriteBody(variables.values),
+              retryUnauthorized: false,
+              routeId: "agents.apps",
+            })
+            .then(operations.refreshReads)
+        : apiClient
+            .request(withPathParams(endpoints.domains.agents.apps.update, { id: variables.id }), {
+              body: appWriteBody(variables.values),
+              retryUnauthorized: false,
+              routeId: "agents.apps",
+            })
+            .then(operations.refreshReads),
     successMessage: "AI 업무 앱을 저장했습니다.",
     errorMessage: "AI 업무 앱을 저장하지 못했습니다.",
   });
@@ -167,11 +147,12 @@ function AppPageContent(): React.JSX.Element {
     gcTime: 0,
     ownsResult: operations.ownsResult,
     mutate: (id: string) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.apps.remove, { id }), {
-        retryUnauthorized: false,
-        routeId: "agents.apps",
-      }),
-    invalidates: [operations.listKey],
+      apiClient
+        .request(withPathParams(endpoints.domains.agents.apps.remove, { id }), {
+          retryUnauthorized: false,
+          routeId: "agents.apps",
+        })
+        .then(operations.refreshReads),
     successMessage: "AI 업무 앱을 삭제했습니다.",
     errorMessage: "AI 업무 앱을 삭제하지 못했습니다.",
     onSuccess: (_, id) => {
@@ -183,11 +164,12 @@ function AppPageContent(): React.JSX.Element {
     gcTime: 0,
     ownsResult: operations.ownsResult,
     mutate: (id: string) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.apps.deprecate, { id }), {
-        retryUnauthorized: false,
-        routeId: "agents.apps",
-      }),
-    invalidates: [operations.listKey],
+      apiClient
+        .request(withPathParams(endpoints.domains.agents.apps.deprecate, { id }), {
+          retryUnauthorized: false,
+          routeId: "agents.apps",
+        })
+        .then(operations.refreshReads),
     successMessage: "AI 업무 앱을 지원 중단했습니다.",
     errorMessage: "AI 업무 앱을 지원 중단하지 못했습니다.",
   });
@@ -207,9 +189,8 @@ function AppPageContent(): React.JSX.Element {
       );
       operations.assertCurrent();
       await client.invalidateQueries({ queryKey: operations.versionsKey(variables.id) });
-      return result;
+      return operations.refreshReads(result);
     },
-    invalidates: [operations.listKey],
     successMessage: (result) =>
       result.version === undefined
         ? "AI 업무 앱을 발행했습니다."
@@ -221,50 +202,31 @@ function AppPageContent(): React.JSX.Element {
     gcTime: 0,
     ownsResult: operations.ownsResult,
     mutate: (variables: { key: string }) =>
-      apiClient.request(endpoints.domains.agents.apps.instantiateTemplate, {
-        body: { key: variables.key },
-        retryUnauthorized: false,
-        routeId: "agents.apps",
-      }),
-    invalidates: [operations.listKey],
+      apiClient
+        .request(endpoints.domains.agents.apps.instantiateTemplate, {
+          body: { key: variables.key },
+          retryUnauthorized: false,
+          routeId: "agents.apps",
+        })
+        .then(operations.refreshReads),
     successMessage: "템플릿에서 AI 업무 앱을 만들었습니다.",
     errorMessage: "템플릿에서 앱을 만들지 못했습니다.",
     onSuccess: () => setTab("apps"),
   });
 
-  const columns = useMemo<ReadonlyArray<DataTableColumn<WorkApp>>>(
-    () => [
-      displayColumn<WorkApp>("title", "앱", (row) => (
-        <span className="truncate">{`${row.icon ?? ""} ${row.title ?? row.id}`.trim()}</span>
-      )),
-      displayColumn<WorkApp>("status", "상태", (row) => (
-        <Badge tone={row.status === "active" ? "success" : "muted"}>
-          {row.status === "active" ? "활성" : (row.status ?? "—")}
-        </Badge>
-      )),
-      displayColumn<WorkApp>("components", "구성 요소", (row) => (
-        <span className="cell-number">{formatNumber(row.components?.length ?? 0)}</span>
-      )),
-      displayColumn<WorkApp>("scope", "허용 팀/역할", (row) =>
-        [row.allowed_teams || "전체 팀", row.allowed_roles || "전체 역할"].join(" · "),
-      ),
-      displayColumn<WorkApp>("owner", "책임자", (row) => row.owner || "—"),
-      displayColumn<WorkApp>("updated_at", "수정일", (row) => formatDateTime(row.updated_at)),
-    ],
-    [],
-  );
-
   const runColumns = useMemo<ReadonlyArray<DataTableColumn<AppRun>>>(
     () => [
       displayColumn<AppRun>("created_at", "실행 시각", (row) => formatDateTime(row.created_at)),
-      displayColumn<AppRun>(
-        "app",
-        "앱",
-        (row) => apps.find((app) => app.id === row.app_id)?.title ?? row.app_id ?? "—",
-      ),
+      displayColumn<AppRun>("app", "앱", (row) => row.app_title || row.app_id || "—"),
       displayColumn<AppRun>("status", "상태", (row) => (
         <Badge tone={row.status === "error" ? "danger" : row.status === "ok" ? "success" : "info"}>
-          {row.status || "—"}
+          {row.status === "ok"
+            ? "완료"
+            : row.status === "error"
+              ? "오류"
+              : row.status === "planned"
+                ? "계획됨"
+                : "상태 확인 필요"}
         </Badge>
       )),
       displayColumn<AppRun>("summary", "요약", (row) => row.output_summary || "—"),
@@ -273,13 +235,11 @@ function AppPageContent(): React.JSX.Element {
       )),
       displayColumn<AppRun>("error", "오류 분류", (row) => row.error_class || "—"),
     ],
-    [apps],
+    [],
   );
 
-  const activeCount = apps.filter((app) => app.status === "active").length;
-  const unscopedCount = apps.filter(
-    (app) => (app.allowed_teams ?? "") === "" && (app.allowed_roles ?? "") === "",
-  ).length;
+  const activeCount = list.data?.summary.active ?? 0;
+  const unscopedCount = list.data?.summary.unscoped ?? 0;
   const summaryUnavailable = list.isPending || (list.isError && !list.data);
   const header = (
     <PageHeader
@@ -309,35 +269,15 @@ function AppPageContent(): React.JSX.Element {
     />
   );
 
-  if (list.isPending && !list.data) {
-    return (
-      <div className="page-stack">
-        {header}
-        <LoadingState label="AI 업무 앱 목록을 불러오는 중입니다." />
-      </div>
-    );
-  }
-
-  if (list.isError && !list.data) {
-    return (
-      <div className="page-stack">
-        {header}
-        <ErrorState
-          message={safeAppErrorMessage(list.error, "AI 업무 앱 목록을 불러오지 못했습니다.")}
-          requestId={isAppError(list.error) ? list.error.requestId : undefined}
-          onRetry={() => void list.refetch()}
-          legacyHref="/admin#/apps"
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="page-stack">
       {header}
 
       <StatGrid label="AI 업무 앱 요약">
-        <StatCard label="전체 앱" value={summaryUnavailable ? "—" : formatNumber(apps.length)} />
+        <StatCard
+          label="전체 앱"
+          value={summaryUnavailable ? "—" : formatNumber(list.data?.summary.total ?? 0)}
+        />
         <StatCard label="활성" tone="success" value={summaryUnavailable ? "—" : formatNumber(activeCount)} />
         <StatCard
           label="공개 범위 미지정"
@@ -383,7 +323,7 @@ function AppPageContent(): React.JSX.Element {
       <Tabs
         ariaLabel="AI 업무 앱 화면"
         items={[
-          { id: "apps", label: "업무 앱", badge: formatNumber(apps.length) },
+          { id: "apps", label: "업무 앱", badge: formatNumber(list.data?.summary.total ?? 0) },
           { id: "templates", label: "앱 템플릿" },
           { id: "runs", label: "실행 이력" },
         ]}
@@ -394,77 +334,16 @@ function AppPageContent(): React.JSX.Element {
 
       {tab === "apps" ? (
         <TabPanel id="apps" panelIdPrefix="apps">
-          <Toolbar label="업무 앱 필터">
-            <form
-              className="agents-toolbar-field"
-              role="search"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const submitted = new FormData(event.currentTarget).get("q");
-                const next = typeof submitted === "string" ? submitted.trim() : "";
-                if (containsPotentialSecret(next, auth.credentialPrefixes)) {
-                  setSearchError(secretSearchMessage);
-                  event.currentTarget.querySelector<HTMLInputElement>('[name="q"]')?.focus();
-                  return;
-                }
-                setSearchError(undefined);
-                updateSearch({ q: next || undefined });
-              }}
-            >
-              <label htmlFor="app-search">업무 앱 검색</label>
-              <Input
-                id="app-search"
-                key={query}
-                name="q"
-                defaultValue={query}
-                placeholder="제목, 설명, 책임자, 팀"
-                aria-invalid={searchError ? "true" : undefined}
-                aria-describedby={searchError ? "app-search-error" : undefined}
-              />
-              {searchError ? (
-                <span id="app-search-error" className="field-error" role="alert">
-                  {searchError}
-                </span>
-              ) : null}
-            </form>
-            <label className="agents-toolbar-field" htmlFor="app-status">
-              <span>상태</span>
-              <Select
-                id="app-status"
-                value={status}
-                options={statusFilters}
-                onChange={(event) =>
-                  updateSearch({ status: event.target.value === "all" ? undefined : event.target.value })
-                }
-              />
-            </label>
-          </Toolbar>
-
-          {apps.length === 0 ? (
-            <EmptyState
-              title="아직 업무 앱이 없습니다."
-              description="앱 템플릿에서 시작하거나 구성 요소를 직접 묶어 새 업무 앱을 만드세요."
-              actions={
-                <Button variant="secondary" onClick={() => setTab("templates")}>
-                  앱 템플릿 보기
-                </Button>
-              }
-            />
-          ) : (
-            <DataTable
-              caption="AI 업무 앱 목록"
-              columns={columns}
-              data={rows}
-              emptyMessage="조건에 맞는 업무 앱이 없습니다."
-              getRowId={(row) => row.id}
-              getRowActionLabel={(row) => `${row.title ?? row.id} 상세 열기`}
-              onRowClick={(row) => {
-                rowTriggerRef.current = document.activeElement as HTMLElement | null;
-                updateSearch({ app: row.id });
-              }}
-            />
-          )}
-          <p className="agents-updated">마지막 갱신 {formatDateTime(list.dataUpdatedAt)}</p>
+          <WorkAppListPanel
+            state={state}
+            result={list}
+            owner={owner}
+            update={updateSearch}
+            returnFocusRef={rowTriggerRef}
+          />
+          {list.data?.summary.total === 0 ? (
+            <Button onClick={() => setTab("templates")}>앱 템플릿 보기</Button>
+          ) : null}
         </TabPanel>
       ) : tab === "templates" ? (
         <TabPanel id="templates" panelIdPrefix="apps">
@@ -558,6 +437,10 @@ function AppPageContent(): React.JSX.Element {
 
       <AppDetailSheet
         app={selected}
+        loading={selectedValid && (detail.isPending || detail.isFetching)}
+        detailError={selectedValid ? detail.error : undefined}
+        invalidAddress={params.has("app") && !selectedValid}
+        onRetry={() => void detail.refetch()}
         canWrite={canWrite}
         onDelete={() => {
           deleteReturnRef.current =
@@ -573,7 +456,7 @@ function AppPageContent(): React.JSX.Element {
           if (!open) closeSheet();
         }}
         onPublish={() => setPublishTarget(selected)}
-        open={selectedId !== ""}
+        open={params.has("app")}
         returnFocusRef={rowTriggerRef}
         writeDisabledReason={writeDisabledReason}
       />

@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- Route-local ownership context and hooks. */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { ErrorState, PermissionDenied } from "@/shared/components/state/PageStates";
@@ -63,6 +63,7 @@ export function useAppRead<T>({
 }
 
 export function useAppOperationAccess() {
+  const client = useQueryClient();
   const owner = useAppScope();
   const auth = useAuth();
   const access = useFeatureMutationAccess(
@@ -85,7 +86,19 @@ export function useAppOperationAccess() {
         return false;
       }
     },
-    listKey: featureOwnedKey(appsKey, owner),
+    refreshReads: async <T,>(result: T): Promise<T> => {
+      assertCurrent();
+      await client.invalidateQueries({
+        queryKey: appsKey,
+        predicate: ({ queryKey }) =>
+          queryKey.at(-2) === owner.marker &&
+          queryKey.at(-1) === owner.id &&
+          queryKey[2] === "catalog" &&
+          (queryKey[3] === "page" || queryKey[3] === "detail"),
+      });
+      assertCurrent();
+      return result;
+    },
     versionsKey: (id: string) => featureOwnedKey([...appsKey, id, "versions"], owner),
   };
 }
