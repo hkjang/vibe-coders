@@ -160,9 +160,9 @@ for (const theme of ["light", "dark"] as const) {
     test(`보관함 편집·상세 접근성 ${theme} ${viewport.width}×${viewport.height}`, async ({ page }, info) => {
       await page.setViewportSize(viewport);
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
       const fixture = await installPromptLibrary(page),
         editor = await openEditor(page);
-      await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
       await expect.poll(() => violations(page)).toEqual([]);
       await expect(editor.getByRole("button", { name: "취소" })).toBeInViewport();
       await page.screenshot({ path: info.outputPath("library-editor.png") });

@@ -24,6 +24,8 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     { title: "검색검증 정책", path: "/app/governance/policies/detail", parameter: "policy" },
     { title: "검색검증 등록 팀", path: "/app/access/users", parameter: "registered_team" },
     { title: "검색검증 로그인 계정", path: "/app/access/users/accounts", parameter: "account_id" },
+    { title: "검색검증 프롬프트 자산", path: "/app/prompts/library", parameter: "asset" },
+    { title: "검색검증 프롬프트 실험", path: "/app/prompts/lab", parameter: "exp" },
     { title: "검색검증 관측 도구", path: "/app/mcp", parameter: "tool" },
   ];
   for (const target of targets) {
@@ -68,19 +70,21 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     await expect(palette.getByRole("option")).toHaveCount(targets.length);
     await palette.getByRole("option", { name: new RegExp(target.title) }).click();
     const panel =
-      target.parameter === "tool"
-        ? page.getByRole("table", { name: "MCP 도구 카탈로그" })
-        : page.getByRole("dialog", {
-            name:
-              target.parameter === "policy"
-                ? "정책 상세"
-                : target.parameter === "registered_team"
-                  ? "등록 팀 상세"
-                  : target.parameter === "account_id"
-                    ? "로그인 계정 상세"
-                    : target.title,
-            exact: true,
-          });
+      target.parameter === "exp"
+        ? page.getByText(`실험: ${target.title}`, { exact: true })
+        : target.parameter === "tool"
+          ? page.getByRole("table", { name: "MCP 도구 카탈로그" })
+          : page.getByRole("dialog", {
+              name:
+                target.parameter === "policy"
+                  ? "정책 상세"
+                  : target.parameter === "registered_team"
+                    ? "등록 팀 상세"
+                    : target.parameter === "account_id"
+                      ? "로그인 계정 상세"
+                      : target.title,
+              exact: true,
+            });
     await expect(panel).toBeVisible();
     if (target.parameter === "policy")
       await expect(panel.getByRole("heading", { name: target.title })).toBeVisible();

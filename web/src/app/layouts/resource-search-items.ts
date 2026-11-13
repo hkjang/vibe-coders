@@ -3,6 +3,18 @@ import { containsPotentialSecret } from "@/shared/security/secrets";
 import { isProviderRef } from "@/shared/api/provider-ref";
 
 export const resourceSearchTargets = {
+  prompt_asset: {
+    featureId: "prompts.library",
+    title: "프롬프트 자산",
+    path: "/prompts/library",
+    parameter: "asset",
+  },
+  prompt_experiment: {
+    featureId: "prompts.lab",
+    title: "프롬프트 실험",
+    path: "/prompts/lab",
+    parameter: "exp",
+  },
   provider: {
     featureId: "gateway.providers",
     title: "AI 공급자",
@@ -51,6 +63,11 @@ export function resourceSearchPath(
   serverLabel?: string,
 ): string | undefined {
   if (!id || [...id].length > 512 || containsPotentialSecret(id, prefixes)) return undefined;
+  if (
+    (kind === "prompt_asset" || kind === "prompt_experiment") &&
+    (id.length > 512 || id.trim() !== id || /\p{C}/u.test(id))
+  )
+    return undefined;
   if (kind === "provider" && !isProviderRef(id)) return undefined;
   if (kind === "mcp_upstream" && !/^[a-z0-9_][a-z0-9_-]*$/u.test(id)) return undefined;
   if ((kind === "team" || kind === "account") && /\p{C}/u.test(id)) return undefined;
@@ -71,6 +88,7 @@ export function resourceSearchPath(
     params.set("tab", "tools");
     params.set("mcp_only", "1");
   }
+  if (kind === "prompt_asset") params.set("tab", "assets");
   // Skills have more than one tab; the detail belongs to the registry tab.
   if (kind === "skill") params.set("tab", "catalog");
   if (kind === "mcp_upstream") params.set("tab", "upstreams");
