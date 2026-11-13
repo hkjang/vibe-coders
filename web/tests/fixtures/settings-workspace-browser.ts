@@ -68,6 +68,7 @@ export async function installSettingsWorkspace(page: Page, role = "admin") {
   bootstrap.backend_version = "v0.86.98";
   for (const feature of bootstrap.migration_registry) feature.enabled_roles = [role];
   const state = {
+    bootstrap,
     denied: false,
     failOnce: false,
     writes: [] as Request[],

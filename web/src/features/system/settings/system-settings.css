@@ -113,3 +113,8 @@
   color: var(--color-muted);
   font-size: 0.8125rem;
 }
+
+.settings-selected-key {
+  margin: 0 0 var(--space-3);
+  overflow-wrap: anywhere;
+}

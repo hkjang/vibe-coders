@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { RuntimeSettingUnavailable } from "./RuntimeSettingUnavailable";
 
 import {
   featureTitles,
@@ -30,6 +32,8 @@ import {
   settingEditPermission,
   settingWithCurrentPermission,
   type ConsoleFeatureRow,
+  parseConsoleFeatureKey,
+  runtimeSettingKeyValid,
 } from "@/features/system/settings/settings-utils";
 import {
   routeId,
@@ -56,10 +60,11 @@ const conflictMessage =
 export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean }): React.JSX.Element {
   const settingsQuery = useEffectiveSettings();
   const triggerRef = useRef<HTMLElement | null>(null);
-  const [editing, setEditing] = useState<ConsoleFeatureRow | undefined>();
-  const [selectedGlobal, setSelectedGlobal] = useState<EffectiveSetting | undefined>();
+  const [params, updateParams] = useSearchState();
+  const selectedKey = params.get("setting") ?? "";
+  const validSelectedKey = runtimeSettingKeyValid(selectedKey) && selectedKey.startsWith("ui.app.");
   const [recovery, setRecovery] = useState<SettingRecovery | undefined>();
-  const [conflict, setConflict] = useState(false);
+  const [conflictKey, setConflictKey] = useState<string>();
   const { owner, principal, effectiveKey, scopedWriter } = useSettingsWorkspace();
   const access = useSettingsWriteAccess();
   const { reloadPending, setReloadPending } = useSettingsReloadNotice({
@@ -75,6 +80,20 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   );
   const globals = useMemo(() => consoleGlobalSettings(consoleSettings), [consoleSettings]);
   const featureRows = useMemo(() => buildConsoleFeatureRows(consoleSettings), [consoleSettings]);
+  const selectedGlobal = validSelectedKey
+    ? globals.find((setting) => setting.key === selectedKey)
+    : undefined;
+  const selectedFeature = validSelectedKey ? parseConsoleFeatureKey(selectedKey) : undefined;
+  const editing = selectedFeature
+    ? featureRows.find(
+        (row) =>
+          row.featureId === selectedFeature.featureId && row[selectedFeature.field]?.key === selectedKey,
+      )
+    : undefined;
+  const closeSelection = () => {
+    setConflictKey(undefined);
+    updateParams({ setting: undefined });
+  };
 
   const reviewedSettings = editing
     ? [editing.status, editing.roles, editing.rollout, editing.readonly].filter(
@@ -167,7 +186,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
     invalidates: [systemSettingsKeys.effective],
     onSuccess: (result) => {
       if (result.outcome === "conflict") {
-        setConflict(true);
+        setConflictKey(selectedKey);
       } else if (result.outcome === "reload_pending") {
         setReloadPending(result);
       } else {
@@ -257,7 +276,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
                         aria-label={`${consoleSettingLabels[setting.key] ?? setting.key} 편집`}
                         onClick={(event) => {
                           triggerRef.current = event.currentTarget;
-                          setSelectedGlobal({ ...setting });
+                          updateParams({ setting: setting.key }, { replace: false });
                         }}
                       >
                         편집
@@ -329,8 +348,9 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
                           aria-label={`${featureTitles.get(row.featureId) ?? row.featureId} 전환 설정 편집`}
                           onClick={(event) => {
                             triggerRef.current = event.currentTarget;
-                            setConflict(false);
-                            setEditing(row);
+                            setConflictKey(undefined);
+                            const first = row.status ?? row.roles ?? row.rollout ?? row.readonly;
+                            if (first) updateParams({ setting: first.key }, { replace: false });
                           }}
                         >
                           편집
@@ -347,12 +367,26 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
 
       <UpdatedAt at={settingsQuery.dataUpdatedAt} />
 
+      {selectedKey && !selectedGlobal && !editing ? (
+        <RuntimeSettingUnavailable
+          console
+          loading={settingsQuery.isPending}
+          error={settingsQuery.error}
+          valid={validSelectedKey}
+          onClose={closeSelection}
+          onRetry={() => void settingsQuery.refetch()}
+          returnFocusRef={triggerRef}
+        />
+      ) : null}
       <ConsoleFeatureDialog
+        selectedKey={selectedKey}
         open={editing !== undefined}
         onOpenChange={(next) => {
-          if (!next) setEditing(undefined);
+          if (!next) closeSelection();
         }}
-        disabledReason={conflict ? conflictMessage : permission.editable ? undefined : permission.reason}
+        disabledReason={
+          conflictKey === selectedKey ? conflictMessage : permission.editable ? undefined : permission.reason
+        }
         onSubmit={async (input) => {
           const result = await saveFeature.mutateAsync(input);
           // Keep the draft visible after a conflict, with saving disabled until
@@ -370,12 +404,16 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         featureWritable={access.allowed && !settingsQuery.isError}
         open={selectedGlobal !== undefined}
         onOpenChange={(next) => {
-          if (!next) setSelectedGlobal(undefined);
+          if (!next) closeSelection();
         }}
-        onRequestRevert={(setting) => setRecovery({ kind: "revert", setting })}
-        onRequestRollback={(setting, historyId, historyCount) =>
-          setRecovery({ kind: "rollback", setting, historyId, historyCount })
-        }
+        onRequestRevert={(setting) => {
+          closeSelection();
+          setRecovery({ kind: "revert", setting });
+        }}
+        onRequestRollback={(setting, historyId, historyCount) => {
+          closeSelection();
+          setRecovery({ kind: "rollback", setting, historyId, historyCount });
+        }}
         onSave={async (input) => {
           const result = await saveGlobal.mutateAsync(input);
           if (result.outcome === "conflict") throw result.error;

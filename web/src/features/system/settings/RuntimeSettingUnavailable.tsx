@@ -4,6 +4,7 @@ import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { QueryNotice } from "./SettingsParts";
 
 export function RuntimeSettingUnavailable({
+  console: isConsole = false,
   loading,
   error,
   valid,
@@ -11,6 +12,7 @@ export function RuntimeSettingUnavailable({
   onRetry,
   returnFocusRef,
 }: {
+  console?: boolean;
   loading: boolean;
   error: unknown;
   valid: boolean;
@@ -22,7 +24,9 @@ export function RuntimeSettingUnavailable({
     <Sheet
       open
       title="설정 상세"
-      description="주소에 지정된 런타임 설정을 확인합니다."
+      description={
+        isConsole ? "주소에 지정된 콘솔 전환 설정을 확인합니다." : "주소에 지정된 런타임 설정을 확인합니다."
+      }
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
@@ -40,7 +44,11 @@ export function RuntimeSettingUnavailable({
       ) : (
         <EmptyState
           title="설정을 찾을 수 없습니다."
-          description="런타임 목록에 없는 키입니다. ui.app 설정은 콘솔 전환 화면에서 확인하세요."
+          description={
+            isConsole
+              ? "콘솔 전환 목록에 없는 키입니다. 런타임 설정은 런타임 화면에서 확인하세요."
+              : "런타임 목록에 없는 키입니다. ui.app 설정은 콘솔 전환 화면에서 확인하세요."
+          }
         />
       )}
     </Sheet>

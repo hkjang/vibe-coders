@@ -26,6 +26,7 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
       !versionAtLeast(auth.backendVersion, "v0.86.97")
     )
       return false;
+    if (kind === "setting" && !versionAtLeast(auth.backendVersion, "v0.86.99")) return false;
     if (kind === "team" && !versionAtLeast(auth.backendVersion, "v0.86.79")) return false;
     if (kind === "account" && !versionAtLeast(auth.backendVersion, "v0.86.90")) return false;
     if (kind === "mcp_tool" && !versionAtLeast(auth.backendVersion, "v0.86.96")) return false;
@@ -140,6 +141,9 @@ function ResourceSearchContent({
         {allowed.includes("prompt_asset") ? "·프롬프트 자산" : ""}
         {allowed.includes("prompt_experiment") ? "·프롬프트 실험" : ""}의 이름을 검색합니다. 종류별 최대
         10개이며 업무 본문은 검색하지 않습니다.
+        {allowed.includes("setting")
+          ? " 설정은 키·범주·한글 설명으로 찾을 수 있으며 실제 값은 검색하지 않습니다."
+          : ""}
       </p>
       <label className="command-search">
         <span className="sr-only">자원 이름 검색</span>
@@ -248,6 +252,7 @@ function ResourceSearchContent({
               <strong>{item.title}</strong>
               <small>
                 {resourceSearchTargets[item.kind].title}
+                {item.kind === "setting" ? ` · ${item.id}` : ""}
                 {item.kind === "mcp_tool"
                   ? ` · ${item.server_label === "(none)" ? "서버 미지정" : item.server_label}`
                   : ""}

@@ -68,6 +68,7 @@ const allowedScenarios = [
   "AUTH-LIVE-042",
   "AUTH-LIVE-043",
   "AUTH-LIVE-044",
+  "AUTH-LIVE-045",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied

@@ -520,12 +520,20 @@ test("설정 초안은 실제 뒤로가기와 native 새로고침을 막고 폐�
   await expect(dialog.getByLabel("변경 사유")).toHaveValue("public navigation draft");
   await page.goBack();
   await guard(page).getByRole("button", { name: "변경 버리기" }).click();
+  // Opening a console editor now adds its own shareable history entry.
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("tab", { name: "콘솔 전환", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(new URL(page.url()).searchParams.has("setting")).toBe(false);
+  await expect(page.locator("#main-content")).toBeFocused();
+  await page.goBack();
   await expect(page.getByRole("tab", { name: "런타임 설정", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",
   );
   await expect(dialog).toBeHidden();
-  await expect(page.locator("#main-content")).toBeFocused();
   expect(api.writes).toHaveLength(0);
 });
 
