@@ -2547,19 +2547,34 @@ func isAlreadyExistsErr(err error) bool {
 }
 
 func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
+	return s.listAPIKeys(ctx, "", nil)
+}
+
+// ListAPIKeysByID applies the exact ID and authenticated team boundary before
+// reading the public catalog. It shares the existing revision projection.
+func (s *SQLStore) ListAPIKeysByID(ctx context.Context, id string, scopeTeam *string) ([]APIKeyPublic, error) {
+	where := " WHERE id = ?"
+	args := []any{id}
+	if scopeTeam != nil {
+		where += " AND COALESCE(team, '') = ?"
+		args = append(args, *scopeTeam)
+	}
+	return s.listAPIKeys(ctx, where, args)
+}
+
+func (s *SQLStore) listAPIKeys(ctx context.Context, where string, args []any) ([]APIKeyPublic, error) {
 	secret, err := s.apiKeyRevisionSecret(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(owner, ''), COALESCE(team, ''),
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, name, COALESCE(owner, ''), COALESCE(team, ''),
 		COALESCE(user_id, ''), COALESCE(service_account_id, ''), COALESCE(role, ''), status,
 		COALESCE(scopes, '[]'), COALESCE(allowed_ips, '[]'), COALESCE(allowed_models, '[]'), COALESCE(denied_models, '[]'),
 		COALESCE(allowed_providers, '[]'), COALESCE(denied_providers, '[]'), COALESCE(budget_limit_krw, 0),
 		COALESCE(expires_at, ''), COALESCE(revoked_at, ''), created_at, key_hash,
 		COALESCE((SELECT new_key_id FROM api_key_rotations WHERE old_key_id = api_keys.id), ''),
 		COALESCE((SELECT grace_ends_at FROM api_key_rotations WHERE old_key_id = api_keys.id), '')
-		FROM api_keys
-		ORDER BY created_at DESC`)
+		FROM api_keys`+where+` ORDER BY created_at DESC`), args...)
 	if err != nil {
 		return nil, err
 	}

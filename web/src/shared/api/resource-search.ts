@@ -15,6 +15,7 @@ export const resourceKindSchema = z.enum([
   "prompt_asset",
   "prompt_experiment",
   "setting",
+  "api_key",
 ]);
 export type ResourceKind = z.infer<typeof resourceKindSchema>;
 const boundedText = (characters: number) =>
@@ -43,7 +44,7 @@ export const resourceSearchSchema = z.strictObject({
           .max(10),
       }),
     )
-    .max(12),
+    .max(13),
 }) satisfies z.ZodType<PostAdminResourceSearchResponse>;
 
 export const resourceSearchEndpoint = operation<

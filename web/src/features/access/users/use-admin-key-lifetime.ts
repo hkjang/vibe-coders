@@ -2,7 +2,11 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { AppError, isAppError } from "@/shared/api/error";
 
 /** A denied read locks this owner for the remainder of the mounted screen. */
-export function useAdminKeyLifetime(error: unknown, assertWritable: () => void) {
+export function useAdminKeyLifetime(
+  error: unknown,
+  assertWritable: () => void,
+  readIsCurrent: () => boolean,
+) {
   const mounted = useRef(false);
   useLayoutEffect(() => {
     mounted.current = true;
@@ -20,7 +24,7 @@ export function useAdminKeyLifetime(error: unknown, assertWritable: () => void) 
   useLayoutEffect(() => {
     deniedRef.current = denied;
   }, [denied]);
-  const ownsResult = () => mounted.current && !deniedRef.current;
+  const ownsResult = () => mounted.current && !deniedRef.current && readIsCurrent();
   return {
     denied,
     ownsResult,

@@ -22,6 +22,7 @@ var resourceSearchFeatures = map[string]string{
 	"policy":            "governance.policies",
 	"team":              "access.users",
 	"account":           "access.users",
+	"api_key":           "access.users",
 	"prompt_asset":      "prompts.library",
 	"prompt_experiment": "prompts.lab",
 	"setting":           "system.settings",
@@ -137,14 +138,16 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			var rows []store.ResourceMetadata
 			var more bool
 			var err error
-			if kind == "team" || kind == "account" {
+			if kind == "team" || kind == "account" || kind == "api_key" {
 				var scopeTeam *string
 				if user.Role == "team_admin" {
 					// Reuse the already verified identity. A later failed token
 					// lookup must never turn a scoped request into an unscoped one.
 					scopeTeam = &user.TeamID
 				}
-				if kind == "account" {
+				if kind == "api_key" {
+					rows, more, err = s.db.SearchAPIKeyMetadata(ctx, input.Query, 10, scopeTeam)
+				} else if kind == "account" {
 					rows, more, err = s.db.SearchAuthAccountMetadata(ctx, input.Query, 10, scopeTeam)
 				} else {
 					rows, more, err = s.db.SearchAuthTeamMetadata(ctx, input.Query, 10, scopeTeam)
@@ -158,6 +161,9 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			} else {
 				group.Limited = more
 				for _, row := range rows {
+					if kind == "api_key" && !validAPIKeyDetailID(row.ID) {
+						continue
+					}
 					// Existing prompt detail routes accept at most 512 UTF-16 code units.
 					if (kind == "prompt_asset" || kind == "prompt_experiment") && len(utf16.Encode([]rune(row.ID))) > 512 {
 						continue

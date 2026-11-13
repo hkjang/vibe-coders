@@ -1,3 +1,4 @@
+import { featureOwnedKey, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
@@ -16,23 +17,24 @@ interface Catalog {
   edit_review_supported?: boolean;
 }
 
-export function useKeyEditReview(target: Pick<ApiKeyPublic, "id" | "revision">, owner?: string) {
+export function useKeyEditReview(
+  target: Pick<ApiKeyPublic, "id" | "revision">,
+  owner?: string,
+  readOwner?: FeatureReadOwner,
+) {
   const client = useQueryClient();
+  const catalogKey = owner ? [...accessKeys.apiKeys, owner] : accessKeys.apiKeys;
+  const ownedCatalogKey = readOwner ? featureOwnedKey(catalogKey, readOwner) : catalogKey;
   const [baseline] = useState(() => ({ ...target }));
   const [attempted, setAttempted] = useState(false);
   const attempt = useRef(false);
   const confirmation = useRef<HTMLInputElement>(null);
   const state = useSyncExternalStore(
     useCallback((notify) => client.getQueryCache().subscribe(notify), [client]),
-    useCallback(
-      () => client.getQueryState<Catalog>(owner ? [...accessKeys.apiKeys, owner] : accessKeys.apiKeys),
-      [client, owner],
-    ),
+    useCallback(() => client.getQueryState<Catalog>(ownedCatalogKey), [client, ownedCatalogKey]),
   );
   function isCurrent() {
-    const current = client.getQueryState<Catalog>(
-      owner ? [...accessKeys.apiKeys, owner] : accessKeys.apiKeys,
-    );
+    const current = client.getQueryState<Catalog>(ownedCatalogKey);
     const matches = current?.data?.api_keys.filter((row) => row.id === baseline.id) ?? [];
     return (
       current?.status === "success" &&

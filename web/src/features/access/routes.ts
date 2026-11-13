@@ -14,7 +14,7 @@ export const accessFeatureModules = defineFeatureModules([
       { path: "accounts", load: () => import("./users/AccountsPage").then((module) => module.AccountsPage) },
       { path: "ips", load: () => import("./users/IpUsagePage").then((module) => module.IpUsagePage) },
     ],
-    queryKeys: ["tab", ...ipQueryKeys, ...accountQueryKeys, ...registeredTeamQueryKeys],
+    queryKeys: ["tab", "api_key_id", ...ipQueryKeys, ...accountQueryKeys, ...registeredTeamQueryKeys],
   },
   {
     featureId: "me.home",
