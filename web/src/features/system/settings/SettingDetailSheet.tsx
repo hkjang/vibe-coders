@@ -101,6 +101,11 @@ function SettingEditor({
       // The router owns a confirmed departure. A second URL update here would
       // replace the destination or change the browser history index.
       if (reason === "navigation") {
+        // POP/loader completion is asynchronous. Clear the discarded draft now
+        // so an intervening query render cannot register it as dirty again.
+        setValue(initialValue);
+        setReason("");
+        setError(undefined);
         // Radix closes after the route commits. Restore the same destination
         // as the navigation coordinator instead of racing its focus with the old trigger.
         returnFocusRef.current = document.getElementById("main-content");

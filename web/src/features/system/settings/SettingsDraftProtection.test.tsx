@@ -74,7 +74,13 @@ function Harness({
         <ConsoleFeatureDialog
           open={open}
           onOpenChange={setOpen}
-          row={{ featureId: "system.settings", status: { ...current, value: "legacy" } }}
+          row={{
+            featureId: "system.settings",
+            status: { ...current, value: "legacy" },
+            roles: { ...current, value: "admin" },
+            rollout: { ...current, value: "30" },
+            readonly: { ...current, value: "false" },
+          }}
           title="전환 설정"
           disabledReason={undefined}
           pending={false}
@@ -120,6 +126,50 @@ function setup(ui: React.ReactNode) {
 }
 
 describe.each(["detail", "feature"] as const)("%s 설정 초안 보호", (mode) => {
+  it("경로 폐기를 승인하면 이동 완료 전 재렌더에도 초안과 이동 차단을 되살리지 않는다", async () => {
+    const user = userEvent.setup();
+    const coordinator = new UnsavedChangesCoordinator();
+    const proceed = vi.fn();
+    const save = vi.fn(async () => undefined);
+    const tree = () => (
+      <UnsavedChangesContext.Provider value={coordinator}>
+        <Harness mode={mode} save={save} />
+      </UnsavedChangesContext.Provider>
+    );
+    const view = setup(tree());
+    await user.click(screen.getByRole("button", { name: "편집 열기" }));
+    const value =
+      mode === "detail"
+        ? screen.getByRole("textbox", { name: "새 값" })
+        : screen.getByRole("combobox", { name: "전환 상태" });
+    if (mode === "detail") await user.type(value, "/discarded-draft");
+    else {
+      await user.selectOptions(value, "preview");
+      await user.type(screen.getByLabelText("미리보기 대상 역할"), ",viewer");
+      await user.clear(screen.getByLabelText("점진 배포 비율(%)"));
+      await user.type(screen.getByLabelText("점진 배포 비율(%)"), "80");
+      await user.selectOptions(screen.getByLabelText("읽기 전용 강제"), "true");
+    }
+    await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "폐기할 사유");
+    act(() => {
+      coordinator.requestNavigation({ proceed, reset: vi.fn() });
+      coordinator.discardConfirmed();
+    });
+    // Browser POP and loaders may complete later. A query notification can
+    // rerender the still-mounted editor in between approval and unmount.
+    view.rerender(tree());
+    expect(proceed).toHaveBeenCalledOnce();
+    expect(coordinator.shouldBlock()).toBe(false);
+    expect(value).toHaveValue(mode === "detail" ? setting.value : "legacy");
+    expect(screen.getByRole("textbox", { name: "변경 사유" })).toHaveValue("");
+    if (mode === "feature") {
+      expect(screen.getByLabelText("미리보기 대상 역할")).toHaveValue("admin");
+      expect(screen.getByLabelText("점진 배포 비율(%)")).toHaveValue(30);
+      expect(screen.getByLabelText("읽기 전용 강제")).toHaveValue("false");
+    }
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("사유만 변경해도 경고하고 계속 편집 포커스·원복·폐기를 보존한다", async () => {
     const user = userEvent.setup();
     setup(<Harness mode={mode} />);
@@ -225,6 +275,24 @@ describe.each(["detail", "feature"] as const)("%s 설정 초안 보호", (mode) 
 });
 
 describe("설정 snapshot과 복구 전환", () => {
+  it("경로 폐기 시 이동 완료를 기다리지 않고 입력한 비밀값을 지운다", async () => {
+    const user = userEvent.setup();
+    const coordinator = new UnsavedChangesCoordinator();
+    setup(
+      <UnsavedChangesContext.Provider value={coordinator}>
+        <Harness current={{ ...setting, is_secret: true, value: "masked" }} />
+      </UnsavedChangesContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "편집 열기" }));
+    await user.type(screen.getByLabelText("새 비밀값"), "discarded-public-test-value");
+    act(() => {
+      coordinator.requestNavigation({ proceed: vi.fn(), reset: vi.fn() });
+      coordinator.discardConfirmed();
+    });
+    expect(screen.getByLabelText("새 비밀값")).toHaveValue("");
+    expect(coordinator.shouldBlock()).toBe(false);
+  });
+
   it("같은 key의 새 prop가 도착해도 열린 값과 CAS 버전을 함께 고정한다", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async (input: SettingSaveInput) => {
