@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { tokenStore } from "@/shared/auth/token-store";
 
@@ -9,7 +9,7 @@ import { systemSettingsKeys, type useEffectiveSettings } from "./use-system-sett
 type Settings = NonNullable<ReturnType<typeof useEffectiveSettings>["data"]>;
 type Notice = { requestId?: string };
 type StoredNotice = SettingReloadPendingNotice & { sessionEpoch: number; queryGeneration: number };
-const noticeKey = ["system", "settings", "reload-pending-notice"] as const;
+const baseNoticeKey = ["system", "settings", "reload-pending-notice"] as const;
 // Opaque browser-memory identities distinguish a recreated (GC/removed) query
 // whose dataUpdateCount starts over. No setting values or query objects are
 // retained in the notice. Weak keys do not keep discarded queries alive.
@@ -27,7 +27,17 @@ function queryGeneration(query: object | undefined): number {
 
 /** Session-local failure evidence survives tab/route unmount and cached
  * "applied" data until a newer successful read confirms convergence. */
-export function useSettingsReloadNotice() {
+export function useSettingsReloadNotice(options?: {
+  effectiveKey: readonly unknown[];
+  principal: string;
+  isCurrent: () => boolean;
+}) {
+  const effectiveKey = options?.effectiveKey ?? systemSettingsKeys.effective;
+  const principal = options?.principal;
+  const noticeKey = useMemo(
+    () => (principal === undefined ? baseNoticeKey : [...baseNoticeKey, principal]),
+    [principal],
+  );
   const client = useQueryClient();
   const sessionEpoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   // Cache only outcome metadata, never drafts/secrets or browser storage. Auth
@@ -40,13 +50,14 @@ export function useSettingsReloadNotice() {
     gcTime: Infinity,
   });
   const subscribe = useCallback((changed: () => void) => client.getQueryCache().subscribe(changed), [client]);
-  const snapshot = useCallback(() => client.getQueryState<Settings>(systemSettingsKeys.effective), [client]);
-  const noticeSnapshot = useCallback(() => client.getQueryData<StoredNotice | null>(noticeKey), [client]);
+  const snapshot = useCallback(() => client.getQueryState<Settings>(effectiveKey), [client, effectiveKey]);
+  const noticeSnapshot = useCallback(
+    () => client.getQueryData<StoredNotice | null>(noticeKey),
+    [client, noticeKey],
+  );
   const state = useSyncExternalStore(subscribe, snapshot, snapshot);
   const local = useSyncExternalStore(subscribe, noticeSnapshot, noticeSnapshot);
-  const generation = queryGeneration(
-    client.getQueryCache().find({ queryKey: systemSettingsKeys.effective, exact: true }),
-  );
+  const generation = queryGeneration(client.getQueryCache().find({ queryKey: effectiveKey, exact: true }));
   const staleSession = Boolean(local && local.sessionEpoch !== sessionEpoch);
   const converged = Boolean(
     local &&
@@ -65,17 +76,17 @@ export function useSettingsReloadNotice() {
     if ((converged || staleSession) && client.getQueryData(noticeKey) === local) {
       client.setQueryData(noticeKey, null);
     }
-  }, [client, converged, local, staleSession]);
+  }, [client, converged, local, staleSession, noticeKey]);
   const setReloadPending = (notice: SettingReloadPendingNotice | undefined): void => {
     // A callback retained by an unmounted/old session cannot repopulate metadata.
-    if (sessionEpoch !== tokenStore.getSessionEpoch()) return;
+    if (sessionEpoch !== tokenStore.getSessionEpoch() || (options && !options.isCurrent())) return;
     const stored: StoredNotice | null = notice
       ? {
           ...(notice.requestId === undefined ? {} : { requestId: notice.requestId }),
           observedUpdates: notice.observedUpdates,
           sessionEpoch,
           queryGeneration: queryGeneration(
-            client.getQueryCache().find({ queryKey: systemSettingsKeys.effective, exact: true }),
+            client.getQueryCache().find({ queryKey: effectiveKey, exact: true }),
           ),
         }
       : null;

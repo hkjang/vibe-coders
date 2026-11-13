@@ -1,3 +1,4 @@
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
@@ -79,10 +80,15 @@ function setup(fixture: (typeof cases)[number], overrides: Record<string, ApiHan
     }),
     ...overrides,
   });
-  const view = renderScreen(<SystemSettingsPage />, {
-    path: "/system/settings",
-    route: `/system/settings?tab=${fixture.tab}`,
-  });
+  const view = renderScreen(
+    <FeatureAccessHarness featureId="system.settings">
+      <SystemSettingsPage />
+    </FeatureAccessHarness>,
+    {
+      path: "/system/settings",
+      route: `/system/settings?tab=${fixture.tab}`,
+    },
+  );
   return { ...view, api, state };
 }
 
@@ -176,7 +182,7 @@ describe.each(cases)("$tab 설정 저장 계약", (fixture) => {
     });
     await waitFor(() => expect(action).toBeEnabled());
     await user.click(action);
-    await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "후속 복구 검토");
+    await user.type(await screen.findByRole("textbox", { name: "변경 사유" }), "후속 복구 검토");
     await user.click(screen.getByRole("button", { name: kind === "revert" ? "되돌리기" : "롤백" }));
     if (outcome === "saved") {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -207,9 +213,11 @@ describe.each(cases)("$tab 설정 저장 계약", (fixture) => {
     });
     await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
     await changeValue(user, fixture.draft);
-    await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "열린 초안");
+    await user.type(await screen.findByRole("textbox", { name: "변경 사유" }), "열린 초안");
     state.setting = { ...state.setting, value: fixture.next, version: 8 };
-    act(() => client.setQueryData(systemSettingsKeys.effective, { settings: [state.setting] }));
+    act(() =>
+      client.setQueriesData({ queryKey: systemSettingsKeys.effective }, { settings: [state.setting] }),
+    );
     await user.click(screen.getByRole("button", { name: "저장" }));
     expect(await screen.findByText("다른 작업자가 설정을 변경했습니다.")).toBeVisible();
     expect(screen.getByLabelText("새 값")).toHaveValue(fixture.draft);
@@ -282,7 +290,7 @@ describe.each(cases)("$tab 설정 저장 계약", (fixture) => {
           : "POST /admin/settings/rollback";
       const { api } = setup(fixture, { [endpoint]: () => response });
       await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
-      await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "버릴 수정 사유");
+      await user.type(await screen.findByRole("textbox", { name: "변경 사유" }), "버릴 수정 사유");
       const action = screen.getByRole("button", {
         name: kind === "revert" ? "기본값(환경변수)으로 되돌리기" : "이전 값으로 롤백",
       });
@@ -409,10 +417,14 @@ describe("복구 이력 snapshot", () => {
       "GET /admin/settings/history": () => pending,
       "POST /admin/settings/rollback": () => fixture.setting,
     });
-    client.setQueryData(
-      systemSettingsKeys.history(fixture.setting.key),
-      history(fixture.setting, "cached-old"),
-    );
+    await screen.findByRole("button", { name: fixture.openLabel });
+    const ownerKey = client
+      .getQueryCache()
+      .find({ queryKey: systemSettingsKeys.effective, exact: false })
+      ?.queryKey.slice(-2);
+    if (!ownerKey) throw new Error("설정 조회 소유자 없음");
+    const historyKey = [...systemSettingsKeys.history(fixture.setting.key), ...ownerKey];
+    client.setQueryData(historyKey, history(fixture.setting, "cached-old"));
     await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
     expect(screen.getByRole("button", { name: "이전 값으로 롤백" })).toBeDisabled();
     expect(screen.getByText("변경 이력을 불러오는 중입니다.")).toBeVisible();
@@ -420,14 +432,9 @@ describe("복구 이력 snapshot", () => {
     await act(async () => release(history(fixture.setting, "fresh-read", 2)));
     const action = screen.getByRole("button", { name: "이전 값으로 롤백" });
     await waitFor(() => expect(action).toBeEnabled());
-    act(() =>
-      client.setQueryData(
-        systemSettingsKeys.history(fixture.setting.key),
-        history(fixture.setting, "later-unreviewed", 3),
-      ),
-    );
+    act(() => client.setQueryData(historyKey, history(fixture.setting, "later-unreviewed", 3)));
     await user.click(action);
-    await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "확인한 이력");
+    await user.type(await screen.findByRole("textbox", { name: "변경 사유" }), "확인한 이력");
     await user.click(screen.getByRole("button", { name: "롤백" }));
     await waitFor(() =>
       expect(api.bodies("POST /admin/settings/rollback")).toEqual([
@@ -499,7 +506,7 @@ describe("복구 이력 snapshot", () => {
     const action = screen.getByRole("button", { name: "이전 값으로 롤백" });
     await waitFor(() => expect(action).toBeEnabled());
     await user.click(action);
-    await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "삭제 취소");
+    await user.type(await screen.findByRole("textbox", { name: "변경 사유" }), "삭제 취소");
     await user.click(screen.getByRole("button", { name: "롤백" }));
     await waitFor(() =>
       expect(api.bodies("POST /admin/settings/rollback")).toEqual([
@@ -531,7 +538,7 @@ describe("복구 이력 snapshot", () => {
     const action = screen.getByRole("button", { name: "이전 값으로 롤백" });
     await waitFor(() => expect(action).toBeEnabled());
     await user.click(action);
-    await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "검토한 이유");
+    await user.type(await screen.findByRole("textbox", { name: "변경 사유" }), "검토한 이유");
     await user.click(screen.getByRole("button", { name: "롤백" }));
     if (status === 409) {
       expect(await screen.findByText("현재 기준으로 설정을 복구할 수 없습니다.")).toBeVisible();

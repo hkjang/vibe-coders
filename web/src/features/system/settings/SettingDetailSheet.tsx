@@ -8,6 +8,7 @@ import {
   settingEditPermission,
   settingSourceLabel,
 } from "@/features/system/settings/settings-utils";
+import { useSettingsWorkspace } from "./settings-workspace-context";
 import { useSettingHistory } from "@/features/system/settings/use-system-settings";
 import type { EffectiveSetting, SettingHistoryEntry } from "@/shared/api/domains/system.schemas";
 import { isAppError } from "@/shared/api/error";
@@ -38,6 +39,7 @@ export interface SettingSaveInput {
  */
 function SettingEditor({
   hasAdminWrite,
+  featureWritable = true,
   onOpenChange,
   onRequestRevert,
   onRequestRollback,
@@ -46,6 +48,7 @@ function SettingEditor({
   returnFocusRef,
   setting: initialSetting,
 }: SettingDetailSheetProps & { setting: EffectiveSetting }): React.JSX.Element {
+  const { scopedWriter } = useSettingsWorkspace();
   const formId = useId();
   // Value and version share one immutable opening snapshot. Query refetches
   // cannot silently upgrade CAS while the operator is editing an older value.
@@ -67,7 +70,7 @@ function SettingEditor({
     history.data
   )
     setHistorySnapshot([...history.data.history]);
-  const permission = settingEditPermission(initialSetting, hasAdminWrite);
+  const permission = settingEditPermission(initialSetting, hasAdminWrite, featureWritable, scopedWriter);
   const historyRows = historySnapshot ?? [];
   const latestHistory = historyRows[0];
   const count = latestHistory?.history_count;
@@ -94,7 +97,15 @@ function SettingEditor({
         ? normalizedBoolean(value) !== normalizedBoolean(initialValue)
         : value !== initialValue) || reason !== "",
     externalPending,
-    onDiscard: () => onOpenChange(false),
+    onDiscard: (reason) => {
+      // The router owns a confirmed departure. A second URL update here would
+      // replace the destination or change the browser history index.
+      if (reason === "navigation") {
+        // Radix closes after the route commits. Restore the same destination
+        // as the navigation coordinator instead of racing its focus with the old trigger.
+        returnFocusRef.current = document.getElementById("main-content");
+      } else onOpenChange(false);
+    },
   });
 
   const submit = async (): Promise<void> => {
@@ -369,6 +380,7 @@ function SettingEditor({
 
 interface SettingDetailSheetProps {
   hasAdminWrite: boolean;
+  featureWritable?: boolean;
   onOpenChange: (open: boolean) => void;
   onRequestRevert: (setting: EffectiveSetting) => void;
   onRequestRollback: (setting: EffectiveSetting, historyId: string, historyCount: number) => void;

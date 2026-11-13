@@ -27,6 +27,10 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             {
+              name: "settings-recovery-shared",
+              test: /[\\/]features[\\/]system[\\/]settings[\\/](settings-utils|use-system-settings|setting-save-outcome|settings-workspace-context|use-settings-mutation)\.(ts|tsx)$/u,
+            },
+            {
               name: "routing-editing-shared",
               test: /[\\/]features[\\/]routing[\\/]rules[\\/](routing-toggle-state|routing-rule-create-state|routing-rule-create-operation|RoutingRuleCreateFields)\.(ts|tsx)$/u,
             },

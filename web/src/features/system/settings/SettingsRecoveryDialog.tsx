@@ -18,7 +18,8 @@ import { Dialog } from "@/shared/components/ui/Dialog";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useSettingsMutation } from "./use-settings-mutation";
+import { useSettingsWorkspace } from "./settings-workspace-context";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
 import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
 import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
@@ -29,6 +30,7 @@ export type SettingRecovery = { setting: EffectiveSetting } & (
 
 interface Props {
   hasAdminWrite: boolean;
+  featureWritable?: boolean;
   onClose: () => void;
   onReloadPending: (notice: SettingReloadPendingNotice) => void;
   onSaved: () => void;
@@ -38,18 +40,20 @@ interface Props {
 
 function RecoveryEditor({
   hasAdminWrite,
+  featureWritable = true,
   onClose,
   onReloadPending,
   onSaved,
   request,
   returnFocusRef,
 }: Props & { request: SettingRecovery }): React.JSX.Element {
+  const { effectiveKey, scopedWriter } = useSettingsWorkspace();
   const [snapshot] = useState(request);
   const [reason, setReason] = useState("");
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<{ message: string; requestId?: string }>();
   const { kind, setting } = snapshot;
-  const permission = settingEditPermission(setting, hasAdminWrite);
+  const permission = settingEditPermission(request.setting, hasAdminWrite, featureWritable, scopedWriter);
   const allowed =
     permission.editable &&
     (kind === "revert"
@@ -59,8 +63,11 @@ function RecoveryEditor({
         Number.isSafeInteger(snapshot.historyCount) &&
         snapshot.historyCount > 0);
   const guard = useDraftGuard({ dirty: reason !== "", onDiscard: onClose });
-  const settingSaveOutcome = useSettingSaveOutcome();
-  const save = useMutationFeedback({
+
+  const settingSaveOutcome = useSettingSaveOutcome(effectiveKey);
+  const save = useSettingsMutation({
+    errorMessage: "설정을 복구하지 못했습니다.",
+    authorized: hasAdminWrite || scopedWriter,
     mutate: async (note: string) => {
       if (!allowed) throw new Error("이 설정을 복구할 권한이 없습니다.");
       const api = endpoints.domains.system.settings;

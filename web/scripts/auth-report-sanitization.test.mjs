@@ -66,6 +66,8 @@ const allowedScenarios = [
   "AUTH-LIVE-040",
   "AUTH-LIVE-041",
   "AUTH-LIVE-042",
+  "AUTH-LIVE-043",
+  "AUTH-LIVE-044",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -250,23 +252,25 @@ test("auth reporter does not serialize a global error when no scenario has finis
 test("auth reporter allows only fixed scenarios and numeric lines from exact spec basenames", async () => {
   const fixtures = allowedScenarios.map((id, index) => {
     const filename =
-      index >= 38
-        ? "execution-receipts-live.spec.ts"
-        : index < 5
-          ? "auth-live.spec.ts"
-          : index === 10
-            ? "recovery-live.spec.ts"
-            : index >= 11 && index <= 13
-              ? "change-set-live.spec.ts"
-              : index === 14
-                ? "resource-search-live.spec.ts"
-                : index >= 20
-                  ? "admin-key-revoke-live.spec.ts"
-                  : index >= 18
-                    ? "me-key-rotation-live.spec.ts"
-                    : index >= 15
-                      ? "operations-live.spec.ts"
-                      : "access-live.spec.ts";
+      index >= 42
+        ? "settings-workspace-live.spec.ts"
+        : index >= 38
+          ? "execution-receipts-live.spec.ts"
+          : index < 5
+            ? "auth-live.spec.ts"
+            : index === 10
+              ? "recovery-live.spec.ts"
+              : index >= 11 && index <= 13
+                ? "change-set-live.spec.ts"
+                : index === 14
+                  ? "resource-search-live.spec.ts"
+                  : index >= 20
+                    ? "admin-key-revoke-live.spec.ts"
+                    : index >= 18
+                      ? "me-key-rotation-live.spec.ts"
+                      : index >= 15
+                        ? "operations-live.spec.ts"
+                        : "access-live.spec.ts";
     const file = index % 2 === 0 ? `/private/${sensitive}/${filename}` : `C:\\private\\${filename}`;
     const fixture = row(id, "passed", [{ title: sensitive, location: { file, line: index + 1, column: 1 } }]);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (${file}:${index + 21}:2)`;

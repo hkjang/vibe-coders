@@ -31,6 +31,7 @@ export default defineConfig({
     "mcp-risk-live.spec.ts",
     "routing-order-live.spec.ts",
     "execution-receipts-live.spec.ts",
+    "settings-workspace-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,
