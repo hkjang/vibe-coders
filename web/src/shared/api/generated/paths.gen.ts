@@ -834,6 +834,7 @@ export const openApiOperations = [
   { method: "GET", path: "/admin/roles" },
   { method: "POST", path: "/admin/roles" },
   { method: "GET", path: "/admin/routing-rules" },
+  { method: "PATCH", path: "/admin/routing-rules" },
   { method: "POST", path: "/admin/routing-rules" },
   { method: "DELETE", path: "/admin/routing-rules/{id}" },
   { method: "PATCH", path: "/admin/routing-rules/{id}" },

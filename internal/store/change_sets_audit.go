@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"errors"
 	"fmt"
 	"time"
@@ -20,7 +19,7 @@ func (s *SQLStore) CreateChangeSetAudited(ctx context.Context, cs ChangeSet, aud
 		return ChangeSet{}, errors.New("invalid change set draft")
 	}
 	var created ChangeSet
-	err := s.changeSetAuditedTransaction(ctx, audit, func(tx *sql.Tx) error {
+	err := s.withAdminAuditTransaction(ctx, audit, func(tx *sql.Tx) error {
 		var err error
 		created, err = s.insertChangeSet(ctx, tx, cs)
 		return err
@@ -40,7 +39,7 @@ func (s *SQLStore) DeleteChangeSetAudited(ctx context.Context, cs ChangeSet, aud
 	if cs.Status == "apply_pending" || cs.Status == "rollback_pending" {
 		return ErrChangeSetRecoveryPending
 	}
-	return s.changeSetAuditedTransaction(ctx, audit, func(tx *sql.Tx) error {
+	return s.withAdminAuditTransaction(ctx, audit, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, s.bind(`DELETE FROM change_sets WHERE id = ? AND status = ? AND updated_at = ?`), cs.ID, cs.Status, cs.UpdatedAt)
 		if err != nil {
 			return err
@@ -66,7 +65,7 @@ func (s *SQLStore) TransitionChangeSetAudited(ctx context.Context, next ChangeSe
 	}
 	expectedRevision := next.UpdatedAt
 	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	err := s.changeSetAuditedTransaction(ctx, audit, func(tx *sql.Tx) error {
+	err := s.withAdminAuditTransaction(ctx, audit, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, s.bind(`UPDATE change_sets SET status = ?, reviewer = ?, note = ?, updated_at = ?
 			WHERE id = ? AND status = ? AND updated_at = ?`), next.Status, next.Reviewer, next.Note, next.UpdatedAt,
 			next.ID, expectedStatus, expectedRevision)
@@ -96,7 +95,7 @@ func (s *SQLStore) StageChangeSetSettingsAudited(ctx context.Context, cs ChangeS
 		return ChangeSet{}, errors.New("invalid change set persistence transition")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	err := s.changeSetAuditedTransaction(ctx, audit, func(tx *sql.Tx) error {
+	err := s.withAdminAuditTransaction(ctx, audit, func(tx *sql.Tx) error {
 		return s.stageChangeSetSettingsTx(ctx, tx, cs, expectedStatus, changedBy, reason, settings, now)
 	})
 	if err != nil {
@@ -117,7 +116,7 @@ func (s *SQLStore) FinalizeChangeSetAudited(ctx context.Context, cs ChangeSet, p
 	}
 	next := cs
 	next.Status, next.UpdatedAt = finalStatus, time.Now().UTC().Format(time.RFC3339Nano)
-	err := s.changeSetAuditedTransaction(ctx, audit, func(tx *sql.Tx) error {
+	err := s.withAdminAuditTransaction(ctx, audit, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, s.bind(`UPDATE change_sets SET status = ?, updated_at = ?
 			WHERE id = ? AND status = ? AND updated_at = ?`), next.Status, next.UpdatedAt, cs.ID, pendingStatus, cs.UpdatedAt)
 		if err != nil {
@@ -151,38 +150,4 @@ func (s *SQLStore) FinalizeChangeSetAudited(ctx context.Context, cs ChangeSet, p
 		return ChangeSet{}, false, err
 	}
 	return next, true, nil
-}
-
-func (s *SQLStore) changeSetAuditedTransaction(ctx context.Context, audit AdminAuditLog, mutate func(*sql.Tx) error) error {
-	if audit.ID == "" || audit.Action == "" {
-		return errors.New("change set audit identity and action are required")
-	}
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := mutate(tx); err != nil {
-		return err
-	}
-	if err := s.insertAdminAudit(ctx, tx, audit); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		// Match runtime flag transactions: SQLite may retain an SQL transaction
-		// after database/sql has marked a failed COMMIT's Tx done.
-		_ = tx.Rollback()
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		if _, cleanupErr := conn.ExecContext(cleanupCtx, "ROLLBACK"); cleanupErr != nil {
-			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		}
-		return err
-	}
-	return nil
 }

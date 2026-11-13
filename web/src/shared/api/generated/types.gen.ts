@@ -2867,6 +2867,51 @@ export type RoutingLearningReport = {
     since: string;
 };
 
+export type RoutingOrderDecision = {
+    applied: boolean;
+    matched_rule_id: string;
+    target_model: string;
+    target_provider: string;
+};
+
+export type RoutingOrderPreviewRequest = {
+    complexity: number;
+    model: string;
+    rule_order: Array<string>;
+    rule_revision: string;
+};
+
+export type RoutingOrderPreviewResponse = {
+    after: RoutingOrderDecision;
+    ambiguous_before_order: boolean;
+    before: RoutingOrderDecision;
+    revision: string;
+    stage: 'complexity_rules';
+};
+
+export type RoutingOrderRequest = {
+    expected_revision: string;
+    order: Array<string>;
+    /**
+     * Required nonblank reason, trimmed before auditing; limit is Unicode code points.
+     */
+    reason: string;
+};
+
+export type RoutingOrderSnapshot = {
+    ambiguous_ties: boolean;
+    revision: string;
+    rules: Array<RoutingRuleView>;
+};
+
+export type RoutingPreviewRequest = RoutingOrderPreviewRequest | {
+    [key: string]: unknown;
+};
+
+export type RoutingPreviewResponse = RoutingOrderPreviewResponse | {
+    [key: string]: unknown;
+};
+
 /**
  * Eight known optional/nullable fields describe the existing Go decoder input; after decoding, target_model must be nonblank. Canonical required keys are not imposed because existing case-insensitive aliases remain accepted. Absent fields or fields supplied only as null begin with Go zero values, except enabled defaults to true; these are create defaults, not preservation of an existing row. ID and created_at are server-assigned and unknown input fields are ignored. No new string-length limit, provider/model existence check or strict JSON parser is introduced.
  */
@@ -2956,6 +3001,8 @@ export type RoutingRulePatchRequest = {
     target_provider?: string | null;
     [key: string]: unknown;
 } | null;
+
+export type RoutingRuleReadResponse = RoutingRuleListResponse | RoutingOrderSnapshot;
 
 export type RoutingRuleView = {
     /**
@@ -10711,17 +10758,27 @@ export type PostAdminRolesResponses = {
 export type GetAdminRoutingRulesData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: 'order';
+    };
     url: '/admin/routing-rules';
 };
 
 export type GetAdminRoutingRulesErrors = {
     /**
-     * Existing authentication/scope rejection: invalid_api_key. GET requires routing:read; PATCH requires routing:write. Legacy read-only credentials cannot PATCH.
+     * invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB.
+     */
+    400: AppError;
+    /**
+     * Existing invalid_api_key authentication or routing scope rejection. Reading and comparison require routing:read; order writes require both routing:read and routing:write. Existing legacy readonly tokens permit GET but still reject POST preview.
      */
     401: AppError;
     /**
-     * routing_rules_failed: stored list could not be read.
+     * routing_order_limit: more than 1000 stored rules or a legacy identifier outside safe order bounds; no partial snapshot or mutation is returned.
+     */
+    422: AppError;
+    /**
+     * routing_order_failed: read, transaction or audit failed. An unconfirmed response is not evidence that a write was not applied; never automatically retry a mutation.
      */
     500: AppError;
     /**
@@ -10736,10 +10793,55 @@ export type GetAdminRoutingRulesResponses = {
     /**
      * OK
      */
-    200: RoutingRuleListResponse;
+    200: RoutingRuleReadResponse;
 };
 
 export type GetAdminRoutingRulesResponse = GetAdminRoutingRulesResponses[keyof GetAdminRoutingRulesResponses];
+
+export type PatchAdminRoutingRulesData = {
+    body: RoutingOrderRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/routing-rules';
+};
+
+export type PatchAdminRoutingRulesErrors = {
+    /**
+     * invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB.
+     */
+    400: AppError;
+    /**
+     * Existing invalid_api_key authentication or routing scope rejection. Reading and comparison require routing:read; order writes require both routing:read and routing:write. Existing legacy readonly tokens permit GET but still reject POST preview.
+     */
+    401: AppError;
+    /**
+     * routing_order_conflict: reviewed configuration differs from current configuration; reload and review again.
+     */
+    409: AppError;
+    /**
+     * routing_order_limit: more than 1000 stored rules or a legacy identifier outside safe order bounds; no partial snapshot or mutation is returned.
+     */
+    422: AppError;
+    /**
+     * routing_order_failed: read, transaction or audit failed. An unconfirmed response is not evidence that a write was not applied; never automatically retry a mutation.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PatchAdminRoutingRulesError = PatchAdminRoutingRulesErrors[keyof PatchAdminRoutingRulesErrors];
+
+export type PatchAdminRoutingRulesResponses = {
+    /**
+     * OK
+     */
+    200: RoutingOrderSnapshot;
+};
+
+export type PatchAdminRoutingRulesResponse = PatchAdminRoutingRulesResponses[keyof PatchAdminRoutingRulesResponses];
 
 export type PostAdminRoutingRulesData = {
     body: RoutingRuleCreateRequest;
@@ -11266,18 +11368,53 @@ export type GetAdminRoutingPreviewResponses = {
 };
 
 export type PostAdminRoutingPreviewData = {
-    body?: never;
+    body: RoutingPreviewRequest;
     path?: never;
     query?: never;
     url: '/admin/routing/preview';
 };
 
+export type PostAdminRoutingPreviewErrors = {
+    /**
+     * invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB.
+     */
+    400: AppError;
+    /**
+     * Existing invalid_api_key authentication or routing scope rejection. Reading and comparison require routing:read; order writes require both routing:read and routing:write. Existing legacy readonly tokens permit GET but still reject POST preview.
+     */
+    401: AppError;
+    /**
+     * routing_order_conflict: reviewed configuration changed; no comparison result is returned.
+     */
+    409: AppError;
+    /**
+     * body_too_large: existing preview request exceeds 4 MiB; order comparisons have an additional 512 KiB limit.
+     */
+    413: AppError;
+    /**
+     * routing_order_limit: more than 1000 stored rules or a legacy identifier outside safe order bounds; no partial snapshot or mutation is returned.
+     */
+    422: AppError;
+    /**
+     * routing_order_failed: read, transaction or audit failed. An unconfirmed response is not evidence that a write was not applied; never automatically retry a mutation.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRoutingPreviewError = PostAdminRoutingPreviewErrors[keyof PostAdminRoutingPreviewErrors];
+
 export type PostAdminRoutingPreviewResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RoutingPreviewResponse;
 };
+
+export type PostAdminRoutingPreviewResponse = PostAdminRoutingPreviewResponses[keyof PostAdminRoutingPreviewResponses];
 
 export type PostAdminSandboxPreviewData = {
     body?: never;

@@ -224,6 +224,7 @@ test("390px 다크 화면에서 검토·동의를 키보드로 사용하고 접�
   creator,
 }, testInfo) => {
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await login(page);
   await page.setViewportSize({ width: 390, height: 844 });
   const { dialog } = await open(page);
@@ -244,7 +245,6 @@ test("390px 다크 화면에서 검토·동의를 키보드로 사용하고 접�
     }),
   ).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as {

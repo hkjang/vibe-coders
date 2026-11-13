@@ -29,6 +29,7 @@ export default defineConfig({
     "admin-key-edit-live.spec.ts",
     "finops-live.spec.ts",
     "mcp-risk-live.spec.ts",
+    "routing-order-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

@@ -10,18 +10,27 @@ import (
 )
 
 func (s *Server) handleRoutingRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPatch || r.URL.Query().Get("view") == "order" {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if r.URL.Query().Get("view") == "order" {
+			s.handleRoutingOrderSnapshot(w, r)
+			return
+		}
 		rules, err := s.db.ListRoutingRules(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_rules_failed")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
+	case http.MethodPatch:
+		s.handleRoutingOrderWrite(w, r)
 	case http.MethodPost:
 		var p struct {
 			MatchPattern   string `json:"match_pattern"`

@@ -6,7 +6,7 @@ import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { createReviewChanged } from "./routing-rule-create-state";
 
-export function useRoutingCreateAccess(canWrite: boolean) {
+export function useRoutingCreateAccess(canWrite: boolean, operationLabel = "규칙 생성") {
   const auth = useAuth();
   const context = useContext(FeatureAccessContext);
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
@@ -31,7 +31,7 @@ export function useRoutingCreateAccess(canWrite: boolean) {
   const write = useFeatureMutationAccess(
     ["routing.rules"],
     canWrite && readable && auth.user?.scopes.includes("routing:write") === true,
-    "규칙 생성에는 routing:read와 routing:write 권한이 필요합니다.",
+    `${operationLabel}에는 routing:read와 routing:write 권한이 필요합니다.`,
   );
   const approval = useMemo(
     () => ({ lifetime, reason: write.reason, prefixKey }),

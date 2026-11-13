@@ -70,6 +70,12 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 		return
 	}
+	_, comparingOrder := probe["rule_order"]
+	_, reviewingOrder := probe["rule_revision"]
+	if comparingOrder || reviewingOrder {
+		s.handleRoutingOrderPreview(w, r, body)
+		return
+	}
 	authCtx, policyKeyID, ok := s.routingPreviewAuthContext(w, r, probe)
 	if !ok {
 		return

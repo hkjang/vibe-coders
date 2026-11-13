@@ -226,7 +226,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/insurance/burn-rate", []string{"get"}, "cost", "Error-budget burn rate", false},
 
 	// ---- admin: routing ----
-	{"/admin/routing-rules", []string{"get", "post"}, "routing", "List / create routing rules", false},
+	{"/admin/routing-rules", []string{"get", "post", "patch"}, "routing", "List / create / reorder routing rules", false},
 	{"/admin/routing-rules/{id}", []string{"patch", "delete"}, "routing", "Update / delete a routing rule", false},
 	{"/admin/routing/pattern-conflicts", []string{"get", "post"}, "routing", "Analyze provider model-pattern conflicts and preview routing", false},
 	{"/admin/routing/breaker-reset", []string{"post"}, "routing", "Reset a tripped provider circuit breaker", false},
@@ -694,7 +694,12 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichRequestIOOpenAPI(op, responses)
 	case "get /admin/policies/export", "post /admin/policies/import":
 		enrichPolicyImportOpenAPI(route, op, responses)
-	case "get /admin/routing-rules", "patch /admin/routing-rules/{id}":
+	case "get /admin/routing-rules":
+		enrichRoutingEditOpenAPI("get", op, responses)
+		enrichRoutingOrderOpenAPI("get", op, responses)
+	case "patch /admin/routing-rules", "post /admin/routing/preview":
+		enrichRoutingOrderOpenAPI(strings.ToLower(method), op, responses)
+	case "patch /admin/routing-rules/{id}":
 		enrichRoutingEditOpenAPI(strings.ToLower(method), op, responses)
 	case "post /admin/routing-rules":
 		enrichRoutingCreateOpenAPI(op, responses)
@@ -1189,6 +1194,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range routingCreateOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range routingOrderOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range routingLearningOpenAPISchemas() {

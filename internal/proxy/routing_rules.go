@@ -44,12 +44,25 @@ func (s *Server) invalidateRoutingRulesCache() { s.routingRules.Store(nil) }
 // (and optional provider) to route to. Returns Applied=false if nothing matches or the
 // target equals the original model.
 func (s *Server) evaluateRoutingRules(ctx context.Context, model string, complexity int) routingDecision {
-	model = strings.TrimSpace(model)
-	if model == "" {
+	if strings.TrimSpace(model) == "" {
 		return routingDecision{}
 	}
+	decision, _ := evaluateRoutingRuleOrder(s.routingRulesSnapshot(ctx), model, complexity)
+	return decision
+}
+
+// Live routing and the explicit order comparison use one rule evaluator.
+// The matching ID also describes no-op rules, which stop later rule matching.
+func evaluateRoutingRuleOrder(rules []store.RoutingRule, model string, complexity int) (routingDecision, string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return routingDecision{}, ""
+	}
 	normalized := strings.ToLower(model)
-	for _, rule := range s.routingRulesSnapshot(ctx) {
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
+		}
 		if complexity < rule.MinComplexity || complexity > rule.MaxComplexity {
 			continue
 		}
@@ -62,7 +75,7 @@ func (s *Server) evaluateRoutingRules(ctx context.Context, model string, complex
 		}
 		target := strings.TrimSpace(rule.TargetModel)
 		if target == "" || target == model {
-			return routingDecision{} // no-op rule
+			return routingDecision{}, rule.ID // no-op rule
 		}
 		return routingDecision{
 			Applied:        true,
@@ -71,9 +84,9 @@ func (s *Server) evaluateRoutingRules(ctx context.Context, model string, complex
 			TargetProvider: strings.TrimSpace(rule.TargetProvider),
 			Desc:           complexityTierName(complexity) + "(" + itoaProxy(rule.MinComplexity) + "-" + itoaProxy(rule.MaxComplexity) + ") " + model + " → " + target,
 			Reason:         "complexity_rule",
-		}
+		}, rule.ID
 	}
-	return routingDecision{}
+	return routingDecision{}, ""
 }
 
 func complexityTierName(c int) string {
