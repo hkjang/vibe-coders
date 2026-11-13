@@ -16,6 +16,7 @@ import {
 test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검색 제한", async ({ page }) => {
   await login(page);
   const targets = [
+    { title: "검색검증 모델", path: "/app/gateway/models", parameter: "model" },
     { title: "검색검증 API 키", path: "/app/access/users", parameter: "api_key_id" },
     { title: "검색검증 공급자", path: "/app/gateway/providers", parameter: "provider" },
     { title: "검색검증 워크플로", path: "/app/agents/workflows", parameter: "workflow" },
@@ -96,6 +97,13 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
       await expect(panel).toContainText(target.title);
     if (target.parameter === "tool") await expect(panel).toContainText(target.title);
     const destination = new URL(page.url());
+    if (target.parameter === "model") {
+      expect(destination.searchParams.get("model")).toBe(target.title);
+      expect(destination.searchParams.get("model_provider")).toMatch(/^prv_[A-Za-z0-9_-]{43}$/u);
+      expect(destination.searchParams.has("source")).toBe(false);
+      await expect(panel.getByText("가상", { exact: true })).toBeVisible();
+      await expect(panel.getByText("에이전트 경로", { exact: true })).toBeVisible();
+    }
     if (target.parameter === "api_key_id") {
       expect(destination.searchParams.get("api_key_id")).toBe("browser_search_key");
       expect(destination.searchParams.get("tab")).toBe("keys");

@@ -3,6 +3,12 @@ import { containsPotentialSecret } from "@/shared/security/secrets";
 import { isProviderRef } from "@/shared/api/provider-ref";
 
 export const resourceSearchTargets = {
+  model: {
+    featureId: "gateway.models",
+    title: "모델",
+    path: "/gateway/models",
+    parameter: "model",
+  },
   api_key: {
     featureId: "access.users",
     title: "API 키",
@@ -73,6 +79,7 @@ export function resourceSearchPath(
   id: string,
   prefixes: readonly string[],
   serverLabel?: string,
+  providerRef?: string,
 ): string | undefined {
   if (!id || [...id].length > 512 || containsPotentialSecret(id, prefixes)) return undefined;
   if (
@@ -87,6 +94,19 @@ export function resourceSearchPath(
   if ((kind === "team" || kind === "account") && /\p{C}/u.test(id)) return undefined;
   const target = resourceSearchTargets[kind];
   const params = new URLSearchParams({ [target.parameter]: id });
+  if (kind === "model") {
+    if (
+      !providerRef ||
+      !isProviderRef(providerRef) ||
+      id.length > 512 ||
+      id.trim() !== id ||
+      /\p{C}/u.test(id)
+    )
+      return undefined;
+    params.set("model_provider", providerRef);
+    // The catalog may refresh a cached result to live data on arrival.
+    // Provider identity alone disambiguates physical and virtual models.
+  }
   if (kind === "mcp_tool") {
     if (
       !serverLabel ||
