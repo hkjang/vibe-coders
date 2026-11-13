@@ -2,6 +2,9 @@ package proxy
 
 func enrichAdminKeyRevokeOpenAPI(method string, op, responses map[string]any) {
 	if method == "get" {
+		op["parameters"] = []any{map[string]any{"name": "id", "in": "query", "required": false, "schema": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,512}$"}, "description": "Optional exact database key ID, never a secret. Empty or duplicate IDs are rejected."}}
+		op["description"] = "Existing public key catalog. Optional exact id lookup returns zero or one rows with the same public fields and revision. Team administrators remain restricted to their exact authenticated team, including an empty team. Missing or out-of-scope IDs return an empty catalog. No key secret or hash is returned."
+		responses["400"] = map[string]any{"description": "Invalid exact ID query", "content": jsonContent(schemaRef("AppError"))}
 		responses["200"] = successResponse("AdminKeyCatalog")
 		return
 	}

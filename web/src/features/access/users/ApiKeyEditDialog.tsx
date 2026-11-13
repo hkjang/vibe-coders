@@ -1,3 +1,4 @@
+import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useState, type RefObject } from "react";
 import { editKeySchema } from "./api-key-form";
 import { ApiKeyEditFields } from "./ApiKeyEditFields";
@@ -38,6 +39,7 @@ function changedBody(baseline: ApiKeyPublic, values: ReviewedKeyEditForm): Updat
 export function ApiKeyEditDialog({
   target,
   owner,
+  readOwner,
   canWrite,
   onOpenChange,
   onSubmit,
@@ -45,13 +47,14 @@ export function ApiKeyEditDialog({
 }: {
   target: ApiKeyPublic;
   owner: string;
+  readOwner?: FeatureReadOwner;
   canWrite: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (id: string, body: UpdateApiKeyBody) => Promise<unknown>;
   returnFocusRef: RefObject<HTMLElement | null>;
 }) {
   const [baseline] = useState(() => ({ ...target }));
-  const review = useKeyEditReview(baseline, owner);
+  const review = useKeyEditReview(baseline, owner, readOwner);
   const form = useZodForm<ReviewedKeyEditForm, ReviewedKeyEditForm>(schema, {
     name: baseline.name,
     owner: baseline.owner,

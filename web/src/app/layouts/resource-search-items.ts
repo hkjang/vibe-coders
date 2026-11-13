@@ -3,6 +3,12 @@ import { containsPotentialSecret } from "@/shared/security/secrets";
 import { isProviderRef } from "@/shared/api/provider-ref";
 
 export const resourceSearchTargets = {
+  api_key: {
+    featureId: "access.users",
+    title: "API 키",
+    path: "/access/users",
+    parameter: "api_key_id",
+  },
   setting: {
     featureId: "system.settings",
     title: "시스템 설정",
@@ -75,6 +81,7 @@ export function resourceSearchPath(
   )
     return undefined;
   if (kind === "setting" && !/^[a-z][a-z0-9._-]{0,255}$/u.test(id)) return undefined;
+  if (kind === "api_key" && !/^[A-Za-z0-9._:-]{1,512}$/u.test(id)) return undefined;
   if (kind === "provider" && !isProviderRef(id)) return undefined;
   if (kind === "mcp_upstream" && !/^[a-z0-9_][a-z0-9_-]*$/u.test(id)) return undefined;
   if ((kind === "team" || kind === "account") && /\p{C}/u.test(id)) return undefined;
@@ -102,5 +109,6 @@ export function resourceSearchPath(
   if (kind === "mcp_upstream") params.set("tab", "upstreams");
   if (kind === "policy") params.set("tab", "safety");
   if (kind === "team") params.set("tab", "teams");
+  if (kind === "api_key") params.set("tab", "keys");
   return `${target.path}?${params}`;
 }

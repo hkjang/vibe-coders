@@ -161,11 +161,12 @@ export function useBudgetProjectionQuery(enabled: boolean, owner?: FeatureReadOw
   );
 }
 
-export function useApiKeysQuery(enabled: boolean, owner?: string) {
+export function useApiKeysQuery(enabled: boolean, owner?: string, readOwner?: FeatureReadOwner) {
   return useAccessQuery(
     owner ? [...accessKeys.apiKeys, owner] : accessKeys.apiKeys,
     (signal) => apiClient.request(access.apiKeys.list, { signal, routeId }),
     enabled,
+    readOwner,
   );
 }
 

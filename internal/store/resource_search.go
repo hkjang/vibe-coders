@@ -68,6 +68,16 @@ func (s *SQLStore) SearchAuthAccountMetadata(ctx context.Context, query string, 
 	return s.searchResourceMetadata(ctx, "users u", "u.id", "u.name", query, limit, scope)
 }
 
+// SearchAPIKeyMetadata searches names only with the catalog's exact team scope.
+// It never selects hashes, secrets, ownership, limits or key permission fields.
+func (s *SQLStore) SearchAPIKeyMetadata(ctx context.Context, query string, limit int, scopeTeam *string) ([]ResourceMetadata, bool, error) {
+	var scope *resourceMetadataScope
+	if scopeTeam != nil {
+		scope = &resourceMetadataScope{expression: "COALESCE(team, '')", value: *scopeTeam}
+	}
+	return s.searchResourceMetadata(ctx, "api_keys", "id", "name", query, limit, scope)
+}
+
 // expression is trusted SQL supplied only by the fixed callers above; the
 // authenticated scope value is always bound, including empty or legacy IDs.
 type resourceMetadataScope struct {

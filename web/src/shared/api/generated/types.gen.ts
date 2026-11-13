@@ -2520,7 +2520,7 @@ export type RequestNoteWriteRequest = {
 } | null;
 
 export type ResourceSearchRequest = {
-    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting'>;
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key'>;
     query: string;
 };
 
@@ -2528,14 +2528,14 @@ export type ResourceSearchResponse = {
     groups: Array<{
         items: Array<{
             id: string;
-            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting';
+            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key';
             /**
              * Present for mcp_tool only; pair with id to identify the observed tool.
              */
             server_label?: string;
             title: string;
         }>;
-        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting';
+        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key';
         limited: boolean;
         status: 'ok' | 'forbidden' | 'unavailable';
     }>;
@@ -4047,11 +4047,20 @@ export type GetAdminAnomaliesResponses = {
 export type GetAdminApiKeysData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Optional exact database key ID, never a secret. Empty or duplicate IDs are rejected.
+         */
+        id?: string;
+    };
     url: '/admin/api-keys';
 };
 
 export type GetAdminApiKeysErrors = {
+    /**
+     * Invalid exact ID query
+     */
+    400: AppError;
     /**
      * Error
      */
