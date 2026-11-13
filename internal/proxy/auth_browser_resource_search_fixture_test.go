@@ -38,6 +38,9 @@ func seedBrowserResourceSearchFixture(t *testing.T, db *store.SQLStore, upstream
 	if err := db.CreatePromptExperiment(ctx, store.PromptExperiment{ID: "browser-search-experiment", Title: "검색검증 프롬프트 실험"}); err != nil {
 		t.Fatal("synthetic search experiment could not be prepared")
 	}
+	if err := db.UpsertAgentRoute(ctx, store.AgentRoute{ID: "browser-search-model", VirtualModel: "검색검증 모델", Name: "검색검증 모델 경로", Enabled: true}); err != nil {
+		t.Fatal("synthetic search virtual model could not be prepared")
+	}
 	now := time.Now().UTC()
 	if err := db.InsertLogRecord(ctx, store.LogRecord{
 		Request: store.RequestLog{ID: "browser-search-tool", TraceID: "browser-search-tool", StatusCode: 200, CreatedAt: now},

@@ -152,20 +152,29 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	providerRefs := s.providerRefsSnapshot()
-	providerRef := providerRefs.physical
-	systemProviderRef := providerRefs.system
-
-	configs, err := s.db.ListProviderConfigs(r.Context())
+	refs := s.providerRefsSnapshot()
+	response, err := s.collectAdminModels(r.Context(), strings.TrimSpace(r.URL.Query().Get("provider")), strings.TrimSpace(r.URL.Query().Get("model")), refs)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "provider configuration is unavailable", "server_error", "models_provider_config_failed")
 		return
 	}
+	response.RequestID = traceIDFromRequest(r)
+	writeAdminModelsResponse(w, response, refs.physical)
+}
 
-	providerFilter := strings.TrimSpace(r.URL.Query().Get("provider"))
-	modelFilter := strings.TrimSpace(r.URL.Query().Get("model"))
+// collectAdminModels is shared by the catalog and metadata navigation search.
+// Both reuse the same bounded refresh, configuration-aware cache and virtual
+// model projection; no handler calls or second inventory are needed.
+func (s *Server) collectAdminModels(ctx context.Context, providerFilter, modelFilter string, providerRefs providerReferences) (adminModelsResponse, error) {
+	providerRef := providerRefs.physical
+	systemProviderRef := providerRefs.system
+
+	configs, err := s.db.ListProviderConfigs(ctx)
+	if err != nil {
+		return adminModelsResponse{}, err
+	}
+
 	response := adminModelsResponse{
-		RequestID:       traceIDFromRequest(r),
 		Models:          []adminModel{},
 		Providers:       []adminModelProvider{},
 		PartialFailures: []adminModelPartialFailure{},
@@ -186,7 +195,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 	var agentRoutesFetchedAt string
 	if needsAgentRoutes {
 		var truncated, overflow bool
-		agentRoutes, truncated, overflow, agentRoutesErr = s.db.ListEnabledAgentRouteModelsBounded(r.Context(), maxAdminModelsResponseRows)
+		agentRoutes, truncated, overflow, agentRoutesErr = s.db.ListEnabledAgentRouteModelsBounded(ctx, maxAdminModelsResponseRows)
 		agentRoutesProjectionTruncated = truncated || overflow
 		if agentRoutesErr != nil {
 			response.PartialFailures = append(response.PartialFailures, adminModelPartialFailure{
@@ -198,7 +207,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 	}
 	agentRouteShadows := enabledAdminAgentRouteShadows(agentRoutes)
 
-	results := s.fetchAdminProviderModels(r.Context(), configs, providerFilter, modelFilter, systemProviderRef, &response)
+	results := s.fetchAdminProviderModels(ctx, configs, providerFilter, modelFilter, systemProviderRef, &response)
 	now := time.Now().UTC()
 	response.GeneratedAt = now.Format(time.RFC3339Nano)
 	seenModels := make(map[string]struct{})
@@ -222,7 +231,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		}
 		if result.status == "ok" && !omitPhysicalModels {
 			for _, catalogModel := range result.models {
-				model := s.adminModelFromCatalog(r.Context(), catalogModel, result, now)
+				model := s.adminModelFromCatalog(ctx, catalogModel, result, now)
 				if routeID, shadowed := agentRouteShadows[model.ID]; shadowed {
 					model.Shadowed = true
 					model.ShadowedBy = routeID
@@ -250,7 +259,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 				Provider: "vibe", ProviderRef: systemProviderRef("vibe"), Status: "failed", Source: adminModelSourceAgentRoute, Stale: false,
 			})
 		} else {
-			s.appendAdminAgentRouteModels(r.Context(), agentRoutes, agentRoutesProjectionTruncated, agentRoutesFetchedAt, modelFilter, now, seenModels, &response, systemProviderRef("vibe"), &limiter)
+			s.appendAdminAgentRouteModels(ctx, agentRoutes, agentRoutesProjectionTruncated, agentRoutesFetchedAt, modelFilter, now, seenModels, &response, systemProviderRef("vibe"), &limiter)
 		}
 	}
 	if limiter.limited {
@@ -280,7 +289,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		}
 		return response.PartialFailures[i].Code < response.PartialFailures[j].Code
 	})
-	writeAdminModelsResponse(w, response, providerRef)
+	return response, nil
 }
 
 func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.ProviderConfig, providerFilter, modelFilter string, systemProviderRef providerReferenceFunc, response *adminModelsResponse) []adminProviderModelsResult {

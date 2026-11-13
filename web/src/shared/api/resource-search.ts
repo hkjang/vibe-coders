@@ -16,6 +16,7 @@ export const resourceKindSchema = z.enum([
   "prompt_experiment",
   "setting",
   "api_key",
+  "model",
 ]);
 export type ResourceKind = z.infer<typeof resourceKindSchema>;
 const boundedText = (characters: number) =>
@@ -30,7 +31,7 @@ export const resourceSearchSchema = z.strictObject({
     .array(
       z.strictObject({
         kind: resourceKindSchema,
-        status: z.enum(["ok", "forbidden", "unavailable"]),
+        status: z.enum(["ok", "partial", "forbidden", "unavailable"]),
         limited: z.boolean(),
         items: z
           .array(
@@ -39,12 +40,18 @@ export const resourceSearchSchema = z.strictObject({
               id: boundedText(512),
               title: boundedText(256),
               server_label: boundedText(512).optional(),
+              provider_ref: z
+                .string()
+                .regex(/^prv_[A-Za-z0-9_-]{43}$/u)
+                .optional(),
+              provider_label: boundedText(256).optional(),
+              virtual: z.boolean().optional(),
             }),
           )
           .max(10),
       }),
     )
-    .max(13),
+    .max(14),
 }) satisfies z.ZodType<PostAdminResourceSearchResponse>;
 
 export const resourceSearchEndpoint = operation<
