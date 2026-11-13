@@ -236,7 +236,7 @@ describe("AppPage", () => {
 
     const table = await screen.findByRole("table", { name: "내 업무 앱 실행 이력" });
     expect(await within(table).findByText("코드 리뷰 어시스턴트")).toBeVisible();
-    expect(within(table).getByText("2 components planned")).toBeVisible();
+    expect(within(table).getByText("구성 요소 2개 계획됨")).toBeVisible();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "실행 apprun_1 영수증 열기" }));
     const dialog = await screen.findByRole("dialog", { name: "업무 앱 실행 영수증" });

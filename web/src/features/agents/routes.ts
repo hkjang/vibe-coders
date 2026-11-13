@@ -5,12 +5,12 @@ export const agentsFeatureModules = defineFeatureModules([
   {
     featureId: "agents.workflows",
     load: () => import("@/features/agents/workflows/WorkflowPage").then((module) => module.WorkflowPage),
-    queryKeys: ["q", "status", "tab", "workflow", "page", "size", "sort"],
+    queryKeys: ["q", "status", "tab", "workflow", "page", "size", "sort", "run"],
   },
   {
     featureId: "agents.apps",
     load: () => import("@/features/agents/apps/AppPage").then((module) => module.AppPage),
-    queryKeys: ["app", "q", "status", "tab", "page", "size", "sort"],
+    queryKeys: ["app", "q", "status", "tab", "page", "size", "sort", "run"],
   },
   {
     featureId: "agents.skills",

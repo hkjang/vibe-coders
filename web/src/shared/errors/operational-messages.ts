@@ -6,6 +6,7 @@ const permissionMessage = "이 작업을 수행할 권한이 없습니다.";
 const temporarilyUnavailable = (subject: string): string => `${subject}를 일시적으로 확인할 수 없습니다.`;
 
 const operationalMessages = {
+  execution_receipt_mismatch: "요청한 실행의 영수증인지 확인하지 못했습니다. 다시 조회하세요.",
   prompt_library_changed: "선택한 자산이 변경됐습니다. 최신 내용을 확인한 뒤 작업창을 다시 열어 주세요.",
   prompt_library_unknown: "작업 결과를 확인하지 못했습니다. 자산과 변경 이력을 확인한 뒤 다시 작업하세요.",
   prompt_library_busy: "진행 중인 보관함 작업이 있습니다. 완료 후 다시 확인하세요.",

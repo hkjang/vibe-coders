@@ -62,6 +62,10 @@ const allowedScenarios = [
   "AUTH-LIVE-036",
   "AUTH-LIVE-037",
   "AUTH-LIVE-038",
+  "AUTH-LIVE-039",
+  "AUTH-LIVE-040",
+  "AUTH-LIVE-041",
+  "AUTH-LIVE-042",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -200,7 +204,7 @@ test("auth reporter emits only safe ID, status, duration and numeric source line
 test("auth reporter rejects non-allowlisted title IDs and ignores helper or unrelated source locations", async () => {
   const fixtures = [
     "AUTH-LIVE-000",
-    "AUTH-LIVE-039",
+    "AUTH-LIVE-9998",
     "AUTH-LIVE-999",
     "AUTH-LIVE-01",
     "AUTH-LIVE-001suffix",
@@ -246,21 +250,23 @@ test("auth reporter does not serialize a global error when no scenario has finis
 test("auth reporter allows only fixed scenarios and numeric lines from exact spec basenames", async () => {
   const fixtures = allowedScenarios.map((id, index) => {
     const filename =
-      index < 5
-        ? "auth-live.spec.ts"
-        : index === 10
-          ? "recovery-live.spec.ts"
-          : index >= 11 && index <= 13
-            ? "change-set-live.spec.ts"
-            : index === 14
-              ? "resource-search-live.spec.ts"
-              : index >= 20
-                ? "admin-key-revoke-live.spec.ts"
-                : index >= 18
-                  ? "me-key-rotation-live.spec.ts"
-                  : index >= 15
-                    ? "operations-live.spec.ts"
-                    : "access-live.spec.ts";
+      index >= 38
+        ? "execution-receipts-live.spec.ts"
+        : index < 5
+          ? "auth-live.spec.ts"
+          : index === 10
+            ? "recovery-live.spec.ts"
+            : index >= 11 && index <= 13
+              ? "change-set-live.spec.ts"
+              : index === 14
+                ? "resource-search-live.spec.ts"
+                : index >= 20
+                  ? "admin-key-revoke-live.spec.ts"
+                  : index >= 18
+                    ? "me-key-rotation-live.spec.ts"
+                    : index >= 15
+                      ? "operations-live.spec.ts"
+                      : "access-live.spec.ts";
     const file = index % 2 === 0 ? `/private/${sensitive}/${filename}` : `C:\\private\\${filename}`;
     const fixture = row(id, "passed", [{ title: sensitive, location: { file, line: index + 1, column: 1 } }]);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (${file}:${index + 21}:2)`;
@@ -280,6 +286,10 @@ test("auth reporter allows only fixed scenarios and numeric lines from exact spe
 
 test("auth reporter rejects prefixed, suffixed, malformed and unrelated source filenames in steps and stacks", async () => {
   const filenames = [
+    "not-execution-receipts-live.spec.ts",
+    "execution-receipts-live.spec.ts.bak",
+    "execution-receipts-live.spec.ts/",
+    `execution-receipts-live.spec.ts?credential=${markers[0]}`,
     "not-auth-live.spec.ts",
     "not-resource-search-live.spec.ts",
     "resource-search-live.spec.ts.bak",

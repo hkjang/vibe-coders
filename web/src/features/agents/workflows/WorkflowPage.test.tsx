@@ -137,7 +137,7 @@ describe("WorkflowPage", () => {
     ["error", "오류"],
     ["pending_approval", "승인 대기"],
     ["planned", "계획됨"],
-    ["unknown_status", "unknown_status"],
+    ["unknown_status", "상태 확인 필요"],
     ["", "—"],
     [undefined, "—"],
   ])("주소의 실행 탭을 복원하고 %s 상태를 %s로 표시한다", async (status, label) => {

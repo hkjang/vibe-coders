@@ -6,17 +6,13 @@ import type { DataTableColumn } from "@/shared/data-table/columns";
 import { displayColumn } from "@/features/agents/table-columns";
 import { formatDateTime, formatDuration, formatNumber } from "@/shared/utils/format";
 import { WorkflowDetailLink } from "./WorkflowDetailLink";
-
-const states = {
-  ok: { label: "완료", tone: "success" },
-  error: { label: "오류", tone: "danger" },
-  pending_approval: { label: "승인 대기", tone: "warning" },
-  planned: { label: "계획됨", tone: "info" },
-} as const;
+import { RunReceiptLink } from "../receipts/RunReceiptLink";
+import { runState } from "../receipts/run-receipt";
 
 export function useWorkflowColumns(
   workflows: readonly WorkflowMetadata[],
   onOpen?: (trigger: HTMLElement) => boolean,
+  onReceiptOpen?: (trigger: HTMLElement) => void,
 ) {
   const columns = useMemo<ReadonlyArray<DataTableColumn<WorkflowMetadata>>>(
     () => [
@@ -49,10 +45,8 @@ export function useWorkflowColumns(
           "—",
       ),
       displayColumn<WorkflowRun>("status", "상태", (row) => {
-        const state = Object.hasOwn(states, row.status ?? "")
-          ? states[row.status as keyof typeof states]
-          : undefined;
-        return <Badge tone={state?.tone ?? "muted"}>{state?.label ?? (row.status || "—")}</Badge>;
+        const state = runState(row.status);
+        return <Badge tone={state.tone}>{state.label}</Badge>;
       }),
       displayColumn<WorkflowRun>(
         "steps",
@@ -63,8 +57,11 @@ export function useWorkflowColumns(
         <span className="cell-number">{formatDuration(row.latency_ms ?? 0)}</span>
       )),
       displayColumn<WorkflowRun>("error", "오류 분류", (row) => row.error_class || "—"),
+      displayColumn<WorkflowRun>("receipt", "영수증", (row) => (
+        <RunReceiptLink id={row.id} resource="workflow" onOpen={onReceiptOpen} />
+      )),
     ],
-    [workflows],
+    [workflows, onReceiptOpen],
   );
   return { columns, runColumns };
 }

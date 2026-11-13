@@ -36,6 +36,8 @@ import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { formatDateTime, formatDuration, formatNumber } from "@/shared/utils/format";
+import { readRunSelection, validReceiptId, runState, appRunSummary } from "../receipts/run-receipt";
+import { RunReceiptLink } from "../receipts/RunReceiptLink";
 import "@/features/agents/agents.css";
 
 const tabIds = ["apps", "templates", "runs"] as const;
@@ -72,9 +74,12 @@ function AppPageContent(): React.JSX.Element {
   const [tab, setTab] = useTabParam<TabId>([...tabIds]);
   const [params, updateSearch] = useSearchState();
   const state = readWorkAppPage(params, auth.credentialPrefixes);
+  const receipt = readRunSelection(params, "app", auth.credentialPrefixes);
   const selectedId = params.get("app") ?? "";
   const selectedValid =
-    params.getAll("app").length === 1 && validWorkAppDetailId(selectedId, auth.credentialPrefixes);
+    !receipt.open &&
+    params.getAll("app").length === 1 &&
+    validWorkAppDetailId(selectedId, auth.credentialPrefixes);
   const selection = useRef(selectedId);
   useLayoutEffect(() => {
     selection.current = selectedId;
@@ -87,7 +92,6 @@ function AppPageContent(): React.JSX.Element {
   const [deprecateTarget, setDeprecateTarget] = useState<WorkApp | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<WorkApp | undefined>();
   const [templateTarget, setTemplateTarget] = useState<AppTemplate | undefined>();
-  const [receiptRunId, setReceiptRunId] = useState("");
   const createButtonRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
   const deleteReturnRef = useRef<HTMLElement | null>(null);
@@ -214,28 +218,26 @@ function AppPageContent(): React.JSX.Element {
     onSuccess: () => setTab("apps"),
   });
 
+  const captureReceiptTrigger = useCallback((element: HTMLElement) => {
+    rowTriggerRef.current = element;
+  }, []);
   const runColumns = useMemo<ReadonlyArray<DataTableColumn<AppRun>>>(
     () => [
       displayColumn<AppRun>("created_at", "실행 시각", (row) => formatDateTime(row.created_at)),
       displayColumn<AppRun>("app", "앱", (row) => row.app_title || row.app_id || "—"),
       displayColumn<AppRun>("status", "상태", (row) => (
-        <Badge tone={row.status === "error" ? "danger" : row.status === "ok" ? "success" : "info"}>
-          {row.status === "ok"
-            ? "완료"
-            : row.status === "error"
-              ? "오류"
-              : row.status === "planned"
-                ? "계획됨"
-                : "상태 확인 필요"}
-        </Badge>
+        <Badge tone={runState(row.status).tone}>{runState(row.status).label}</Badge>
       )),
-      displayColumn<AppRun>("summary", "요약", (row) => row.output_summary || "—"),
+      displayColumn<AppRun>("summary", "요약", (row) => appRunSummary(row.output_summary)),
       displayColumn<AppRun>("latency", "소요", (row) => (
         <span className="cell-number">{formatDuration(row.latency_ms ?? 0)}</span>
       )),
       displayColumn<AppRun>("error", "오류 분류", (row) => row.error_class || "—"),
+      displayColumn<AppRun>("receipt", "영수증", (row) => (
+        <RunReceiptLink id={row.id} resource="app" onOpen={captureReceiptTrigger} />
+      )),
     ],
-    [],
+    [captureReceiptTrigger],
   );
 
   const activeCount = list.data?.summary.active ?? 0;
@@ -417,22 +419,29 @@ function AppPageContent(): React.JSX.Element {
             data={runs.data?.runs ?? []}
             emptyMessage="아직 실행한 업무 앱이 없습니다."
             getRowId={(row) => row.id}
-            getRowActionLabel={(row) => `실행 ${row.id} 영수증 열기`}
+            getRowActionLabel={(row) =>
+              validReceiptId(row.id, auth.credentialPrefixes)
+                ? `실행 ${row.id} 영수증 열기`
+                : "영수증 주소 확인 필요"
+            }
             loading={runs.isPending}
             onRowClick={(row) => {
+              if (!validReceiptId(row.id, auth.credentialPrefixes)) return;
               rowTriggerRef.current = document.activeElement as HTMLElement | null;
-              setReceiptRunId(row.id);
+              updateSearch({ run: row.id, app: undefined, tab: "runs" }, { replace: false });
             }}
           />
         </TabPanel>
       )}
 
       <AppReceiptDialog
+        open={receipt.open}
+        invalidAddress={receipt.invalid}
         onOpenChange={(open) => {
-          if (!open) setReceiptRunId("");
+          if (!open) updateSearch({ run: undefined });
         }}
         returnFocusRef={rowTriggerRef}
-        runId={receiptRunId}
+        runId={receipt.id}
       />
 
       <AppDetailSheet
@@ -456,7 +465,7 @@ function AppPageContent(): React.JSX.Element {
           if (!open) closeSheet();
         }}
         onPublish={() => setPublishTarget(selected)}
-        open={params.has("app")}
+        open={!receipt.open && params.has("app")}
         returnFocusRef={rowTriggerRef}
         writeDisabledReason={writeDisabledReason}
       />
