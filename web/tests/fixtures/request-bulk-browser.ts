@@ -5,7 +5,7 @@ import { flowRequestA } from "../e2e/fixtures/request-safe-flow";
 
 export async function installRequestBulk(page: Page) {
   const fixture = await installRequestSavedFilters(page);
-  fixture.bootstrap.backend_version = "v0.86.123";
+  fixture.bootstrap.backend_version = "v0.86.124";
   fixture.bootstrap.permissions = ["admin:read"];
   if (fixture.bootstrap.user) fixture.bootstrap.user.scopes = ["admin:read"];
   for (const feature of fixture.bootstrap.migration_registry) feature.read_only = true;

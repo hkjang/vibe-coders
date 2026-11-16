@@ -8,6 +8,7 @@ import type { DataTableSettingsColumn } from "@/shared/data-table/use-data-table
 
 export interface DataTableSettingsDialogProps {
   announcement: string;
+  description?: string;
   columns: readonly DataTableSettingsColumn[];
   onMove: (columnId: string, direction: -1 | 1) => void;
   onOpenChange: (open: boolean) => void;
@@ -19,6 +20,7 @@ export interface DataTableSettingsDialogProps {
 
 export function DataTableSettingsDialog({
   announcement,
+  description = "표시할 열과 순서를 정합니다. 머리글 경계를 드래그하거나 키보드 화살표로 너비를 조절할 수 있습니다.",
   columns,
   onMove,
   onOpenChange,
@@ -33,7 +35,7 @@ export function DataTableSettingsDialog({
       onOpenChange={onOpenChange}
       returnFocusRef={returnFocusRef}
       title="표 열 설정"
-      description="표시할 열과 순서를 정합니다. 머리글 경계를 드래그하거나 키보드 화살표로 너비를 조절할 수 있습니다."
+      description={description}
       footer={
         <>
           <Button variant="secondary" onClick={onReset}>

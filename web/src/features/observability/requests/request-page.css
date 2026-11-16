@@ -76,9 +76,12 @@
 .request-table {
   min-width: 74rem;
 }
+.request-table td {
+  overflow-wrap: anywhere;
+}
 .request-table code {
   display: inline-block;
-  max-width: 15rem;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: middle;
@@ -140,6 +143,10 @@
   min-width: var(--space-6);
   min-height: var(--space-6);
   justify-content: center;
+}
+
+.request-table .request-selection-column {
+  padding-inline: var(--space-2);
 }
 
 .request-table tr[data-selected] {

@@ -1,15 +1,21 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
+import { Columns3, MoveHorizontal } from "lucide-react";
 import type { AppRequestSummary, AppRequestsResponse } from "@/shared/api/schemas";
 import { RowSelectionCheckbox } from "@/shared/data-table/RowSelectionCheckbox";
 import { usePageRowSelection } from "@/shared/data-table/use-page-row-selection";
-import { Badge } from "@/shared/components/ui/Badge";
+import { DataTableResizeHandle } from "@/shared/data-table/DataTableResizeHandle";
+import { DataTableSettingsLoader } from "@/shared/data-table/DataTableSettingsLoader";
+import {
+  useDataTableLayout,
+  useDataTableOverflow,
+  dataTableColumnLabel,
+} from "@/shared/data-table/use-data-table-layout";
 import { Button } from "@/shared/components/ui/Button";
-import { httpStatusTone } from "@/shared/utils/http-status";
 import { downloadCsv, toCsv } from "@/shared/utils/csv";
 import { formatRequestDate } from "./request-date";
 import { requestSelectionIdentity } from "./request-safe-flow-selection";
 import { requestCsvColumns, requestCsvFilename } from "./request-csv";
-import { RequestCost } from "./RequestCost";
+import { requestLockedColumns, requestTableColumns, requestTableId } from "./request-table-columns";
 
 const emptyRows: AppRequestSummary[] = [];
 interface Props {
@@ -41,6 +47,24 @@ export function RequestResultsTable({
   const rows = data?.requests ?? emptyRows;
   const selectionFrame = useMemo(() => ({ frame, selecting }), [frame, selecting]);
   const bulk = usePageRowSelection(selectionFrame, rows, requestSelectionIdentity, isDataCurrent);
+  const columns = useMemo(() => requestTableColumns(timeZone), [timeZone]);
+  const layout = useDataTableLayout({
+    columns,
+    data: rows,
+    getRowId: requestSelectionIdentity,
+    lockedColumnIds: requestLockedColumns,
+    tableId: requestTableId,
+  });
+  const { table } = layout;
+  const { scrollRef, scrollState, updateScrollState } = useDataTableOverflow(
+    rows,
+    fetching,
+    `${layout.layoutVersion}:${selecting}`,
+  );
+  const settingsTrigger = useRef<HTMLButtonElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const width = table.getTotalSize() + 88 + (selecting ? 48 : 0);
+
   return (
     <div className="data-table-shell">
       <div className="request-selection-toolbar">
@@ -53,6 +77,9 @@ export function RequestResultsTable({
           }}
         >
           {selecting ? "선택 마치기" : "여러 요청 선택"}
+        </Button>
+        <Button ref={settingsTrigger} variant="secondary" size="small" onClick={() => setSettingsOpen(true)}>
+          <Columns3 aria-hidden="true" /> 열 설정
         </Button>
         {selecting && (
           <>
@@ -83,100 +110,117 @@ export function RequestResultsTable({
           </>
         )}
       </div>
-      <div className="data-table-scroll" tabIndex={0} aria-label="요청 목록 표 영역">
-        <table className="data-table request-table">
-          <caption className="sr-only">현재 페이지 요청 목록</caption>
-          <thead>
-            <tr>
-              {selecting && (
-                <th className="request-selection-column" scope="col">
-                  <RowSelectionCheckbox
-                    label="현재 페이지 요청 전체 선택"
-                    checked={bulk.all}
-                    mixed={bulk.mixed}
-                    disabled={!ready || rows.length === 0}
-                    onChange={bulk.toggleAll}
-                  />
+      <div
+        className="data-table-scroll-frame"
+        data-at-start={scrollState.atStart || undefined}
+        data-at-end={scrollState.atEnd || undefined}
+        data-overflow={scrollState.overflowing || undefined}
+      >
+        <div
+          ref={scrollRef}
+          className="data-table-scroll"
+          tabIndex={0}
+          aria-label="요청 목록 표 영역"
+          onScroll={updateScrollState}
+        >
+          <table
+            className="data-table request-table"
+            style={{ minWidth: width, width, tableLayout: "fixed" }}
+          >
+            <caption className="sr-only">현재 페이지 요청 목록</caption>
+            <thead>
+              <tr>
+                {selecting && (
+                  <th className="request-selection-column" scope="col" style={{ width: 48 }}>
+                    <RowSelectionCheckbox
+                      label="현재 페이지 요청 전체 선택"
+                      checked={bulk.all}
+                      mixed={bulk.mixed}
+                      disabled={!ready || rows.length === 0}
+                      onChange={bulk.toggleAll}
+                    />
+                  </th>
+                )}
+                {table.getHeaderGroups()[0]?.headers.map((header) => (
+                  <th
+                    key={header.id}
+                    scope="col"
+                    className="data-table-resizable-heading"
+                    style={{ width: header.getSize() }}
+                  >
+                    <span className="data-table-header-content">
+                      <table.FlexRender header={header} />
+                    </span>
+                    <DataTableResizeHandle
+                      label={dataTableColumnLabel(header.column)}
+                      width={header.getSize()}
+                      onReset={() => header.column.resetSize()}
+                      onKey={(key) => layout.resizeColumnByKey(header.column.id, header.getSize(), key)}
+                      onMouseDown={header.getResizeHandler()}
+                      onTouchStart={header.getResizeHandler()}
+                    />
+                  </th>
+                ))}
+                <th scope="col" style={{ width: 88 }}>
+                  <span className="sr-only">작업</span>
                 </th>
-              )}
-              <th>시각</th>
-              <th>상태</th>
-              <th>요청 ID</th>
-              <th>모델</th>
-              <th>공급자</th>
-              <th>지연</th>
-              <th>토큰</th>
-              <th>비용</th>
-              <th>
-                <span className="sr-only">작업</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.requests.length ? (
-              data.requests.map((request, index) => (
-                <tr
-                  key={requestSelectionIdentity(request)}
-                  data-selected={(selecting && bulk.has(request)) || undefined}
-                >
-                  {selecting && (
-                    <td className="request-selection-column">
-                      <RowSelectionCheckbox
-                        label={`${index + 1}번째 요청 선택`}
-                        checked={bulk.has(request)}
-                        disabled={!ready}
-                        onChange={() => bulk.toggle(request)}
-                      />
-                    </td>
-                  )}
-                  <td>
-                    <time
-                      data-testid={`request-created-at-${request.request_id}`}
-                      dateTime={request.created_at}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length ? (
+                table.getRowModel().rows.map((row, index) => {
+                  const request = row.original;
+                  return (
+                    <tr
+                      key={requestSelectionIdentity(request)}
+                      data-selected={(selecting && bulk.has(request)) || undefined}
                     >
-                      {formatRequestDate(request.created_at, timeZone, {
-                        dateStyle: "short",
-                        timeStyle: "medium",
-                      })}
-                    </time>
-                  </td>
-                  <td>
-                    <Badge tone={httpStatusTone(request.status_code)}>{request.status_code}</Badge>
-                  </td>
-                  <td>
-                    <code>{request.request_id}</code>
-                  </td>
-                  <td>{request.model || "-"}</td>
-                  <td>{request.provider_display}</td>
-                  <td>{request.latency_ms.toLocaleString("ko-KR")}ms</td>
-                  <td>{request.total_tokens.toLocaleString("ko-KR")}</td>
-                  <td>
-                    <RequestCost value={request.estimated_cost} currency={request.currency} />
-                  </td>
-                  <td>
-                    <Button
-                      size="small"
-                      variant="ghost"
-                      ref={(node) => onRowRef(request, node)}
-                      aria-disabled={!ready}
-                      aria-label={`${index + 1}번째 요청 ${request.request_id} 상세 보기`}
-                      onClick={() => onOpen(request, index + 1)}
-                    >
-                      상세
-                    </Button>
+                      {selecting && (
+                        <td className="request-selection-column" style={{ width: 48 }}>
+                          <RowSelectionCheckbox
+                            label={`${index + 1}번째 요청 선택`}
+                            checked={bulk.has(request)}
+                            disabled={!ready}
+                            onChange={() => bulk.toggle(request)}
+                          />
+                        </td>
+                      )}
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id} style={{ width: cell.column.getSize() }}>
+                          <table.FlexRender cell={cell} />
+                        </td>
+                      ))}
+                      <td>
+                        <Button
+                          size="small"
+                          variant="ghost"
+                          ref={(node) => onRowRef(request, node)}
+                          aria-disabled={!ready}
+                          aria-label={`${index + 1}번째 요청 ${request.request_id} 상세 보기`}
+                          onClick={() => onOpen(request, index + 1)}
+                        >
+                          상세
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td className="data-table-state" colSpan={layout.visibleColumnCount + (selecting ? 2 : 1)}>
+                    조건에 맞는 요청이 없습니다. 기간이나 필터를 조정해 보세요.
                   </td>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td className="data-table-state" colSpan={selecting ? 10 : 9}>
-                  조건에 맞는 요청이 없습니다. 기간이나 필터를 조정해 보세요.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
+      {scrollState.overflowing && (
+        <div className="data-table-overflow-hint" aria-hidden="true">
+          <MoveHorizontal /> 좌우로 이동해 추가 열 보기
+        </div>
+      )}
       <div className="data-table-pagination">
         <span>
           {data?.requests.length ?? 0}건 · 마지막 갱신{" "}
@@ -220,6 +264,19 @@ export function RequestResultsTable({
           다음
         </Button>
       </div>
+      {settingsOpen && (
+        <DataTableSettingsLoader
+          announcement={layout.settingsAnnouncement}
+          columns={layout.settingsColumns}
+          description="표시할 열과 순서를 정합니다. 머리글 경계에서 마우스·키보드로 너비를 조절할 수 있습니다. 열 설정은 화면에만 적용되며 CSV는 전체 운영 항목을 포함합니다."
+          onMove={layout.moveColumn}
+          onOpenChange={setSettingsOpen}
+          onReset={layout.resetSettings}
+          onToggleVisibility={layout.toggleColumnVisibility}
+          open={settingsOpen}
+          returnFocusRef={settingsTrigger}
+        />
+      )}
     </div>
   );
 }

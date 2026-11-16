@@ -60,10 +60,22 @@ export function Dialog({
             onCloseAutoFocus?.(event);
             if (event.defaultPrevented) return;
             const requestedTarget = returnFocusRef.current;
+            const active = document.activeElement;
+            // A replaced page may already have focused its error or recovery
+            // heading. Do not overwrite that move with the generic main fallback.
+            const existingFocus =
+              active instanceof HTMLElement &&
+              active.isConnected &&
+              active !== document.body &&
+              active !== document.documentElement &&
+              !active.matches(":disabled") &&
+              !active.closest("[inert]")
+                ? active
+                : undefined;
             const returnTarget =
               requestedTarget?.isConnected && !requestedTarget.matches(":disabled")
                 ? requestedTarget
-                : (document.querySelector<HTMLElement>("#main-content") ?? document.body);
+                : (existingFocus ?? document.querySelector<HTMLElement>("#main-content") ?? document.body);
             event.preventDefault();
             returnTarget.focus();
           }}
