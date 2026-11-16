@@ -4,6 +4,7 @@ import { RouterProvider } from "react-router";
 
 import { AppErrorBoundary } from "@/app/error-boundaries/AppErrorBoundary";
 import { AppProviders } from "@/app/providers/AppProviders";
+import { initializeAppearance } from "@/app/providers/theme";
 import { createAppRouter } from "@/app/router/router";
 import { sanitizeWindowAppLocationBeforeBootstrap } from "@/shared/security/app-route-query";
 import "@/shared/styles/globals.css";
@@ -12,6 +13,7 @@ import "@/shared/styles/foundation.css";
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root application mount point");
 sanitizeWindowAppLocationBeforeBootstrap();
+initializeAppearance();
 const router = createAppRouter();
 
 createRoot(root).render(
