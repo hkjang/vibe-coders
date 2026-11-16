@@ -174,7 +174,7 @@ async function assertPreserved(current: Prepared) {
   }
 }
 type HealthAction = "개별 차단기" | "전체 차단기" | "세션 고정";
-async function prepareHealth(page: Page, action: HealthAction) {
+async function prepareHealth(page: Page, action: HealthAction, provider = publicName) {
   const trigger =
     action === "개별 차단기"
       ? page
@@ -193,8 +193,8 @@ async function prepareHealth(page: Page, action: HealthAction) {
     dialog,
     trigger,
     save: dialog.getByRole("button", { name: "해제", exact: true }),
-    target: action === "개별 차단기" ? publicName : "",
-    label: action === "개별 차단기" ? publicName : "전체 공급자",
+    target: action === "개별 차단기" ? provider : "",
+    label: action === "개별 차단기" ? provider : "전체 공급자",
     call: action === "세션 고정" ? "POST /admin/routing/balancer" : "POST /admin/routing/breaker-reset",
   };
 }
@@ -273,32 +273,47 @@ for (const action of ["추가", "편집", "검토", "중지", "삭제", "비공�
 }
 for (const mode of ["read_only", "preview_read_only"] as const) {
   for (const action of ["개별 차단기", "전체 차단기", "세션 고정"] as const) {
-    test(`${action} 확인창 ${mode} 전환은 고정 대상을 보존하고 DOM 활성화 시도도 전송하지 않는다`, async ({
-      page,
-      gateway,
-    }) => {
-      await login(page, healthUrl);
-      const current = await prepareHealth(page, action);
-      await expect(current.save).toBeEnabled();
-      gateway.setMode("gateway.health", mode);
-      gateway.changeReadModels();
-      await refreshRuntime(page);
-      await refreshBehindModal(page, "gateway.health");
-      await expect(current.dialog).toContainText(current.label);
-      await expect(current.dialog).toContainText(reason);
-      await expect(current.save).toBeDisabled();
-      await forceConfirm(current.save);
-      expect(gateway.writes).toEqual([]);
-      gateway.setMode("gateway.health", "writable");
-      await refreshRuntime(page);
-      await expect(current.save).toBeEnabled();
-      expect(gateway.writes).toEqual([]);
-      await current.save.click();
-      await expect(current.dialog).toBeHidden();
-      expect(gateway.writes).toEqual([
-        { call: current.call, body: { provider: current.target }, userId: "gateway-one" },
-      ]);
-    });
+    for (const changed of [false, true]) {
+      test(`${action} 확인창 ${mode} 복구는 변경된 상태를 다시 확인한다: 상태 변경=${changed}`, async ({
+        page,
+        gateway,
+      }) => {
+        await login(page, healthUrl);
+        let current = await prepareHealth(page, action);
+        await expect(current.save).toBeEnabled();
+        gateway.setMode("gateway.health", mode);
+        if (changed) gateway.changeReadModels();
+        await refreshRuntime(page);
+        await refreshBehindModal(page, "gateway.health");
+        await expect(current.dialog).toContainText(current.label);
+        await expect(current.dialog).toContainText(reason);
+        await expect(current.save).toBeDisabled();
+        await forceConfirm(current.save);
+        expect(gateway.writes).toEqual([]);
+        gateway.setMode("gateway.health", "writable");
+        await refreshRuntime(page);
+        await expect(current.dialog.getByText(reason, { exact: true })).toBeHidden();
+        if (changed && action !== "세션 고정") {
+          // The fixture changes the breaker provider, not the session snapshot.
+          // Restoring write permission does not renew consent to changed state.
+          await expect(current.save).toBeDisabled();
+          await expect(current.dialog).toContainText("최신 상태를 확인한 뒤 작업을 다시 열어 주세요.");
+          await forceConfirm(current.save);
+          expect(gateway.writes).toEqual([]);
+          await page.keyboard.press("Escape");
+          await expect(current.dialog).toBeHidden();
+          current = await prepareHealth(page, action, "refreshed-health-provider");
+          await expect(current.dialog).toContainText(current.label);
+        }
+        await expect(current.save).toBeEnabled();
+        expect(gateway.writes).toEqual([]);
+        await current.save.click();
+        await expect(current.dialog).toBeHidden();
+        expect(gateway.writes).toEqual([
+          { call: current.call, body: { provider: current.target }, userId: "gateway-one" },
+        ]);
+      });
+    }
   }
 }
 

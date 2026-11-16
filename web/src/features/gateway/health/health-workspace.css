@@ -1,0 +1,15 @@
+.gateway-health-workspace .page-stack > *,
+.gateway-health-workspace .health-widget-body {
+  min-width: 0;
+}
+
+.gateway-health-workspace .health-widget-header p {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 22.5rem) and (max-width: 47.9375rem) {
+  .gateway-health-workspace .metric-pairs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

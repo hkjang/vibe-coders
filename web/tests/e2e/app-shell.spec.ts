@@ -1041,7 +1041,7 @@ test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) 
     page.getByRole("table", { name: "선택 기간의 공급자 상태 점수 순위" }).getByText("openai-primary"),
   ).toBeVisible();
   await expect(page.getByText("96점", { exact: true })).toBeVisible();
-  await expect(page.getByText("session_hash", { exact: true })).toBeVisible();
+  await expect(page.getByText("세션 해시 분배", { exact: true })).toBeVisible();
   // The registry is writable Preview; this user lacks routing:write. Do not
   // mislabel a missing operation scope as runtime feature readonly.
   await expect(page.locator("#main-content").getByText("조작 권한 없음", { exact: true })).toBeVisible();

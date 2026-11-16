@@ -4,6 +4,7 @@ import type { PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useHealthActions } from "./use-health-actions";
+import { useFeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { tokenStore } from "@/shared/auth/token-store";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import type * as MutationFeedbackModule from "@/shared/hooks/use-mutation-feedback";
@@ -56,14 +57,23 @@ function setup() {
       </QueryClientProvider>
     );
   }
-  return { api, ...renderHook(() => useHealthActions(), { wrapper: Wrapper }) };
+  return {
+    api,
+    ...renderHook(
+      () => ({
+        ...useHealthActions(),
+        owner: useFeatureReadOwner("gateway.health", "health-test", [], "routing:read"),
+      }),
+      { wrapper: Wrapper },
+    ),
+  };
 }
 describe("두 복구 API 실제 전송 경계", () => {
   for (const [message, endpoint] of [
     ["회로 차단기를 해제하지 못했습니다.", "POST /admin/routing/breaker-reset"],
     ["세션 고정을 해제하지 못했습니다.", "POST /admin/routing/balancer"],
   ] as const) {
-    it.each(["readonly", "permission", "owner", "missing", "session"])(
+    it.each(["readonly", "permission", "owner", "missing", "session", "snapshot"])(
       `${endpoint}의 최신 %s는 캡처된 실제 callback도 차단한다`,
       async (boundary) => {
         const current = setup();
@@ -75,7 +85,15 @@ describe("두 복구 API 실제 전송 경계", () => {
         if (boundary === "missing") access.missing = true;
         if (boundary === "session") act(() => tokenStore.clearAll());
         current.rerender();
-        await expect(Promise.resolve().then(() => captured("exact-provider"))).rejects.toBeDefined();
+        await expect(
+          Promise.resolve().then(() =>
+            captured({
+              provider: "exact-provider",
+              owner: current.result.current.owner,
+              snapshotCurrent: () => boundary !== "snapshot",
+            }),
+          ),
+        ).rejects.toBeDefined();
         expect(current.api.calls).toEqual([]);
         access.readOnly = false;
         access.write = true;
@@ -85,7 +103,11 @@ describe("두 복구 API 실제 전송 경계", () => {
         expect(current.api.calls).toEqual([]);
         const latest = callbacks.get(message);
         if (!latest) throw new Error("missing current recovery callback");
-        await latest("exact-provider");
+        await latest({
+          provider: "exact-provider",
+          owner: current.result.current.owner,
+          snapshotCurrent: () => true,
+        });
         expect(current.api.calls).toHaveLength(1);
         expect(current.api.bodies(endpoint)).toEqual([{ provider: "exact-provider" }]);
       },
