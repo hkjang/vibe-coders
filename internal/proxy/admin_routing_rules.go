@@ -23,6 +23,23 @@ func (s *Server) handleRoutingRules(w http.ResponseWriter, r *http.Request) {
 			s.handleRoutingOrderSnapshot(w, r)
 			return
 		}
+		id, detail, err := routingRuleDetailQuery(r.URL.RawQuery)
+		if detail {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid routing rule detail query", "invalid_request_error", "invalid_routing_detail")
+			return
+		}
+		if detail {
+			rules, err := s.db.ListRoutingRulesByID(r.Context(), id)
+			if err != nil {
+				writeOpenAIError(w, http.StatusInternalServerError, "routing rule detail is unavailable", "server_error", "routing_rule_detail_failed")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
+			return
+		}
 		rules, err := s.db.ListRoutingRules(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_rules_failed")

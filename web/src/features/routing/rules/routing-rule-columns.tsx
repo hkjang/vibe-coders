@@ -1,3 +1,4 @@
+import { RoutingRuleDetailLink } from "./RoutingRuleDetailLink";
 import { useMemo } from "react";
 import type { RoutingRule } from "@/shared/api/domains/routing";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -84,6 +85,7 @@ export function useRuleColumns(
         header: "작업",
         cell: ({ row }) => (
           <div className="routing-tab-actions">
+            <RoutingRuleDetailLink row={row.original} />
             <Button
               ref={(button) => actions.onToggleRef(row.original.id, button)}
               size="small"

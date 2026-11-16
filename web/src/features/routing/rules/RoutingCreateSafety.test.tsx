@@ -352,17 +352,13 @@ describe("생성창·현재 주체의 요청 수명", () => {
     const { dialog, captured } = await approved(current);
     await invoke(captured);
     await waitFor(() => expect(current.count(createPath)).toBe(1));
-    current.update({ userId: "operator-b" });
-    await waitFor(() => expect(dialog).not.toBeInTheDocument());
-    // Existing parent key is epoch+feature, not principal. Establish B through
-    // its actual Query before isolating this new operation's late-publication fence.
     current.records.clear();
     const before = current.count(listPath);
-    await act(async () => {
-      await current.actualListQuery().fetch();
-    });
-    expect(current.count(listPath)).toBe(before + 1);
-    expect(current.actualListQuery().state.data).toEqual({ rules: [] });
+    current.update({ userId: "operator-b" });
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    // The workspace disposes A's cache before automatically loading B's list.
+    await waitFor(() => expect(current.count(listPath)).toBe(before + 1));
+    await waitFor(() => expect(current.actualListQuery().state.data).toEqual({ rules: [] }));
     const reads = current.count(listPath);
     await act(async () => {
       held.resolve(reply);
@@ -382,14 +378,15 @@ describe("생성창·현재 주체의 요청 수명", () => {
     await invoke(captured);
     await waitFor(() => expect(current.count(listPath)).toBe(before + 1));
     expect(createToasts().success).toHaveBeenCalledWith(successMessage);
-    current.update({ userId: "operator-b" });
-    await waitFor(() => expect(dialog).not.toBeInTheDocument());
     current.response.read = undefined;
     const oldRows = [...current.records.values()];
     current.records.clear();
-    await act(async () => {
-      await current.actualListQuery().fetch();
-    });
+    // The new reader now mounts with an empty cache and fetches automatically.
+    // Only the previous reader's post-create GET remains held.
+    current.update({ userId: "operator-b" });
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    await waitFor(() => expect(current.count(listPath)).toBe(before + 2));
+    await waitFor(() => expect(current.actualListQuery().state.status).toBe("success"));
     expect(current.actualListQuery().state.data).toEqual({ rules: [] });
     const reads = current.count(listPath);
     const toasts = createToasts().success.mock.calls.length;

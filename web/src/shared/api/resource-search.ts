@@ -17,6 +17,7 @@ export const resourceKindSchema = z.enum([
   "setting",
   "api_key",
   "model",
+  "routing_rule",
 ]);
 export type ResourceKind = z.infer<typeof resourceKindSchema>;
 const boundedText = (characters: number) =>
@@ -51,7 +52,7 @@ export const resourceSearchSchema = z.strictObject({
           .max(10),
       }),
     )
-    .max(14),
+    .max(15),
 }) satisfies z.ZodType<PostAdminResourceSearchResponse>;
 
 export const resourceSearchEndpoint = operation<

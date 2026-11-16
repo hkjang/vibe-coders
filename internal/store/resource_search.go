@@ -21,6 +21,12 @@ type ResourceMetadata struct {
 func (s *SQLStore) SearchResourceMetadata(ctx context.Context, kind, query string, limit int) ([]ResourceMetadata, bool, error) {
 	var table, id, title string
 	switch kind {
+	case "routing_rule":
+		// Rules have generated IDs, not names. Search the ID and model selectors;
+		// return only the ID and target model, never notes or provider settings.
+		// Legacy no-op rules may have no target model; keep their selectors
+		// discoverable with a fixed, non-sensitive display label.
+		return s.searchResourceMetadata(ctx, "routing_rules", "id", "COALESCE(NULLIF(target_model, ''), '대상 모델 미지정')", query, limit, nil, "id", "match_pattern", "target_model")
 	case "provider":
 		table, id, title = "provider_configs", "name", "name"
 	case "workflow":
@@ -85,8 +91,8 @@ type resourceMetadataScope struct {
 	value      string
 }
 
-// All SQL identifiers come from the fixed sources above, never request input.
-func (s *SQLStore) searchResourceMetadata(ctx context.Context, table, id, title, query string, limit int, scope *resourceMetadataScope) ([]ResourceMetadata, bool, error) {
+// All SQL columns and display expressions come from fixed sources above, never request input.
+func (s *SQLStore) searchResourceMetadata(ctx context.Context, table, id, title, query string, limit int, scope *resourceMetadataScope, searchColumns ...string) ([]ResourceMetadata, bool, error) {
 	if !utf8.ValidString(query) || utf8.RuneCountInString(query) < 2 || utf8.RuneCountInString(query) > 128 || limit < 1 || limit > 50 {
 		return nil, false, errors.New("invalid resource search bounds")
 	}
@@ -101,8 +107,17 @@ func (s *SQLStore) searchResourceMetadata(ctx context.Context, table, id, title,
 		// Byte bounds also cover SQLite legacy text containing embedded NUL, for
 		// which character LENGTH alone does not bound the value returned to Go.
 		" AND " + byteLength(id) + " <= 2048 AND " + byteLength(title) + " <= 1024" +
-		" AND " + s.metadataLowerSQL(title) + " LIKE " + s.metadataLowerSQL("?") + " ESCAPE '!'"
-	args := []any{pattern}
+		" AND ("
+	if len(searchColumns) == 0 {
+		searchColumns = []string{title}
+	}
+	predicates := make([]string, 0, len(searchColumns))
+	args := make([]any, 0, len(searchColumns)+2)
+	for _, column := range searchColumns {
+		predicates = append(predicates, s.metadataLowerSQL(column)+" LIKE "+s.metadataLowerSQL("?")+" ESCAPE '!'")
+		args = append(args, pattern)
+	}
+	statement += strings.Join(predicates, " OR ") + ")"
 	if scope != nil {
 		statement += " AND " + scope.expression + " = ?"
 		args = append(args, scope.value)

@@ -407,15 +407,11 @@ describe("삭제 확인의 현재 권한·조회 세대", () => {
     const { dialog } = await approved(current);
     await confirmDelete(current, dialog);
     await waitFor(() => expect(current.count(current.deletePath)).toBe(1));
+    const beforeRefresh = current.count(listPath);
     current.update({ userId: "operator-b" });
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
-    // Existing parent identity is epoch+feature owner, not principal. Explicitly
-    // establish B's real current list before testing the retired DELETE response.
-    const beforeRefresh = current.count(listPath);
-    await act(async () => {
-      await current.actualListQuery().fetch();
-    });
-    expect(current.count(listPath)).toBe(beforeRefresh + 1);
+    // B gets a new query after A's list has been disposed by the workspace.
+    await waitFor(() => expect(current.count(listPath)).toBe(beforeRefresh + 1));
     await waitFor(() => expect(current.actualListQuery().state.data).toEqual({ rules: [] }));
     const reads = current.count(listPath);
     await act(async () => {

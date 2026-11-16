@@ -3,6 +3,12 @@ import { containsPotentialSecret } from "@/shared/security/secrets";
 import { isProviderRef } from "@/shared/api/provider-ref";
 
 export const resourceSearchTargets = {
+  routing_rule: {
+    featureId: "routing.rules",
+    title: "라우팅 규칙",
+    path: "/routing/rules",
+    parameter: "rule_id",
+  },
   model: {
     featureId: "gateway.models",
     title: "모델",
@@ -70,6 +76,7 @@ export const resourceSearchTargets = {
 } satisfies Record<ResourceKind, { featureId: string; title: string; path: string; parameter: string }>;
 
 export function resourceSearchReadScope(kind: ResourceKind): string {
+  if (kind === "routing_rule") return "routing:read";
   if (kind === "policy") return "security:read";
   return kind === "mcp_upstream" || kind === "mcp_tool" ? "observability:read" : "admin:read";
 }
@@ -87,6 +94,7 @@ export function resourceSearchPath(
     (id.length > 512 || id.trim() !== id || /\p{C}/u.test(id))
   )
     return undefined;
+  if (kind === "routing_rule" && (id.trim() !== id || /\p{C}/u.test(id))) return undefined;
   if (kind === "setting" && !/^[a-z][a-z0-9._-]{0,255}$/u.test(id)) return undefined;
   if (kind === "api_key" && !/^[A-Za-z0-9._:-]{1,512}$/u.test(id)) return undefined;
   if (kind === "provider" && !isProviderRef(id)) return undefined;

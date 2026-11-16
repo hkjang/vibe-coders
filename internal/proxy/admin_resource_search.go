@@ -15,7 +15,8 @@ import (
 )
 
 var resourceSearchFeatures = map[string]string{
-	"model": "gateway.models", "provider": "gateway.providers", "workflow": "agents.workflows",
+	"routing_rule": "routing.rules",
+	"model":        "gateway.models", "provider": "gateway.providers", "workflow": "agents.workflows",
 	"app": "agents.apps", "skill": "agents.skills",
 	"mcp_upstream":      "mcp.overview",
 	"mcp_tool":          "mcp.overview",
@@ -62,7 +63,8 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 	}
 	adminRead := hasScope(user.Scopes, "admin:read")
 	securityRead := hasScope(user.Scopes, "security:read")
-	if !adminRead && !securityRead {
+	routingRead := hasScope(user.Scopes, "routing:read")
+	if !adminRead && !securityRead && !routingRead {
 		writeOpenAIError(w, 403, "resource search permission required", "invalid_request_error", "permission_denied")
 		return
 	}
@@ -72,10 +74,14 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 	// lists do not: SSO users must first exchange them for a gateway session.
 	readRequest := r.Clone(r.Context())
 	readRequest.Method = http.MethodGet
-	// A policy-only reader is authorized by the same session and scope boundary
-	// as GET /admin/policies, without gaining access to other metadata kinds.
+	// Domain-only readers use the same session/scope boundary as their existing
+	// collection GET, without gaining access to other metadata kinds.
 	if !adminRead {
-		readRequest.URL.Path = "/admin/policies"
+		if securityRead {
+			readRequest.URL.Path = "/admin/policies"
+		} else {
+			readRequest.URL.Path = "/admin/routing-rules"
+		}
 	}
 	if !s.authorizeAdmin(readRequest) {
 		writeOpenAIError(w, 401, "authentication required", "invalid_request_error", "invalid_access_token")
@@ -104,7 +110,7 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 		}
 		seen[kind] = true
 	}
-	if !adminRead && !seen["policy"] {
+	if !adminRead && !(securityRead && seen["policy"]) && !(routingRead && seen["routing_rule"]) {
 		writeOpenAIError(w, 403, "resource search permission required", "invalid_request_error", "permission_denied")
 		return
 	}
@@ -130,6 +136,9 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 		canRead := adminRead && ((kind != "mcp_upstream" && kind != "mcp_tool") || hasScope(user.Scopes, "observability:read"))
 		if kind == "policy" {
 			canRead = securityRead
+		}
+		if kind == "routing_rule" {
+			canRead = routingRead
 		}
 		if allowed[resourceSearchFeatures[kind]] && canRead {
 			if kind == "model" {
@@ -173,6 +182,9 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			} else {
 				group.Limited = more
 				for _, row := range rows {
+					if kind == "routing_rule" && !validRoutingRuleDetailID(row.ID) {
+						continue
+					}
 					if kind == "api_key" && !validAPIKeyDetailID(row.ID) {
 						continue
 					}
