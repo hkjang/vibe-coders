@@ -955,6 +955,7 @@ export const openApiOperations = [
   { method: "DELETE", path: "/admin/text2sql/profiles" },
   { method: "GET", path: "/admin/text2sql/profiles" },
   { method: "POST", path: "/admin/text2sql/profiles" },
+  { method: "PUT", path: "/admin/text2sql/profiles" },
   { method: "POST", path: "/admin/text2sql/promote" },
   { method: "GET", path: "/admin/text2sql/prompt-dna" },
   { method: "GET", path: "/admin/text2sql/registry/export" },

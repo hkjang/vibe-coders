@@ -9,6 +9,8 @@ interface DialogProps {
   description: string;
   footer?: ReactNode;
   onOpenChange: (open: boolean) => void;
+  onOpenAutoFocus?: (event: Event) => void;
+  onCloseAutoFocus?: (event: Event) => void;
   open: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
   title: string;
@@ -25,6 +27,8 @@ export function Dialog({
   description,
   footer,
   onOpenChange,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   open,
   returnFocusRef,
   title,
@@ -37,6 +41,7 @@ export function Dialog({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="dialog-overlay" />
         <DialogPrimitive.Content
+          onOpenAutoFocus={onOpenAutoFocus}
           onEscapeKeyDown={(event) => {
             if (
               event.target instanceof Element &&
@@ -52,6 +57,8 @@ export function Dialog({
             .filter(Boolean)
             .join(" ")}
           onCloseAutoFocus={(event) => {
+            onCloseAutoFocus?.(event);
+            if (event.defaultPrevented) return;
             const requestedTarget = returnFocusRef.current;
             const returnTarget =
               requestedTarget?.isConnected && !requestedTarget.matches(":disabled")

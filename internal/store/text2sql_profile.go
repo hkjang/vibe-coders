@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -20,68 +24,101 @@ type Text2SQLProfile struct {
 	ExecConnectionID string `json:"exec_connection_id"` // "" / "default" = env TEXT2SQL_EXEC_DSN
 	Enabled          bool   `json:"enabled"`
 	UpdatedAt        string `json:"updated_at"`
+	Revision         string `json:"revision,omitempty"`
+	revisionNonce    string
+}
+
+const text2SQLProfileColumns = `virtual_model, mode, COALESCE(upstream_model,''), COALESCE(summary_model,''),
+ COALESCE(schema_name,''), COALESCE(exec_connection_id,''), enabled, updated_at, revision_nonce`
+
+func scanText2SQLProfile(row interface{ Scan(...any) error }) (Text2SQLProfile, error) {
+	var p Text2SQLProfile
+	var enabled int
+	err := row.Scan(&p.VirtualModel, &p.Mode, &p.UpstreamModel, &p.SummaryModel, &p.SchemaName,
+		&p.ExecConnectionID, &enabled, &p.UpdatedAt, &p.revisionNonce)
+	if err != nil {
+		return Text2SQLProfile{}, err
+	}
+	p.Enabled = enabled == 1
+	p.Revision = text2SQLProfileRevision(p)
+	return p, nil
+}
+
+func text2SQLProfileRevision(p Text2SQLProfile) string {
+	p.Revision = ""
+	// The nonce detects same-value writes and deletion/recreation by current writers.
+	// Fields and timestamp also detect writes by older binaries sharing this schema.
+	raw, _ := json.Marshal(struct {
+		Profile Text2SQLProfile `json:"profile"`
+		Nonce   string          `json:"nonce"`
+	}{p, p.revisionNonce})
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:])
 }
 
 func (s *SQLStore) ListText2SQLProfiles(ctx context.Context) ([]Text2SQLProfile, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT virtual_model, mode, COALESCE(upstream_model,''), COALESCE(summary_model,''),
-		        COALESCE(schema_name,''), COALESCE(exec_connection_id,''), enabled, updated_at
-		 FROM text2sql_profiles ORDER BY virtual_model`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+text2SQLProfileColumns+` FROM text2sql_profiles ORDER BY virtual_model`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Text2SQLProfile{}
 	for rows.Next() {
-		var p Text2SQLProfile
-		var enabled int
-		if err := rows.Scan(&p.VirtualModel, &p.Mode, &p.UpstreamModel, &p.SummaryModel,
-			&p.SchemaName, &p.ExecConnectionID, &enabled, &p.UpdatedAt); err != nil {
+		p, err := scanText2SQLProfile(rows)
+		if err != nil {
 			return nil, err
 		}
-		p.Enabled = enabled == 1
 		out = append(out, p)
 	}
 	return out, rows.Err()
 }
 
 func (s *SQLStore) GetText2SQLProfile(ctx context.Context, virtualModel string) (Text2SQLProfile, bool, error) {
-	var p Text2SQLProfile
-	var enabled int
-	err := s.db.QueryRowContext(ctx, s.bind(
-		`SELECT virtual_model, mode, COALESCE(upstream_model,''), COALESCE(summary_model,''),
-		        COALESCE(schema_name,''), COALESCE(exec_connection_id,''), enabled, updated_at
-		 FROM text2sql_profiles WHERE virtual_model = ?`), virtualModel).
-		Scan(&p.VirtualModel, &p.Mode, &p.UpstreamModel, &p.SummaryModel,
-			&p.SchemaName, &p.ExecConnectionID, &enabled, &p.UpdatedAt)
+	p, err := scanText2SQLProfile(s.db.QueryRowContext(ctx, s.bind(
+		`SELECT `+text2SQLProfileColumns+` FROM text2sql_profiles WHERE virtual_model = ?`), virtualModel))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Text2SQLProfile{}, false, nil
 	}
 	if err != nil {
 		return Text2SQLProfile{}, false, err
 	}
-	p.Enabled = enabled == 1
 	return p, true, nil
 }
 
 func (s *SQLStore) UpsertText2SQLProfile(ctx context.Context, p Text2SQLProfile) error {
+	_, err := s.writeText2SQLProfile(ctx, s.db, p)
+	return err
+}
+
+func (s *SQLStore) writeText2SQLProfile(ctx context.Context, exec adminAuditExecer, p Text2SQLProfile) (Text2SQLProfile, error) {
 	if p.Mode == "" {
 		p.Mode = "preview"
 	}
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return Text2SQLProfile{}, err
+	}
+	p.revisionNonce = hex.EncodeToString(nonce[:])
+	p.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	p.Revision = text2SQLProfileRevision(p)
 	enabled := 1
 	if !p.Enabled {
 		enabled = 0
 	}
-	_, err := s.db.ExecContext(ctx, s.bind(
+	_, err := exec.ExecContext(ctx, s.bind(
 		`INSERT INTO text2sql_profiles
-		 (virtual_model, mode, upstream_model, summary_model, schema_name, exec_connection_id, enabled, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 (virtual_model, mode, upstream_model, summary_model, schema_name, exec_connection_id, enabled, updated_at, revision_nonce)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(virtual_model) DO UPDATE SET mode=excluded.mode, upstream_model=excluded.upstream_model,
 		 summary_model=excluded.summary_model, schema_name=excluded.schema_name,
-		 exec_connection_id=excluded.exec_connection_id, enabled=excluded.enabled, updated_at=excluded.updated_at`),
+		 exec_connection_id=excluded.exec_connection_id, enabled=excluded.enabled, updated_at=excluded.updated_at,
+		 revision_nonce=excluded.revision_nonce`),
 		p.VirtualModel, p.Mode, p.UpstreamModel, p.SummaryModel,
-		p.SchemaName, p.ExecConnectionID, enabled, time.Now().UTC().Format(time.RFC3339Nano))
-	return err
+		p.SchemaName, p.ExecConnectionID, enabled, p.UpdatedAt, p.revisionNonce)
+	if err != nil {
+		return Text2SQLProfile{}, err
+	}
+	return p, nil
 }
 
 func (s *SQLStore) DeleteText2SQLProfile(ctx context.Context, virtualModel string) error {

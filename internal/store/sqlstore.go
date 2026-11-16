@@ -1001,6 +1001,7 @@ func migrationStatements() []string {
 				updated_at TEXT NOT NULL
 			)`,
 		`ALTER TABLE text2sql_profiles ADD COLUMN exec_connection_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE text2sql_profiles ADD COLUMN revision_nonce TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS text2sql_golden_queries (
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,

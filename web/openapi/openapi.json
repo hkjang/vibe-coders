@@ -11188,6 +11188,11 @@
           "mode": {
             "type": "string"
           },
+          "revision": {
+            "description": "Opaque change token, returned by persisted list/review/PUT reads; absent from legacy POST input echo.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
           "schema_name": {
             "type": "string"
           },
@@ -11266,6 +11271,90 @@
         },
         "required": [
           "profiles"
+        ],
+        "type": "object"
+      },
+      "Text2SQLProfileReview": {
+        "properties": {
+          "profile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Text2SQLProfile"
+              }
+            ],
+            "nullable": true
+          },
+          "review_supported": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "revision": {
+            "pattern": "^(absent|[0-9a-f]{64})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_supported",
+          "profile",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "Text2SQLProfileReviewedInput": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "exec_connection_id": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "expected_revision": {
+            "pattern": "^(absent|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "preview",
+              "execute"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema_name": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "summary_model": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "upstream_model": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "virtual_model": {
+            "maxLength": 512,
+            "type": "string"
+          }
+        },
+        "required": [
+          "virtual_model",
+          "mode",
+          "upstream_model",
+          "summary_model",
+          "schema_name",
+          "exec_connection_id",
+          "enabled",
+          "expected_revision",
+          "reason"
         ],
         "type": "object"
       },
@@ -12489,7 +12578,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.111"
+    "version": "v0.86.112"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -28840,18 +28929,45 @@
         ]
       },
       "get": {
-        "description": "Existing administrator-managed virtual-model mappings. exec_connection_id is a stored connection identifier, never a DSN. Empty/default uses the environment/runtime execution DB; a named source can execute without a default DSN and never falls back to another source when unavailable. Named connection availability is checked at execution, not by saving a profile. Existing shared authorization and raw-content restrictions remain. Profile lookup errors stop execution instead of ignoring the mapping.",
+        "description": "Existing administrator-managed virtual-model mappings. exec_connection_id is a stored connection identifier, never a DSN. Empty/default uses the environment/runtime execution DB; a named source can execute without a default DSN and never falls back to another source when unavailable. Named connection availability is checked at execution, not by saving a profile. Existing shared authorization and raw-content restrictions remain. Profile lookup errors stop execution instead of ignoring the mapping. Ordinary GET returns the legacy list. view=review&virtual_model=... returns a no-store review snapshot, capability marker and opaque revision or absent. Existing admin:read and raw-content permission required.",
         "operationId": "get__admin_text2sql_profiles",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "review"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required only with view=review; exact virtual model name.",
+            "in": "query",
+            "name": "virtual_model",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Text2SQLProfileList"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Text2SQLProfileList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Text2SQLProfileReview"
+                    }
+                  ]
                 }
               }
             },
-            "description": "OK"
+            "description": "Legacy list or opt-in review snapshot"
           },
           "400": {
             "content": {
@@ -28977,6 +29093,111 @@
               }
             },
             "description": "Existing validation, authorization or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Virtual-model profiles",
+        "tags": [
+          "text2sql"
+        ]
+      },
+      "put": {
+        "description": "Existing administrator-managed virtual-model mappings. exec_connection_id is a stored connection identifier, never a DSN. Empty/default uses the environment/runtime execution DB; a named source can execute without a default DSN and never falls back to another source when unavailable. Named connection availability is checked at execution, not by saving a profile. Existing shared authorization and raw-content restrictions remain. Profile lookup errors stop execution instead of ignoring the mapping. Mandatory reviewed complete upsert: all nine non-null unique fields required, no unknown fields/query, 16 KiB UTF-8 body bound, 500-character trimmed reason, 512-byte identifier/model/schema fields. Requires admin:write plus admin:read and raw-content permission. Expected revision is verified in the same short SQL transaction as the profile update and audit insertion. Competing legacy/current writers are serialized. Conflicts return 409; no-op returns 400. Metadata deadline is 5 seconds. This method deliberately returns 405 on old servers; never fall back to POST. Enabled=false stops applying this profile and uses server defaults, not a global SQL execution stop. Connection/schema revisions are not covered; no external connection test or model execution occurs. On uncertain failure, re-read before trying again.",
+        "operationId": "put__admin_text2sql_profiles",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Text2SQLProfileReviewedInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Text2SQLProfileSaved"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "text2sql_profile_conflict: reviewed profile changed; no write"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "text2sql_profile_review_unavailable: re-read current state before retrying"
           },
           "default": {
             "content": {

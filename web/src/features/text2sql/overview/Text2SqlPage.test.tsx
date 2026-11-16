@@ -318,7 +318,8 @@ describe("Text2SqlPage", () => {
     const api = mockApi({
       ...shellHandlers,
       "GET /admin/text2sql/features": () => ({ features: [] }),
-      "POST /admin/text2sql/profiles": (options) => ({ profile: options.body }),
+      "GET /admin/text2sql/profiles": () => ({ review_supported: true, profile: null, revision: "absent" }),
+      "PUT /admin/text2sql/profiles": (options) => ({ profile: options.body }),
     });
     const user = userEvent.setup();
     renderPage("/text2sql?tab=runtime");
@@ -332,9 +333,11 @@ describe("Text2SqlPage", () => {
     expect(within(dialog).getByRole("option", { name: "실행 (SQL 조회까지)" })).toHaveValue("execute");
     await user.selectOptions(within(dialog).getByRole("combobox", { name: /모드/u }), "execute");
     await user.selectOptions(within(dialog).getByRole("combobox", { name: "실행 DB 연결" }), "analytics_db");
-    await user.click(within(dialog).getByRole("button", { name: "저장" }));
-    await waitFor(() => expect(api.bodies("POST /admin/text2sql/profiles")).toHaveLength(1));
-    expect(api.bodies("POST /admin/text2sql/profiles")[0]).toMatchObject({
+    await user.type(within(dialog).getByRole("textbox", { name: /변경 사유/u }), "선택한 분석 DB 적용");
+    await user.click(within(dialog).getByRole("button", { name: "변경 검토" }));
+    await user.click(await within(dialog).findByRole("button", { name: "검토한 변경 저장" }));
+    await waitFor(() => expect(api.bodies("PUT /admin/text2sql/profiles")).toHaveLength(1));
+    expect(api.bodies("PUT /admin/text2sql/profiles")[0]).toMatchObject({
       virtual_model: "vibe/text2sql-selected",
       mode: "execute",
       exec_connection_id: "analytics_db",

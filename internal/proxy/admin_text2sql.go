@@ -1367,12 +1367,18 @@ func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) 
 		if !s.allowText2SQLSensitiveRead(w, r) {
 			return
 		}
+		if r.URL.Query().Get("view") != "" {
+			s.handleText2SQLProfileReviewSnapshot(w, r)
+			return
+		}
 		list, err := s.db.ListText2SQLProfiles(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "profiles_failed")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"profiles": list})
+	case http.MethodPut:
+		s.handleText2SQLProfileReviewedSave(w, r)
 	case http.MethodPost:
 		var p struct {
 			VirtualModel     string `json:"virtual_model"`

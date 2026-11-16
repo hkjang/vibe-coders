@@ -3479,6 +3479,10 @@ export type Text2SqlProfile = {
     enabled: boolean;
     exec_connection_id: string;
     mode: string;
+    /**
+     * Opaque change token, returned by persisted list/review/PUT reads; absent from legacy POST input echo.
+     */
+    revision?: string;
     schema_name: string;
     summary_model: string;
     updated_at: string;
@@ -3504,6 +3508,24 @@ export type Text2SqlProfileInput = {
 
 export type Text2SqlProfileList = {
     profiles: Array<Text2SqlProfile>;
+};
+
+export type Text2SqlProfileReview = {
+    profile: Text2SqlProfile | null;
+    review_supported: true;
+    revision: string;
+};
+
+export type Text2SqlProfileReviewedInput = {
+    enabled: boolean;
+    exec_connection_id: string;
+    expected_revision: string;
+    mode: 'preview' | 'execute';
+    reason: string;
+    schema_name: string;
+    summary_model: string;
+    upstream_model: string;
+    virtual_model: string;
 };
 
 export type Text2SqlProfileSaved = {
@@ -13424,7 +13446,13 @@ export type DeleteAdminText2SqlProfilesResponses = {
 export type GetAdminText2SqlProfilesData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: 'review';
+        /**
+         * Required only with view=review; exact virtual model name.
+         */
+        virtual_model?: string;
+    };
     url: '/admin/text2sql/profiles';
 };
 
@@ -13455,9 +13483,9 @@ export type GetAdminText2SqlProfilesError = GetAdminText2SqlProfilesErrors[keyof
 
 export type GetAdminText2SqlProfilesResponses = {
     /**
-     * OK
+     * Legacy list or opt-in review snapshot
      */
-    200: Text2SqlProfileList;
+    200: Text2SqlProfileList | Text2SqlProfileReview;
 };
 
 export type GetAdminText2SqlProfilesResponse = GetAdminText2SqlProfilesResponses[keyof GetAdminText2SqlProfilesResponses];
@@ -13502,6 +13530,55 @@ export type PostAdminText2SqlProfilesResponses = {
 };
 
 export type PostAdminText2SqlProfilesResponse = PostAdminText2SqlProfilesResponses[keyof PostAdminText2SqlProfilesResponses];
+
+export type PutAdminText2SqlProfilesData = {
+    body: Text2SqlProfileReviewedInput;
+    path?: never;
+    query?: never;
+    url: '/admin/text2sql/profiles';
+};
+
+export type PutAdminText2SqlProfilesErrors = {
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    403: AppError;
+    /**
+     * text2sql_profile_conflict: reviewed profile changed; no write
+     */
+    409: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    500: AppError;
+    /**
+     * text2sql_profile_review_unavailable: re-read current state before retrying
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PutAdminText2SqlProfilesError = PutAdminText2SqlProfilesErrors[keyof PutAdminText2SqlProfilesErrors];
+
+export type PutAdminText2SqlProfilesResponses = {
+    /**
+     * OK
+     */
+    200: Text2SqlProfileSaved;
+};
+
+export type PutAdminText2SqlProfilesResponse = PutAdminText2SqlProfilesResponses[keyof PutAdminText2SqlProfilesResponses];
 
 export type PostAdminText2SqlPromoteData = {
     body?: never;
