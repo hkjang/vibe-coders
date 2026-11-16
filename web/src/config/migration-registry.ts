@@ -180,10 +180,10 @@ export const migrationRegistry = [
     keywords: ["request", "trace", "session", "요청", "추적"],
     appPath: "/app/observability/requests",
     legacyPath: "/admin#/requests",
-    status: "preview_read_only",
+    status: "preview",
     riskLevel: "low",
     requiredPermission: "admin:read",
-    readOnly: true,
+    readOnly: false,
     enabledRoles: [
       "super_admin",
       "admin",

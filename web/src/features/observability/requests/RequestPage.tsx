@@ -14,9 +14,10 @@ import { isAppError } from "@/shared/api/error";
 import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
 import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "../traces/trace-safe-flow-access";
 import { requestSelectionIdentity, useRequestSafeFlowSelection } from "./request-safe-flow-selection";
+import { RequestSavedFilters } from "./saved-filters/RequestSavedFilters";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
-import { FeatureReadOnlyBadge, MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
+import { MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
 import { Button } from "@/shared/components/ui/Button";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
@@ -302,12 +303,12 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
     <section className="page-stack request-page">
       <header className="page-header">
         <div>
-          <MigrationEyebrow fallbackStatus="preview_read_only" prefix="관측" />
+          <MigrationEyebrow fallbackStatus="preview" prefix="관측" />
           <h1>요청 탐색기</h1>
           <p>프롬프트와 원시 오류를 제외한 최근 요청 운영 메타데이터를 조회합니다.</p>
         </div>
         <div className="page-actions">
-          <FeatureReadOnlyBadge readOnly />
+          <Badge tone="info">요청 기록 읽기 전용</Badge>
           <Button variant="secondary" disabled={result.isFetching} onClick={() => void result.refetch()}>
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}
           </Button>
@@ -318,6 +319,16 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
           ) : null}
         </div>
       </header>
+
+      <RequestSavedFilters
+        query={query}
+        onApply={(params) => {
+          setFilterError(undefined);
+          setFilterRevision((value) => value + 1);
+          pendingPageFocusRef.current = true;
+          setSearchParams(params, { replace: false });
+        }}
+      />
 
       <form
         className="request-filters"

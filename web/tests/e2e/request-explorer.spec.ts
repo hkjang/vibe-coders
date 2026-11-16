@@ -16,7 +16,7 @@ test("요청 제목은 정식 전환과 조회 전용을 구분하고 런타임 
   await page.goto("observability/requests");
   await expect(page.getByRole("heading", { name: "요청 탐색기", exact: true })).toBeVisible();
   await expect(page.getByRole("status", { name: "화면 전환 상태", exact: true })).toHaveText("관측 · 정식");
-  await expect(page.locator(".page-actions").getByText("읽기 전용", { exact: true })).toBeVisible();
+  await expect(page.locator(".page-actions").getByText("요청 기록 읽기 전용", { exact: true })).toBeVisible();
   feature.status = "preview_read_only";
   const response = page.waitForResponse((item) => new URL(item.url()).pathname === "/admin/ui-bootstrap");
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));

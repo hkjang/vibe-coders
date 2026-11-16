@@ -414,14 +414,14 @@ func TestGatewayCatalogFeaturesKeepTheirRoleAndRolloutContract(t *testing.T) {
 	}
 }
 
-func TestRequestExplorerIsAdminReadOnlyPreview(t *testing.T) {
+func TestRequestExplorerAllowsSharedFilterPreview(t *testing.T) {
 	wantRoles := "super_admin,admin,ops_admin,ai_admin,security_admin,billing_admin,readonly_admin"
 	for i := range appUIFeatures {
 		feature := appUIFeatures[i]
 		if feature.FeatureID != "observability.requests" {
 			continue
 		}
-		if feature.Status != "preview_read_only" || !feature.ReadOnly || feature.RequiredPermission != "admin:read" {
+		if feature.Status != "preview" || feature.ReadOnly || feature.RequiredPermission != "admin:read" {
 			t.Fatalf("request explorer permission contract widened: %+v", feature)
 		}
 		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
