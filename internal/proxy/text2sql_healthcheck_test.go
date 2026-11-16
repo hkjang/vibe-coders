@@ -83,7 +83,9 @@ func TestText2SQLHealthcheckNamedConnectionChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stale.Close()
-	s.t2sExecConns.Store(conn.ID, stale)
+	s.t2sPoolMu.Lock()
+	s.t2sExecConns = map[string]*text2sqlDBPool{conn.ID: {db: stale, driver: "sqlite"}}
+	s.t2sPoolMu.Unlock()
 	if body := healthcheckResult(t, s, "?connection_id="+conn.ID); body["status"] != "warn" || body["query_ok"] != true {
 		t.Fatal("current connection failed")
 	}

@@ -623,7 +623,6 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) error {
 	for _, a := range list {
 		stored[a.Key] = a
 	}
-	prevT2S := s.t2sConf()
 	prevCH := s.chConf()
 	prevRet := s.cfg.Retention
 	if s.retention != nil {
@@ -658,7 +657,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) error {
 		}
 		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, &skills, &limits, &logging, &mcp, &up, &quota, d.Key, val)
 	}
-	s.t2sRuntime.Store(&t2s)
+	s.applyText2SQLRuntime(t2s)
 	s.chRuntime.Store(&ch)
 	s.carbonRuntime.Store(&carbon)
 	s.insRuntime.Store(&ins)
@@ -679,18 +678,6 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) error {
 		s.retention.Reconfigure(ret)
 	}
 
-	// Swap Text2SQL execute/twin DB connections when their DSN/driver changed: close the
-	// cached *sql.DB so the next request lazily reopens against the new target.
-	if prevT2S.ExecDSN != t2s.ExecDSN || prevT2S.ExecDriver != t2s.ExecDriver {
-		if db := s.t2sExec.Swap(nil); db != nil {
-			_ = db.Close()
-		}
-	}
-	if prevT2S.TwinDSN != t2s.TwinDSN || prevT2S.TwinDriver != t2s.TwinDriver {
-		if db := s.t2sTwin.Swap(nil); db != nil {
-			_ = db.Close()
-		}
-	}
 	// Restart the ClickHouse sink worker when its URL or interval changed (start/stop too).
 	if s.chSinkStarted && (prevCH.URL != ch.URL || prevCH.SinkInterval != ch.SinkInterval) {
 		s.applyClickHouseSinkWorker()

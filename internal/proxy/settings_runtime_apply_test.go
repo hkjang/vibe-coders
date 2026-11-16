@@ -29,10 +29,19 @@ func TestSettingsRuntimeApply(t *testing.T) {
 	if err := db.UpsertAdminSetting(ctx, store.AdminSetting{Key: "text2sql.exec_driver", Category: "text2sql", ValueJSON: enc("sqlite"), ValueType: "string", Source: "admin"}, "t", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertAdminSetting(ctx, store.AdminSetting{Key: "text2sql.exec_dsn", Category: "text2sql", ValueJSON: enc(dsn1), ValueType: "string", IsSecret: true, Source: "admin"}, "t", ""); err != nil {
+	encryptedFirst, err := server.secrets.Load().Encrypt(dsn1)
+	if err != nil {
+		t.Fatal("encrypt initial execution target")
+	}
+	if err := db.UpsertAdminSetting(ctx, store.AdminSetting{Key: "text2sql.exec_dsn", Category: "text2sql", ValueJSON: enc(encryptedFirst), ValueType: "string", IsSecret: true, Source: "admin"}, "t", ""); err != nil {
 		t.Fatal(err)
 	}
-	server.reloadRuntimeConfig(ctx)
+	if err := server.reloadRuntimeConfig(ctx); err != nil {
+		t.Fatal("reload execution target")
+	}
+	if server.t2sConf().ExecDSN != dsn1 {
+		t.Fatal("initial encrypted execution target was not applied")
+	}
 	conn1, err := server.text2sqlExecDB()
 	if err != nil {
 		t.Fatalf("open exec1: %v", err)
@@ -47,7 +56,9 @@ func TestSettingsRuntimeApply(t *testing.T) {
 	if err := db.UpsertAdminSetting(ctx, store.AdminSetting{Key: "text2sql.exec_dsn", Category: "text2sql", ValueJSON: enc(encDSN2), ValueType: "string", IsSecret: true, Source: "admin"}, "t", ""); err != nil {
 		t.Fatal(err)
 	}
-	server.reloadRuntimeConfig(ctx)
+	if err := server.reloadRuntimeConfig(ctx); err != nil {
+		t.Fatal("reload execution target")
+	}
 	if server.t2sExec.Load() != nil {
 		t.Error("cached exec DB should be cleared after DSN change")
 	}

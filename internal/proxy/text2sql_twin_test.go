@@ -31,7 +31,7 @@ func TestText2SQLValidationDBFallback(t *testing.T) {
 	if driver != "sqlite" {
 		t.Errorf("driver = %q, want sqlite (exec fallback)", driver)
 	}
-	if got := s.t2sExec.Load(); got != db {
+	if got := s.t2sExec.Load(); got == nil || got.db != db {
 		t.Error("fallback should open and cache the exec DB")
 	}
 	if s.t2sTwin.Load() != nil {
@@ -88,7 +88,7 @@ func TestText2SQLValidationDBTwin(t *testing.T) {
 	if driver != "sqlite" {
 		t.Errorf("driver = %q, want sqlite", driver)
 	}
-	if s.t2sTwin.Load() != db {
+	if s.t2sTwin.Load() == nil || s.t2sTwin.Load().db != db {
 		t.Error("twin DB should be cached on t2sTwin")
 	}
 
