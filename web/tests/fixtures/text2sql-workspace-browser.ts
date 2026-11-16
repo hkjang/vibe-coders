@@ -8,7 +8,7 @@ export async function installText2SqlWorkspace(page: Page, health?: Record<strin
   const bootstrap = fixture.bootstrap;
   const base = bootstrap.migration_registry[0];
   if (!base || !bootstrap.user) throw new Error("Missing fixture identity");
-  bootstrap.backend_version = "v0.86.109";
+  bootstrap.backend_version = "v0.86.111";
   bootstrap.ui.default_entry = "/app/text2sql";
   bootstrap.migration_registry = migrationRegistry
     .filter((feature) => feature.featureId === "text2sql.overview")
@@ -29,6 +29,19 @@ export async function installText2SqlWorkspace(page: Page, health?: Record<strin
   const exportWait = new Promise<void>((resolve) => {
     releaseExport = resolve;
   });
+  const features = [
+    {
+      name: "self_challenge",
+      description: "보조 모델이 SQL을 검토합니다. 추가 호출 비용이 발생합니다.",
+      enabled: false,
+    },
+    { name: "gateway_memory", description: "최근 사용한 스키마와 테이블을 활용합니다.", enabled: true },
+    {
+      name: "cumulative_risk_enforce",
+      description: "당일 누적 위험 한도를 넘으면 요청을 차단합니다.",
+      enabled: false,
+    },
+  ];
   const bodies: Record<string, unknown> = {
     "/admin/text2sql": workspaceOverview,
     "/admin/text2sql/kill-switch": { disabled: false, config_enabled: true },
@@ -44,7 +57,7 @@ export async function installText2SqlWorkspace(page: Page, health?: Record<strin
       ],
     },
     "/admin/text2sql/features": {
-      features: [{ name: "explain", description: "SQL 실행 계획 점검", enabled: true }],
+      features,
     },
     "/admin/text2sql/glossary": { terms: [], conflicts: [] },
     "/admin/text2sql/tables": { tables: [], columns: [] },
@@ -76,6 +89,13 @@ export async function installText2SqlWorkspace(page: Page, health?: Record<strin
       path = new URL(request.url()).pathname;
     if (request.method() !== "GET") {
       fixture.writes.push(request);
+      if (path === "/admin/text2sql/features") {
+        const input = request.postDataJSON() as { name: string; enabled: boolean };
+        const feature = features.find((item) => item.name === input.name);
+        if (!feature || typeof input.enabled !== "boolean") return route.fulfill({ status: 400, json: {} });
+        feature.enabled = input.enabled;
+        return route.fulfill({ json: input });
+      }
       if (path === "/admin/text2sql/registry/import")
         return route.fulfill({
           json: { tables_imported: 1, columns_imported: 0, table_errors: 0, column_errors: 0 },

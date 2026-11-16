@@ -290,3 +290,99 @@ it("DB 연결 점검 진단에 인증정보를 표시하지 않는다", async ()
   await screen.findByText("민감한 연결 정보는 표시하지 않습니다.");
   expect(document.body.textContent).not.toContain("private-password");
 });
+
+it("한글 기능 이름으로 선택한 스위치만 기존 식별자로 저장하고 결과를 갱신한다", async () => {
+  const features = [
+    { name: "self_challenge", description: "추가 호출 비용이 발생합니다.", enabled: false },
+    { name: "gateway_memory", description: "최근 스키마를 활용합니다.", enabled: true },
+    { name: "cumulative_risk_enforce", description: "누적 위험 한도 초과를 차단합니다.", enabled: false },
+  ];
+  let finish!: () => void;
+  const view = setup("runtime", {
+    "GET /admin/text2sql/features": () => ({ features }),
+    "POST /admin/text2sql/features": (options) =>
+      new Promise((resolve) => {
+        finish = () => {
+          const body = options.body as { name: string; enabled: boolean };
+          const selected = features.find((item) => item.name === body.name);
+          if (selected) selected.enabled = body.enabled;
+          resolve({ status: "ok" });
+        };
+      }),
+  });
+  const extraReview = await screen.findByRole("switch", { name: "SQL 추가 검토 꺼짐" });
+  expect(screen.getByRole("switch", { name: "최근 스키마 활용 켜짐" })).toBeChecked();
+  expect(screen.getByRole("switch", { name: "누적 위험 차단 꺼짐" })).not.toBeChecked();
+  extraReview.focus();
+  await userEvent.keyboard(" ");
+  await waitFor(() =>
+    expect(view.api.bodies("POST /admin/text2sql/features")).toEqual([
+      { name: "self_challenge", enabled: true },
+    ]),
+  );
+  expect(extraReview).toBeDisabled();
+  expect(screen.getByRole("switch", { name: "최근 스키마 활용 켜짐" })).toBeDisabled();
+  await userEvent.click(extraReview);
+  expect(view.api.bodies("POST /admin/text2sql/features")).toHaveLength(1);
+  await act(async () => finish());
+  expect(await screen.findByRole("switch", { name: "SQL 추가 검토 켜짐" })).toBeChecked();
+});
+
+it("읽기 전용에서는 한글 기능 상태를 보여주고 변경 요청은 보내지 않는다", async () => {
+  state.auth = testAuth({ scopes: ["admin:read"], user: { team_id: "alpha" } });
+  const view = setup("runtime", {
+    "GET /admin/text2sql/features": () => ({
+      features: [{ name: "gateway_memory", description: "최근 스키마 활용", enabled: true }],
+    }),
+  });
+  const control = await screen.findByRole("switch", { name: "최근 스키마 활용 켜짐" });
+  expect(control).toBeChecked();
+  expect(control).toBeDisabled();
+  await userEvent.click(control);
+  expect(view.api.bodies("POST /admin/text2sql/features")).toEqual([]);
+});
+
+it("연결 조회 실패를 연결 삭제로 표시하지 않고 재조회 후 프로필 연결 이름을 복구한다", async () => {
+  let fail = true;
+  const view = setup("runtime", {
+    "GET /admin/text2sql/connections": () => {
+      if (fail) throw apiFailure("unavailable", 503);
+      return {
+        connections: [
+          { id: "analytics_db", name: "분석 DB", driver: "postgres", enabled: false, description: "" },
+        ],
+      };
+    },
+  });
+  const table = await screen.findByRole("table", { name: "런타임 Text2SQL 프로필" });
+  expect(await within(table).findByText("연결 상태 확인 불가")).toBeVisible();
+  expect(within(table).queryByText("등록되지 않은 연결")).not.toBeInTheDocument();
+  fail = false;
+  await userEvent.click(screen.getByRole("button", { name: "실행 DB 연결 재시도" }));
+  expect(await within(table).findByText("분석 DB")).toBeVisible();
+  expect(within(table).getByText("연결 중지")).toBeVisible();
+  expect(view.api.bodies("POST /admin/text2sql/profiles")).toEqual([]);
+});
+
+it("선택 기능 갱신이 실패하면 이전 상태의 변경을 막고 수동 재시도로 복구한다", async () => {
+  let fail = false;
+  const view = setup("runtime", {
+    "GET /admin/text2sql/features": () => {
+      if (fail) throw apiFailure("unavailable", 503);
+      return { features: [{ name: "self_challenge", description: "SQL 검토", enabled: false }] };
+    },
+  });
+  const control = await screen.findByRole("switch", { name: "SQL 추가 검토 꺼짐" });
+  expect(control).toBeEnabled();
+  fail = true;
+  await act(async () => {
+    await view.client.invalidateQueries({ queryKey: ["text2sql", "features"] });
+  });
+  await waitFor(() => expect(control).toBeDisabled());
+  expect(control).toHaveAttribute("title", "선택 기능 목록을 확인한 후 변경하세요.");
+  await userEvent.click(control);
+  expect(view.api.bodies("POST /admin/text2sql/features")).toEqual([]);
+  fail = false;
+  await userEvent.click(screen.getByRole("button", { name: "선택 기능 재시도" }));
+  await waitFor(() => expect(control).toBeEnabled());
+});

@@ -322,7 +322,9 @@ describe("Text2SqlPage", () => {
     });
     const user = userEvent.setup();
     renderPage("/text2sql?tab=runtime");
-    expect(await screen.findByText("분석 DB")).toBeVisible();
+    expect(
+      await within(screen.getByRole("table", { name: "Text2SQL 실행 DB 연결" })).findByText("분석 DB"),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "프로필 추가" }));
     const dialog = await screen.findByRole("dialog", { name: "런타임 프로필 추가" });
     await user.type(within(dialog).getByRole("textbox", { name: /가상 모델/u }), "vibe/text2sql-selected");
@@ -360,7 +362,9 @@ describe("Text2SqlPage", () => {
     const user = userEvent.setup();
     renderPage("/text2sql?tab=runtime");
 
-    expect(await screen.findByText("분석 DB")).toBeVisible();
+    expect(
+      await within(screen.getByRole("table", { name: "Text2SQL 실행 DB 연결" })).findByText("분석 DB"),
+    ).toBeVisible();
     const table = screen.getByRole("table", { name: "Text2SQL 실행 DB 연결" });
     expect(api.calls.some((call) => call.key === "GET /admin/text2sql/healthcheck")).toBe(false);
 
@@ -382,7 +386,9 @@ describe("Text2SqlPage", () => {
     const user = userEvent.setup();
     renderPage("/text2sql?tab=runtime");
 
-    expect(await screen.findByText("분석 DB")).toBeVisible();
+    expect(
+      await within(screen.getByRole("table", { name: "Text2SQL 실행 DB 연결" })).findByText("분석 DB"),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "analytics_db 연결 삭제" }));
 
     const dialog = await screen.findByRole("dialog", { name: "실행 DB 연결 삭제" });
@@ -401,7 +407,9 @@ describe("Text2SqlPage", () => {
     mockApi({ ...shellHandlers, "GET /admin/text2sql/features": () => ({ features: [] }) });
     renderPage("/text2sql?tab=runtime");
 
-    expect(await screen.findByText("분석 DB")).toBeVisible();
+    expect(
+      await within(screen.getByRole("table", { name: "Text2SQL 실행 DB 연결" })).findByText("분석 DB"),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "analytics_db 연결 삭제" })).toBeDisabled();
   });
 
