@@ -1344,3 +1344,80 @@ test("keeps the mobile Overview and navigation drawer stable", async ({ page }) 
     scale: "css",
   });
 });
+
+test("사용 현황은 수신 항목만 검색·정렬하고 추가 요청·저장을 하지 않는다", async ({ page }) => {
+  await mockGateway(page);
+  let reads = 0;
+  await page.route("**/admin/stats", (route) => {
+    reads += 1;
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...stats,
+        by_model: [
+          { key: "검증 모델 2", requests: 2, tokens: 10, cost_krw: 100, average_latency_ms: 2 },
+          { key: "검증 모델 10", requests: 10, tokens: 2, cost_krw: 9, average_latency_ms: 10 },
+        ],
+        by_status: [
+          { class: "2xx", requests: 8 },
+          { class: "5xx", requests: 2 },
+        ],
+      }),
+    });
+  });
+  await page.goto("overview?tab=usage&trend=30d");
+  const model = page.getByRole("region", { name: "모델별 사용량", exact: true });
+  await expect(model.getByRole("row").nth(1)).toContainText("검증 모델 10");
+  const before = reads;
+  await model.getByRole("button", { name: "비용 (원) 내림차순 정렬" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(model.getByRole("row").nth(1)).toContainText("검증 모델 2");
+  await model.getByRole("searchbox").fill("없는 모델 검색어");
+  await expect(model.getByText("수신 2개 중 0개 표시")).toBeVisible();
+  await expect(model.getByText(/검색과 일치하는 항목이 없습니다/)).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage }, url: location.href }),
+    ),
+  ).not.toContain("없는 모델 검색어");
+  await model.getByRole("button", { name: "검색 지우기" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(model.getByRole("searchbox")).toBeFocused();
+  const status = page.getByRole("region", { name: "상태 분포", exact: true });
+  await status.getByRole("searchbox").fill("서버 오류");
+  await expect(status.getByText("20.0%", { exact: true })).toBeVisible();
+  await expect(page.getByText(/위 추이 그래프의 기간 선택은 적용되지 않습니다/)).toBeVisible();
+  expect(reads).toBe(before);
+  await page.reload();
+  await expect(model.getByRole("searchbox")).toHaveValue("");
+  await expect(status.getByRole("searchbox")).toHaveValue("");
+  await expect(page).toHaveURL(/trend=30d/);
+});
+
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`사용 현황 탐색의 한글·키보드·접근성 ${theme} ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.clock.setFixedTime(new Date("2026-09-02T04:00:00.000Z"));
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+      await mockGateway(page);
+      await page.goto("overview?tab=usage");
+      const keys = page.getByRole("region", { name: "요청량 상위 API 키", exact: true });
+      await expect(keys.getByRole("table")).toBeVisible();
+      await expect(keys.getByText(/최대 5개/)).toBeVisible();
+      await keys.getByRole("searchbox").focus();
+      await page.keyboard.type("missing-key");
+      await expect(keys.getByText(/0개 표시/)).toBeVisible();
+      await page.keyboard.press("Tab");
+      await expect(keys.getByRole("button", { name: "검색 지우기" })).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(keys.getByRole("searchbox")).toBeFocused();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await axeViolations(page)).toEqual([]);
+      await expect(keys).toHaveScreenshot(`overview-usage-keys-${theme}-${width}.png`, {
+        animations: "disabled",
+      });
+    });
+  }
+}
