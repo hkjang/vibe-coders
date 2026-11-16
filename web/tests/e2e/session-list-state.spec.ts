@@ -455,6 +455,7 @@ test("390px 다크 목록의 긴 한글은 페이지를 넘치지 않고 키보�
   page,
   gateway,
 }, testInfo) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   gateway.periodReply(7, {
     body: sessionList(7, [{ ...sessionA, last_message: "긴 공개 한글 세션 미리보기 ".repeat(30) }]),
@@ -470,7 +471,6 @@ test("390px 다크 목록의 긴 한글은 페이지를 넘치지 않고 키보�
   await page.keyboard.press("ArrowRight");
   await expect.poll(() => scroll.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }
