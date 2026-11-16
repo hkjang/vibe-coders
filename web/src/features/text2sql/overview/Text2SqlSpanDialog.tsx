@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useText2SqlQuery } from "./use-text2sql-query";
 import type { RefObject } from "react";
 
+import { operationLabel } from "./text2sql-labels";
 import { StatusBadge } from "@/features/text2sql/overview/text2sql-presentation";
 import { text2sqlRouteId } from "@/features/text2sql/overview/use-text2sql-queries";
 import { apiClient } from "@/shared/api/client";
@@ -36,15 +37,16 @@ export function Text2SqlSpanDialog({
   returnFocusRef,
 }: Text2SqlSpanDialogProps): React.JSX.Element {
   const open = requestId !== "";
-  const spans = useQuery({
-    queryKey: ["text2sql", "spans", requestId],
-    queryFn: ({ signal }) =>
+  const spans = useText2SqlQuery({
+    key: ["text2sql", "spans", requestId],
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.spans, {
         query: { request_id: requestId },
         signal,
         routeId: text2sqlRouteId,
       }),
     enabled: open,
+    automatic: false,
   });
   const rows = spans.data?.spans ?? [];
 
@@ -86,7 +88,7 @@ export function Text2SqlSpanDialog({
           {rows.length === 0 ? (
             <EmptyState
               title="저장된 단계 기록이 없습니다."
-              description="새 Text2SQL 요청부터 단계별 span이 수집됩니다."
+              description="새 Text2SQL 요청부터 단계별 기록이 수집됩니다."
             />
           ) : (
             <ol className="t2s-span-list">
@@ -94,7 +96,7 @@ export function Text2SqlSpanDialog({
                 <li key={span.id || `${span.stage}-${index}`}>
                   <div className="t2s-span-head">
                     <strong>
-                      {index + 1}. {span.stage || "-"}
+                      {index + 1}. {operationLabel(span.stage)}
                     </strong>
                     <StatusBadge value={span.status} />
                     <span>{formatNumber(span.latency_ms)} ms</span>
@@ -110,7 +112,7 @@ export function Text2SqlSpanDialog({
                     ]}
                   />
                   {span.detail ? (
-                    <JsonBlock label={`${span.stage || "단계"} 상세`} value={span.detail} />
+                    <JsonBlock label={`${operationLabel(span.stage)} 상세`} value={span.detail} />
                   ) : null}
                 </li>
               ))}

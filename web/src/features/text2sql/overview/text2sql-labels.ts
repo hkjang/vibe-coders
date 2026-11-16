@@ -64,3 +64,27 @@ export function clip(value: string, max: number): string {
   if (value.length <= max) return value;
   return `${value.slice(0, max)}…`;
 }
+
+const operationLabels: Record<string, string> = {
+  ok: "정상",
+  success: "성공",
+  passed: "통과",
+  warn: "주의",
+  warning: "주의",
+  error: "오류",
+  failed: "실패",
+  rejected: "거부",
+  blocked: "차단",
+  preview_only: "미리보기만",
+  preview: "미리보기",
+  execute: "실행",
+  generate: "SQL 생성",
+  validate: "SQL 검증",
+  summary: "결과 요약",
+  explain: "실행 계획",
+  permission: "권한 확인",
+  risk: "위험 평가",
+};
+export function operationLabel(value: string): string {
+  return operationLabels[value.toLowerCase()] ?? (value || "—");
+}

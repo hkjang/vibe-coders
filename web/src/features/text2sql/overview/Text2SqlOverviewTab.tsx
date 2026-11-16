@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 
 import { StatusBadge } from "@/features/text2sql/overview/text2sql-presentation";
-import { clip } from "@/features/text2sql/overview/text2sql-labels";
+import { clip, operationLabel } from "@/features/text2sql/overview/text2sql-labels";
 import { Text2SqlSpanDialog } from "@/features/text2sql/overview/Text2SqlSpanDialog";
 import type { Text2SQLOverview, Text2SQLQueryLog } from "@/shared/api/domains/text2sql";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -44,7 +44,11 @@ function useLogColumns(
           </div>
         ),
       }),
-      column.accessor((row) => row.mode, { id: "mode", header: "모드" }),
+      column.accessor((row) => row.mode, {
+        id: "mode",
+        header: "모드",
+        cell: ({ getValue }) => operationLabel(getValue()),
+      }),
       column.accessor((row) => row.question, {
         id: "question",
         header: "질문",
@@ -133,7 +137,11 @@ function modelColumns(): ReadonlyArray<DataTableColumn<ModelMetric>> {
 function stageColumns(totalCost: number): ReadonlyArray<DataTableColumn<StageMetric>> {
   const column = createDataTableColumnHelper<StageMetric>();
   return column.columns([
-    column.accessor((row) => row.stage, { id: "stage", header: "단계" }),
+    column.accessor((row) => row.stage, {
+      id: "stage",
+      header: "단계",
+      cell: ({ getValue }) => operationLabel(getValue()),
+    }),
     column.accessor((row) => row.status, {
       id: "status",
       header: "상태",
@@ -208,7 +216,11 @@ export function Text2SqlOverviewTab({
         header: "가상 모델",
         cell: ({ getValue }) => <code className="mono">{getValue()}</code>,
       }),
-      column.accessor((row) => row.mode, { id: "mode", header: "모드" }),
+      column.accessor((row) => row.mode, {
+        id: "mode",
+        header: "모드",
+        cell: ({ getValue }) => operationLabel(getValue()),
+      }),
       column.accessor((row) => row.upstream, { id: "upstream", header: "업스트림 모델" }),
     ]) as Array<DataTableColumn<RuntimeProfile>>;
   }, []);
@@ -282,7 +294,7 @@ export function Text2SqlOverviewTab({
           columns={stageColumnDefs}
           data={stageMetrics}
           loading={unavailable}
-          emptyMessage="단계별 span 메트릭이 없습니다. 신규 Text2SQL 요청부터 수집됩니다."
+          emptyMessage="단계별 지표이 없습니다. 신규 Text2SQL 요청부터 수집됩니다."
         />
       </SectionCard>
 

@@ -1,6 +1,9 @@
+import { UpdatedTime } from "@/features/health/health-ui";
 import { RefreshCw } from "lucide-react";
 import { useCallback } from "react";
 
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
+import { useFeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useAuth } from "@/app/auth/AuthProvider";
 import "@/features/text2sql/text2sql.css";
 import { Text2SqlAccessTab } from "@/features/text2sql/overview/Text2SqlAccessTab";
@@ -29,7 +32,7 @@ const tabs: ReadonlyArray<TabItem<Text2SqlTabId>> = [
   { id: "schemas", label: "스키마·레지스트리" },
   { id: "access", label: "권한·용어" },
   { id: "risk", label: "위험·이상" },
-  { id: "golden", label: "Golden Query" },
+  { id: "golden", label: "기준 SQL 검증" },
   { id: "reports", label: "리포트·인사이트" },
 ];
 const tabIds = tabs.map((tab) => tab.id);
@@ -46,6 +49,7 @@ function windowLabel(value: string): string {
 }
 
 function minRiskFrom(value: string | null): number {
+  if (value === null || value.trim() === "") return 50;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 50;
 }
@@ -56,8 +60,25 @@ function minRiskFrom(value: string | null): number {
  * reasons are shown on screen only — never written to the URL or to storage.
  */
 export function Text2SqlPage(): React.JSX.Element {
+  const owner = useFeatureReadOwner("text2sql.overview", "text2sql-workspace");
+  if (!owner.readable)
+    return (
+      <div className="page-stack">
+        <PageHeader title="Text2SQL" readOnly />
+        <InlineNotice tone="warning" title="Text2SQL 조회 권한을 확인하세요.">
+          현재 계정이 조회할 수 있는 화면인지 확인하세요.
+        </InlineNotice>
+      </div>
+    );
+  return <Text2SqlWorkspace key={owner.id} />;
+}
+
+function Text2SqlWorkspace(): React.JSX.Element {
   const auth = useAuth();
-  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
+  const writeAccess = useFeatureMutationAccess(
+    ["text2sql.overview"],
+    auth.user?.scopes.includes("admin:write") ?? false,
+  );
   const [params, updateSearch] = useSearchState();
   const [tab, setTab] = useTabParam<Text2SqlTabId>(tabIds);
   const requestedWindow = params.get("window");
@@ -69,34 +90,20 @@ export function Text2SqlPage(): React.JSX.Element {
 
   const queries = useText2SqlQueries({ minRisk, registrySchema, tab, window: selectedWindow });
   const overview = queries.overview.data;
+  const canWrite = writeAccess.allowed && queries.active.every((query) => !query.owner.denied);
   const setRegistrySchema = useCallback(
     (schema: string): void => updateSearch({ schema: schema || undefined }),
     [updateSearch],
   );
 
-  const refreshing = queries.overview.isFetching || queries.connections.isFetching;
+  const refreshing = queries.active.some((query) => query.isFetching);
+  const updatedAt =
+    queries.active.length > 0 && queries.active.every((query) => query.dataUpdatedAt > 0)
+      ? Math.min(...queries.active.map((query) => query.dataUpdatedAt))
+      : 0;
   const refreshAll = (): void => {
-    void Promise.all([queries.overview.refetch(), queries.connections.refetch()]);
+    for (const query of queries.active) query.refetch();
   };
-
-  if (queries.overview.isError && !overview) {
-    return (
-      <div className="page-stack">
-        <PageHeader
-          title="Text2SQL"
-          readOnly={!canWrite}
-          description="자연어 질문을 읽기 전용 SQL로 변환하는 파이프라인을 운영합니다."
-          legacyHref="/admin#/text2sql"
-        />
-        <ErrorState
-          message={safeAppErrorMessage(queries.overview.error, "Text2SQL 현황을 불러오지 못했습니다.")}
-          requestId={isAppError(queries.overview.error) ? queries.overview.error.requestId : undefined}
-          onRetry={() => void queries.overview.refetch()}
-          legacyHref="/admin#/text2sql"
-        />
-      </div>
-    );
-  }
 
   const connections = queries.connections.data?.connections ?? [];
 
@@ -128,7 +135,19 @@ export function Text2SqlPage(): React.JSX.Element {
         }
       />
 
+      <div className="t2s-refresh-summary">
+        <span>현재 탭만 갱신합니다. 비활성 브라우저에서는 자동 갱신을 멈춥니다.</span>
+        {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} label="현재 탭 마지막 정상 갱신" /> : null}
+      </div>
       <Text2SqlEmergencyPanel canWrite={canWrite} />
+      {queries.overview.isError && !overview ? (
+        <ErrorState
+          message={safeAppErrorMessage(queries.overview.error, "Text2SQL 현황을 불러오지 못했습니다.")}
+          requestId={isAppError(queries.overview.error) ? queries.overview.error.requestId : undefined}
+          onRetry={() => queries.overview.refetch()}
+          showLegacy={false}
+        />
+      ) : null}
 
       {queries.overview.isError && overview ? (
         <InlineNotice tone="warning" title="현황 갱신에 실패해 마지막 정상 데이터를 표시합니다.">
@@ -178,6 +197,7 @@ export function Text2SqlPage(): React.JSX.Element {
       {tab === "schemas" ? (
         <TabPanel id="schemas" panelIdPrefix="text2sql">
           <Text2SqlSchemaTab
+            key={registrySchema}
             canWrite={canWrite}
             columns={queries.registry.data?.columns ?? []}
             connections={connections}

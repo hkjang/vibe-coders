@@ -7,14 +7,14 @@
 .t2s-cell-stack {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .t2s-cell-stack span,
 .t2s-column-list li,
 .t2s-suggestion-list li {
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .t2s-column-list,
@@ -25,18 +25,18 @@
   list-style: none;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .t2s-suggestion-list {
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .t2s-column-list li {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .t2s-toggle-list {
@@ -62,15 +62,15 @@
 }
 
 .t2s-toggle-list p {
-  margin: 2px 0 0;
+  margin: var(--space-1) 0 0;
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .t2s-inline-field {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   font-size: 13px;
 }
 
@@ -101,12 +101,12 @@
 }
 
 .t2s-panel-failure p {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   font-size: 13px;
 }
 
 .t2s-panel-failure code {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-muted);
 }
 
@@ -134,11 +134,51 @@
 }
 
 .t2s-span-head span {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-muted);
 }
 .t2s-row-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.t2s-refresh-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+.t2s-toggle-list p,
+.t2s-readonly-note,
+.t2s-panel-failure p {
+  font-size: 14px;
+}
+
+@media (max-width: 767px) {
+  .t2s-panel-failure {
+    flex-wrap: wrap;
+  }
+  .t2s-panel-failure > div {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .t2s-inline-field {
+    flex-wrap: wrap;
+  }
+}
+
+.t2s-refresh-summary time {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.t2s-refresh-summary time svg {
+  width: 14px;
+  height: 14px;
 }

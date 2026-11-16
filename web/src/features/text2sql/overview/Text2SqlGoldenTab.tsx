@@ -19,7 +19,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useText2SqlMutation } from "./use-text2sql-mutation";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { formatNumber, formatPercent } from "@/shared/utils/format";
 
@@ -61,7 +61,8 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
     tags: "",
   });
 
-  const save = useMutationFeedback({
+  const save = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (values: GoldenFormValues) => {
       access.assertCurrent();
       return apiClient.request(endpoints.domains.text2sql.golden.save, {
@@ -80,9 +81,10 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
       });
     },
     invalidates: text2sqlInvalidations.overview,
-    successMessage: "Golden Query를 저장했습니다.",
+    successMessage: "기준 SQL를 저장했습니다.",
   });
-  const remove = useMutationFeedback({
+  const remove = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (id: string) => {
       access.assertCurrent();
       return apiClient.request(endpoints.domains.text2sql.golden.remove, {
@@ -91,9 +93,10 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
       });
     },
     invalidates: text2sqlInvalidations.overview,
-    successMessage: "Golden Query를 삭제했습니다.",
+    successMessage: "기준 SQL를 삭제했습니다.",
   });
-  const run = useMutationFeedback({
+  const run = useText2SqlMutation({
+    authorized: canWrite,
     mutate: () => {
       access.assertCurrent();
       return apiClient.request(endpoints.domains.text2sql.golden.run, {
@@ -164,7 +167,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
 
   const resultColumn = createDataTableColumnHelper<Text2SQLGoldenRun["results"][number]>();
   const resultColumns = resultColumn.columns([
-    resultColumn.accessor((row) => row.name, { id: "name", header: "Golden Query" }),
+    resultColumn.accessor((row) => row.name, { id: "name", header: "기준 SQL" }),
     resultColumn.accessor((row) => row.passed, {
       id: "passed",
       header: "판정",
@@ -209,8 +212,8 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
       {!writable ? <InlineNotice tone="warning">{access.reason}</InlineNotice> : null}
 
       <SectionCard
-        title="Golden Query (few-shot · 회귀)"
-        description="등록한 질문과 검증된 SQL은 생성 프롬프트의 few-shot 예시로 주입되고 회귀 검증에 사용됩니다."
+        title="기준 SQL (생성 예시·회귀 검증)"
+        description="등록한 질문과 검증된 SQL은 생성 프롬프트의 SQL 생성 예시로 주입되고 회귀 검증에 사용됩니다."
         actions={
           <>
             <Button
@@ -228,18 +231,18 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
               title={access.reason ?? writeDisabledTitle(writable)}
               onClick={() => setDialogOpen(true)}
             >
-              Golden Query 추가
+              기준 SQL 추가
             </Button>
           </>
         }
       >
         <DataTable
-          caption="Text2SQL Golden Query"
+          caption="Text2SQL 기준 SQL"
           columns={columns}
           data={golden}
           loading={loading}
           getRowId={(row) => row.id}
-          emptyMessage="Golden Query가 없습니다. 등록하면 few-shot 예시와 회귀 검증 기준으로 쓰입니다."
+          emptyMessage="기준 SQL가 없습니다. 등록하면 SQL 생성 예시와 회귀 검증 기준으로 쓰입니다."
         />
       </SectionCard>
 
@@ -257,7 +260,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
             columns={resultColumns}
             data={runResult.results}
             getRowId={(row, index) => row.id || `${row.name}-${index}`}
-            emptyMessage="실행된 Golden Query가 없습니다."
+            emptyMessage="실행된 기준 SQL가 없습니다."
           />
         </SectionCard>
       ) : null}
@@ -270,7 +273,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
         }}
         form={form}
         returnFocusRef={createTriggerRef}
-        title="Golden Query 추가"
+        title="기준 SQL 추가"
         scrollBody
         description="자연어 질문과 검증된 기대 SQL을 한 쌍으로 등록합니다."
         submitDisabled={!writable}
@@ -331,9 +334,9 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
         open={runConfirmOpen}
         onOpenChange={setRunConfirmOpen}
         returnFocusRef={runTriggerRef}
-        title="Golden Query 회귀 검증 실행"
+        title="기준 SQL 회귀 검증 실행"
         confirmDisabled={!writable}
-        description="사용 중인 모델로 모든 활성 Golden Query의 SQL을 다시 생성합니다. 모델 호출 비용이 발생하며 시간이 걸릴 수 있습니다."
+        description="사용 중인 모델로 모든 활성 기준 SQL의 SQL을 다시 생성합니다. 모델 호출 비용이 발생하며 시간이 걸릴 수 있습니다."
         confirmLabel="실행"
         onConfirm={async () => {
           await run.mutateAsync();
@@ -347,9 +350,9 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
         }}
         returnFocusRef={rowTriggerRef}
         tone="danger"
-        title="Golden Query 삭제"
+        title="기준 SQL 삭제"
         confirmDisabled={!writable}
-        description="삭제하면 few-shot 예시와 회귀 검증 대상에서 함께 빠집니다."
+        description="삭제하면 SQL 생성 예시와 회귀 검증 대상에서 함께 빠집니다."
         confirmLabel="삭제"
         onConfirm={async () => {
           await remove.mutateAsync(toDelete);
