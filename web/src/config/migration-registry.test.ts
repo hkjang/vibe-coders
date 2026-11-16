@@ -242,9 +242,9 @@ describe("migration registry", () => {
     const feature = migrationRegistry.find((candidate) => candidate.featureId === "observability.requests");
     if (!feature) throw new Error("observability.requests fixture is missing");
     expect(feature).toMatchObject({
-      status: "preview_read_only",
+      status: "preview",
       requiredPermission: "admin:read",
-      readOnly: true,
+      readOnly: false,
       enabledRoles: [
         "super_admin",
         "admin",
@@ -271,8 +271,8 @@ describe("migration registry", () => {
     });
     expect(resolveFeature(feature, gatewayAdmin, "v0.83.0")).toMatchObject({
       permitted: true,
-      status: "preview_read_only",
-      readOnly: true,
+      status: "preview",
+      readOnly: false,
     });
     expect(
       resolveFeature(feature, { ...gatewayAdmin, role: "viewer", roles: ["viewer"] }, "v0.83.0"),
@@ -426,8 +426,8 @@ describe("migration registry", () => {
     });
     expect(resolveFeature(feature, gatewayAdmin, "v0.83.0")).toMatchObject({
       permitted: true,
-      status: "preview_read_only",
-      readOnly: true,
+      status: "preview",
+      readOnly: false,
     });
   });
 });
