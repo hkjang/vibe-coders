@@ -1,0 +1,91 @@
+.command-dialog:has(.resource-search-scope) {
+  overflow-y: auto;
+}
+.resource-search-scope {
+  flex-shrink: 0;
+  margin: 0 var(--space-4) var(--space-3);
+  min-width: 0;
+}
+.resource-search-scope-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-background);
+  text-align: left;
+}
+.resource-search-scope-trigger > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.resource-search-scope-trigger svg {
+  flex-shrink: 0;
+}
+.resource-search-scope-options:not([hidden]) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+  max-height: 10rem;
+  overflow: auto;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+}
+.resource-search-scope-options button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-small);
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+.resource-search-scope-options button[aria-pressed="true"] {
+  background: var(--color-primary-soft);
+}
+.resource-search-group-label {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+.resource-search-help {
+  font-size: 0.875rem;
+  display: block;
+  margin: 0;
+}
+.resource-search-recovery {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 var(--space-4) var(--space-2);
+}
+.resource-search-recovery p {
+  flex: 1;
+  min-width: 8rem;
+  margin: 0;
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+@media (max-width: 40rem) {
+  .resource-search-scope-options:not([hidden]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

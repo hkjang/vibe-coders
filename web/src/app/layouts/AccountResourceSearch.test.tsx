@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import ResourceSearchPanel from "./ResourceSearchPanel";
 import { resourceSearchPath } from "./resource-search-items";
@@ -70,7 +70,7 @@ it("계정 이름 검색은 조회 권한으로 지원되는 종류만 보내고
   expect(request.mock.calls[0]?.[1]).toMatchObject({
     body: { query: "정산", kinds: ["workflow", "team", "account"] },
   });
-  expect(screen.getByText("로그인 계정", { exact: true })).toBeVisible();
+  expect(within(screen.getByRole("option")).getByText("로그인 계정", { exact: true })).toBeVisible();
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
   expect(view.go).toHaveBeenCalledWith(
     "/access/users/accounts?account_id=%EC%82%AC%EC%9A%A9%EC%9E%90%2Fa%26b",
