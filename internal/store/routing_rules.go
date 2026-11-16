@@ -27,9 +27,19 @@ type RoutingRulePatch struct {
 }
 
 func (s *SQLStore) ListRoutingRules(ctx context.Context) ([]RoutingRule, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, enabled, priority, match_pattern, min_complexity, max_complexity,
+	return s.listRoutingRules(ctx, "", nil)
+}
+
+// ListRoutingRulesByID preserves the public rule projection while selecting an
+// exact stored identity. It is read-only and does not use mutation admission.
+func (s *SQLStore) ListRoutingRulesByID(ctx context.Context, id string) ([]RoutingRule, error) {
+	return s.listRoutingRules(ctx, " WHERE id = ?", []any{id})
+}
+
+func (s *SQLStore) listRoutingRules(ctx context.Context, where string, args []any) ([]RoutingRule, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, enabled, priority, match_pattern, min_complexity, max_complexity,
 		target_model, COALESCE(target_provider, ''), COALESCE(note, ''), created_at
-		FROM routing_rules ORDER BY priority ASC, created_at ASC`)
+		FROM routing_rules`+where+` ORDER BY priority ASC, created_at ASC`), args...)
 	if err != nil {
 		return nil, err
 	}

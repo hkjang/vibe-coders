@@ -97,3 +97,16 @@
   color: var(--color-muted);
   font-size: 0.8125rem;
 }
+
+.routing-rule-detail {
+  display: grid;
+  gap: var(--space-4);
+}
+.routing-rule-detail dt {
+  color: var(--color-muted);
+}
+.routing-rule-detail dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

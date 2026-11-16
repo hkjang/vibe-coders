@@ -394,6 +394,35 @@ export type RoutingDomainQuery = z.input<typeof domainQuerySchema>;
 
 export const routingEndpoints = {
   rules: {
+    detail: operation<GetAdminRoutingRulesData, unknown>()(
+      "GET",
+      "/admin/routing-rules",
+      z.strictObject({
+        rules: z
+          .array(
+            z.strictObject({
+              id: z.string(),
+              enabled: z.boolean(),
+              priority: z.number().int().safe(),
+              match_pattern: z.string(),
+              min_complexity: z.number().int().safe(),
+              max_complexity: z.number().int().safe(),
+              target_model: z.string(),
+              target_provider: z.string(),
+              note: z.string(),
+              created_at: z.string(),
+            }),
+          )
+          .max(1),
+      }),
+      z.strictObject({
+        id: z
+          .string()
+          .min(1)
+          .max(1024)
+          .refine((value) => [...value].length <= 512 && value.trim() === value && !/\p{C}/u.test(value)),
+      }),
+    ),
     list: operation<GetAdminRoutingRulesData, unknown>()(
       "GET",
       "/admin/routing-rules",

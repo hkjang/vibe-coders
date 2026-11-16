@@ -127,6 +127,35 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
   }
+  // Reuse the existing live routing-order fixture; do not add rules that could
+  // change its full-order/CAS regression or invoke an upstream.
+  await page.keyboard.press("Control+k");
+  const routingPalette = page.getByRole("dialog", { name: "명령 팔레트", exact: true });
+  await routingPalette.getByRole("button", { name: "자원 검색", exact: true }).click();
+  await routingPalette.getByRole("button", { name: "검색 대상: 전체 자원" }).click();
+  await routingPalette
+    .getByRole("group", { name: "검색할 자원 종류" })
+    .getByRole("button", { name: "라우팅 규칙", exact: true })
+    .click();
+  await routingPalette.getByRole("combobox").fill("browser-order");
+  await expect(routingPalette.getByRole("option")).toHaveCount(2);
+  const detailResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      response.status() === 200 &&
+      url.pathname === "/admin/routing-rules" &&
+      url.searchParams.get("id") === "browser-order-a"
+    );
+  });
+  await routingPalette.getByRole("option", { name: /browser-order-a/ }).click();
+  expect((await detailResponse).request().method()).toBe("GET");
+  const ruleDetail = page.getByRole("dialog", { name: "라우팅 규칙 상세", exact: true });
+  await expect(ruleDetail.getByText("규칙 ID").locator("..")).toContainText("browser-order-a");
+  expect(new URL(page.url()).searchParams.get("rule_id")).toBe("browser-order-a");
+  await page.reload();
+  await expect(ruleDetail.getByText("규칙 ID").locator("..")).toContainText("browser-order-a");
+  await page.keyboard.press("Escape");
+  await expect(ruleDetail).toBeHidden();
   await signOut(page);
   expect(await sessionIsEmpty(page)).toBe(true);
   await signIn(page, reader);

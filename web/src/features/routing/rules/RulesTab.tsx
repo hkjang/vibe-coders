@@ -1,3 +1,6 @@
+import { RoutingRuleDetailFocusContext } from "./routing-rule-detail-focus";
+import { RoutingRuleDetailRoute } from "./RoutingRuleDetailRoute";
+import { RoutingRuleWorkspace } from "./RoutingRuleWorkspace";
 import { Plus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -31,7 +34,16 @@ const RoutingRuleCreateDialog = lazy(() =>
 );
 
 export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
+  return (
+    <RoutingRuleWorkspace>
+      <RuleWorkspaceContent canWrite={canWrite} />
+    </RoutingRuleWorkspace>
+  );
+}
+
+function RuleWorkspaceContent({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
+  const detailReturnFocus = useRef<HTMLElement | null>(null);
   const createTrigger = useRef<HTMLButtonElement>(null);
   const createPanel = useRef<HTMLDivElement>(null);
   const createAccess = useRoutingCreateAccess(canWrite);
@@ -117,205 +129,213 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
   const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <div
-      className="routing-panel-stack"
-      ref={(node) => {
-        createPanel.current = node;
-        togglePanelRef.current = node;
-        editPanelRef.current = node;
-        deletePanelRef.current = node;
-      }}
-      tabIndex={-1}
-    >
-      {canWrite ? null : <ScopeNotice>{writeScopeMessage}</ScopeNotice>}
-      {rules.isError ? (
-        <QueryFailureNotice
-          error={rules.error}
-          hasData={Boolean(rules.data)}
-          label="라우팅 규칙"
-          onRetry={() => void toggleData.refresh().catch(() => undefined)}
-        />
-      ) : null}
-
-      <SectionCard
-        title="복잡도 기반 라우팅 규칙"
-        description="요청 복잡도 점수와 모델 패턴이 모두 맞는 규칙 중 우선순위가 가장 앞선 규칙이 적용됩니다."
-        actions={
-          <div className="routing-tab-actions">
-            <RoutingOrderButton canWrite={canWrite} />
-            <Button
-              ref={createTrigger}
-              variant="primary"
-              disabled={!createAccess.write.allowed}
-              title={createAccess.write.reason}
-              onClick={() => {
-                try {
-                  createAccess.assertApproval(createAccess.approval);
-                  if (createActive.current !== undefined) return;
-                  const sequence = ++createSerial.current;
-                  createActive.current = sequence;
-                  setCreateSelection({ lifetime: createAccess.lifetime, serial: sequence });
-                } catch {
-                  /* Retired create trigger. */
-                }
-              }}
-            >
-              <Plus aria-hidden="true" /> 규칙 추가
-            </Button>
-          </div>
-        }
+    <RoutingRuleDetailFocusContext.Provider value={detailReturnFocus}>
+      <div
+        className="routing-panel-stack"
+        ref={(node) => {
+          createPanel.current = node;
+          togglePanelRef.current = node;
+          editPanelRef.current = node;
+          deletePanelRef.current = node;
+        }}
+        tabIndex={-1}
       >
-        <DataTable
-          caption="복잡도 기반 라우팅 규칙 목록"
-          columns={useRuleColumns(
-            canWrite,
-            {
-              onDelete: (rule, trigger) => {
-                try {
-                  deleteAccess.assertApproval(deleteAccess.approval);
-                  const query = client.getQueryCache().find({ queryKey: parentKey, exact: true });
-                  if (
-                    deleteActive.current !== undefined ||
-                    !query ||
-                    query !== renderedQuery ||
-                    query.state.dataUpdateCount !== renderedCount ||
-                    query.state.data !== renderedData
-                  )
-                    return;
-                  const current = toggleData.assertConfirmed().find((candidate) => candidate.id === rule.id);
-                  if (!sameRoutingRule(current, rule) || deleteIdentityReason(rule)) return;
-                  const sequence = ++deleteSerial.current;
-                  deleteActive.current = sequence;
-                  registerDelete(rule.id, trigger);
-                  setDeleteSelection({
-                    lifetime: deleteAccess.lifetime,
-                    target: { rule: Object.freeze({ ...rule }), serial: sequence },
-                  });
-                } catch {
-                  /* Retired callbacks and unconfirmed lists cannot open a deletion. */
-                }
-              },
-              onDeleteRef: registerDelete,
-              onEdit: (rule, trigger) => {
-                try {
-                  editAccess.assertApproval(editAccess.approval);
-                  const query = client.getQueryCache().find({ queryKey: parentKey, exact: true });
-                  if (
-                    editActive.current !== undefined ||
-                    !query ||
-                    query !== renderedQuery ||
-                    query.state.dataUpdateCount !== renderedCount ||
-                    query.state.data !== renderedData
-                  )
-                    return;
-                  const current = toggleData.assertConfirmed().find((candidate) => candidate.id === rule.id);
-                  if (!sameRoutingRule(current, rule) || editIdentityReason(rule)) return;
-                  const sequence = ++serial.current;
-                  editActive.current = sequence;
-                  registerEdit(rule.id, trigger);
-                  setEditSelection({
-                    lifetime: editAccess.lifetime,
-                    target: { rule: { ...rule }, serial: sequence },
-                  });
-                } catch {
-                  /* No new edit from a retired callback or unconfirmed list. */
-                }
-              },
-              onEditRef: registerEdit,
-              onToggle: toggleSelection.open,
-              onToggleRef: registerToggle,
-            },
-            {
-              allowed: toggleAccess.write.allowed && toggleData.confirmed,
-              reason:
-                toggleAccess.write.reason ??
-                (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
-            },
-            {
-              allowed: editAccess.write.allowed && toggleData.confirmed,
-              reason:
-                editAccess.write.reason ??
-                (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
-              prefixes: editAccess.prefixes,
-            },
-            {
-              allowed: deleteAccess.write.allowed && toggleData.confirmed,
-              reason:
-                deleteAccess.write.reason ??
-                (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
-            },
-          )}
-          data={pageRows}
-          emptyMessage="등록된 라우팅 규칙이 없습니다. 규칙을 추가하면 복잡도에 따라 모델을 자동으로 바꿉니다."
-          error={rules.isError && !rules.data ? "라우팅 규칙을 불러오지 못했습니다." : undefined}
-          getRowId={(row) => row.id}
-          loading={rules.isPending}
-          onPageChange={(index) => updateSearch({ page: index === 0 ? undefined : index + 1 })}
-          onRetry={() => void toggleData.refresh().catch(() => undefined)}
-          pageCount={pageCount}
-          pageIndex={page - 1}
-        />
-        <p className="routing-meta">
-          사용 상태는 설정을 다시 읽은 서버에 반영되며, 실제 선택은 라우팅 활성 여부·조건·우선순위에 따릅니다.
-        </p>
-      </SectionCard>
+        {canWrite ? null : <ScopeNotice>{writeScopeMessage}</ScopeNotice>}
+        {rules.isError ? (
+          <QueryFailureNotice
+            error={rules.error}
+            hasData={Boolean(rules.data)}
+            label="라우팅 규칙"
+            onRetry={() => void toggleData.refresh().catch(() => undefined)}
+          />
+        ) : null}
 
-      {creating !== undefined ? (
-        <Suspense fallback={<p role="status">규칙 생성 편집기를 불러오는 중입니다…</p>}>
-          <RoutingRuleCreateDialog
-            key={`${createAccess.key}:${creating}`}
-            access={createAccess}
-            returnFocusRef={createReturnFocus}
+        <SectionCard
+          title="복잡도 기반 라우팅 규칙"
+          description="요청 복잡도 점수와 모델 패턴이 모두 맞는 규칙 중 우선순위가 가장 앞선 규칙이 적용됩니다."
+          actions={
+            <div className="routing-tab-actions">
+              <RoutingOrderButton canWrite={canWrite} />
+              <Button
+                ref={createTrigger}
+                variant="primary"
+                disabled={!createAccess.write.allowed}
+                title={createAccess.write.reason}
+                onClick={() => {
+                  try {
+                    createAccess.assertApproval(createAccess.approval);
+                    if (createActive.current !== undefined) return;
+                    const sequence = ++createSerial.current;
+                    createActive.current = sequence;
+                    setCreateSelection({ lifetime: createAccess.lifetime, serial: sequence });
+                  } catch {
+                    /* Retired create trigger. */
+                  }
+                }}
+              >
+                <Plus aria-hidden="true" /> 규칙 추가
+              </Button>
+            </div>
+          }
+        >
+          <DataTable
+            caption="복잡도 기반 라우팅 규칙 목록"
+            columns={useRuleColumns(
+              canWrite,
+              {
+                onDelete: (rule, trigger) => {
+                  try {
+                    deleteAccess.assertApproval(deleteAccess.approval);
+                    const query = client.getQueryCache().find({ queryKey: parentKey, exact: true });
+                    if (
+                      deleteActive.current !== undefined ||
+                      !query ||
+                      query !== renderedQuery ||
+                      query.state.dataUpdateCount !== renderedCount ||
+                      query.state.data !== renderedData
+                    )
+                      return;
+                    const current = toggleData
+                      .assertConfirmed()
+                      .find((candidate) => candidate.id === rule.id);
+                    if (!sameRoutingRule(current, rule) || deleteIdentityReason(rule)) return;
+                    const sequence = ++deleteSerial.current;
+                    deleteActive.current = sequence;
+                    registerDelete(rule.id, trigger);
+                    setDeleteSelection({
+                      lifetime: deleteAccess.lifetime,
+                      target: { rule: Object.freeze({ ...rule }), serial: sequence },
+                    });
+                  } catch {
+                    /* Retired callbacks and unconfirmed lists cannot open a deletion. */
+                  }
+                },
+                onDeleteRef: registerDelete,
+                onEdit: (rule, trigger) => {
+                  try {
+                    editAccess.assertApproval(editAccess.approval);
+                    const query = client.getQueryCache().find({ queryKey: parentKey, exact: true });
+                    if (
+                      editActive.current !== undefined ||
+                      !query ||
+                      query !== renderedQuery ||
+                      query.state.dataUpdateCount !== renderedCount ||
+                      query.state.data !== renderedData
+                    )
+                      return;
+                    const current = toggleData
+                      .assertConfirmed()
+                      .find((candidate) => candidate.id === rule.id);
+                    if (!sameRoutingRule(current, rule) || editIdentityReason(rule)) return;
+                    const sequence = ++serial.current;
+                    editActive.current = sequence;
+                    registerEdit(rule.id, trigger);
+                    setEditSelection({
+                      lifetime: editAccess.lifetime,
+                      target: { rule: { ...rule }, serial: sequence },
+                    });
+                  } catch {
+                    /* No new edit from a retired callback or unconfirmed list. */
+                  }
+                },
+                onEditRef: registerEdit,
+                onToggle: toggleSelection.open,
+                onToggleRef: registerToggle,
+              },
+              {
+                allowed: toggleAccess.write.allowed && toggleData.confirmed,
+                reason:
+                  toggleAccess.write.reason ??
+                  (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
+              },
+              {
+                allowed: editAccess.write.allowed && toggleData.confirmed,
+                reason:
+                  editAccess.write.reason ??
+                  (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
+                prefixes: editAccess.prefixes,
+              },
+              {
+                allowed: deleteAccess.write.allowed && toggleData.confirmed,
+                reason:
+                  deleteAccess.write.reason ??
+                  (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
+              },
+            )}
+            data={pageRows}
+            emptyMessage="등록된 라우팅 규칙이 없습니다. 규칙을 추가하면 복잡도에 따라 모델을 자동으로 바꿉니다."
+            error={rules.isError && !rules.data ? "라우팅 규칙을 불러오지 못했습니다." : undefined}
+            getRowId={(row) => row.id}
+            loading={rules.isPending}
+            onPageChange={(index) => updateSearch({ page: index === 0 ? undefined : index + 1 })}
+            onRetry={() => void toggleData.refresh().catch(() => undefined)}
+            pageCount={pageCount}
+            pageIndex={page - 1}
+          />
+          <p className="routing-meta">
+            사용 상태는 설정을 다시 읽은 서버에 반영되며, 실제 선택은 라우팅 활성 여부·조건·우선순위에
+            따릅니다.
+          </p>
+        </SectionCard>
+
+        {creating !== undefined ? (
+          <Suspense fallback={<p role="status">규칙 생성 편집기를 불러오는 중입니다…</p>}>
+            <RoutingRuleCreateDialog
+              key={`${createAccess.key}:${creating}`}
+              access={createAccess}
+              returnFocusRef={createReturnFocus}
+              onClose={() => {
+                if (createActive.current !== creating) return;
+                createActive.current = undefined;
+                setCreateSelection({ lifetime: createAccess.lifetime });
+              }}
+            />
+          </Suspense>
+        ) : null}
+
+        {editing ? (
+          <RoutingRuleEditDialog
+            key={`${editAccess.key}:${editing.serial}`}
+            rule={editing.rule}
+            access={editAccess}
+            returnFocusRef={editReturnFocusRef}
             onClose={() => {
-              if (createActive.current !== creating) return;
-              createActive.current = undefined;
-              setCreateSelection({ lifetime: createAccess.lifetime });
+              if (editActive.current !== editing.serial) return;
+              editActive.current = undefined;
+              setEditSelection({ lifetime: editAccess.lifetime });
             }}
           />
-        </Suspense>
-      ) : null}
+        ) : null}
 
-      {editing ? (
-        <RoutingRuleEditDialog
-          key={`${editAccess.key}:${editing.serial}`}
-          rule={editing.rule}
-          access={editAccess}
-          returnFocusRef={editReturnFocusRef}
-          onClose={() => {
-            if (editActive.current !== editing.serial) return;
-            editActive.current = undefined;
-            setEditSelection({ lifetime: editAccess.lifetime });
-          }}
-        />
-      ) : null}
+        {toggleSelection.target ? (
+          <RoutingToggleDialog
+            key={`${toggleAccess.securityKey}:${toggleSelection.target.sequence}`}
+            rule={toggleSelection.target.rule}
+            intendedEnabled={toggleSelection.target.intendedEnabled}
+            access={toggleAccess}
+            data={toggleData}
+            onClose={() => {
+              if (toggleSelection.target) toggleSelection.close(toggleSelection.target.sequence);
+            }}
+            returnFocusRef={toggleReturnFocusRef}
+          />
+        ) : null}
 
-      {toggleSelection.target ? (
-        <RoutingToggleDialog
-          key={`${toggleAccess.securityKey}:${toggleSelection.target.sequence}`}
-          rule={toggleSelection.target.rule}
-          intendedEnabled={toggleSelection.target.intendedEnabled}
-          access={toggleAccess}
-          data={toggleData}
-          onClose={() => {
-            if (toggleSelection.target) toggleSelection.close(toggleSelection.target.sequence);
-          }}
-          returnFocusRef={toggleReturnFocusRef}
-        />
-      ) : null}
-
-      {deleting ? (
-        <RoutingRuleDeleteDialog
-          key={`${deleteAccess.key}:${deleting.serial}`}
-          rule={deleting.rule}
-          access={deleteAccess}
-          returnFocusRef={deleteReturnFocusRef}
-          onClose={() => {
-            if (deleteActive.current !== deleting.serial) return;
-            deleteActive.current = undefined;
-            setDeleteSelection({ lifetime: deleteAccess.lifetime });
-          }}
-        />
-      ) : null}
-    </div>
+        {deleting ? (
+          <RoutingRuleDeleteDialog
+            key={`${deleteAccess.key}:${deleting.serial}`}
+            rule={deleting.rule}
+            access={deleteAccess}
+            returnFocusRef={deleteReturnFocusRef}
+            onClose={() => {
+              if (deleteActive.current !== deleting.serial) return;
+              deleteActive.current = undefined;
+              setDeleteSelection({ lifetime: deleteAccess.lifetime });
+            }}
+          />
+        ) : null}
+      </div>
+      <RoutingRuleDetailRoute />
+    </RoutingRuleDetailFocusContext.Provider>
   );
 }

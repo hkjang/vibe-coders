@@ -169,7 +169,7 @@ func TestResourceSearchAccountProjectionFeatureAndLegacy(t *testing.T) {
 	}
 	schemas := resourceSearchOpenAPISchemas()
 	request := schemas["ResourceSearchRequest"].(map[string]any)["properties"].(map[string]any)["kinds"].(map[string]any)
-	if request["maxItems"] != 14 || len(request["items"].(map[string]any)["enum"].([]string)) != 14 {
+	if request["maxItems"] != 15 || len(request["items"].(map[string]any)["enum"].([]string)) != 15 {
 		t.Fatal("account kind missing from request contract")
 	}
 }

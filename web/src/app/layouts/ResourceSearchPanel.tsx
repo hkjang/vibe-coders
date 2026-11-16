@@ -28,6 +28,7 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
       !versionAtLeast(auth.backendVersion, "v0.86.97")
     )
       return false;
+    if (kind === "routing_rule" && !versionAtLeast(auth.backendVersion, "v0.86.103")) return false;
     if (kind === "model" && !versionAtLeast(auth.backendVersion, "v0.86.102")) return false;
     if (kind === "api_key" && !versionAtLeast(auth.backendVersion, "v0.86.101")) return false;
     if (kind === "setting" && !versionAtLeast(auth.backendVersion, "v0.86.99")) return false;
@@ -36,7 +37,8 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
     if (kind === "mcp_tool" && !versionAtLeast(auth.backendVersion, "v0.86.96")) return false;
     const feature = auth.features.find((item) => item.featureId === resourceSearchTargets[kind].featureId);
     if (!feature || !auth.user) return false;
-    if (kind !== "policy" && !auth.user.scopes.includes("admin:read")) return false;
+    if (kind !== "policy" && kind !== "routing_rule" && !auth.user.scopes.includes("admin:read"))
+      return false;
     if (!auth.user.scopes.includes(resourceSearchReadScope(kind))) return false;
     const effective = resolveFeature(feature, auth.user, auth.backendVersion, {
       legacyFallback: auth.legacyFallback,
@@ -173,6 +175,7 @@ function ResourceSearchContent({
       />
       <p className="command-footer resource-search-help">
         종류별 최대 10개 · 이름 검색{kinds.includes("setting") ? " · 설정 키·범주·설명 검색" : ""}
+        {kinds.includes("routing_rule") ? " · 라우팅 규칙 ID·모델 패턴·대상 모델 검색" : ""}
         {kinds.includes("model") ? " · 모델 목록은 공급자 연결 상태에 따라 일부만 표시될 수 있습니다." : ""}
       </p>
       <label className="command-search">
@@ -313,7 +316,7 @@ function ResourceSearchContent({
                       {item.kind === "model"
                         ? ` · ${item.provider_label}${item.virtual ? " · 가상 모델" : ""}`
                         : ""}
-                      {item.kind === "setting" ? ` · ${item.id}` : ""}
+                      {item.kind === "setting" || item.kind === "routing_rule" ? ` · ${item.id}` : ""}
                       {item.kind === "mcp_tool"
                         ? ` · ${item.server_label === "(none)" ? "서버 미지정" : item.server_label}`
                         : ""}

@@ -8713,11 +8713,12 @@
                 "prompt_experiment",
                 "setting",
                 "api_key",
-                "model"
+                "model",
+                "routing_rule"
               ],
               "type": "string"
             },
-            "maxItems": 14,
+            "maxItems": 15,
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
@@ -8765,7 +8766,8 @@
                           "prompt_experiment",
                           "setting",
                           "api_key",
-                          "model"
+                          "model",
+                          "routing_rule"
                         ],
                         "type": "string"
                       },
@@ -8819,7 +8821,8 @@
                     "prompt_experiment",
                     "setting",
                     "api_key",
-                    "model"
+                    "model",
+                    "routing_rule"
                   ],
                   "type": "string"
                 },
@@ -8844,7 +8847,7 @@
               ],
               "type": "object"
             },
-            "maxItems": 14,
+            "maxItems": 15,
             "type": "array"
           },
           "request_id": {
@@ -12217,7 +12220,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.102"
+    "version": "v0.86.103"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -24200,7 +24203,7 @@
     },
     "/admin/resource-search": {
       "post": {
-        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies; all other kinds require admin:read. MCP server and tool search additionally require observability:read and never fetch discovery data. MCP server search exposes canonical upstream slug IDs and safe display names; observed tool search uses the exact catalog server-label/tool-name pair. A security-only reader must request the policy kind; other groups remain forbidden. No admin:write required. Team search requires access.users and applies the same exact authenticated team_admin TeamID scope as GET /admin/teams?view=registered, including an empty team scope. It searches registered team names, not usage groups, IDs or members. Account search also requires access.users and matches GET /admin/users?view=accounts primary-team scope, including unassigned accounts for an empty authenticated team. It selects and searches stored login names only, never email, roles, credentials, membership lists or usage identities. Query is trimmed, 2–128 Unicode characters, literal name substring; SQLite uses the embedded Unicode lowercase function and PostgreSQL uses LOWER for both stored names and query. Observed MCP tool search selects only server_label and tool_name from the existing MCP catalog with is_mcp=1, matches tool names only, and orders by tool name then server label. It returns the exact server_label and tool-name id pair, excludes empty servers and names longer than 256 characters/1024 bytes, and never performs discovery or invokes tools. Prompt asset and experiment search require admin:read and their respective prompts.library/prompts.lab feature, matching the existing admin lists. They select stored asset names or experiment titles and IDs only, never prompt bodies, descriptions, inputs, outputs, metrics, owners or team fields. Setting search requires admin:read and system.settings. It searches only static registered keys, categories and Korean descriptions, ordered by key; no effective, stored or environment values are searched or returned. API key search requires admin:read and access.users. It searches only registered key names, never secrets, hashes, owners, scopes or limits. Its exact team_admin TeamID scope, including an empty team, matches GET /admin/api-keys?id; names and safe ASCII database IDs alone are returned. Fourteen supported navigation kinds: provider, workflow, app, skill, mcp_upstream, policy, team, account, mcp_tool, prompt_asset, prompt_experiment, setting, api_key and model. Model search reuses GET /admin/models inventory collection, its configuration-aware 20-second cache, bounded refresh and singleflight; no model inference or business execution. It matches safe model IDs only, returns an opaque provider_ref and safe provider_label, and preserves virtual model namespace identity. Model results may be partial when an upstream failed, cached data is stale or the bounded inventory is truncated. Safe matching results remain usable; partial never means an exhaustive search. Cold cache may require provider catalog I/O, bounded by the shared three-second deadline. Storage-only groups are collected first regardless of requested order, so a slow model upstream cannot starve unrelated kinds. At most ten metadata rows per kind ordered by stored title then ID. IDs are bounded to 512 Unicode characters/2048 UTF-8 bytes and titles to 256 characters/1024 bytes before selection. Unsafe or oversized IDs/titles are omitted for every role without truncating IDs; full team metadata remains available in the registered-team screen. Definitions, policy conditions/actions, instructions, credentials, URLs, members and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Only model groups may report partial and retain items. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
+        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies. Routing rule search requires routing:read, matching GET /admin/routing-rules; remaining kinds require admin:read. MCP server and tool search additionally require observability:read and never fetch discovery data. MCP server search exposes canonical upstream slug IDs and safe display names; observed tool search uses the exact catalog server-label/tool-name pair. A reader without admin:read must request policy with security:read or routing_rule with routing:read. Other groups remain forbidden; no cross-scope access is inferred. No admin:write required. Team search requires access.users and applies the same exact authenticated team_admin TeamID scope as GET /admin/teams?view=registered, including an empty team scope. It searches registered team names, not usage groups, IDs or members. Account search also requires access.users and matches GET /admin/users?view=accounts primary-team scope, including unassigned accounts for an empty authenticated team. It selects and searches stored login names only, never email, roles, credentials, membership lists or usage identities. Query is trimmed, 2–128 Unicode characters, literal name substring; SQLite uses the embedded Unicode lowercase function and PostgreSQL uses LOWER for both stored names and query. Observed MCP tool search selects only server_label and tool_name from the existing MCP catalog with is_mcp=1, matches tool names only, and orders by tool name then server label. It returns the exact server_label and tool-name id pair, excludes empty servers and names longer than 256 characters/1024 bytes, and never performs discovery or invokes tools. Prompt asset and experiment search require admin:read and their respective prompts.library/prompts.lab feature, matching the existing admin lists. They select stored asset names or experiment titles and IDs only, never prompt bodies, descriptions, inputs, outputs, metrics, owners or team fields. Setting search requires admin:read and system.settings. It searches only static registered keys, categories and Korean descriptions, ordered by key; no effective, stored or environment values are searched or returned. API key search requires admin:read and access.users. It searches only registered key names, never secrets, hashes, owners, scopes or limits. Its exact team_admin TeamID scope, including an empty team, matches GET /admin/api-keys?id; names and safe ASCII database IDs alone are returned. Routing rule search requires the available routing.rules feature and matches generated rule IDs, incoming model patterns and target model names. It selects only the ID and target model as the display title, never notes, providers, complexity or actions. Fifteen supported navigation kinds: provider, workflow, app, skill, mcp_upstream, policy, team, account, mcp_tool, prompt_asset, prompt_experiment, setting, api_key, model and routing_rule. Model search reuses GET /admin/models inventory collection, its configuration-aware 20-second cache, bounded refresh and singleflight; no model inference or business execution. It matches safe model IDs only, returns an opaque provider_ref and safe provider_label, and preserves virtual model namespace identity. Model results may be partial when an upstream failed, cached data is stale or the bounded inventory is truncated. Safe matching results remain usable; partial never means an exhaustive search. Cold cache may require provider catalog I/O, bounded by the shared three-second deadline. Storage-only groups are collected first regardless of requested order, so a slow model upstream cannot starve unrelated kinds. At most ten metadata rows per kind ordered by stored title then ID. IDs are bounded to 512 Unicode characters/2048 UTF-8 bytes and titles to 256 characters/1024 bytes before selection. Unsafe or oversized IDs/titles are omitted for every role without truncating IDs; full team metadata remains available in the registered-team screen. Definitions, policy conditions/actions, instructions, credentials, URLs, members and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Only model groups may report partial and retain items. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
         "operationId": "post__admin_resource_search",
         "requestBody": {
           "content": {
@@ -24461,7 +24464,7 @@
     },
     "/admin/routing-rules": {
       "get": {
-        "description": "Without view=order the existing complete raw routing rule list is unchanged. Exactly view=order and no other query returns a bounded review snapshot in the existing server order (priority, then stored creation timestamp). Its SHA-256 revision compares all configuration fields; it is not a monotonic version or idempotency token. Equal priority and creation timestamp have unspecified legacy order, reported by ambiguous_ties. Order snapshots use no-store.",
+        "description": "Without view=order or id the existing complete raw routing rule list is unchanged. A single id query selects exactly that stored rule and returns the same raw configuration shape with zero or one row and no-store. Detail IDs are nonblank exact strings up to 512 Unicode characters and 2048 UTF-8 bytes without surrounding whitespace, control or format characters. Duplicate, malformed, empty IDs and mixed detail queries return 400; an invalid detail never falls back to the whole collection. This read requires routing:read and does not change or execute routing. Exactly view=order and no other query returns a bounded review snapshot in the existing server order (priority, then stored creation timestamp). Its SHA-256 revision compares all configuration fields; it is not a monotonic version or idempotency token. Equal priority and creation timestamp have unspecified legacy order, reported by ambiguous_ties. Order snapshots use no-store.",
         "operationId": "get__admin_routing_rules",
         "parameters": [
           {
@@ -24471,6 +24474,16 @@
               "enum": [
                 "order"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact read-only rule ID, mutually exclusive with view and any other query.",
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -24494,7 +24507,7 @@
                 }
               }
             },
-            "description": "invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB."
+            "description": "invalid_routing_detail: malformed, duplicate or invalid exact ID, or an ID combined with other queries; invalid_routing_order: invalid or combined order-view query. Detail IDs are exact UTF-8 values of at most 512 code points and 2048 bytes, without control or format characters."
           },
           "401": {
             "content": {

@@ -2520,7 +2520,7 @@ export type RequestNoteWriteRequest = {
 } | null;
 
 export type ResourceSearchRequest = {
-    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model'>;
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule'>;
     query: string;
 };
 
@@ -2528,7 +2528,7 @@ export type ResourceSearchResponse = {
     groups: Array<{
         items: Array<{
             id: string;
-            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model';
+            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule';
             provider_label?: string;
             /**
              * Model provider opaque reference, including a separate system namespace for virtual models.
@@ -2541,7 +2541,7 @@ export type ResourceSearchResponse = {
             title: string;
             virtual?: boolean;
         }>;
-        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model';
+        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule';
         limited: boolean;
         status: 'ok' | 'partial' | 'forbidden' | 'unavailable';
     }>;
@@ -10894,13 +10894,17 @@ export type GetAdminRoutingRulesData = {
     path?: never;
     query?: {
         view?: 'order';
+        /**
+         * Exact read-only rule ID, mutually exclusive with view and any other query.
+         */
+        id?: string;
     };
     url: '/admin/routing-rules';
 };
 
 export type GetAdminRoutingRulesErrors = {
     /**
-     * invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB.
+     * invalid_routing_detail: malformed, duplicate or invalid exact ID, or an ID combined with other queries; invalid_routing_order: invalid or combined order-view query. Detail IDs are exact UTF-8 values of at most 512 code points and 2048 bytes, without control or format characters.
      */
     400: AppError;
     /**
