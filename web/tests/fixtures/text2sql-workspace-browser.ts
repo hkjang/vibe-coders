@@ -8,7 +8,7 @@ export async function installText2SqlWorkspace(page: Page, health?: Record<strin
   const bootstrap = fixture.bootstrap;
   const base = bootstrap.migration_registry[0];
   if (!base || !bootstrap.user) throw new Error("Missing fixture identity");
-  bootstrap.backend_version = "v0.86.126";
+  bootstrap.backend_version = "v0.86.127";
   bootstrap.ui.default_entry = "/app/text2sql";
   bootstrap.migration_registry = migrationRegistry
     .filter((feature) => feature.featureId === "text2sql.overview")

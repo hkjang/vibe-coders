@@ -21,6 +21,22 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
 }
+.request-time-presets {
+  display: grid;
+  gap: var(--space-2);
+}
+.request-time-preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.request-time-presets p,
+.request-time-preset-notice {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
 .request-filter-grid label {
   display: grid;
   gap: var(--space-1);
