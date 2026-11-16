@@ -21,7 +21,7 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   // Screens declare their own query keys next to their route registration; this
   // map covers the routes no feature module owns: the login screen and the two
   // compatibility redirects that forward to the gateway catalog screens.
-  "/login": new Set(["return_to"]),
+  "/login": new Set(["return_to", "sso"]),
   "/providers": new Set(["page", "provider", "q", "range", "status", "sort", "page_size"]),
   "/models": new Set([
     "model",
@@ -104,6 +104,14 @@ export function sanitizeAppRouteSearch(
   const rejectedValues = new Map<string, boolean>();
   const route = routerPath(pathname);
   const invalidOperationalKeys = new Set<string>();
+  // These are gateway-owned refusal markers, not arbitrary provider errors.
+  // Keep one bounded outcome through both startup and client-side navigation.
+  if (route === "/login" && parameters.has("sso")) {
+    const values = parameters.getAll("sso");
+    if (values.length !== 1 || !["none", "error"].includes(values[0] ?? "")) {
+      invalidOperationalKeys.add("sso");
+    }
+  }
   if (route === "/observability/traces" || route.startsWith("/observability/traces/")) {
     for (const key of ["flow_kind", "flow_status"] as const) {
       if (
