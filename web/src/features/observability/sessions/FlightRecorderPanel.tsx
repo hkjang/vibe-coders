@@ -9,6 +9,7 @@ import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
 import { useFlightRecorder } from "./flight-recorder-query";
 import { flightRecorderVerdict } from "./flight-recorder-state";
 import { FlightRecorderTimeline } from "./FlightRecorderTimeline";
+import { SessionReadDenied } from "./SessionReadDenied";
 import { useSessionListAccess, type SessionListAccess } from "./session-list-access";
 import "./flight-recorder.css";
 
@@ -38,7 +39,14 @@ function FlightRecorderContent({
   sessionId,
   access,
 }: FlightRecorderPanelProps & { access: SessionListAccess }): React.JSX.Element {
-  const { query: recorder, refresh, ready, canExport } = useFlightRecorder(sessionId, access);
+  const {
+    query: recorder,
+    refresh,
+    ready,
+    canExport,
+    denied,
+    denialRequestId,
+  } = useFlightRecorder(sessionId, access);
   const requestId = isAppError(recorder.error) ? recorder.error.requestId : undefined;
   const safeRequestId =
     requestId && !containsPotentialSecret(requestId, access.prefixes) ? requestId : undefined;
@@ -66,6 +74,7 @@ function FlightRecorderContent({
     </InlineNotice>
   ) : null;
   const actions = <div className="section-card-actions">{retryButton}</div>;
+  if (denied) return <SessionReadDenied detail onRetry={refresh} requestId={denialRequestId} />;
   if (!recorder.data)
     return (
       <div className="obs-section-stack flight-recorder-panel">

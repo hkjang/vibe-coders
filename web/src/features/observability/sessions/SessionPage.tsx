@@ -2,6 +2,7 @@ import { RefreshCw, Search } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { FlightRecorderPanel } from "./FlightRecorderPanel";
 import { SessionListResults } from "./SessionListResults";
+import { SessionReadDenied } from "./SessionReadDenied";
 import { useSessionListAccess, type SessionListAccess } from "./session-list-access";
 import { useSessionList } from "./session-list-query";
 import {
@@ -56,6 +57,8 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
     filterSerial,
     successCount,
     ready,
+    denied,
+    denialRequestId,
   } = useSessionList(days, keyword, identity, access, interval);
   const showBlocked = blocked?.serial === filterSerial && !(ready && successCount !== blocked.count);
   const resetFilters = () => {
@@ -145,18 +148,22 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
           {draft.error}
         </p>
       ) : null}
-      <section aria-label="목록 조회 기준">
-        <p role="status">{sessionListNotice(days, sessions.data, sessions.isFetching, sessions.isError)}</p>
-        <p>
-          검색과 합계는 불러온 최대 200개 세션에 적용됩니다. 전체 세션 검색이나 기간 전체의 합계가 아닙니다.
-        </p>
-        <p aria-live="polite">
-          {showBlocked
-            ? sessionListBlockedMessage
-            : "목록을 새로 확인하는 동안에는 새로운 세션을 선택할 수 없습니다."}
-        </p>
-      </section>
-      {sessions.isError ? (
+      {!denied ? (
+        <section aria-label="목록 조회 기준">
+          <p role="status">{sessionListNotice(days, sessions.data, sessions.isFetching, sessions.isError)}</p>
+          <p>
+            검색과 합계는 불러온 최대 200개 세션에 적용됩니다. 전체 세션 검색이나 기간 전체의 합계가 아닙니다.
+          </p>
+          <p aria-live="polite">
+            {showBlocked
+              ? sessionListBlockedMessage
+              : "목록을 새로 확인하는 동안에는 새로운 세션을 선택할 수 없습니다."}
+          </p>
+        </section>
+      ) : null}
+      {denied ? (
+        <SessionReadDenied focus={openSessionId === ""} onRetry={refresh} requestId={denialRequestId} />
+      ) : sessions.isError ? (
         <ErrorState
           message={
             sessions.data
@@ -169,7 +176,7 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
           legacyHref="/admin#/sessions"
         />
       ) : null}
-      {sessions.data || !sessions.isError ? (
+      {!denied && (sessions.data || !sessions.isError) ? (
         <SessionListResults
           data={sessions.data}
           rows={rows}
