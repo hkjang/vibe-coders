@@ -10,7 +10,7 @@ import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { migrationRegistry } from "@/config/migration-registry";
 import { usePreferences } from "@/shared/stores/preferences";
 import type { AuthMode } from "@/app/auth/AuthProvider";
-import type { ComponentProps } from "react";
+import { Children, type ComponentProps } from "react";
 import type * as ButtonModule from "@/shared/components/ui/Button";
 
 const clickRuntime = vi.hoisted(() => new Map<string, () => void>());
@@ -20,7 +20,12 @@ vi.mock("@/shared/components/ui/Button", async (importOriginal) => {
   return {
     ...actual,
     Button: function ObservedButton(props: ComponentProps<typeof actual.Button>) {
-      const label = props["aria-label"] ?? (typeof props.children === "string" ? props.children : undefined);
+      const label =
+        props["aria-label"] ??
+        Children.toArray(props.children)
+          .filter((child) => typeof child === "string")
+          .join("")
+          .trim();
       if (label && props.onClick) {
         const callback = props.onClick;
         clickRuntime.set(label, () => Reflect.apply(callback, undefined, []));

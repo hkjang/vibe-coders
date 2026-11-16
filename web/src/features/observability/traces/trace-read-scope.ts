@@ -4,10 +4,10 @@ import { assertFeatureRead, useFeatureReadOwner } from "@/shared/hooks/use-featu
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import type { TraceSafeFlowAccess } from "./trace-safe-flow-access";
 
-/** A denied trace list retires its child via unmount; flow reads have a separate scope. */
+/** A denied request/trace list retires its child via unmount; flow reads have a separate scope. */
 export function useTraceReadScope(
   access: TraceSafeFlowAccess,
-  marker: "trace-list-read" | "trace-flow-read",
+  marker: "trace-list-read" | "trace-flow-read" | "request-list-read",
 ) {
   const owner = useFeatureReadOwner(access.routeId, marker);
   const [diagnostic, setDiagnostic] = useState<{ owner: number; requestId?: string }>();

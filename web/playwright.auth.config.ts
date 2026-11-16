@@ -33,6 +33,7 @@ export default defineConfig({
     "execution-receipts-live.spec.ts",
     "settings-workspace-live.spec.ts",
     "overview-trend-live.spec.ts",
+    "request-bulk-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

@@ -120,6 +120,45 @@
   }
 }
 
+/* Current-page selection is kept outside the horizontally scrolling table. */
+.request-selection-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.request-selection-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.request-selection-column .checkbox {
+  min-width: var(--space-6);
+  min-height: var(--space-6);
+  justify-content: center;
+}
+
+.request-table tr[data-selected] {
+  background: var(--color-secondary);
+}
+
+.request-page .data-table-pagination {
+  flex-wrap: wrap;
+}
+
+.request-page .data-table-pagination > span {
+  flex: 1 1 16rem;
+}
+
+.request-page .data-table-pagination .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* Compare-with-another-request panel inside the request detail dialog. */
 .request-compare {
   display: grid;
