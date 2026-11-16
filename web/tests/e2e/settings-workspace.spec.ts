@@ -133,24 +133,60 @@ for (const theme of ["light", "dark"] as const)
     });
   }
 
-test("설정 초안 폐기 뒤로가기는 필터 주소를 보존하고 앞으로 이동에서 초기 값을 연다", async ({ page }) => {
-  const state = await installSettingsWorkspace(page);
-  await page.goto("system/settings?tab=runtime&q=cache&category=cache");
-  const before = page.url();
-  await page.getByRole("link", { name: runtimeKey, exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: runtimeKey, exact: true });
-  await sheet.getByLabel("새 값", { exact: true }).selectOption("false");
-  await page.goBack();
-  await page.getByRole("button", { name: "계속 편집", exact: true }).click();
-  await expect(sheet.getByLabel("새 값", { exact: true })).toHaveValue("false");
-  await page.goBack();
-  await page.getByRole("button", { name: "변경 버리기", exact: true }).click();
-  await expect(sheet).toBeHidden();
-  await expect(page).toHaveURL(before);
-  await expect(page.locator("#main-content")).toBeFocused();
-  await page.goForward();
-  await expect(sheet).toBeVisible();
-  await expect(sheet.getByLabel("새 값", { exact: true })).toHaveValue("true");
-  expect(state.writes).toEqual([]);
-  expect(state.unexpected).toEqual([]);
-});
+for (const delayedHistory of [false, true])
+  test(`설정 초안 폐기 뒤로가기는 필터 주소를 보존하고 앞으로 이동에서 초기 값을 연다${delayedHistory ? " · 이동 지연" : ""}`, async ({
+    page,
+  }) => {
+    const state = await installSettingsWorkspace(page);
+    if (delayedHistory)
+      await page.addInitScript(() => {
+        const nativeGo = history.go.bind(history);
+        const gate = { waiting: false, resume: () => {} };
+        Object.assign(window, { settingsHistoryGate: gate });
+        history.go = (delta = 0) => {
+          if (delta !== -1) return nativeGo(delta);
+          gate.waiting = true;
+          gate.resume = () => {
+            gate.waiting = false;
+            history.go = nativeGo;
+            nativeGo(delta);
+          };
+        };
+      });
+    await page.goto("system/settings?tab=runtime&q=cache&category=cache");
+    const before = page.url();
+    await page.getByRole("link", { name: runtimeKey, exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: runtimeKey, exact: true });
+    await sheet.getByLabel("새 값", { exact: true }).selectOption("false");
+    await page.goBack();
+    await page.getByRole("button", { name: "계속 편집", exact: true }).click();
+    await expect(sheet.getByLabel("새 값", { exact: true })).toHaveValue("false");
+    await page.goBack();
+    await page.getByRole("button", { name: "변경 버리기", exact: true }).click();
+    if (delayedHistory) {
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as unknown as { settingsHistoryGate: { waiting: boolean } }).settingsHistoryGate
+                .waiting,
+          ),
+        )
+        .toBe(true);
+      // The editor must discard immediately, even if the browser has not yet
+      // delivered the approved POP event and the sheet is still mounted.
+      await expect(sheet.getByLabel("새 값", { exact: true })).toHaveValue("true");
+      await page.evaluate(() =>
+        (window as unknown as { settingsHistoryGate: { resume: () => void } }).settingsHistoryGate.resume(),
+      );
+    }
+    await expect(page.getByRole("alertdialog")).toBeHidden();
+    await expect(sheet).toBeHidden();
+    await expect(page).toHaveURL(before);
+    await expect(page.locator("#main-content")).toBeFocused();
+    await page.goForward();
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByLabel("새 값", { exact: true })).toHaveValue("true");
+    expect(state.writes).toEqual([]);
+    expect(state.unexpected).toEqual([]);
+  });

@@ -78,6 +78,14 @@ function ConsoleFeatureEditor({
       // The router owns a confirmed departure. A second URL update here would
       // replace the destination or change the browser history index.
       if (reason === "navigation") {
+        // The editor can render again before the browser commits the departure.
+        // Discard every field now instead of relying on the eventual unmount.
+        setStatus(row.status?.value ?? "");
+        setRoles(row.roles?.value ?? "");
+        setRollout(row.rollout?.value ?? "");
+        setReadOnly(normalizedBoolean(row.readonly?.value ?? "false"));
+        setReason("");
+        setError(undefined);
         // Radix closes after the route commits. Restore the same destination
         // as the navigation coordinator instead of racing its focus with the old trigger.
         returnFocusRef.current = document.getElementById("main-content");
