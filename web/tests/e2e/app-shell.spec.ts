@@ -670,8 +670,15 @@ test("운영 개요: 추이 기간을 새로고침과 탭 이동 뒤에도 복�
   await page.reload();
   await expect(page.getByRole("img", { name: "최근 24시간 요청 수" })).toBeVisible();
   await page.getByRole("tab", { name: "운영 상태", exact: true }).click();
+  // Reopening a private widget creates a fresh read lifetime. Count the explicit
+  // refresh only after that initial read, so transport scheduling is not a second refresh.
+  const reopened = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/timeseries",
+  );
   await page.getByRole("tab", { name: "사용 현황", exact: true }).click();
+  await reopened;
   await expect(range.getByRole("button", { name: "최근 24시간" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "전체 새로고침", exact: true })).toBeEnabled();
   const before = windows.length;
   await page.getByRole("button", { name: "전체 새로고침", exact: true }).click();
   await expect.poll(() => windows.length).toBe(before + 1);

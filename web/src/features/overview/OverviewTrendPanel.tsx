@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useOverviewQuery } from "./use-overview-query";
 
 import { TimeSeriesChart, type ChartSeries } from "@/features/observability/charts";
 import { refreshIntervalMs } from "@/features/health/health-utils";
@@ -41,22 +41,20 @@ export function OverviewTrendPanel(): React.JSX.Element {
   const [range, setRange] = useTabParam<WindowId>(windowIds, "7d", "trend");
   const selected = windows.find((item) => item.id === range) ?? windows[1];
 
-  const timeseries = useQuery({
-    refetchInterval: interval,
-    refetchIntervalInBackground: false,
-    queryKey: ["overview", "timeseries", selected.id],
-    queryFn: ({ signal }) =>
+  const timeseries = useOverviewQuery({
+    interval,
+    key: ["timeseries", selected.id],
+    read: (signal) =>
       apiClient.request(endpoints.admin.timeseries, {
         query: { window: selected.id, bucket: selected.bucket },
         routeId,
         signal,
       }),
   });
-  const heatmap = useQuery({
-    refetchInterval: interval,
-    refetchIntervalInBackground: false,
-    queryKey: ["overview", "heatmap", selected.heatmap],
-    queryFn: ({ signal }) =>
+  const heatmap = useOverviewQuery({
+    interval,
+    key: ["heatmap", selected.heatmap],
+    read: (signal) =>
       apiClient.request(endpoints.admin.heatmap, {
         query: { window: selected.heatmap },
         routeId,

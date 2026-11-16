@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useOverviewQuery } from "./use-overview-query";
 import { useMemo, useState } from "react";
 
 import { apiClient } from "@/shared/api/client";
@@ -19,9 +19,9 @@ import { formatNumber } from "@/shared/utils/format";
 /** Capability map (GET /admin/capabilities): what the gateway can do and where it lives. */
 export function OverviewCapabilitiesTab(): React.JSX.Element {
   const [search, setSearch] = useState("");
-  const capabilities = useQuery({
-    queryKey: ["admin", "capabilities"],
-    queryFn: ({ signal }) =>
+  const capabilities = useOverviewQuery({
+    key: ["capabilities"],
+    read: (signal) =>
       apiClient.request(endpoints.domains.observability.capabilities, {
         signal,
         routeId: "overview.capabilities",

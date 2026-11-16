@@ -1,6 +1,8 @@
+import { useContext, useState } from "react";
+import { OverviewRefreshContext } from "./overview-refresh-context";
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
-import { useIsFetching, useQuery, useQueryClient, type Query } from "@tanstack/react-query";
+import { useIsFetching, useQuery, type Query } from "@tanstack/react-query";
 import { Activity, RefreshCw } from "lucide-react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -9,6 +11,7 @@ import { OverviewCapabilitiesTab } from "@/features/overview/OverviewCapabilitie
 import { OverviewStatusTab } from "@/features/overview/OverviewStatusTab";
 import { OverviewUsageTab } from "@/features/overview/OverviewUsageTab";
 import { OverviewTrendPanel } from "@/features/overview/OverviewTrendPanel";
+import { useOverviewQuery } from "./use-overview-query";
 import { OverviewQueryFeedback } from "@/features/overview/OverviewQueryFeedback";
 import { overviewReadDenied } from "@/features/overview/overview-query-state";
 import { healthStatusLabels } from "@/config/ui-labels";
@@ -36,7 +39,16 @@ const tabQueryFilter = {
 };
 
 export function OverviewPage(): React.JSX.Element {
-  const queryClient = useQueryClient();
+  const [refreshers] = useState(() => new Set<() => void>());
+  return (
+    <OverviewRefreshContext value={refreshers}>
+      <OverviewContent />
+    </OverviewRefreshContext>
+  );
+}
+
+function OverviewContent(): React.JSX.Element {
+  const refreshers = useContext(OverviewRefreshContext);
   const tabFetching = useIsFetching(tabQueryFilter);
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
@@ -44,8 +56,9 @@ export function OverviewPage(): React.JSX.Element {
   const [range, setRange] = useHealthRange();
   const [tab, setTab] = useTabParam<TabId>(tabIds, "status");
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
-  const canReadRouting =
-    auth.mode === "open" || auth.mode === "legacy" || Boolean(auth.user?.scopes.includes("routing:read"));
+  const canReadRouting = auth.user
+    ? auth.user.scopes.includes("routing:read")
+    : auth.mode === "open" || auth.mode === "legacy";
 
   const health = useQuery({
     queryKey: ["gateway", "health"],
@@ -57,37 +70,34 @@ export function OverviewPage(): React.JSX.Element {
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
-  const statsQuery = useQuery({
-    queryKey: ["admin", "stats"],
-    queryFn: ({ signal }) =>
+  const statsQuery = useOverviewQuery({
+    key: ["stats"],
+    read: (signal) =>
       apiClient.request(endpoints.admin.stats, {
         signal,
         routeId: "overview.traffic",
       }),
-    refetchInterval: interval,
-    refetchIntervalInBackground: false,
+    interval,
   });
-  const routingQuery = useQuery({
-    queryKey: ["admin", "routing", "health", range],
-    queryFn: ({ signal }) =>
+  const routingQuery = useOverviewQuery({
+    key: ["routing", range],
+    read: (signal) =>
       apiClient.request(endpoints.admin.routing.health, {
         query: { window: range, threshold: 70 },
         signal,
         routeId: "overview.routing",
       }),
-    enabled: canReadRouting,
-    refetchInterval: interval,
-    refetchIntervalInBackground: false,
+    scope: "routing:read",
+    interval,
   });
-  const operationsQuery = useQuery({
-    queryKey: ["admin", "ops", "risk"],
-    queryFn: ({ signal }) =>
+  const operationsQuery = useOverviewQuery({
+    key: ["operations"],
+    read: (signal) =>
       apiClient.request(endpoints.admin.ops.risk, {
         signal,
         routeId: "overview.operations",
       }),
-    refetchInterval: interval,
-    refetchIntervalInBackground: false,
+    interval,
   });
 
   const stats = {
@@ -154,17 +164,12 @@ export function OverviewPage(): React.JSX.Element {
     tabFetching > 0;
 
   const refreshAll = (): void => {
-    void Promise.all([
-      health.refetch(),
-      stats.refetch(),
-      operations.refetch(),
-      queryClient.refetchQueries({ ...tabQueryFilter, type: "active" }),
-      ...(canReadRouting ? [routing.refetch()] : []),
-    ]);
+    void health.refetch();
+    for (const refresh of refreshers ?? []) refresh();
   };
 
   return (
-    <div className="page-stack">
+    <div className="page-stack overview-page">
       <header className="page-header">
         <div>
           <MigrationEyebrow fallbackStatus="preview_read_only" />
