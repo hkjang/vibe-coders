@@ -10,7 +10,7 @@ export async function installRequestSavedFilters(page: Page) {
   const base = bootstrap.migration_registry[0];
   const feature = migrationRegistry.find((item) => item.featureId === "observability.requests");
   if (!base || !feature || !bootstrap.user) throw new Error("Missing request fixture identity");
-  bootstrap.backend_version = "v0.86.125";
+  bootstrap.backend_version = "v0.86.126";
   bootstrap.ui.default_entry = feature.appPath;
   bootstrap.migration_registry = [
     {

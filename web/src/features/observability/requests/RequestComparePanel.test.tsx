@@ -164,7 +164,13 @@ describe("RequestComparePanel", () => {
 describe("FilterSuggestions", () => {
   it("offers values observed by the gateway", async () => {
     const api = mockApi({ "GET /admin/suggest": () => ({ field: "model", values: ["model-a", "model-b"] }) });
-    const { container } = renderScreen(<FilterSuggestions enabled field="model" id="models" />);
+    const { container } = renderScreen(
+      <FeatureAccessContext.Provider
+        value={{ featureId: "observability.requests", permitted: true, readOnly: true }}
+      >
+        <FilterSuggestions enabled field="model" id="models" />
+      </FeatureAccessContext.Provider>,
+    );
     await vi.waitFor(() => expect(container.querySelectorAll("#models option")).toHaveLength(2));
     expect(api.calls[0]?.options.query).toEqual({ field: "model" });
   });
