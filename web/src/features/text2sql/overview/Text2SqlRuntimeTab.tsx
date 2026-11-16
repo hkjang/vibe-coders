@@ -1,3 +1,5 @@
+import { useAuth } from "@/app/auth/AuthProvider";
+import { containsPotentialSecret } from "@/shared/security/secrets";
 import { useRef, useState } from "react";
 import { z } from "zod";
 
@@ -6,13 +8,12 @@ import {
   ReadOnlyNotice,
   StatusBadge,
 } from "@/features/text2sql/overview/text2sql-presentation";
-import { writeDisabledTitle } from "@/features/text2sql/overview/text2sql-labels";
+import { writeDisabledTitle, operationLabel } from "@/features/text2sql/overview/text2sql-labels";
 import { text2sqlInvalidations, text2sqlRouteId } from "@/features/text2sql/overview/use-text2sql-queries";
 import { apiClient } from "@/shared/api/client";
 import type {
   Text2SQLConnectionRow,
   Text2SQLFeatureRow,
-  Text2SQLHealthcheck,
   Text2SQLProfileRow,
 } from "@/shared/api/domains/text2sql";
 import { endpoints } from "@/shared/api/endpoints";
@@ -32,7 +33,7 @@ import { Switch } from "@/shared/components/ui/Switch";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useText2SqlMutation } from "./use-text2sql-mutation";
 
 const profileFormSchema = z.object({
   virtual_model: z
@@ -106,13 +107,15 @@ export function Text2SqlRuntimeTab({
   profiles,
   profilesLoading,
 }: Text2SqlRuntimeTabProps): React.JSX.Element {
+  const auth = useAuth();
+  const diagnostic = (value: string | undefined): string =>
+    value && containsPotentialSecret(value, auth.credentialPrefixes)
+      ? "민감한 연결 정보는 표시하지 않습니다."
+      : value || "—";
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const [profileToDelete, setProfileToDelete] = useState("");
   const [connectionToDelete, setConnectionToDelete] = useState<Text2SQLConnectionRow | undefined>();
-  const [health, setHealth] = useState<{ id: string; result: Text2SQLHealthcheck } | undefined>();
-  const [healthError, setHealthError] = useState<string | undefined>();
-  const [healthPending, setHealthPending] = useState("");
   const profileTriggerRef = useRef<HTMLButtonElement>(null);
   const connectionTriggerRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
@@ -135,7 +138,8 @@ export function Text2SqlRuntimeTab({
   });
   const selectedDriver = connectionForm.watch("driver");
 
-  const saveProfile = useMutationFeedback({
+  const saveProfile = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (values: ProfileFormValues) =>
       apiClient.request(endpoints.domains.text2sql.profiles.save, {
         body: { ...values, enabled: true },
@@ -144,7 +148,8 @@ export function Text2SqlRuntimeTab({
     invalidates: text2sqlInvalidations.overview,
     successMessage: "런타임 프로필을 저장했습니다.",
   });
-  const removeProfile = useMutationFeedback({
+  const removeProfile = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (virtualModel: string) =>
       apiClient.request(endpoints.domains.text2sql.profiles.remove, {
         query: { virtual_model: virtualModel },
@@ -153,7 +158,8 @@ export function Text2SqlRuntimeTab({
     invalidates: text2sqlInvalidations.overview,
     successMessage: "런타임 프로필을 삭제했습니다.",
   });
-  const saveConnection = useMutationFeedback({
+  const saveConnection = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (values: ConnectionFormValues) =>
       apiClient.request(endpoints.domains.text2sql.connections.save, {
         body: { ...values, enabled: true },
@@ -162,7 +168,8 @@ export function Text2SqlRuntimeTab({
     invalidates: text2sqlInvalidations.connections,
     successMessage: "실행 DB 연결을 저장했습니다.",
   });
-  const removeConnection = useMutationFeedback({
+  const removeConnection = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (connectionId: string) =>
       apiClient.request(endpoints.domains.text2sql.connections.remove, {
         query: { id: connectionId },
@@ -172,7 +179,8 @@ export function Text2SqlRuntimeTab({
     successMessage: (_result, connectionId) => `실행 DB 연결 삭제 완료: ${connectionId}`,
     errorMessage: "실행 DB 연결을 삭제하지 못했습니다.",
   });
-  const toggleFeature = useMutationFeedback({
+  const toggleFeature = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (variables: { name: string; enabled: boolean }) =>
       apiClient.request(endpoints.domains.text2sql.features.toggle, {
         body: variables,
@@ -183,25 +191,24 @@ export function Text2SqlRuntimeTab({
       `${variables.name} 기능을 ${variables.enabled ? "켰습니다" : "껐습니다"}.`,
   });
 
-  const runHealthcheck = async (connectionId: string): Promise<void> => {
-    setHealthPending(connectionId || "default");
-    setHealthError(undefined);
-    try {
-      const result = await apiClient.request(endpoints.domains.text2sql.connections.healthcheck, {
+  const healthcheck = useText2SqlMutation({
+    readOnly: true,
+    mutate: (connectionId: string) =>
+      apiClient.request(endpoints.domains.text2sql.connections.healthcheck, {
         query: connectionId ? { connection_id: connectionId } : {},
         routeId: text2sqlRouteId,
-      });
-      setHealth({ id: connectionId || "기본(ENV)", result });
-    } catch (cause) {
-      setHealth(undefined);
-      const requestId = isAppError(cause) ? cause.requestId : undefined;
-      setHealthError(
-        `${safeAppErrorMessage(cause, "헬스체크를 실행하지 못했습니다.")}${requestId ? ` (요청 ID: ${requestId})` : ""}`,
-      );
-    } finally {
-      setHealthPending("");
-    }
-  };
+      }),
+    errorMessage: "연결을 점검하지 못했습니다.",
+  });
+  const health = healthcheck.data
+    ? { id: healthcheck.variables || "기본(환경 변수)", result: healthcheck.data }
+    : undefined;
+  const healthRequestId = isAppError(healthcheck.error) ? healthcheck.error.requestId : undefined;
+  const healthError = healthcheck.error
+    ? `${safeAppErrorMessage(healthcheck.error, "연결을 점검하지 못했습니다.")}${healthRequestId ? ` (요청 ID: ${healthRequestId})` : ""}`
+    : undefined;
+  const healthPending = healthcheck.isPending ? healthcheck.variables || "default" : "";
+  const runHealthcheck = (connectionId: string): void => healthcheck.mutate(connectionId);
 
   const profileColumn = createDataTableColumnHelper<Text2SQLProfileRow>();
   const profileColumns = profileColumn.columns([
@@ -215,7 +222,11 @@ export function Text2SqlRuntimeTab({
         </div>
       ),
     }),
-    profileColumn.accessor((row) => row.mode, { id: "mode", header: "모드" }),
+    profileColumn.accessor((row) => row.mode, {
+      id: "mode",
+      header: "모드",
+      cell: ({ getValue }) => operationLabel(getValue()),
+    }),
     profileColumn.accessor((row) => row.upstream_model, {
       id: "upstream",
       header: "업스트림",
@@ -234,7 +245,7 @@ export function Text2SqlRuntimeTab({
     profileColumn.accessor((row) => row.exec_connection_id, {
       id: "connection",
       header: "실행 DB",
-      cell: ({ getValue }) => getValue() || "기본(ENV)",
+      cell: ({ getValue }) => getValue() || "기본(환경 변수)",
     }),
     profileColumn.display({
       id: "actions",
@@ -285,7 +296,7 @@ export function Text2SqlRuntimeTab({
             disabled={healthPending !== ""}
             onClick={() => void runHealthcheck(row.original.id)}
           >
-            {healthPending === row.original.id ? "확인 중" : "헬스체크"}
+            {healthPending === row.original.id ? "확인 중" : "연결 점검"}
           </Button>
           <Button
             size="small"
@@ -340,7 +351,7 @@ export function Text2SqlRuntimeTab({
         actions={
           <>
             <Button disabled={healthPending !== ""} onClick={() => void runHealthcheck("")}>
-              기본(ENV) 헬스체크
+              기본(환경 변수) 연결 점검
             </Button>
             <Button
               ref={connectionTriggerRef}
@@ -371,7 +382,7 @@ export function Text2SqlRuntimeTab({
           emptyMessage="등록된 실행 DB 연결이 없습니다. 등록하지 않으면 환경 변수 TEXT2SQL_EXEC_DSN을 사용합니다."
         />
         {healthError ? (
-          <InlineNotice tone="danger" title="헬스체크 실패">
+          <InlineNotice tone="danger" title="연결 점검 실패">
             {healthError}
           </InlineNotice>
         ) : null}
@@ -380,15 +391,15 @@ export function Text2SqlRuntimeTab({
             tone={
               health.result.status === "ok" ? "success" : health.result.status === "warn" ? "warning" : "info"
             }
-            title={`헬스체크 결과 — ${health.id}`}
+            title={`연결 점검 결과 — ${diagnostic(health.id)}`}
           >
             <KeyValueList
               items={[
-                { label: "상태", value: <StatusBadge value={health.result.status} /> },
-                { label: "설명", value: health.result.detail },
-                { label: "드라이버", value: health.result.driver },
-                { label: "문장 제한 시간", value: health.result.statement_timeout },
-                { label: "read-only 트랜잭션", value: health.result.read_only_tx_ok ? "정상" : "실패" },
+                { label: "상태", value: <StatusBadge value={diagnostic(health.result.status)} /> },
+                { label: "설명", value: diagnostic(health.result.detail) },
+                { label: "드라이버", value: diagnostic(health.result.driver) },
+                { label: "문장 제한 시간", value: diagnostic(health.result.statement_timeout) },
+                { label: "읽기 전용 트랜잭션", value: health.result.read_only_tx_ok ? "정상" : "실패" },
                 {
                   label: "계정 쓰기 제한",
                   value:
@@ -406,7 +417,7 @@ export function Text2SqlRuntimeTab({
       </SectionCard>
 
       <SectionCard
-        title="기능 토글 (런타임 온오프)"
+        title="선택 기능 켜기·끄기"
         description="Text2SQL 파이프라인의 선택 기능입니다. 긴급 중지와 재개는 화면 상단에서 별도로 검토합니다."
       >
         {featuresError ? (
@@ -442,6 +453,7 @@ export function Text2SqlRuntimeTab({
       </SectionCard>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={profileDialogOpen}
         onOpenChange={(next) => {
           setProfileDialogOpen(next);
@@ -487,7 +499,7 @@ export function Text2SqlRuntimeTab({
         <FormField label="실행 DB 연결" error={profileForm.formState.errors.exec_connection_id?.message}>
           {(control) => (
             <Select {...control} {...profileForm.register("exec_connection_id")}>
-              <option value="">기본(ENV)</option>
+              <option value="">기본(환경 변수)</option>
               {connections.map((connection) => (
                 <option key={connection.id} value={connection.id}>
                   {connection.name}
@@ -500,6 +512,7 @@ export function Text2SqlRuntimeTab({
       </FormDialog>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={connectionDialogOpen}
         onOpenChange={(next) => {
           setConnectionDialogOpen(next);
@@ -545,6 +558,7 @@ export function Text2SqlRuntimeTab({
       </FormDialog>
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         open={profileToDelete !== ""}
         onOpenChange={(next) => {
           if (!next) setProfileToDelete("");
@@ -561,6 +575,7 @@ export function Text2SqlRuntimeTab({
       />
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         open={connectionToDelete !== undefined}
         onOpenChange={(next) => {
           if (!next) setConnectionToDelete(undefined);

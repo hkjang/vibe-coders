@@ -225,7 +225,7 @@ describe("Text2SqlPage", () => {
     mockApi({ ...shellHandlers });
     renderPage("/text2sql?tab=golden");
 
-    expect(await screen.findByRole("button", { name: "Golden Query 추가" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "기준 SQL 추가" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "회귀 검증 실행" })).toBeDisabled();
     for (const notice of screen.getAllByText(/admin:write/u)) expect(notice).toBeVisible();
   });
@@ -251,7 +251,8 @@ describe("Text2SqlPage", () => {
     const riskCall = api.calls.find((call) => call.key === "GET /admin/text2sql/risk-queue");
     expect(riskCall?.options.query).toEqual({ window: "30d", min_risk: 70 });
     const overviewCall = api.calls.find((call) => call.key === "GET /admin/text2sql");
-    expect(overviewCall?.options.query).toEqual({ window: "30d" });
+    expect(overviewCall).toBeUndefined();
+    expect(api.calls.some((call) => call.key === "GET /admin/text2sql/connections")).toBe(false);
   });
 
   it("deletes a golden query after confirmation", async () => {
@@ -263,7 +264,7 @@ describe("Text2SqlPage", () => {
     renderPage("/text2sql?tab=golden");
 
     expect(await screen.findByText("월별 매출")).toBeVisible();
-    const table = screen.getByRole("table", { name: "Text2SQL Golden Query" });
+    const table = screen.getByRole("table", { name: "Text2SQL 기준 SQL" });
     await user.click(within(table).getByRole("button", { name: "삭제" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "삭제" }));
@@ -337,7 +338,7 @@ describe("Text2SqlPage", () => {
     const table = screen.getByRole("table", { name: "Text2SQL 실행 DB 연결" });
     expect(api.calls.some((call) => call.key === "GET /admin/text2sql/healthcheck")).toBe(false);
 
-    await user.click(within(table).getByRole("button", { name: "헬스체크" }));
+    await user.click(within(table).getByRole("button", { name: "연결 점검" }));
     await waitFor(() => {
       expect(api.calls.some((call) => call.key === "GET /admin/text2sql/healthcheck")).toBe(true);
     });

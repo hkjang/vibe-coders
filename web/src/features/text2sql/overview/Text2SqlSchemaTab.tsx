@@ -18,6 +18,8 @@ import type {
 } from "@/shared/api/domains/text2sql";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
+import { useText2SqlRegistryTransfer } from "./use-text2sql-registry-transfer";
+import { registryActionError } from "./text2sql-registry-file";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
@@ -33,8 +35,7 @@ import { Textarea } from "@/shared/components/ui/Textarea";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useText2SqlMutation } from "./use-text2sql-mutation";
 import { downloadText } from "@/shared/utils/csv";
 
 const schemaFormSchema = z.object({
@@ -147,7 +148,8 @@ export function Text2SqlSchemaTab({
     sensitivity: "normal",
   });
 
-  const saveSchema = useMutationFeedback({
+  const saveSchema = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (values: SchemaFormValues) =>
       apiClient.request(endpoints.domains.text2sql.schemas.save, {
         body: {
@@ -165,7 +167,8 @@ export function Text2SqlSchemaTab({
     invalidates: text2sqlInvalidations.overview,
     successMessage: "스키마 카탈로그를 저장했습니다.",
   });
-  const removeSchema = useMutationFeedback({
+  const removeSchema = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (name: string) =>
       apiClient.request(endpoints.domains.text2sql.schemas.remove, {
         query: { name },
@@ -174,7 +177,8 @@ export function Text2SqlSchemaTab({
     invalidates: text2sqlInvalidations.overview,
     successMessage: "스키마 카탈로그를 삭제했습니다.",
   });
-  const saveTable = useMutationFeedback({
+  const saveTable = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (values: TableFormValues) =>
       apiClient.request(endpoints.domains.text2sql.registry.saveTable, {
         body: { schema_name: registrySchema, ...values },
@@ -183,7 +187,8 @@ export function Text2SqlSchemaTab({
     invalidates: text2sqlInvalidations.registry,
     successMessage: "테이블을 등록했습니다.",
   });
-  const removeTable = useMutationFeedback({
+  const removeTable = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (table: string) =>
       apiClient.request(endpoints.domains.text2sql.registry.removeTable, {
         query: { schema: registrySchema, table },
@@ -192,7 +197,8 @@ export function Text2SqlSchemaTab({
     invalidates: text2sqlInvalidations.registry,
     successMessage: "테이블을 삭제했습니다.",
   });
-  const removeColumn = useMutationFeedback({
+  const removeColumn = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (target: { table: string; column: string }) =>
       apiClient.request(endpoints.domains.text2sql.registry.removeColumn, {
         query: { schema: registrySchema, table: target.table, column: target.column },
@@ -201,7 +207,8 @@ export function Text2SqlSchemaTab({
     invalidates: text2sqlInvalidations.registry,
     successMessage: "컬럼을 삭제했습니다.",
   });
-  const saveColumn = useMutationFeedback({
+  const saveColumn = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (values: ColumnFormValues) =>
       apiClient.request(endpoints.domains.text2sql.registry.saveColumn, {
         body: { schema_name: registrySchema, ...values },
@@ -210,7 +217,8 @@ export function Text2SqlSchemaTab({
     invalidates: text2sqlInvalidations.registry,
     successMessage: "컬럼을 등록했습니다.",
   });
-  const collect = useMutationFeedback({
+  const collect = useText2SqlMutation({
+    authorized: canWrite,
     mutate: () =>
       apiClient.request(endpoints.domains.text2sql.registry.collect, {
         body: {
@@ -226,57 +234,19 @@ export function Text2SqlSchemaTab({
         text: `테이블 ${result.added_tables}개 · 컬럼 ${result.added_columns}개를 레지스트리에 추가했습니다.`,
       }),
   });
-  const importBundle = useMutationFeedback({
-    mutate: (bundle: { tables: Record<string, unknown>[]; columns: Record<string, unknown>[] }) =>
-      apiClient.request(endpoints.domains.text2sql.registry.import, {
-        body: bundle,
-        routeId: text2sqlRouteId,
-      }),
-    invalidates: text2sqlInvalidations.registry,
-    onSuccess: (result) =>
-      setRegistryMessage({
-        tone: "success",
-        text: `가져오기 완료 — 테이블 ${result.tables_imported}개, 컬럼 ${result.columns_imported}개 (오류 ${result.table_errors + result.column_errors}건)`,
-      }),
+  const { importBundle, exportBundle } = useText2SqlRegistryTransfer({
+    canWrite,
+    onMessage: setRegistryMessage,
   });
-
-  const exportRegistry = async (): Promise<void> => {
-    setRegistryMessage(undefined);
-    try {
-      const bundle = await apiClient.request(endpoints.domains.text2sql.registry.export, {
-        query: registrySchema ? { schema: registrySchema } : {},
-        routeId: text2sqlRouteId,
-      });
-      downloadText(
-        `t2s-registry${registrySchema ? `-${registrySchema}` : ""}.json`,
-        JSON.stringify(bundle, null, 2),
-        "application/json",
-      );
-      setRegistryMessage({
-        tone: "success",
-        text: `내보내기 완료 (테이블 ${bundle.tables.length}개, 컬럼 ${bundle.columns.length}개)`,
-      });
-    } catch (cause) {
-      const requestId = isAppError(cause) ? cause.requestId : undefined;
-      setRegistryMessage({
-        tone: "danger",
-        text: `${safeAppErrorMessage(cause, "내보내기에 실패했습니다.")}${requestId ? ` (요청 ID: ${requestId})` : ""}`,
-      });
-    }
-  };
-
-  const importFile = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+  const transferError = importBundle.error ?? exportBundle.error;
+  const transferRequestId = isAppError(transferError) ? transferError.requestId : undefined;
+  const importFile = (event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
     setRegistryMessage(undefined);
-    try {
-      const parsed: unknown = JSON.parse(await file.text());
-      const bundle = parsed as { tables?: Record<string, unknown>[]; columns?: Record<string, unknown>[] };
-      await importBundle.mutateAsync({ tables: bundle.tables ?? [], columns: bundle.columns ?? [] });
-    } catch {
-      setRegistryMessage({ tone: "danger", text: "JSON 파일을 읽지 못했습니다. 형식을 확인하세요." });
-    }
+    exportBundle.reset();
+    importBundle.mutate(file);
   };
 
   const schemaColumn = createDataTableColumnHelper<Text2SQLSchemaRow>();
@@ -482,9 +452,18 @@ export function Text2SqlSchemaTab({
           >
             {collect.isPending ? "수집 중" : "실행DB에서 자동 수집"}
           </Button>
-          <Button onClick={() => void exportRegistry()}>JSON 내보내기</Button>
           <Button
-            disabled={!canWrite}
+            disabled={exportBundle.isPending}
+            onClick={() => {
+              setRegistryMessage(undefined);
+              importBundle.reset();
+              exportBundle.mutate(registrySchema);
+            }}
+          >
+            {exportBundle.isPending ? "내보내는 중" : "JSON 내보내기"}
+          </Button>
+          <Button
+            disabled={!canWrite || importBundle.isPending}
             title={writeDisabledTitle(canWrite)}
             onClick={() => fileInputRef.current?.click()}
           >
@@ -507,10 +486,17 @@ export function Text2SqlSchemaTab({
             accept="application/json,.json"
             className="sr-only"
             aria-label="레지스트리 JSON 파일 선택"
+            disabled={!canWrite || importBundle.isPending}
             onChange={(event) => void importFile(event)}
           />
         </Toolbar>
 
+        {transferError ? (
+          <InlineNotice tone="danger" title="파일 작업을 완료하지 못했습니다.">
+            {registryActionError(transferError, "파일 작업에 실패했습니다.")}
+            {transferRequestId ? ` (요청 ID: ${transferRequestId})` : ""}
+          </InlineNotice>
+        ) : null}
         {registryMessage ? (
           <InlineNotice tone={registryMessage.tone}>{registryMessage.text}</InlineNotice>
         ) : null}
@@ -564,6 +550,7 @@ export function Text2SqlSchemaTab({
       </SectionCard>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={schemaDialogOpen}
         onOpenChange={(next) => {
           setSchemaDialogOpen(next);
@@ -608,6 +595,7 @@ export function Text2SqlSchemaTab({
       </FormDialog>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={tableDialogOpen}
         onOpenChange={(next) => {
           setTableDialogOpen(next);
@@ -630,6 +618,7 @@ export function Text2SqlSchemaTab({
       </FormDialog>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={columnDialogOpen}
         onOpenChange={(next) => {
           setColumnDialogOpen(next);
@@ -667,6 +656,7 @@ export function Text2SqlSchemaTab({
       </FormDialog>
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         open={schemaToDelete !== ""}
         onOpenChange={(next) => {
           if (!next) setSchemaToDelete("");
@@ -683,6 +673,7 @@ export function Text2SqlSchemaTab({
       />
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         open={columnToDelete !== undefined}
         onOpenChange={(next) => {
           if (!next) setColumnToDelete(undefined);
@@ -700,6 +691,7 @@ export function Text2SqlSchemaTab({
       />
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         open={tableToDelete !== ""}
         onOpenChange={(next) => {
           if (!next) setTableToDelete("");

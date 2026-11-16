@@ -4,6 +4,7 @@ import {
   sensitivityLabel,
   sensitivityTones,
   statusTones,
+  operationLabel,
 } from "@/features/text2sql/overview/text2sql-labels";
 import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -16,7 +17,7 @@ export function SensitivityBadge({ value }: { value: string }): React.JSX.Elemen
 }
 
 export function StatusBadge({ value }: { value: string }): React.JSX.Element {
-  return <Badge tone={statusTones[value.toLowerCase()] ?? "muted"}>{value || "—"}</Badge>;
+  return <Badge tone={statusTones[value.toLowerCase()] ?? "muted"}>{operationLabel(value)}</Badge>;
 }
 
 /**

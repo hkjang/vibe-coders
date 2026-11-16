@@ -25,7 +25,7 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useText2SqlMutation } from "./use-text2sql-mutation";
 
 const permissionFormSchema = z
   .object({
@@ -94,7 +94,8 @@ export function Text2SqlAccessTab({
     description: "",
   });
 
-  const savePermission = useMutationFeedback({
+  const savePermission = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (values: PermissionFormValues) =>
       apiClient.request(endpoints.domains.text2sql.permissions.save, {
         body: values,
@@ -103,7 +104,8 @@ export function Text2SqlAccessTab({
     invalidates: text2sqlInvalidations.overview,
     successMessage: "권한 규칙을 저장했습니다.",
   });
-  const removePermission = useMutationFeedback({
+  const removePermission = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (id: string) =>
       apiClient.request(endpoints.domains.text2sql.permissions.remove, {
         query: { id },
@@ -112,7 +114,8 @@ export function Text2SqlAccessTab({
     invalidates: text2sqlInvalidations.overview,
     successMessage: "권한 규칙을 삭제했습니다.",
   });
-  const saveTerm = useMutationFeedback({
+  const saveTerm = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (values: GlossaryFormValues) =>
       apiClient.request(endpoints.domains.text2sql.glossary.save, {
         body: values,
@@ -121,7 +124,8 @@ export function Text2SqlAccessTab({
     invalidates: text2sqlInvalidations.glossary,
     successMessage: "업무 용어를 저장했습니다.",
   });
-  const removeTerm = useMutationFeedback({
+  const removeTerm = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (id: string) =>
       apiClient.request(endpoints.domains.text2sql.glossary.remove, {
         query: { id },
@@ -297,6 +301,7 @@ export function Text2SqlAccessTab({
       </SectionCard>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={permissionDialogOpen}
         onOpenChange={(next) => {
           setPermissionDialogOpen(next);
@@ -340,6 +345,7 @@ export function Text2SqlAccessTab({
       </FormDialog>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={glossaryDialogOpen}
         onOpenChange={(next) => {
           setGlossaryDialogOpen(next);
@@ -378,6 +384,7 @@ export function Text2SqlAccessTab({
       </FormDialog>
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         open={permissionToDelete !== ""}
         onOpenChange={(next) => {
           if (!next) setPermissionToDelete("");
@@ -394,6 +401,7 @@ export function Text2SqlAccessTab({
       />
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         open={termToDelete !== ""}
         onOpenChange={(next) => {
           if (!next) setTermToDelete("");

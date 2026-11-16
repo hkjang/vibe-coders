@@ -1,8 +1,7 @@
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useText2SqlQuery } from "./use-text2sql-query";
 
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
-import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 
 export const text2sqlRouteId = "text2sql.overview";
 
@@ -43,123 +42,108 @@ interface Text2SqlQueriesOptions {
   window: string;
 }
 
-export interface Text2SqlQueries {
-  anomalies: UseQueryResult<unknown>;
-  connections: UseQueryResult<unknown>;
-  features: UseQueryResult<unknown>;
-  glossary: UseQueryResult<unknown>;
-  miners: UseQueryResult<unknown>;
-  overview: UseQueryResult<unknown>;
-  registry: UseQueryResult<unknown>;
-  reports: UseQueryResult<unknown>;
-  riskQueue: UseQueryResult<unknown>;
-}
-
-/**
- * Loads the Text2SQL console data. The overview and connection list
- * back the page shell, so they always load; every other panel is fetched only
- * while its tab is open. The healthcheck is deliberately absent: it probes the
- * execute database, so it stays behind an explicit button.
- */
+/** Load only the visible tab's reads; connection tests remain explicit actions. */
 export function useText2SqlQueries({ minRisk, registrySchema, tab, window }: Text2SqlQueriesOptions) {
-  const refetchInterval = useRefreshInterval();
-  const shared = { refetchInterval, refetchIntervalInBackground: false } as const;
-
-  const overview = useQuery({
-    queryKey: text2sqlQueryKeys.overview(window),
-    queryFn: ({ signal }) =>
+  const overview = useText2SqlQuery({
+    key: text2sqlQueryKeys.overview(window),
+    enabled: ["overview", "runtime", "schemas", "access", "golden"].includes(tab),
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.overview, {
         query: { window },
         signal,
         routeId: text2sqlRouteId,
       }),
-    ...shared,
   });
-  const connections = useQuery({
-    queryKey: text2sqlQueryKeys.connections(),
-    queryFn: ({ signal }) =>
+  const connections = useText2SqlQuery({
+    key: text2sqlQueryKeys.connections(),
+    enabled: tab === "runtime" || tab === "schemas",
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.connections.list, {
         signal,
         routeId: text2sqlRouteId,
       }),
-    ...shared,
   });
-  const features = useQuery({
-    queryKey: text2sqlQueryKeys.features(),
-    queryFn: ({ signal }) =>
+  const features = useText2SqlQuery({
+    key: text2sqlQueryKeys.features(),
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.features.list, {
         signal,
         routeId: text2sqlRouteId,
       }),
     enabled: tab === "runtime",
-    ...shared,
   });
-  const glossary = useQuery({
-    queryKey: text2sqlQueryKeys.glossary(),
-    queryFn: ({ signal }) =>
+  const glossary = useText2SqlQuery({
+    key: text2sqlQueryKeys.glossary(),
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.glossary.list, {
         signal,
         routeId: text2sqlRouteId,
       }),
     enabled: tab === "access",
-    ...shared,
   });
-  const registry = useQuery({
-    queryKey: text2sqlQueryKeys.registry(registrySchema),
-    queryFn: ({ signal }) =>
+  const registry = useText2SqlQuery({
+    key: text2sqlQueryKeys.registry(registrySchema),
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.registry.tables, {
         query: { schema: registrySchema },
         signal,
         routeId: text2sqlRouteId,
       }),
     enabled: tab === "schemas" && registrySchema !== "",
-    ...shared,
   });
-  const riskQueue = useQuery({
-    queryKey: text2sqlQueryKeys.riskQueue(window, minRisk),
-    queryFn: ({ signal }) =>
+  const riskQueue = useText2SqlQuery({
+    key: text2sqlQueryKeys.riskQueue(window, minRisk),
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.riskQueue, {
         query: { window, min_risk: minRisk },
         signal,
         routeId: text2sqlRouteId,
       }),
     enabled: tab === "risk",
-    ...shared,
   });
-  const anomalies = useQuery({
-    queryKey: text2sqlQueryKeys.anomalies(window),
-    queryFn: ({ signal }) =>
+  const anomalies = useText2SqlQuery({
+    key: text2sqlQueryKeys.anomalies(window),
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.anomalies, {
         query: { window },
         signal,
         routeId: text2sqlRouteId,
       }),
     enabled: tab === "risk",
-    ...shared,
   });
-  const miners = useQuery({
-    queryKey: text2sqlQueryKeys.miners(),
-    queryFn: ({ signal }) =>
+  const miners = useText2SqlQuery({
+    key: text2sqlQueryKeys.miners(),
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.miners, {
         query: { window: "30d", min_count: 3 },
         signal,
         routeId: text2sqlRouteId,
       }),
     enabled: tab === "reports",
-    ...shared,
   });
-  const reports = useQuery({
-    queryKey: text2sqlQueryKeys.reports(),
-    queryFn: ({ signal }) =>
+  const reports = useText2SqlQuery({
+    key: text2sqlQueryKeys.reports(),
+    read: (signal) =>
       apiClient.request(endpoints.domains.text2sql.reports.list, {
         signal,
         routeId: text2sqlRouteId,
       }),
     enabled: tab === "reports",
-    ...shared,
   });
 
+  const active = [
+    overview,
+    connections,
+    features,
+    glossary,
+    registry,
+    riskQueue,
+    anomalies,
+    miners,
+    reports,
+  ].filter((query) => query.active);
   return {
+    active,
     anomalies,
     connections,
     features,

@@ -196,8 +196,8 @@ for (const withdraw of [false, true]) {
       await page.getByLabel("이메일", { exact: true }).fill(sqlAccount.email);
       await page.getByLabel("비밀번호", { exact: true }).fill("public-password");
       await page.getByRole("button", { name: "로그인", exact: true }).click();
-      await page.getByRole("button", { name: "Golden Query 추가", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Golden Query 추가", exact: true });
+      await page.getByRole("button", { name: "기준 SQL 추가", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "기준 SQL 추가", exact: true });
       await dialog.getByRole("textbox", { name: "이름", exact: true }).fill("공개 SQL 검사");
       await dialog.getByRole("textbox", { name: "자연어 질문", exact: true }).fill("한글 항목 조회");
       const editor = await activate(dialog, "기대 SQL");

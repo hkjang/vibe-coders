@@ -19,7 +19,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useText2SqlMutation } from "./use-text2sql-mutation";
 import { formatNumber, formatRelative } from "@/shared/utils/format";
 
 type ReportCandidate = Text2SQLMiners["report_candidates"][number];
@@ -82,7 +82,8 @@ export function Text2SqlReportTab({
   });
   const promoteForm = useZodForm<PromoteFormValues, PromoteFormValues>(promoteFormSchema, { name: "" });
 
-  const saveSchedule = useMutationFeedback({
+  const saveSchedule = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (variables: ScheduleFormValues & { id: string }) =>
       apiClient.request(endpoints.domains.text2sql.reports.schedule, {
         body: variables,
@@ -91,7 +92,8 @@ export function Text2SqlReportTab({
     invalidates: text2sqlInvalidations.reports,
     successMessage: "리포트 스케줄을 저장했습니다.",
   });
-  const removeReport = useMutationFeedback({
+  const removeReport = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (id: string) =>
       apiClient.request(endpoints.domains.text2sql.reports.remove, {
         query: { id },
@@ -100,7 +102,8 @@ export function Text2SqlReportTab({
     invalidates: text2sqlInvalidations.reports,
     successMessage: "저장 리포트를 삭제했습니다.",
   });
-  const promote = useMutationFeedback({
+  const promote = useText2SqlMutation({
+    authorized: canWrite,
     mutate: (variables: { name: string; question: string; sql: string }) =>
       apiClient.request(endpoints.domains.text2sql.promote, {
         body: { target: "report", ...variables },
@@ -310,6 +313,7 @@ export function Text2SqlReportTab({
       </SectionCard>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={scheduleTarget !== undefined}
         onOpenChange={(next) => {
           if (!next) setScheduleTarget(undefined);
@@ -336,6 +340,7 @@ export function Text2SqlReportTab({
       </FormDialog>
 
       <FormDialog
+        submitDisabled={!canWrite}
         open={promoteTarget !== undefined}
         onOpenChange={(next) => {
           if (!next) setPromoteTarget(undefined);
@@ -361,6 +366,7 @@ export function Text2SqlReportTab({
       </FormDialog>
 
       <ConfirmDialog
+        confirmDisabled={!canWrite}
         open={reportToDelete !== ""}
         onOpenChange={(next) => {
           if (!next) setReportToDelete("");
