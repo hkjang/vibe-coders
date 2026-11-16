@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { useCallback, useContext, useLayoutEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useContext, useLayoutEffect, useMemo, useRef } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AppError, isAppError } from "@/shared/api/error";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
@@ -19,6 +19,7 @@ export interface OverviewQuery<Data> {
   isFetching: boolean;
   dataUpdatedAt: number;
   refetch: () => void;
+  isDataCurrent: () => boolean;
 }
 
 /** Each widget owns its read lifetime; a denied widget does not stop its neighbours. */
@@ -36,6 +37,7 @@ export function useOverviewQuery<Data>({
   staleTime?: number;
 }): OverviewQuery<Data> {
   const auth = useAuth();
+  const client = useQueryClient();
   const refreshers = useContext(OverviewRefreshContext);
   const owner = useFeatureReadOwner("overview", "overview-widget", [], scope);
   const enabled = owner.readable && !owner.denied;
@@ -56,6 +58,26 @@ export function useOverviewQuery<Data>({
       return data;
     },
   });
+  const entry = client
+    .getQueryCache()
+    .find({ queryKey: featureOwnedKey(["overview", ...key], owner), exact: true });
+  const binding = useMemo(() => ({ entry, data: query.data, owner }), [entry, query.data, owner]);
+  const activeBinding = useRef<typeof binding | undefined>(undefined);
+  useLayoutEffect(() => {
+    activeBinding.current = binding;
+    return () => {
+      if (activeBinding.current === binding) activeBinding.current = undefined;
+    };
+  }, [binding]);
+  // A saved export callback must not outlive its query, response, account or view.
+  const isDataCurrent = (): boolean =>
+    activeBinding.current === binding &&
+    binding.data !== undefined &&
+    owner.isCurrent() &&
+    entry !== undefined &&
+    client.getQueryCache().get(entry.queryHash) === entry &&
+    entry.state.data === binding.data &&
+    !(isAppError(entry.state.error) && [401, 403].includes(entry.state.error.status ?? 0));
   const { refetch: queryRefetch } = query;
   const refetch = useCallback(() => {
     if (owner.denied) owner.restart();
@@ -90,5 +112,6 @@ export function useOverviewQuery<Data>({
     isFetching: current && query.isFetching,
     dataUpdatedAt: current ? query.dataUpdatedAt : 0,
     refetch,
+    isDataCurrent,
   };
 }

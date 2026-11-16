@@ -205,3 +205,45 @@
   color: var(--color-muted);
   font-size: 0.875rem;
 }
+.overview-trend-data {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.overview-trend-data > * {
+  min-width: 0;
+}
+
+.overview-trend-totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.overview-trend-totals > div {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+}
+
+.overview-trend-totals dt {
+  color: var(--color-muted);
+}
+.overview-trend-totals dd {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-trend-table-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+.overview-trend-table-heading h3 {
+  margin: 0;
+}

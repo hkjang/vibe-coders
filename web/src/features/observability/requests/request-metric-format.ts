@@ -1,15 +1,11 @@
 import { containsPotentialSecret } from "@/shared/security/secrets";
+import { formatPreciseNumber } from "@/shared/utils/precise-number";
 
 export const unavailableRequestMetricLabels = new Set(["[값 비공개]", "[값 생략]", "공급자 이름 비공개"]);
 
-const numbers = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 6 });
-
 /** Keep small, nonzero costs visible; exports retain the unrounded API number. */
 export function formatRequestMetric(value: number): string {
-  if (!Number.isFinite(value)) return "확인 불가";
-  if (value === 0) return "0";
-  if (value !== 0 && Math.abs(value) < 0.000001) return value.toExponential(4);
-  return numbers.format(value);
+  return formatPreciseNumber(value);
 }
 
 export function visibleRequestCurrency(currency: string, prefixes: readonly string[]): string | undefined {

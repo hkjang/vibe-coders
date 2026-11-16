@@ -9,6 +9,92 @@ import { renderScreen } from "@/test/render";
 import { OverviewRefreshContext } from "./overview-refresh-context";
 import { useOverviewQuery } from "./use-overview-query";
 
+function exportHarness(read: Reader) {
+  let current = () => false;
+  function Host() {
+    const [period, setPeriod] = useState("1h");
+    const query = useOverviewQuery({ key: ["export", period], read });
+    useLayoutEffect(() => {
+      current = query.isDataCurrent;
+    });
+    return (
+      <>
+        <output aria-label="내보낼 결과">{query.data?.label ?? "없음"}</output>
+        <output aria-label="선택 기간">{period}</output>
+        <button onClick={query.refetch}>내보내기 데이터 새로고침</button>
+        <button onClick={() => setPeriod((value) => (value === "1h" ? "7d" : "1h"))}>기간 바꾸기</button>
+      </>
+    );
+  }
+  return {
+    ...renderScreen(
+      <FeatureAccessHarness featureId="overview" readOnly>
+        <Host />
+      </FeatureAccessHarness>,
+      { route: "/overview" },
+    ),
+    capture: () => current,
+  };
+}
+
+it("CSV가 캡처한 응답은 새 응답과 뷰 종료 후 다시 사용할 수 없다", async () => {
+  let value = { label: "첫 통계" };
+  const view = exportHarness(async () => value);
+  await screen.findByText("첫 통계");
+  const old = view.capture();
+  expect(old()).toBe(true);
+  value = { label: "새 통계" };
+  await userEvent.click(screen.getByRole("button", { name: "내보내기 데이터 새로고침" }));
+  await screen.findByText("새 통계");
+  expect(old()).toBe(false);
+  const current = view.capture();
+  expect(current()).toBe(true);
+  view.unmount();
+  expect(current()).toBe(false);
+});
+
+it.each([401, 403])("%s 조회 거부 뒤 같은 응답으로 복구해도 이전 CSV 검사는 폐기된다", async (status) => {
+  let denied = false;
+  const value = { label: "같은 통계" };
+  const view = exportHarness(async () => {
+    if (denied) throw new AppError("거부", { kind: "permission", status });
+    return value;
+  });
+  await screen.findByText("같은 통계");
+  const old = view.capture();
+  denied = true;
+  await userEvent.click(screen.getByRole("button", { name: "내보내기 데이터 새로고침" }));
+  await waitFor(() => expect(screen.getByLabelText("내보낼 결과")).toHaveTextContent("없음"));
+  expect(old()).toBe(false);
+  denied = false;
+  await userEvent.click(screen.getByRole("button", { name: "내보내기 데이터 새로고침" }));
+  await screen.findByText("같은 통계");
+  expect(view.capture()()).toBe(true);
+  expect(old()).toBe(false);
+});
+
+it("같은 응답의 기간 왕복과 캐시 제거도 이전 내보내기를 복원하지 않는다", async () => {
+  const value = { label: "동일 통계" };
+  const read = vi.fn(async () => value);
+  const view = exportHarness(read);
+  await screen.findByText("동일 통계");
+  const first = view.capture();
+  await userEvent.click(screen.getByRole("button", { name: "기간 바꾸기" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  await screen.findByText("동일 통계");
+  expect(first()).toBe(false);
+  await userEvent.click(screen.getByRole("button", { name: "기간 바꾸기" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+  await screen.findByText("동일 통계");
+  expect(first()).toBe(false);
+  const current = view.capture();
+  expect(current()).toBe(true);
+  act(() => {
+    view.client.removeQueries({ queryKey: ["overview", "export"] });
+    expect(current()).toBe(false);
+  });
+});
+
 const state = vi.hoisted(() => ({ auth: {} as ReturnType<typeof testAuth> }));
 vi.mock("@/app/auth/AuthProvider", () => ({ useAuth: () => state.auth }));
 type Value = { label: string };
