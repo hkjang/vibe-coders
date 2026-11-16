@@ -31,6 +31,8 @@ export const observabilityFeatureModules = defineFeatureModules([
       "limit",
       "model",
       "selected_ref",
+      "flow_kind",
+      "flow_status",
       "selected_request",
       "status",
       "to",

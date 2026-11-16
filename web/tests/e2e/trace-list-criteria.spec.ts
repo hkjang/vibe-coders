@@ -1,6 +1,10 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import { test, traceAccount, flowRequestA, flowRequestB } from "./fixtures/trace-safe-flow";
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 // Synthetic transport exercises the real router, auth, QueryClient and visible UI.
 // It does not prove server filtering, database scope or the safe-flow SQL contract.
 const path = "/app/observability/traces";
@@ -346,7 +350,6 @@ test("390px 어두운 읽기 전용 화면에서 긴 한글 기준·검증·선�
   await expect(flow(page)).toContainText("공개 검색 도구");
   await page.getByRole("button", { name: "요청 상세 닫기", exact: true }).click();
   await expect(lane(page)).toBeFocused();
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }

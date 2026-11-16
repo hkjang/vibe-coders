@@ -329,7 +329,14 @@ describe("안전한 Trace 단계 조회", () => {
     const view = renderTrace();
     await table();
     retry().focus();
-    await userEvent.setup().tab();
+    const user = userEvent.setup();
+    await user.tab();
+    expect(screen.getByLabelText("단계 유형")).toHaveFocus();
+    await user.tab();
+    expect(screen.getByLabelText("단계 상태")).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "단계 필터 초기화" })).toHaveFocus();
+    await user.tab();
     expect(screen.getByRole("region", { name: "단계 표 가로 스크롤" })).toHaveFocus();
     expect((await axe.run(view.container)).violations).toHaveLength(0);
   });

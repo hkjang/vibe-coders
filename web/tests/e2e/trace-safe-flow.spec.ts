@@ -9,6 +9,10 @@ import {
 } from "./fixtures/trace-safe-flow";
 import type { TraceSafeFlow } from "../../src/shared/api/domains/trace-safe-flow.schema";
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 // Synthetic browser transport tests the actual React router/auth/query lifetime.
 // SQLite/PostgreSQL query, scope and raw-column boundaries have separate Go tests.
 const card = (page: Page) => page.getByRole("region", { name: "선택한 요청의 단계 기록", exact: true });
@@ -82,6 +86,38 @@ test("딥 링크 새로고침과 같은 비공개 표시의 두 요청을 원문
   expect(gateway.calls.at(-1)?.url.searchParams.get("created_at")).toBe(flowRequestA.created_at);
   await page.getByRole("button", { name: "요청 상세 닫기", exact: true }).click();
   await expect(page.getByRole("heading", { name: "추적 탐색기", exact: true })).toBeFocused();
+});
+
+test("단계 필터는 부모·시간축과 선택을 보존하고 새로고침·뒤로 가기로 복원된다", async ({ page, gateway }) => {
+  await login(page, true);
+  await expect(stageName(page, "공개 검색 도구")).toBeVisible();
+  const parent = card(page).getByRole("row").filter({ hasText: "게이트웨이 요청" });
+  const bar = parent.locator(".trace-safe-flow-bar");
+  const scale = await bar.getAttribute("style");
+  const lists = gateway.listReads();
+  const flows = gateway.calls.length;
+  const status = card(page).getByRole("combobox", { name: "단계 상태", exact: true });
+  await status.focus();
+  await status.selectOption("error");
+  await expect(status).toBeFocused();
+  await expect(stageName(page, "공개 검색 도구")).toHaveCount(0);
+  await expect(stageName(page, "권한 검사", "텍스트 SQL 단계")).toBeVisible();
+  expect(await bar.getAttribute("style")).toBe(scale);
+  expect(gateway.listReads()).toBe(lists);
+  expect(gateway.calls).toHaveLength(flows);
+  expect(new URL(page.url()).searchParams.get("selected_ref")).toBe(flowRequestA.request_ref);
+  expect(new URL(page.url()).searchParams.get("flow_status")).toBe("error");
+  await page.reload();
+  await expect(card(page).getByRole("combobox", { name: "단계 상태", exact: true })).toHaveValue("error");
+  await expect(stageName(page, "공개 검색 도구")).toHaveCount(0);
+  await card(page).getByRole("combobox", { name: "단계 유형", exact: true }).selectOption("mcp_tool");
+  await expect(card(page)).toContainText("조건에 맞는 하위 단계가 없습니다");
+  await expect(parent).toBeVisible();
+  await page.goBack();
+  await expect(stageName(page, "권한 검사", "텍스트 SQL 단계")).toBeVisible();
+  await card(page).getByRole("button", { name: "단계 필터 초기화", exact: true }).click();
+  await expect(stageName(page, "공개 검색 도구")).toBeVisible();
+  expect(new URL(page.url()).searchParams.has("flow_status")).toBe(false);
 });
 
 for (const mode of ["legacy_token", "open"] as const) {
@@ -363,7 +399,6 @@ test("390px 다크 화면의 긴 단계와 미기록 값은 키보드로 읽을 
   await page.keyboard.press("ArrowRight");
   await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }

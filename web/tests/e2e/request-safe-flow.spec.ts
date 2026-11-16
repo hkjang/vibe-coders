@@ -1,6 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 import { test, requestAccount, flowRequestA, flowRequestB, safeFlow } from "./fixtures/request-safe-flow";
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 // Synthetic transport exercises the actual React auth/router/query/dialog.
 // Existing Go tests separately prove the reused endpoint's scope and query bounds.
 const dialog = (page: Page) => page.getByRole("dialog");
@@ -84,6 +88,25 @@ test("추적 ID가 없어도 상세에서 명시적으로 처리 단계를 조�
   expect(gateway.calls[1]?.url.searchParams.get("request_ref")).toBe(flowRequestB.request_ref);
   expect(gateway.calls[1]?.url.searchParams.get("created_at")).toBe(flowRequestB.created_at);
   expect(new URL(page.url()).searchParams.has("selected_request")).toBe(false);
+});
+
+test("상세의 단계 필터는 목록 주소를 유지하고 닫으면 초기화된다", async ({ page, gateway }) => {
+  await login(page);
+  await openFlow(page);
+  await expect(card(page)).toContainText("공개 검색 도구");
+  const address = page.url();
+  const lists = gateway.listReads();
+  const flows = gateway.calls.length;
+  await card(page).getByRole("combobox", { name: "단계 상태", exact: true }).selectOption("error");
+  await expect(dialog(page)).toBeVisible();
+  await expect(card(page)).toContainText("하위 단계 2개 중 1개 표시");
+  expect(page.url()).toBe(address);
+  expect(gateway.listReads()).toBe(lists);
+  expect(gateway.calls).toHaveLength(flows);
+  await page.keyboard.press("Escape");
+  await openFlow(page);
+  await expect(card(page).getByRole("combobox", { name: "단계 상태", exact: true })).toHaveValue("all");
+  await expect(card(page)).toContainText("공개 검색 도구");
 });
 
 for (const mode of ["legacy_token", "open"] as const) {
@@ -344,7 +367,6 @@ test("390px 다크 상세창의 긴 단계는 표 안에서 스크롤되고 키�
   await page.keyboard.press("ArrowRight");
   await expect.poll(() => scroll.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }

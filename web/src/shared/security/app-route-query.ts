@@ -11,6 +11,7 @@ import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
 import { domainDecisionRequestIDError } from "@/shared/utils/domain-decision-filters";
 import { readModelCatalogPageSize, readModelCatalogSorting } from "@/shared/utils/model-catalog-query";
+import { isValidTraceStepFilter } from "@/shared/utils/trace-step-query";
 import {
   readProviderCatalogPageSize,
   readProviderCatalogSorting,
@@ -103,6 +104,15 @@ export function sanitizeAppRouteSearch(
   const rejectedValues = new Map<string, boolean>();
   const route = routerPath(pathname);
   const invalidOperationalKeys = new Set<string>();
+  if (route === "/observability/traces" || route.startsWith("/observability/traces/")) {
+    for (const key of ["flow_kind", "flow_status"] as const) {
+      if (
+        parameters.has(key) &&
+        (route !== "/observability/traces" || !isValidTraceStepFilter(key, parameters.getAll(key)))
+      )
+        invalidOperationalKeys.add(key);
+    }
+  }
   if (route === "/overview" && parameters.has("trend")) {
     const values = parameters.getAll("trend");
     if (values.length !== 1 || !["24h", "7d", "30d"].includes(values[0] ?? "")) {
