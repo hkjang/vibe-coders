@@ -17,7 +17,8 @@ func TestText2SQLProfileConnectionOpenAPI(t *testing.T) {
 	paths := spec["paths"].(map[string]any)
 	assertJSONRequestSchema(t, paths, "/admin/text2sql/profiles", "post", "Text2SQLProfileInput")
 	assertJSONOperationSchema(t, paths, "/admin/text2sql/profiles", "post", "201", "Text2SQLProfileSaved")
-	assertJSONOperationSchema(t, paths, "/admin/text2sql/profiles", "get", "200", "Text2SQLProfileList")
+	assertJSONRequestSchema(t, paths, "/admin/text2sql/profiles", "put", "Text2SQLProfileReviewedInput")
+	assertJSONOperationSchema(t, paths, "/admin/text2sql/profiles", "put", "200", "Text2SQLProfileSaved")
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	for _, name := range []string{"Text2SQLProfile", "Text2SQLProfileInput"} {
 		properties := schemas[name].(map[string]any)["properties"].(map[string]any)

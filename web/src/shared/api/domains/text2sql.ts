@@ -1,3 +1,4 @@
+import { text2sqlProfileReviewEndpoints } from "./text2sql-profile-review";
 import { text2sqlSchemaDetailEndpoint } from "./text2sql-schema-detail";
 import { z } from "zod";
 
@@ -532,6 +533,7 @@ export const text2sqlEndpoints = {
     ),
   },
   profiles: {
+    ...text2sqlProfileReviewEndpoints,
     save: operation<WithBody<PostAdminText2SqlProfilesData, Text2SQLProfileInput>, unknown>()(
       "POST",
       "/admin/text2sql/profiles",

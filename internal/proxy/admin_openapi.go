@@ -278,7 +278,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/text2sql", []string{"get"}, "text2sql", "Text2SQL query logs / admin overview", false},
 	{"/admin/text2sql/spans", []string{"get"}, "text2sql", "Text2SQL per-request pipeline spans", false},
 	{"/admin/text2sql/schemas", []string{"get", "post", "delete"}, "text2sql", "Schema registry", false},
-	{"/admin/text2sql/profiles", []string{"get", "post", "delete"}, "text2sql", "Virtual-model profiles", false},
+	{"/admin/text2sql/profiles", []string{"get", "post", "put", "delete"}, "text2sql", "Virtual-model profiles", false},
 	{"/admin/text2sql/tables", []string{"get", "post", "delete"}, "text2sql", "Registry tables", false},
 	{"/admin/text2sql/columns", []string{"get", "post", "delete"}, "text2sql", "Registry columns + sensitivity", false},
 	{"/admin/text2sql/collect", []string{"post"}, "text2sql", "Collect information_schema", false},
@@ -657,7 +657,7 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("WorkflowRunList")
 	case "get /admin/text2sql/healthcheck":
 		enrichText2SQLHealthcheckOpenAPI(op, responses)
-	case "get /admin/text2sql/profiles", "post /admin/text2sql/profiles", "delete /admin/text2sql/profiles":
+	case "get /admin/text2sql/profiles", "put /admin/text2sql/profiles", "post /admin/text2sql/profiles", "delete /admin/text2sql/profiles":
 		enrichText2SQLProfileOpenAPI(strings.ToLower(method), op, responses)
 	case "get /admin/text2sql":
 		enrichText2SQLSchemaDetailOpenAPI(op, responses)

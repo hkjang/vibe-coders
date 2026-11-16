@@ -197,3 +197,49 @@
   width: 14px;
   height: 14px;
 }
+
+.t2s-profile-fields {
+  display: grid;
+  gap: var(--space-4);
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.t2s-profile-diff {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.t2s-profile-diff table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.t2s-profile-diff th,
+.t2s-profile-diff td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  min-width: 7rem;
+  word-break: keep-all;
+}
+.t2s-profile-diff caption {
+  text-align: left;
+  padding-block: var(--space-2);
+  font-weight: 600;
+}
+
+.t2s-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.t2s-profile-fields input[type="checkbox"] {
+  width: var(--space-6);
+  height: var(--space-6);
+  margin: 0;
+  align-self: flex-start;
+}

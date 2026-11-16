@@ -262,7 +262,7 @@ it("프로필 입력 중 쓰기 권한을 회수해도 초안은 유지하고 �
   await userEvent.type(within(dialog).getByRole("textbox", { name: /가상 모델/ }), "vibe/text2sql-draft");
   state.auth = testAuth({ scopes: ["admin:read"], user: { team_id: "alpha" } });
   view.redraw();
-  const save = within(dialog).getByRole("button", { name: "저장" });
+  const save = within(dialog).getByRole("button", { name: "변경 검토" });
   expect(save).toBeDisabled();
   expect(within(dialog).getByRole("textbox", { name: /가상 모델/ })).toHaveValue("vibe/text2sql-draft");
   save.removeAttribute("disabled");
@@ -270,11 +270,11 @@ it("프로필 입력 중 쓰기 권한을 회수해도 초안은 유지하고 �
   if (!form) throw new Error("입력 폼이 없습니다.");
   fireEvent.submit(form);
   await act(async () => {});
-  expect(view.api.calls.some((c) => c.key.startsWith("POST"))).toBe(false);
+  expect(view.api.calls.some((c) => ["POST", "PUT"].some((method) => c.key.startsWith(method)))).toBe(false);
   state.auth = testAuth({ user: { team_id: "alpha" } });
   view.redraw();
-  expect(within(dialog).getByRole("button", { name: "저장" })).toBeEnabled();
-  expect(view.api.calls.some((c) => c.key.startsWith("POST"))).toBe(false);
+  expect(within(dialog).getByRole("button", { name: "변경 검토" })).toBeEnabled();
+  expect(view.api.calls.some((c) => ["POST", "PUT"].some((method) => c.key.startsWith(method)))).toBe(false);
 });
 
 it("DB 연결 점검 진단에 인증정보를 표시하지 않는다", async () => {

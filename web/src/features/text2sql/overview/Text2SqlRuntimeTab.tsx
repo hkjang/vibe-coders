@@ -1,11 +1,11 @@
+import { ProfileList } from "../profiles/ProfileList";
 import { Text2SqlFeatureControls } from "./Text2SqlFeatureControls";
-import { Text2SqlProfileConnection } from "./Text2SqlProfileConnection";
 import { Text2SqlHealthResult } from "./Text2SqlHealthResult";
 import { useRef, useState } from "react";
 import { z } from "zod";
 
 import { PanelFailure, ReadOnlyNotice } from "@/features/text2sql/overview/text2sql-presentation";
-import { writeDisabledTitle, operationLabel } from "@/features/text2sql/overview/text2sql-labels";
+import { writeDisabledTitle } from "@/features/text2sql/overview/text2sql-labels";
 import { text2sqlInvalidations, text2sqlRouteId } from "@/features/text2sql/overview/use-text2sql-queries";
 import { apiClient } from "@/shared/api/client";
 import type {
@@ -29,22 +29,6 @@ import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data
 import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useText2SqlMutation } from "./use-text2sql-mutation";
-
-const profileFormSchema = z.object({
-  virtual_model: z
-    .string()
-    .trim()
-    .min(1, "가상 모델명을 입력하세요.")
-    .refine((value) => value.toLowerCase().startsWith("vibe/text2sql"), {
-      message: "가상 모델명은 vibe/text2sql 로 시작해야 합니다.",
-    }),
-  mode: z.enum(["preview", "execute"]),
-  upstream_model: z.string().trim(),
-  summary_model: z.string().trim(),
-  schema_name: z.string().trim(),
-  exec_connection_id: z.string().trim(),
-});
-type ProfileFormValues = z.infer<typeof profileFormSchema>;
 
 const connectionFormSchema = z.object({
   id: z
@@ -102,23 +86,11 @@ export function Text2SqlRuntimeTab({
   profiles,
   profilesLoading,
 }: Text2SqlRuntimeTabProps): React.JSX.Element {
-  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
-  const [profileToDelete, setProfileToDelete] = useState("");
   const [connectionToDelete, setConnectionToDelete] = useState<Text2SQLConnectionRow | undefined>();
-  const profileTriggerRef = useRef<HTMLButtonElement>(null);
   const connectionTriggerRef = useRef<HTMLButtonElement>(null);
-  const rowTriggerRef = useRef<HTMLElement | null>(null);
   const connectionRowTriggerRef = useRef<HTMLElement | null>(null);
 
-  const profileForm = useZodForm<ProfileFormValues, ProfileFormValues>(profileFormSchema, {
-    virtual_model: "",
-    mode: "preview",
-    upstream_model: "",
-    summary_model: "",
-    schema_name: "",
-    exec_connection_id: "",
-  });
   const connectionForm = useZodForm<ConnectionFormValues, ConnectionFormValues>(connectionFormSchema, {
     id: "",
     name: "",
@@ -128,26 +100,6 @@ export function Text2SqlRuntimeTab({
   });
   const selectedDriver = connectionForm.watch("driver");
 
-  const saveProfile = useText2SqlMutation({
-    authorized: canWrite,
-    mutate: (values: ProfileFormValues) =>
-      apiClient.request(endpoints.domains.text2sql.profiles.save, {
-        body: { ...values, enabled: true },
-        routeId: text2sqlRouteId,
-      }),
-    invalidates: text2sqlInvalidations.overview,
-    successMessage: "런타임 프로필을 저장했습니다.",
-  });
-  const removeProfile = useText2SqlMutation({
-    authorized: canWrite,
-    mutate: (virtualModel: string) =>
-      apiClient.request(endpoints.domains.text2sql.profiles.remove, {
-        query: { virtual_model: virtualModel },
-        routeId: text2sqlRouteId,
-      }),
-    invalidates: text2sqlInvalidations.overview,
-    successMessage: "런타임 프로필을 삭제했습니다.",
-  });
   const saveConnection = useText2SqlMutation({
     authorized: canWrite,
     mutate: (values: ConnectionFormValues) =>
@@ -188,70 +140,6 @@ export function Text2SqlRuntimeTab({
     : undefined;
   const healthPending = healthcheck.isPending ? healthcheck.variables || "default" : "";
   const runHealthcheck = (connectionId: string): void => healthcheck.mutate(connectionId);
-
-  const profileColumn = createDataTableColumnHelper<Text2SQLProfileRow>();
-  const profileColumns = profileColumn.columns([
-    profileColumn.accessor((row) => row.virtual_model, {
-      id: "virtual_model",
-      header: "가상 모델",
-      cell: ({ row }) => (
-        <div className="t2s-cell-stack">
-          <code className="mono">{row.original.virtual_model}</code>
-          {row.original.enabled ? null : <Badge tone="danger">중지</Badge>}
-        </div>
-      ),
-    }),
-    profileColumn.accessor((row) => row.mode, {
-      id: "mode",
-      header: "모드",
-      cell: ({ getValue }) => operationLabel(getValue()),
-    }),
-    profileColumn.accessor((row) => row.upstream_model, {
-      id: "upstream",
-      header: "업스트림",
-      cell: ({ getValue }) => getValue() || "—",
-    }),
-    profileColumn.accessor((row) => row.summary_model, {
-      id: "summary",
-      header: "요약 모델",
-      cell: ({ getValue }) => getValue() || "—",
-    }),
-    profileColumn.accessor((row) => row.schema_name, {
-      id: "schema",
-      header: "스키마",
-      cell: ({ getValue }) => getValue() || "—",
-    }),
-    profileColumn.accessor((row) => row.exec_connection_id, {
-      id: "connection",
-      header: "실행 DB",
-      cell: ({ getValue }) => (
-        <Text2SqlProfileConnection
-          id={getValue()}
-          connections={connections}
-          loading={connectionsLoading}
-          error={connectionsError}
-        />
-      ),
-    }),
-    profileColumn.display({
-      id: "actions",
-      header: "동작",
-      cell: ({ row }) => (
-        <Button
-          size="small"
-          variant="danger"
-          disabled={!canWrite}
-          title={writeDisabledTitle(canWrite)}
-          onClick={(event) => {
-            rowTriggerRef.current = event.currentTarget;
-            setProfileToDelete(row.original.virtual_model);
-          }}
-        >
-          삭제
-        </Button>
-      ),
-    }),
-  ]) as Array<DataTableColumn<Text2SQLProfileRow>>;
 
   const connectionColumn = createDataTableColumnHelper<Text2SQLConnectionRow>();
   const connectionColumns = connectionColumn.columns([
@@ -306,30 +194,14 @@ export function Text2SqlRuntimeTab({
     <div className="t2s-stack">
       <ReadOnlyNotice canWrite={canWrite} />
 
-      <SectionCard
-        title="런타임 프로필 (DB 오버라이드 · 신규 가상 모델)"
-        description="환경 기본값을 덮어쓰거나 새 vibe/text2sql-* 가상 모델을 추가합니다."
-        actions={
-          <Button
-            ref={profileTriggerRef}
-            variant="primary"
-            disabled={!canWrite}
-            title={writeDisabledTitle(canWrite)}
-            onClick={() => setProfileDialogOpen(true)}
-          >
-            프로필 추가
-          </Button>
-        }
-      >
-        <DataTable
-          caption="런타임 Text2SQL 프로필"
-          columns={profileColumns}
-          data={profiles}
-          loading={profilesLoading}
-          getRowId={(row) => row.virtual_model}
-          emptyMessage="런타임 프로필이 없습니다. 추가하면 환경 기본값을 덮어쓰거나 새 가상 모델을 정의할 수 있습니다."
-        />
-      </SectionCard>
+      <ProfileList
+        canWrite={canWrite}
+        profiles={profiles}
+        profilesLoading={profilesLoading}
+        connections={connections}
+        connectionsLoading={connectionsLoading}
+        connectionsError={connectionsError}
+      />
 
       <SectionCard
         title="실행 DB 연결 관리"
@@ -385,65 +257,6 @@ export function Text2SqlRuntimeTab({
 
       <FormDialog
         submitDisabled={!canWrite}
-        open={profileDialogOpen}
-        onOpenChange={(next) => {
-          setProfileDialogOpen(next);
-          if (!next) profileForm.reset();
-        }}
-        form={profileForm}
-        returnFocusRef={profileTriggerRef}
-        title="런타임 프로필 추가"
-        description="가상 모델을 업스트림 모델·스키마·실행 DB에 연결합니다."
-        onSubmit={async (values) => {
-          await saveProfile.mutateAsync(values);
-        }}
-      >
-        <FormField
-          label="가상 모델"
-          required
-          description="예: vibe/text2sql-finance"
-          error={profileForm.formState.errors.virtual_model?.message}
-        >
-          {(control) => <Input {...control} {...profileForm.register("virtual_model")} />}
-        </FormField>
-        <FormField label="모드" required error={profileForm.formState.errors.mode?.message}>
-          {(control) => (
-            <Select
-              {...control}
-              {...profileForm.register("mode")}
-              options={[
-                { value: "preview", label: "미리보기 (SQL 생성만)" },
-                { value: "execute", label: "실행 (SQL 조회까지)" },
-              ]}
-            />
-          )}
-        </FormField>
-        <FormField label="업스트림 모델" error={profileForm.formState.errors.upstream_model?.message}>
-          {(control) => <Input {...control} {...profileForm.register("upstream_model")} />}
-        </FormField>
-        <FormField label="요약 모델" error={profileForm.formState.errors.summary_model?.message}>
-          {(control) => <Input {...control} {...profileForm.register("summary_model")} />}
-        </FormField>
-        <FormField label="스키마명" error={profileForm.formState.errors.schema_name?.message}>
-          {(control) => <Input {...control} {...profileForm.register("schema_name")} />}
-        </FormField>
-        <FormField label="실행 DB 연결" error={profileForm.formState.errors.exec_connection_id?.message}>
-          {(control) => (
-            <Select {...control} {...profileForm.register("exec_connection_id")}>
-              <option value="">기본(환경 변수)</option>
-              {connections.map((connection) => (
-                <option key={connection.id} value={connection.id}>
-                  {connection.name}
-                  {connection.enabled ? "" : " (중지)"}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </FormDialog>
-
-      <FormDialog
-        submitDisabled={!canWrite}
         open={connectionDialogOpen}
         onOpenChange={(next) => {
           setConnectionDialogOpen(next);
@@ -487,23 +300,6 @@ export function Text2SqlRuntimeTab({
           {(control) => <Input {...control} {...connectionForm.register("description")} />}
         </FormField>
       </FormDialog>
-
-      <ConfirmDialog
-        confirmDisabled={!canWrite}
-        open={profileToDelete !== ""}
-        onOpenChange={(next) => {
-          if (!next) setProfileToDelete("");
-        }}
-        returnFocusRef={rowTriggerRef}
-        tone="danger"
-        title="런타임 프로필 삭제"
-        description={`${profileToDelete} 프로필을 삭제하면 이 가상 모델은 환경 기본값으로 되돌아갑니다.`}
-        confirmLabel="삭제"
-        onConfirm={async () => {
-          await removeProfile.mutateAsync(profileToDelete);
-          setProfileToDelete("");
-        }}
-      />
 
       <ConfirmDialog
         confirmDisabled={!canWrite}
