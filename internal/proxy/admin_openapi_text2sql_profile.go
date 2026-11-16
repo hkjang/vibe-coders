@@ -54,6 +54,17 @@ func text2SQLProfileOpenAPISchemas() map[string]any {
 	reviewed["expected_revision"] = map[string]any{"type": "string", "pattern": "^(absent|[0-9a-f]{64})$"}
 	reviewed["reason"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 500}
 	return map[string]any{
+		"Text2SQLProfileReviewedDeleteInput": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"virtual_model", "confirmation", "expected_revision", "reason"}, "properties": map[string]any{
+			"virtual_model":     map[string]any{"type": "string", "maxLength": 512, "description": "Canonical lowercase virtual model; at most 512 UTF-8 bytes."},
+			"confirmation":      map[string]any{"type": "string", "maxLength": 512, "description": "Must exactly equal virtual_model, including case and whitespace."},
+			"expected_revision": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+			"reason":            map[string]any{"type": "string", "minLength": 1, "maxLength": 500},
+		}},
+		"Text2SQLProfileReviewedDeleted": map[string]any{"type": "object", "required": []string{"virtual_model", "status", "reviewed_revision"}, "properties": map[string]any{
+			"virtual_model":     map[string]any{"type": "string"},
+			"status":            map[string]any{"type": "string", "enum": []string{"deleted"}},
+			"reviewed_revision": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+		}},
 		"Text2SQLProfileReviewedInput": map[string]any{"type": "object", "additionalProperties": false, "required": append(append([]string{}, fields...), "enabled", "expected_revision", "reason"), "properties": reviewed},
 		"Text2SQLProfileReview": map[string]any{"type": "object", "required": []string{"review_supported", "profile", "revision"}, "properties": map[string]any{
 			"review_supported": map[string]any{"type": "boolean", "enum": []bool{true}},
@@ -64,5 +75,14 @@ func text2SQLProfileOpenAPISchemas() map[string]any {
 		"Text2SQLProfile":      map[string]any{"type": "object", "required": append(fields, "enabled", "updated_at"), "properties": row},
 		"Text2SQLProfileSaved": map[string]any{"type": "object", "required": []string{"profile"}, "properties": map[string]any{"profile": schemaRef("Text2SQLProfile")}},
 		"Text2SQLProfileList":  map[string]any{"type": "object", "required": []string{"profiles"}, "properties": map[string]any{"profiles": map[string]any{"type": "array", "items": schemaRef("Text2SQLProfile")}}},
+	}
+}
+
+func enrichText2SQLProfileDeleteOpenAPI(op, responses map[string]any) {
+	op["description"] = "Deletes exactly the reviewed persisted mapping, with audit in the same SQLite/PostgreSQL transaction. Requires admin:write, admin:read and raw-content permission. All four fields must be unique, non-null and present; unknown fields/query and bodies over 4 KiB are rejected. Confirmation must exactly match the canonical virtual model. Reason is trimmed, 1–500 Unicode characters. A missing, changed or recreated profile returns 409 without deletion. Metadata timeout is 5 seconds. On uncertain failure re-read; never automatically retry or fall back to legacy DELETE. This removes the DB override, not the virtual model or global SQL execution. Subsequent requests use existing configured/built-in defaults; active requests and actual DB data are unaffected. Connection/schema/environment changes are not frozen by this review."
+	op["requestBody"] = map[string]any{"required": true, "content": jsonContent(schemaRef("Text2SQLProfileReviewedDeleteInput"))}
+	responses["200"] = successResponse("Text2SQLProfileReviewedDeleted")
+	for _, code := range []string{"400", "401", "403", "404", "405", "409", "503"} {
+		responses[code] = map[string]any{"description": "Validation, authorization, revision conflict or metadata failure; no unsafe fallback", "content": jsonContent(schemaRef("AppError"))}
 	}
 }

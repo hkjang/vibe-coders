@@ -4,6 +4,8 @@ import type {
   PutAdminText2SqlProfilesData,
   Text2SqlProfileReview,
   Text2SqlProfileSaved,
+  PostAdminText2SqlProfilesReviewedDeleteData,
+  Text2SqlProfileReviewedDeleted,
 } from "@/shared/api/generated";
 import { operation, type WithQuery } from "@/shared/api/endpoint-factory";
 
@@ -45,7 +47,13 @@ export const text2sqlProfileReviewEndpoints = {
     "/admin/text2sql/profiles",
     z.object({ profile: reviewedProfileSchema }),
   ),
+  deleteReviewed: operation<PostAdminText2SqlProfilesReviewedDeleteData, Text2SqlProfileReviewedDeleted>()(
+    "POST",
+    "/admin/text2sql/profiles/reviewed-delete",
+    z.object({ virtual_model: z.string().min(1), status: z.literal("deleted"), reviewed_revision: revision }),
+  ),
 };
 export type ProfileReviewSnapshot = z.infer<typeof profileReviewSchema>;
 export type ReviewedProfile = z.infer<typeof reviewedProfileSchema>;
 export type ProfileReviewInput = NonNullable<PutAdminText2SqlProfilesData["body"]>;
+export type ProfileDeleteReviewInput = NonNullable<PostAdminText2SqlProfilesReviewedDeleteData["body"]>;
