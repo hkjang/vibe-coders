@@ -578,7 +578,15 @@ async function mockGateway(page: Page, options: MockGatewayOptions = {}): Promis
         return json({
           bucket: url.searchParams.get("bucket") ?? "day",
           since: "2026-10-01T00:00:00Z",
-          points: [{ date: "2026-10-12", bucket: "2026-10-12", requests: 17, tokens: 250, cost_krw: 150 }],
+          points: [
+            {
+              date: url.searchParams.get("bucket") === "hour" ? "2026-10-12T12" : "2026-10-12",
+              bucket: url.searchParams.get("bucket") ?? "day",
+              requests: 17,
+              tokens: 250,
+              cost_krw: 150,
+            },
+          ],
         });
       case "/admin/heatmap":
         return json({ since: "2026-10-01T00:00:00Z", cells: [{ day: 1, hour: 12, requests: 17 }] });

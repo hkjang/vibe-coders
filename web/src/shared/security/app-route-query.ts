@@ -123,7 +123,7 @@ export function sanitizeAppRouteSearch(
   }
   if (route === "/overview" && parameters.has("trend")) {
     const values = parameters.getAll("trend");
-    if (values.length !== 1 || !["24h", "7d", "30d"].includes(values[0] ?? "")) {
+    if (values.length !== 1 || !["1h", "24h", "7d", "30d"].includes(values[0] ?? "")) {
       invalidOperationalKeys.add("trend");
     }
   }

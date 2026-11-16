@@ -1,6 +1,7 @@
 import { useOverviewQuery } from "./use-overview-query";
 
-import { TimeSeriesChart, type ChartSeries } from "@/features/observability/charts";
+import { OverviewTrendData } from "./OverviewTrendData";
+import { trendWindows, type TrendWindow } from "./overview-trend";
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { OverviewQueryFeedback } from "@/features/overview/OverviewQueryFeedback";
 import { overviewReadDenied } from "@/features/overview/overview-query-state";
@@ -11,18 +12,12 @@ import { Button } from "@/shared/components/ui/Button";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { usePreferences } from "@/shared/stores/preferences";
-import { formatKRW, formatNumber } from "@/shared/utils/format";
+import { formatNumber } from "@/shared/utils/format";
 import "@/features/observability/observability.css";
 
 const routeId = "overview";
 
-const windows = [
-  { id: "24h", label: "최근 24시간", bucket: "hour", heatmap: "7d" },
-  { id: "7d", label: "최근 7일", bucket: "day", heatmap: "7d" },
-  { id: "30d", label: "최근 30일", bucket: "day", heatmap: "30d" },
-] as const;
-type WindowId = (typeof windows)[number]["id"];
-const windowIds = windows.map((window) => window.id);
+const windowIds = trendWindows.map((window) => window.id);
 
 const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -38,8 +33,8 @@ function heatLevel(requests: number, peak: number): number {
  */
 export function OverviewTrendPanel(): React.JSX.Element {
   const interval = refreshIntervalMs(usePreferences((state) => state.refreshInterval));
-  const [range, setRange] = useTabParam<WindowId>(windowIds, "7d", "trend");
-  const selected = windows.find((item) => item.id === range) ?? windows[1];
+  const [range, setRange] = useTabParam<TrendWindow>(windowIds, "7d", "trend");
+  const selected = trendWindows.find((item) => item.id === range) ?? trendWindows[2];
 
   const timeseries = useOverviewQuery({
     interval,
@@ -62,24 +57,6 @@ export function OverviewTrendPanel(): React.JSX.Element {
       }),
   });
 
-  const points = timeseries.data?.points ?? [];
-  const series: ChartSeries[] = [
-    {
-      id: "requests",
-      name: "요청",
-      colorVar: "--obs-series-1",
-      points: points.map((point) => ({ label: point.date, value: point.requests })),
-    },
-  ];
-  const costSeries: ChartSeries[] = [
-    {
-      id: "cost",
-      name: "비용",
-      colorVar: "--obs-series-2",
-      points: points.map((point) => ({ label: point.date, value: point.cost_krw })),
-    },
-  ];
-
   const cells = heatmap.data?.cells ?? [];
   const peak = Math.max(0, ...cells.map((cell) => cell.requests));
   const byCell = new Map(cells.map((cell) => [`${cell.day}-${cell.hour}`, cell.requests]));
@@ -88,10 +65,11 @@ export function OverviewTrendPanel(): React.JSX.Element {
     <>
       <SectionCard
         title="사용 추이"
+        aria-label="사용 추이"
         description="보존된 요청 로그를 기간별로 집계한 요청 수와 비용입니다."
         actions={
           <div className="range-picker" role="group" aria-label="추이 기간">
-            {windows.map((item) => (
+            {trendWindows.map((item) => (
               <Button
                 key={item.id}
                 size="small"
@@ -117,20 +95,13 @@ export function OverviewTrendPanel(): React.JSX.Element {
             추이를 불러오는 중입니다.
           </p>
         ) : timeseries.data && !overviewReadDenied(timeseries.error) ? (
-          <>
-            <TimeSeriesChart
-              caption={`${selected.label} 요청 수`}
-              series={series}
-              valueLabel="요청"
-              format={(value) => formatNumber(value)}
-            />
-            <TimeSeriesChart
-              caption={`${selected.label} 비용`}
-              series={costSeries}
-              valueLabel="비용"
-              format={(value) => formatKRW(value)}
-            />
-          </>
+          <OverviewTrendData
+            key={range}
+            data={timeseries.data}
+            label={selected.label}
+            range={range}
+            isDataCurrent={timeseries.isDataCurrent}
+          />
         ) : null}
       </SectionCard>
 

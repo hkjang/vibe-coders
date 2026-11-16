@@ -68,6 +68,14 @@
   font-size: 10px;
 }
 
+.obs-chart-scrollable svg {
+  min-width: 720px;
+}
+
+.obs-chart-scrollable .obs-scatter-axis {
+  font-size: 13px;
+}
+
 .obs-scatter-grid {
   stroke: var(--color-border);
   stroke-width: 1;

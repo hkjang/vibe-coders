@@ -730,7 +730,7 @@ export const adminModelsQuerySchema = z
 /** The dashboard chart windows the server accepts, plus its bucket sizes. */
 export const timeseriesQuerySchema = z
   .object({
-    window: z.enum(["24h", "7d", "30d"]),
+    window: z.enum(["1h", "24h", "7d", "30d"]),
     bucket: z.enum(["hour", "day"]),
   })
   .strict();
