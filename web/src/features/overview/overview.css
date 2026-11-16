@@ -179,3 +179,29 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.overview-usage-section {
+  min-width: 0;
+}
+.overview-usage-tools {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.overview-usage-search {
+  display: grid;
+  flex: 1 1 16rem;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.overview-usage-search label {
+  font-size: 0.875rem;
+}
+.overview-usage-tools p {
+  margin: 0;
+  padding-bottom: var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
