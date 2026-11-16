@@ -16,6 +16,7 @@ import {
 test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검색 제한", async ({ page }) => {
   await login(page);
   const targets = [
+    { title: "검색검증 스키마", path: "/app/text2sql/schemas/detail", parameter: "schema_name" },
     { title: "검색검증 모델", path: "/app/gateway/models", parameter: "model" },
     { title: "검색검증 API 키", path: "/app/access/users", parameter: "api_key_id" },
     { title: "검색검증 공급자", path: "/app/gateway/providers", parameter: "provider" },
@@ -72,24 +73,32 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
     await expect(palette.getByRole("option")).toHaveCount(targets.length);
     await palette.getByRole("option", { name: new RegExp(target.title) }).click();
     const panel =
-      target.parameter === "exp"
-        ? page.getByText(`실험: ${target.title}`, { exact: true })
-        : target.parameter === "tool"
-          ? page.getByRole("table", { name: "MCP 도구 카탈로그" })
-          : page.getByRole("dialog", {
-              name:
-                target.parameter === "api_key_id"
-                  ? "API 키 상세"
-                  : target.parameter === "policy"
-                    ? "정책 상세"
-                    : target.parameter === "registered_team"
-                      ? "등록 팀 상세"
-                      : target.parameter === "account_id"
-                        ? "로그인 계정 상세"
-                        : target.title,
-              exact: true,
-            });
+      target.parameter === "schema_name"
+        ? page.getByRole("heading", { name: target.title, exact: true })
+        : target.parameter === "exp"
+          ? page.getByText(`실험: ${target.title}`, { exact: true })
+          : target.parameter === "tool"
+            ? page.getByRole("table", { name: "MCP 도구 카탈로그" })
+            : page.getByRole("dialog", {
+                name:
+                  target.parameter === "api_key_id"
+                    ? "API 키 상세"
+                    : target.parameter === "policy"
+                      ? "정책 상세"
+                      : target.parameter === "registered_team"
+                        ? "등록 팀 상세"
+                        : target.parameter === "account_id"
+                          ? "로그인 계정 상세"
+                          : target.title,
+                exact: true,
+              });
     await expect(panel).toBeVisible();
+    if (target.parameter === "schema_name") {
+      await expect(page.getByText("중지됨", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "설명 보기" }).click();
+      await expect(page.getByLabel("스키마 설명 본문")).toContainText("검토된 정산 스키마 설명");
+      await expect(page.getByRole("list", { name: "허용 테이블" })).toContainText("정산_내역");
+    }
     if (target.parameter === "policy")
       await expect(panel.getByRole("heading", { name: target.title })).toBeVisible();
     if (target.parameter === "registered_team") await expect(panel).toContainText(target.title);

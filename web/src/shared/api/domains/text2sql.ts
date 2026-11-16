@@ -1,3 +1,4 @@
+import { text2sqlSchemaDetailEndpoint } from "./text2sql-schema-detail";
 import { z } from "zod";
 
 import type {
@@ -507,6 +508,7 @@ export interface Text2SQLRegistryImportInput {
 }
 
 export const text2sqlEndpoints = {
+  schemaDetail: text2sqlSchemaDetailEndpoint,
   overview: operation<WithQuery<GetAdminText2SqlData, { window?: string }>, unknown>()(
     "GET",
     "/admin/text2sql",

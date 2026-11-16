@@ -15,8 +15,9 @@ import (
 )
 
 var resourceSearchFeatures = map[string]string{
-	"routing_rule": "routing.rules",
-	"model":        "gateway.models", "provider": "gateway.providers", "workflow": "agents.workflows",
+	"text2sql_schema": "text2sql.overview",
+	"routing_rule":    "routing.rules",
+	"model":           "gateway.models", "provider": "gateway.providers", "workflow": "agents.workflows",
 	"app": "agents.apps", "skill": "agents.skills",
 	"mcp_upstream":      "mcp.overview",
 	"mcp_tool":          "mcp.overview",
@@ -159,7 +160,14 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			var rows []store.ResourceMetadata
 			var more bool
 			var err error
-			if kind == "team" || kind == "account" || kind == "api_key" {
+			if kind == "text2sql_schema" {
+				var teams []string
+				var scoped bool
+				teams, scoped, err = requestTeamScopeForCallerChecked(s, readRequest.WithContext(ctx))
+				if err == nil {
+					rows, more, err = s.db.SearchText2SQLSchemaMetadata(ctx, input.Query, 10, teams, scoped)
+				}
+			} else if kind == "team" || kind == "account" || kind == "api_key" {
 				var scopeTeam *string
 				if user.Role == "team_admin" {
 					// Reuse the already verified identity. A later failed token
@@ -182,6 +190,9 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			} else {
 				group.Limited = more
 				for _, row := range rows {
+					if kind == "text2sql_schema" && !validText2SQLSchemaName(row.ID) {
+						continue
+					}
 					if kind == "routing_rule" && !validRoutingRuleDetailID(row.ID) {
 						continue
 					}

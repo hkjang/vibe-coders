@@ -55,6 +55,15 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	if name, detail, err := text2SQLSchemaDetailQuery(r.URL.RawQuery); detail {
+		w.Header().Set("Cache-Control", "no-store")
+		if err != nil {
+			writeOpenAIError(w, 400, "invalid schema detail query", "invalid_request_error", "invalid_schema_detail")
+			return
+		}
+		s.writeText2SQLSchemaDetail(w, r, name)
+		return
+	}
 	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
 	if scopeErr != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL scope could not be resolved", "server_error", "text2sql_scope_failed")
@@ -220,17 +229,7 @@ func (s *Server) projectText2SQLAdminForExternal(
 		return boundedExternalProviderText(value, projectionArgs...)
 	}
 	s.projectText2SQLLogsForExternal(logs)
-	for index := range schemas {
-		schema := &schemas[index]
-		schema.Team = project(schema.Team)
-		schema.Name = project(schema.Name)
-		schema.Dialect = project(schema.Dialect)
-		schema.SchemaText = text2SQLSensitiveContentOmitted
-		schema.AllowedTables = []string{}
-		schema.CollectedAt = project(schema.CollectedAt)
-		schema.SourceFingerprint = project(schema.SourceFingerprint)
-		schema.UpdatedAt = project(schema.UpdatedAt)
-	}
+	s.projectText2SQLSchemasForExternal(schemas)
 	for index := range modelMetrics {
 		modelMetrics[index].UpstreamModel = project(modelMetrics[index].UpstreamModel)
 	}

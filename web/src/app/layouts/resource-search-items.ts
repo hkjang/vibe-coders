@@ -3,6 +3,12 @@ import { containsPotentialSecret } from "@/shared/security/secrets";
 import { isProviderRef } from "@/shared/api/provider-ref";
 
 export const resourceSearchTargets = {
+  text2sql_schema: {
+    featureId: "text2sql.overview",
+    title: "Text2SQL 스키마",
+    path: "/text2sql/schemas/detail",
+    parameter: "schema_name",
+  },
   routing_rule: {
     featureId: "routing.rules",
     title: "라우팅 규칙",
@@ -94,7 +100,8 @@ export function resourceSearchPath(
     (id.length > 512 || id.trim() !== id || /\p{C}/u.test(id))
   )
     return undefined;
-  if (kind === "routing_rule" && (id.trim() !== id || /\p{C}/u.test(id))) return undefined;
+  if ((kind === "routing_rule" || kind === "text2sql_schema") && (id.trim() !== id || /\p{C}/u.test(id)))
+    return undefined;
   if (kind === "setting" && !/^[a-z][a-z0-9._-]{0,255}$/u.test(id)) return undefined;
   if (kind === "api_key" && !/^[A-Za-z0-9._:-]{1,512}$/u.test(id)) return undefined;
   if (kind === "provider" && !isProviderRef(id)) return undefined;

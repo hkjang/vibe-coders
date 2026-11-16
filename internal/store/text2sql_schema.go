@@ -55,9 +55,19 @@ func (s *SQLStore) Text2SQLSchemaImpact(ctx context.Context, schemaName string) 
 }
 
 func (s *SQLStore) ListText2SQLSchemas(ctx context.Context) ([]Text2SQLSchema, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, COALESCE(team,''), COALESCE(dialect,''), schema_text, COALESCE(allowed_tables,''), is_default, enabled,
+	return s.listText2SQLSchemas(ctx, "")
+}
+
+// ListText2SQLSchemasByName is an exact indexed lookup, including disabled entries.
+// It does not use request-time default resolution or fall back to another schema.
+func (s *SQLStore) ListText2SQLSchemasByName(ctx context.Context, name string) ([]Text2SQLSchema, error) {
+	return s.listText2SQLSchemas(ctx, " WHERE name = ?", name)
+}
+
+func (s *SQLStore) listText2SQLSchemas(ctx context.Context, where string, args ...any) ([]Text2SQLSchema, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT name, COALESCE(team,''), COALESCE(dialect,''), schema_text, COALESCE(allowed_tables,''), is_default, enabled,
 		COALESCE(version,1), COALESCE(collected_at,''), COALESCE(source_fingerprint,''), updated_at
-		FROM text2sql_schemas ORDER BY team, name`)
+		FROM text2sql_schemas`+where+` ORDER BY team, name`), args...)
 	if err != nil {
 		return nil, err
 	}

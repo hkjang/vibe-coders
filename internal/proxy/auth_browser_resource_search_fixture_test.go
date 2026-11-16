@@ -41,6 +41,9 @@ func seedBrowserResourceSearchFixture(t *testing.T, db *store.SQLStore, upstream
 	if err := db.UpsertAgentRoute(ctx, store.AgentRoute{ID: "browser-search-model", VirtualModel: "검색검증 모델", Name: "검색검증 모델 경로", Enabled: true}); err != nil {
 		t.Fatal("synthetic search virtual model could not be prepared")
 	}
+	if err := db.UpsertText2SQLSchema(ctx, store.Text2SQLSchema{Name: "검색검증 스키마", Team: "browser-team", Dialect: "postgres", SchemaText: "검토된 정산 스키마 설명", AllowedTables: []string{"정산_내역"}, Enabled: false}); err != nil {
+		t.Fatal("synthetic schema navigation could not be prepared")
+	}
 	now := time.Now().UTC()
 	if err := db.InsertLogRecord(ctx, store.LogRecord{
 		Request: store.RequestLog{ID: "browser-search-tool", TraceID: "browser-search-tool", StatusCode: 200, CreatedAt: now},

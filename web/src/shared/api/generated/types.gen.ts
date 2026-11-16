@@ -2520,7 +2520,7 @@ export type RequestNoteWriteRequest = {
 } | null;
 
 export type ResourceSearchRequest = {
-    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule'>;
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule' | 'text2sql_schema'>;
     query: string;
 };
 
@@ -2528,7 +2528,7 @@ export type ResourceSearchResponse = {
     groups: Array<{
         items: Array<{
             id: string;
-            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule';
+            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule' | 'text2sql_schema';
             provider_label?: string;
             /**
              * Model provider opaque reference, including a separate system namespace for virtual models.
@@ -2541,7 +2541,7 @@ export type ResourceSearchResponse = {
             title: string;
             virtual?: boolean;
         }>;
-        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule';
+        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model' | 'routing_rule' | 'text2sql_schema';
         limited: boolean;
         status: 'ok' | 'partial' | 'forbidden' | 'unavailable';
     }>;
@@ -3434,6 +3434,33 @@ export type Text2SqlEmergencyState = {
     reason?: string;
     review_token: string;
     scope: 'responding_process';
+};
+
+/**
+ * Preserved legacy overview; other existing statistics, logs and registry fields are unchanged.
+ */
+export type Text2SqlLegacyOverview = {
+    schemas: Array<Text2SqlSchemaView>;
+    [key: string]: unknown;
+};
+
+export type Text2SqlSchemaDetailResponse = {
+    raw_content_available: boolean;
+    schema: Text2SqlSchemaView;
+};
+
+export type Text2SqlSchemaView = {
+    allowed_tables: Array<string>;
+    collected_at: string;
+    dialect: string;
+    enabled: boolean;
+    is_default: boolean;
+    name: string;
+    schema_text: string;
+    source_fingerprint: string;
+    team: string;
+    updated_at: string;
+    version: number;
 };
 
 export type TrackingAllowRequest = {
@@ -12833,16 +12860,57 @@ export type PostAdminTemplatesIdUseResponses = {
 export type GetAdminText2SqlData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Existing overview period, only without detail mode.
+         */
+        window?: string;
+        view?: 'schema';
+        /**
+         * Required exact name when view=schema; never a pattern or default selector.
+         */
+        name?: string;
+    };
     url: '/admin/text2sql';
 };
 
+export type GetAdminText2SqlErrors = {
+    /**
+     * Text2SQL query rejected or unavailable; generic error never echoes the schema context.
+     */
+    400: AppError;
+    /**
+     * Text2SQL query rejected or unavailable; generic error never echoes the schema context.
+     */
+    401: AppError;
+    /**
+     * Text2SQL query rejected or unavailable; generic error never echoes the schema context.
+     */
+    403: AppError;
+    /**
+     * Text2SQL query rejected or unavailable; generic error never echoes the schema context.
+     */
+    404: AppError;
+    /**
+     * Text2SQL query rejected or unavailable; generic error never echoes the schema context.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminText2SqlError = GetAdminText2SqlErrors[keyof GetAdminText2SqlErrors];
+
 export type GetAdminText2SqlResponses = {
     /**
-     * OK
+     * Legacy overview or exact detail selected by view
      */
-    200: unknown;
+    200: Text2SqlLegacyOverview | Text2SqlSchemaDetailResponse;
 };
+
+export type GetAdminText2SqlResponse = GetAdminText2SqlResponses[keyof GetAdminText2SqlResponses];
 
 export type GetAdminText2SqlAnomaliesData = {
     body?: never;
