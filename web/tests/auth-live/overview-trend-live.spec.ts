@@ -48,5 +48,42 @@ for (const [id, role, account] of [
     await page.reload();
     await expect(table).toBeVisible();
     expect(new URL(page.url()).searchParams.get("trend")).toBe("1h");
+    const mcpResponse = page.waitForResponse(
+      (value) => new URL(value.url()).pathname === "/admin/mcp/overview" && value.status() === 200,
+    );
+    const textResponse = page.waitForResponse(
+      (value) => new URL(value.url()).pathname === "/admin/text2sql/summary" && value.status() === 200,
+    );
+    await page.goto("/app/overview?range=1h");
+    const mcp: { recent_call_count: number; recent_error_count: number } = await (await mcpResponse).json();
+    const sql: { window: string; stats: { total: number; valid_rate: number } } = await (
+      await textResponse
+    ).json();
+    expect(
+      sql.window === "1h" && Object.keys(sql).sort().join() === "enabled,generated_at,since,stats,window",
+    ).toBe(true);
+    const services = page.getByRole("region", { name: "연결 서비스", exact: true });
+    const mcpCard = services
+      .locator("article")
+      .filter({ has: page.getByRole("heading", { name: "MCP 도구 호출", exact: true }) });
+    const sqlCard = services
+      .locator("article")
+      .filter({ has: page.getByRole("heading", { name: "자연어 SQL 처리", exact: true }) });
+    const expectedCalls = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(
+      mcp.recent_call_count,
+    );
+    await expect
+      .poll(async () => (await mcpCard.locator(".metric-value strong").textContent()) === expectedCalls)
+      .toBe(true);
+    const expectedRate =
+      sql.stats.total === 0
+        ? "—"
+        : new Intl.NumberFormat("ko-KR", { style: "percent", maximumFractionDigits: 1 }).format(
+            sql.stats.valid_rate,
+          );
+    await expect
+      .poll(async () => (await sqlCard.locator(".metric-value strong").textContent()) === expectedRate)
+      .toBe(true);
+    expect(await services.getByRole("link").count()).toBe(2);
   });
 }

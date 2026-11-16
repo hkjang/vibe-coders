@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { serviceSummaryEndpoints } from "./domains/service-summaries";
 import { resourceSearchEndpoint } from "@/shared/api/resource-search";
 
 import type {
@@ -175,6 +176,7 @@ export const endpoints = {
     uiBootstrapSchema,
   ),
   admin: {
+    serviceSummaries: serviceSummaryEndpoints,
     resourceSearch: resourceSearchEndpoint,
     stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),
     // The dashboard's two chart sources: totals over time and the weekday/hour heatmap.
