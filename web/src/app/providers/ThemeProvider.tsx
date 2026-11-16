@@ -1,4 +1,6 @@
-import { useEffect, type PropsWithChildren } from "react";
+import { useLayoutEffect, type PropsWithChildren } from "react";
+
+import { applyTheme } from "@/app/providers/theme";
 
 import { usePreferences } from "@/shared/stores/preferences";
 
@@ -6,19 +8,17 @@ export function ThemeProvider({ children }: PropsWithChildren): React.JSX.Elemen
   const theme = usePreferences((state) => state.theme);
   const density = usePreferences((state) => state.density);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = (): void => {
-      const resolved = theme === "system" ? (media.matches ? "dark" : "light") : theme;
-      document.documentElement.dataset.theme = resolved;
-      document.documentElement.style.colorScheme = resolved;
+      applyTheme(theme, media.matches);
     };
     apply();
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.dataset.density = density;
   }, [density]);
 
