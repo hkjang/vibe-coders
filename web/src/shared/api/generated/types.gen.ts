@@ -3436,6 +3436,37 @@ export type Text2SqlEmergencyState = {
     scope: 'responding_process';
 };
 
+export type Text2SqlHealthcheck = {
+    /**
+     * Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.
+     */
+    account_write_restricted: boolean | null;
+    configured: boolean;
+    connection_id: string;
+    detail: string;
+    detail_code: string;
+    driver: string;
+    probe_timeout: string;
+    /**
+     * Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.
+     */
+    query_ok: boolean | null;
+    /**
+     * Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.
+     */
+    reachable: boolean | null;
+    /**
+     * Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.
+     */
+    read_only_tx_ok: boolean | null;
+    statement_timeout: string;
+    /**
+     * Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.
+     */
+    statement_timeout_ok: boolean | null;
+    status: 'ok' | 'warn' | 'error' | 'preview_only';
+};
+
 /**
  * Preserved legacy overview; other existing statistics, logs and registry fields are unchanged.
  */
@@ -13153,16 +13184,40 @@ export type PostAdminText2SqlGoldenRunResponses = {
 export type GetAdminText2SqlHealthcheckData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Stored connection ID; empty/default selects environment/runtime defaults.
+         */
+        connection_id?: string;
+    };
     url: '/admin/text2sql/healthcheck';
 };
+
+export type GetAdminText2SqlHealthcheckErrors = {
+    /**
+     * Existing admin authorization denied
+     */
+    401: AppError;
+    /**
+     * Existing admin authorization denied
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminText2SqlHealthcheckError = GetAdminText2SqlHealthcheckErrors[keyof GetAdminText2SqlHealthcheckErrors];
 
 export type GetAdminText2SqlHealthcheckResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: Text2SqlHealthcheck;
 };
+
+export type GetAdminText2SqlHealthcheckResponse = GetAdminText2SqlHealthcheckResponses[keyof GetAdminText2SqlHealthcheckResponses];
 
 export type GetAdminText2SqlKillSwitchData = {
     body?: never;

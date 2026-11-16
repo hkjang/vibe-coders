@@ -239,6 +239,8 @@ jobs:
         run: go test -race ./internal/store -run '^TestRequestIOSamples' -count=1 -timeout=5m
       - name: Verify PostgreSQL prompt CSV team scope, masking and spreadsheet safety
         run: go test -race ./internal/proxy -run '^TestPromptExportCSV' -count=1 -timeout=5m
+      - name: Verify PostgreSQL Text2SQL connection diagnostics
+        run: go test -race ./internal/proxy -run '^TestText2SQLHealthcheck' -count=1 -timeout=5m
       - name: Verify PostgreSQL team report decisions and portal ratio precision
         run: go test -race ./internal/proxy -run '^TestTeamConsole(Report|Portal)' -count=1 -timeout=5m
       - name: Verify PostgreSQL personal receipt ownership and recommendation contracts
