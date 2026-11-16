@@ -4,6 +4,7 @@ import type { AppRequestsQuery } from "@/shared/api/schemas";
 import { Button } from "@/shared/components/ui/Button";
 import { isValidIPAddress } from "@/shared/utils/ip-address";
 import { FilterSuggestions } from "./FilterSuggestions";
+import { advancedRequestFilterKeys } from "./request-filter-summary";
 import {
   defaultLimit,
   defaultTimeZone,
@@ -59,6 +60,7 @@ export function RequestFilters({
     : selectedLimit;
   const deepLinkIP = searchParams.get("ip")?.trim() ?? "";
   const deepLinkIPError = deepLinkIP !== "" && !isValidIPAddress(deepLinkIP);
+  const advancedCount = advancedRequestFilterKeys.filter((key) => Boolean(query[key])).length;
   // Fetch suggestions only after this field is focused.
   const [suggestFields, setSuggestFields] = useState<Record<string, boolean>>({});
   const enableSuggest = (field: string) => (): void =>
@@ -123,7 +125,10 @@ export function RequestFilters({
           <input name="provider_ref" maxLength={47} defaultValue={searchParams.get("provider_ref") ?? ""} />
         </label>
         <details className="request-advanced" open={deepLinkIPError || undefined}>
-          <summary>고급 필터</summary>
+          <summary>
+            <span>고급 필터</span>
+            {advancedCount > 0 && <span className="request-advanced-count">{advancedCount}개 적용</span>}
+          </summary>
           <div className="request-filter-grid">
             <label>
               추적 ID

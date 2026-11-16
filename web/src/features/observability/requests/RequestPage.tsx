@@ -12,6 +12,8 @@ import { isAppError } from "@/shared/api/error";
 import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "../traces/trace-safe-flow-access";
 import { requestSelectionIdentity, useRequestSafeFlowSelection } from "./request-safe-flow-selection";
 import { RequestFilters } from "./RequestFilters";
+import { RequestActiveFilters } from "./RequestActiveFilters";
+import { withoutRequestFilter } from "./request-filter-summary";
 import { defaultTimeZone, filterKeys, queryFromSearch } from "./request-page-query";
 import { RequestResultsTable } from "./RequestResultsTable";
 import { RequestSavedFilters } from "./saved-filters/RequestSavedFilters";
@@ -246,6 +248,17 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
           setFilterError(undefined);
           setFilterRevision((revision) => revision + 1);
           setSearchParams({}, { replace: false });
+        }}
+      />
+
+      <RequestActiveFilters
+        query={query}
+        credentialPrefixes={auth.credentialPrefixes}
+        current={selection.ready}
+        onRemove={(key) => {
+          setFilterError(undefined);
+          pendingPageFocusRef.current = true;
+          setSearchParams(withoutRequestFilter(searchParams, key), { replace: false });
         }}
       />
 

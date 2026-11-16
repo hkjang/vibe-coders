@@ -59,5 +59,19 @@ for (const [id, role, account] of [
     await expect(page.getByRole("table", { name: "현재 페이지 요청 목록" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: /^모델/u })).toHaveCount(0);
     await expect(page.getByRole("columnheader", { name: /^요청 ID/u })).toBeVisible();
+    const summary = page.getByRole("region", { name: "요청 조회 조건", exact: true });
+    await expect(summary).toContainText("적용 중인 조건 1개");
+    const unfiltered = page.waitForResponse((value) => {
+      const url = new URL(value.url());
+      return url.pathname === "/admin/requests" && !url.searchParams.has("model") && value.status() === 200;
+    });
+    await page.getByRole("button", { name: "모델 필터 해제", exact: true }).click();
+    await unfiltered;
+    await expect(summary).toContainText("적용 중인 조건 0개");
+    expect(new URL(page.url()).searchParams.toString() === "limit=2").toBe(true);
+    await expect(page.getByRole("heading", { name: "요청 조회 결과", exact: true })).toBeFocused();
+    await page.goBack();
+    await expect(summary).toContainText("적용 중인 조건 1개");
+    await expect(page.getByRole("table", { name: "현재 페이지 요청 목록" }).getByRole("row")).toHaveCount(3);
   });
 }
