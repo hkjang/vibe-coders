@@ -15,7 +15,7 @@ import (
 )
 
 var resourceSearchFeatures = map[string]string{
-	"provider": "gateway.providers", "workflow": "agents.workflows",
+	"model": "gateway.models", "provider": "gateway.providers", "workflow": "agents.workflows",
 	"app": "agents.apps", "skill": "agents.skills",
 	"mcp_upstream":      "mcp.overview",
 	"mcp_tool":          "mcp.overview",
@@ -29,10 +29,13 @@ var resourceSearchFeatures = map[string]string{
 }
 
 type resourceSearchItem struct {
-	Kind        string `json:"kind"`
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	ServerLabel string `json:"server_label,omitempty"`
+	Kind          string `json:"kind"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	ServerLabel   string `json:"server_label,omitempty"`
+	ProviderRef   string `json:"provider_ref,omitempty"`
+	ProviderLabel string `json:"provider_label,omitempty"`
+	Virtual       bool   `json:"virtual,omitempty"`
 }
 
 type resourceSearchGroup struct {
@@ -117,7 +120,9 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 		allowed[feature.FeatureID] = feature.Available && feature.Status != "legacy" && feature.Status != "hidden"
 	}
 	groups := make([]resourceSearchGroup, 0, len(input.Kinds))
-	providerRef := s.providerRefSnapshot()
+	refs := s.providerRefsSnapshot()
+	providerRef := refs.physical
+	modelIndex := -1
 	for _, kind := range input.Kinds {
 		group := resourceSearchGroup{Kind: kind, Items: []resourceSearchItem{}, Status: "forbidden"}
 		// MCP lists require observability:read as well as the console feature's
@@ -127,6 +132,13 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			canRead = securityRead
 		}
 		if allowed[resourceSearchFeatures[kind]] && canRead {
+			if kind == "model" {
+				// Finish storage-only groups first. Slow upstreams must not consume
+				// the shared deadline before unrelated navigation can be read.
+				modelIndex = len(groups)
+				groups = append(groups, group)
+				continue
+			}
 			if kind == "setting" {
 				groups = append(groups, s.searchSettingNavigation(ctx, input.Query, settingRegistry, settingDescriptions))
 				continue
@@ -188,6 +200,9 @@ func (s *Server) handleAdminResourceSearch(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		groups = append(groups, group)
+	}
+	if modelIndex >= 0 {
+		groups[modelIndex] = s.searchModelNavigation(ctx, input.Query, refs)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"groups": groups, "request_id": traceIDFromRequest(r)})
 }

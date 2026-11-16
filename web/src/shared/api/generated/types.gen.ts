@@ -2520,7 +2520,7 @@ export type RequestNoteWriteRequest = {
 } | null;
 
 export type ResourceSearchRequest = {
-    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key'>;
+    kinds: Array<'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model'>;
     query: string;
 };
 
@@ -2528,16 +2528,22 @@ export type ResourceSearchResponse = {
     groups: Array<{
         items: Array<{
             id: string;
-            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key';
+            kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model';
+            provider_label?: string;
+            /**
+             * Model provider opaque reference, including a separate system namespace for virtual models.
+             */
+            provider_ref?: string;
             /**
              * Present for mcp_tool only; pair with id to identify the observed tool.
              */
             server_label?: string;
             title: string;
+            virtual?: boolean;
         }>;
-        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key';
+        kind: 'provider' | 'workflow' | 'app' | 'skill' | 'mcp_upstream' | 'policy' | 'team' | 'account' | 'mcp_tool' | 'prompt_asset' | 'prompt_experiment' | 'setting' | 'api_key' | 'model';
         limited: boolean;
-        status: 'ok' | 'forbidden' | 'unavailable';
+        status: 'ok' | 'partial' | 'forbidden' | 'unavailable';
     }>;
     request_id: string;
 };

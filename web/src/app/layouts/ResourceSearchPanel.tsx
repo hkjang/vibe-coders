@@ -28,6 +28,7 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
       !versionAtLeast(auth.backendVersion, "v0.86.97")
     )
       return false;
+    if (kind === "model" && !versionAtLeast(auth.backendVersion, "v0.86.102")) return false;
     if (kind === "api_key" && !versionAtLeast(auth.backendVersion, "v0.86.101")) return false;
     if (kind === "setting" && !versionAtLeast(auth.backendVersion, "v0.86.99")) return false;
     if (kind === "team" && !versionAtLeast(auth.backendVersion, "v0.86.79")) return false;
@@ -113,11 +114,26 @@ function ResourceSearchContent({
   const items = useMemo(
     () =>
       (groups ?? []).flatMap((group) => {
-        if (group.status !== "ok" || !kinds.includes(group.kind)) return [];
+        if (
+          (group.status !== "ok" && !(group.kind === "model" && group.status === "partial")) ||
+          !kinds.includes(group.kind)
+        )
+          return [];
         return group.items.flatMap((item) => {
           if (item.kind !== group.kind || containsPotentialSecret(item.title, auth.credentialPrefixes))
             return [];
-          const path = resourceSearchPath(item.kind, item.id, auth.credentialPrefixes, item.server_label);
+          if (
+            item.kind === "model" &&
+            (!item.provider_label || containsPotentialSecret(item.provider_label, auth.credentialPrefixes))
+          )
+            return [];
+          const path = resourceSearchPath(
+            item.kind,
+            item.id,
+            auth.credentialPrefixes,
+            item.server_label,
+            item.provider_ref,
+          );
           return path ? [{ ...item, path }] : [];
         });
       }),
@@ -157,6 +173,7 @@ function ResourceSearchContent({
       />
       <p className="command-footer resource-search-help">
         종류별 최대 10개 · 이름 검색{kinds.includes("setting") ? " · 설정 키·범주·설명 검색" : ""}
+        {kinds.includes("model") ? " · 모델 목록은 공급자 연결 상태에 따라 일부만 표시될 수 있습니다." : ""}
       </p>
       <label className="command-search">
         <span className="sr-only">자원 이름 검색</span>
@@ -229,7 +246,7 @@ function ResourceSearchContent({
               ?.filter((group) => group.status !== "ok")
               .map(
                 (group) =>
-                  `${resourceSearchTargets[group.kind].title} (${group.status === "forbidden" ? "권한 없음" : "조회 실패"})`,
+                  `${resourceSearchTargets[group.kind].title} (${group.status === "forbidden" ? "권한 없음" : group.status === "partial" ? "일부 목록만 확인됨" : "조회 실패"})`,
               )
               .join(", ")}.`
           : ""}
@@ -279,7 +296,7 @@ function ResourceSearchContent({
               </div>
               {positions.map(({ item, position }) => (
                 <button
-                  key={JSON.stringify([item.kind, item.server_label, item.id])}
+                  key={JSON.stringify([item.kind, item.server_label, item.provider_ref, item.id])}
                   id={`${listId}-${position}`}
                   type="button"
                   className="command-result resource-search-result"
@@ -293,6 +310,9 @@ function ResourceSearchContent({
                     <strong>{item.title}</strong>
                     <small>
                       {resourceSearchTargets[item.kind].title}
+                      {item.kind === "model"
+                        ? ` · ${item.provider_label}${item.virtual ? " · 가상 모델" : ""}`
+                        : ""}
                       {item.kind === "setting" ? ` · ${item.id}` : ""}
                       {item.kind === "mcp_tool"
                         ? ` · ${item.server_label === "(none)" ? "서버 미지정" : item.server_label}`

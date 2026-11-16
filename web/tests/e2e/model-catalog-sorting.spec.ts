@@ -187,6 +187,7 @@ test("390px dark controls support keyboard sorting, scrolling and unclipped sizi
 }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await page.goto("gateway/models");
   await ready(page, 10);
   const quality = header(page, "품질");
@@ -213,7 +214,6 @@ test("390px dark controls support keyboard sorting, scrolling and unclipped sizi
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: unknown[] }> } }
