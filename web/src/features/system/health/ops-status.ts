@@ -1,3 +1,5 @@
+import type { OpsStatus } from "@/shared/api/schemas";
+import { healthStatusLabels } from "@/config/ui-labels";
 import type { BadgeProps } from "@/shared/components/ui/Badge";
 
 /**
@@ -63,4 +65,23 @@ export function appRouteForCardLink(link: string | null | undefined): string | u
   if (value === "") return undefined;
   const hash = value.startsWith("/admin") ? value.slice("/admin".length) : value;
   return appRouteForLegacyHash[hash];
+}
+
+export function scoreTier(score: number): "danger" | "success" | "warning" {
+  if (score < 50) return "danger";
+  if (score < 70) return "warning";
+  return "success";
+}
+
+export function riskFactorTone(severity: "critical" | "info" | "warning"): BadgeProps["tone"] {
+  if (severity === "critical") return "danger";
+  if (severity === "warning") return "warning";
+  return "info";
+}
+
+export function diskState(disk: OpsStatus["disk"]): { label: string; tone: BadgeProps["tone"] } {
+  if (!disk.available) return { label: healthStatusLabels.unavailable, tone: "danger" };
+  if (disk.used_percent >= 90) return { label: healthStatusLabels.critical, tone: "danger" };
+  if (disk.used_percent >= 80) return { label: healthStatusLabels.attention, tone: "warning" };
+  return { label: "사용 가능", tone: "success" };
 }

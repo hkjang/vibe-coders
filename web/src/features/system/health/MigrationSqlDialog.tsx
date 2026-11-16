@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useSystemHealthQuery } from "./use-system-health-query";
 import { useMemo, useState, type RefObject } from "react";
 
 import { opsRouteId } from "@/features/system/health/OpsHomeTab";
@@ -13,6 +13,8 @@ import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
+import { Button } from "@/shared/components/ui/Button";
+import { useSystemText } from "./system-health-labels";
 
 const kindLabels: Record<string, string> = {
   add_column: "컬럼 추가",
@@ -51,14 +53,17 @@ export function MigrationSqlDialog({
   open,
   returnFocusRef,
 }: MigrationSqlDialogProps): React.JSX.Element {
+  const safe = useSystemText();
+  const [page, setPage] = useState(0);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("all");
   const [driftOnly, setDriftOnly] = useState(false);
 
-  const report = useQuery({
+  const report = useSystemHealthQuery({
     enabled: open,
-    queryKey: ["system", "ops", "migration-sql"],
-    queryFn: ({ signal }) =>
+    automatic: false,
+    key: ["system", "ops", "migration-sql"],
+    read: (signal) =>
       apiClient.request(endpoints.domains.system.ops.migrationSql, { routeId: opsRouteId, signal }),
   });
 
@@ -86,9 +91,14 @@ export function MigrationSqlDialog({
   }, [driftOnly, kind, query, report.data]);
 
   const counts = report.data?.counts;
+  const pageCount = Math.max(1, Math.ceil(rows.length / 50));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleRows = rows.slice(currentPage * 50, (currentPage + 1) * 50);
 
   return (
     <Dialog
+      scrollBody
+      scrollBodyLabel="마이그레이션 SQL 검색과 문장"
       open={open}
       onOpenChange={onOpenChange}
       returnFocusRef={returnFocusRef}
@@ -106,14 +116,14 @@ export function MigrationSqlDialog({
 
       {report.data?.live_error ? (
         <InlineNotice tone="warning" title="이 데이터베이스와 비교하지 못했습니다.">
-          {report.data.live_error} 선언한 스키마는 그대로 표시합니다.
+          실시간 인덱스 상태를 확인하지 못했습니다. 선언한 스키마는 그대로 표시합니다.
         </InlineNotice>
       ) : null}
 
       <p className="metric-note">
-        {report.data?.dialect ? `${report.data.dialect} · ` : ""}
-        전체 {counts?.total ?? 0} · 테이블 {counts?.create_table ?? 0} · 인덱스 {counts?.create_index ?? 0} ·
-        컬럼 추가 {counts?.add_column ?? 0}
+        {report.data?.dialect ? `${safe(report.data.dialect)} · ` : ""}
+        전체 {counts?.total ?? "—"} · 테이블 {counts?.create_table ?? "—"} · 인덱스{" "}
+        {counts?.create_index ?? "—"} · 컬럼 추가 {counts?.add_column ?? "—"}
         {counts?.rewritten ? ` · 이 방언에 맞춰 다시 쓴 문장 ${counts.rewritten}` : ""}
       </p>
 
@@ -123,7 +133,10 @@ export function MigrationSqlDialog({
           <Input
             id="migration-sql-search"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(0);
+            }}
             placeholder="테이블, 인덱스, 문장"
           />
         </label>
@@ -132,7 +145,10 @@ export function MigrationSqlDialog({
           <Select
             id="migration-sql-kind"
             value={kind}
-            onChange={(event) => setKind(event.target.value)}
+            onChange={(event) => {
+              setKind(event.target.value);
+              setPage(0);
+            }}
             options={[
               { label: "전체", value: "all" },
               { label: "테이블", value: "create_table" },
@@ -145,12 +161,17 @@ export function MigrationSqlDialog({
         <Checkbox
           label="이 DB와 다른 인덱스만"
           checked={driftOnly}
-          onChange={(event) => setDriftOnly(event.target.checked)}
+          onChange={(event) => {
+            setDriftOnly(event.target.checked);
+            setPage(0);
+          }}
         />
       </div>
 
       {report.isPending ? (
         <p className="metric-note">불러오는 중…</p>
+      ) : !report.data ? (
+        <p className="metric-note">선언된 SQL 문장을 확인하지 못했습니다.</p>
       ) : rows.length === 0 ? (
         <EmptyState
           title="조건에 맞는 문장이 없습니다."
@@ -158,36 +179,53 @@ export function MigrationSqlDialog({
         />
       ) : (
         <ol className="ops-sql-list" aria-label="선언된 마이그레이션 문장">
-          {rows.map((statement) => {
+          {visibleRows.map((statement) => {
             const status = statement.name ? indexStatus[statement.name] : undefined;
             return (
               <li key={`${statement.seq ?? 0}-${statement.sql}`}>
                 <div className="ops-card-head">
                   <span className="metric-note">#{statement.seq ?? 0}</span>
                   <Badge tone="muted">{kindLabels[statement.kind ?? "other"] ?? "기타"}</Badge>
-                  {statement.table ? <span className="mono">{statement.table}</span> : null}
+                  {statement.table ? <span className="mono">{safe(statement.table)}</span> : null}
                   {status ? (
                     <Badge tone={indexStatusTones[status] ?? "muted"}>
-                      {indexStatusLabels[status] ?? status}
+                      {indexStatusLabels[status] ?? "확인 필요"}
                     </Badge>
                   ) : null}
                 </div>
                 {statement.name && indexDetail[statement.name] ? (
-                  <p className="metric-note">{indexDetail[statement.name]}</p>
+                  <p className="metric-note">{safe(indexDetail[statement.name])}</p>
                 ) : null}
-                <code className="ops-sql">{statement.sql}</code>
+                <code className="ops-sql">{safe(statement.sql)}</code>
                 {statement.declared_sql ? (
-                  <p className="metric-note">선언 원문: {statement.declared_sql}</p>
+                  <p className="metric-note">선언 원문: {safe(statement.declared_sql)}</p>
                 ) : null}
               </li>
             );
           })}
         </ol>
       )}
+      {report.data && rows.length > 0 ? (
+        <nav className="ops-sql-pagination" aria-label="SQL 문장 페이지">
+          <p role="status">
+            검색 결과 {rows.length}개 · {currentPage + 1} / {pageCount}페이지 · 페이지당 최대 50개
+          </p>
+          <Button variant="secondary" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+            이전 문장
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={currentPage + 1 >= pageCount}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            다음 문장
+          </Button>
+        </nav>
+      ) : null}
 
       {report.data?.post_migration?.length ? (
         <InlineNotice tone="info" title="목록 이후에 적용되는 변경">
-          {report.data.post_migration.join(", ")}
+          {safe(report.data.post_migration.join(", "))}
         </InlineNotice>
       ) : null}
     </Dialog>
