@@ -22,6 +22,25 @@ function Probe({ rendered }: { rendered: () => void }): React.JSX.Element {
 }
 
 describe("RouteQueryGuard", () => {
+  it.each(["none", "error"])("preserves the %s SSO outcome when login renders", async (outcome) => {
+    const rendered = vi.fn();
+    render(
+      <MemoryRouter initialEntries={[`/login?sso=${outcome}&return_to=%2Fapp%2Foverview&token=private`]}>
+        <Routes>
+          <Route element={<RouteQueryGuard />}>
+            <Route path="login" element={<Probe rendered={rendered} />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      `/login?sso=${outcome}&return_to=%2Fapp%2Foverview`,
+    );
+    expect(screen.getByRole("status")).not.toHaveTextContent("private");
+    expect(rendered).toHaveBeenCalledTimes(1);
+  });
+
   it("sanitizes route queries before rendering its guarded child", async () => {
     const rendered = vi.fn();
     render(

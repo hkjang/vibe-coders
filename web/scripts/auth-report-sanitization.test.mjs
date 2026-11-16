@@ -70,6 +70,11 @@ const allowedScenarios = [
   "AUTH-LIVE-044",
   "AUTH-LIVE-045",
   "AUTH-LIVE-046",
+  "KEYCLOAK-LIVE-001",
+  "KEYCLOAK-LIVE-002",
+  "KEYCLOAK-LIVE-003",
+  "KEYCLOAK-LIVE-004",
+  "KEYCLOAK-LIVE-005",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -129,12 +134,15 @@ function row(id, status = "failed", steps = []) {
   };
 }
 
-async function report(rows, status = "failed") {
+async function report(rows, status = "failed", product = false) {
   const originalCwd = process.cwd();
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "vibe-auth-report-sanitization-"));
   try {
     process.chdir(temporaryDirectory);
-    const child = spawnSync(process.execPath, ["--input-type=module", "-e", runner, reporterUrl], {
+    const selectedReporter = product
+      ? new URL("../tests/keycloak-live/safe-reporter.ts", import.meta.url).href
+      : reporterUrl;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", runner, selectedReporter], {
       cwd: temporaryDirectory,
       input: JSON.stringify({
         sensitive,
@@ -152,8 +160,9 @@ async function report(rows, status = "failed") {
     assert.equal(child.stdout.length, 0, "The reporter must not write to stdout");
     assert.equal(child.stderr.length, 0, "The reporter must not write to stderr");
     assert.deepEqual(await readdir(temporaryDirectory), ["test-results"]);
-    assert.deepEqual(await readdir(join(temporaryDirectory, "test-results")), ["auth-live-summary.json"]);
-    const raw = await readFile(join(temporaryDirectory, "test-results", "auth-live-summary.json"), "utf8");
+    const summaryName = product ? "keycloak-live-summary.json" : "auth-live-summary.json";
+    assert.deepEqual(await readdir(join(temporaryDirectory, "test-results")), [summaryName]);
+    const raw = await readFile(join(temporaryDirectory, "test-results", summaryName), "utf8");
     for (const marker of markers) {
       assert.equal(raw.includes(marker), false, "The JSON report must omit every synthetic secret marker");
     }
@@ -183,6 +192,42 @@ async function report(rows, status = "failed") {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }
+
+test("Keycloak product reporter preserves only fixed IDs and numeric failure locations", async () => {
+  const fixtures = allowedScenarios
+    .filter((id) => id.startsWith("KEYCLOAK-"))
+    .map((id) => {
+      const fixture = row(id);
+      fixture.result.error.stack = `Error: ${sensitive}\n    at test (/private/${sensitive}/keycloak-product.spec.ts:58:2)`;
+      return fixture;
+    });
+  const summary = await report(fixtures, "failed", true);
+  assert.deepEqual(
+    summary.tests,
+    fixtures.map((entry) => ({
+      scenario: entry.test.title.split(" ")[0],
+      status: "failed",
+      durationMs: 123,
+      failureSourceLine: 58,
+    })),
+  );
+});
+
+test("Keycloak product reporter rejects forged IDs and source filenames", async () => {
+  const fixtures = ["KEYCLOAK-LIVE-000", "KEYCLOAK-LIVE-006", "KEYCLOAK-LIVE-001suffix"].map((id) => {
+    const fixture = row(id);
+    fixture.result.error.stack = `Error: ${sensitive}\n    at test (/private/not-keycloak-product.spec.ts:58:2)`;
+    return fixture;
+  });
+  assert.deepEqual(
+    (await report(fixtures, "failed", true)).tests,
+    fixtures.map(() => ({
+      scenario: "UNKNOWN",
+      status: "failed",
+      durationMs: 123,
+    })),
+  );
+});
 
 test("auth reporter emits only safe ID, status, duration and numeric source lines", async () => {
   const fixture = row("AUTH-LIVE-001", "failed", [

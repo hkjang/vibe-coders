@@ -3,6 +3,11 @@ import { resolve } from "node:path";
 import type { FullResult, Reporter, TestCase, TestResult, TestStep } from "@playwright/test/reporter";
 
 const scenarios = new Set([
+  "KEYCLOAK-LIVE-001",
+  "KEYCLOAK-LIVE-002",
+  "KEYCLOAK-LIVE-003",
+  "KEYCLOAK-LIVE-004",
+  "KEYCLOAK-LIVE-005",
   "AUTH-LIVE-001",
   "AUTH-LIVE-002",
   "AUTH-LIVE-003",
@@ -51,6 +56,7 @@ const scenarios = new Set([
   "AUTH-LIVE-046",
 ]);
 const sourceFiles = new Set([
+  "keycloak-product.spec.ts",
   "auth-live.spec.ts",
   "access-live.spec.ts",
   "recovery-live.spec.ts",
