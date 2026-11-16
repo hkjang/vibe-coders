@@ -26,6 +26,7 @@ test("원문 비교 API 없이 두 요청의 안전한 운영 지표를 비교�
   page,
   gateway,
 }, info) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await page.emulateMedia({ colorScheme: "dark" });
   const versions: string[] = [];
   page.on("request", (req) => {
@@ -46,7 +47,6 @@ test("원문 비교 API 없이 두 요청의 안전한 운영 지표를 비교�
   await page.getByRole("region", { name: "요청 비교 표 가로 스크롤" }).focus();
   await expect(page.getByRole("region", { name: "요청 비교 표 가로 스크롤" })).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   expect(
     await page.evaluate(
       async () =>
