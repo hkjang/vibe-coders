@@ -12,6 +12,7 @@ import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "./trace-safe-f
 import { useTraceListQuery } from "./trace-list-query";
 import { TraceListCriteria } from "./TraceListCriteria";
 import { TraceListResults } from "./TraceListResults";
+import { TraceReadDenied } from "./TraceReadDenied";
 import {
   buildTraceQuery,
   orderTraceRequests,
@@ -57,7 +58,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
   const criteriaIdentity = JSON.stringify([filterFormKey, searchParams.getAll("cursor")]);
   const list = useTraceListQuery(query, criteriaIdentity, selectionKey ?? "", flowAccess, interval);
   const { result } = list;
-  const data = result.data?.response;
+  const data = list.denied ? undefined : result.data?.response;
   const displayedQuery = result.data?.criteria;
   const displayedTimeZone = displayedQuery?.tz ?? selectedTimeZone;
   const routeRef = useRef({ searchParams, setSearchParams });
@@ -200,6 +201,13 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
       />
     );
   }
+  if (list.denied) {
+    return (
+      <div className="page-stack trace-page">
+        <TraceReadDenied onRetry={list.retry} requestId={list.denialRequestId} />
+      </div>
+    );
+  }
   const criteriaPanel = (
     <TraceListCriteria
       requested={query}
@@ -222,7 +230,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
           onRetry={() => {
             pendingPageFocusRef.current = true;
             pendingErrorActionFocusRef.current = "retry";
-            void result.refetch();
+            list.retry();
           }}
           onReset={() => {
             pendingPageFocusRef.current = true;
@@ -281,7 +289,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
               <ExternalLink aria-hidden="true" /> 기존 화면 보기
             </LegacyLink>
           ) : null}
-          <Button variant="primary" disabled={result.isFetching} onClick={() => void result.refetch()}>
+          <Button variant="primary" disabled={result.isFetching} onClick={list.retry}>
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}
           </Button>
         </div>
@@ -336,7 +344,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
               <code>요청 ID: {result.error.requestId}</code>
             ) : null}
           </div>
-          <Button size="small" variant="secondary" onClick={() => void result.refetch()}>
+          <Button size="small" variant="secondary" onClick={list.retry}>
             재시도
           </Button>
         </div>

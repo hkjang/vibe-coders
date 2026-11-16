@@ -262,6 +262,10 @@ describe("안전한 Trace 단계 조회", () => {
       view.rerenderRuntime();
     });
     expect(view.container.innerHTML).not.toContain(marker);
+    // Prefix changes retire the prior read scope; wait for its fresh masked read.
+    await table();
+    expect(view.flowCalls()).toHaveLength(2);
+    expect(view.container.innerHTML).not.toContain(marker);
     view.reply(async () => {
       throw new AppError("unsafe", { kind: "http", status: 503, requestId: marker });
     });

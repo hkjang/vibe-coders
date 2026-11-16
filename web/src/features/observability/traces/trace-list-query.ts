@@ -15,6 +15,8 @@ import { AppError } from "@/shared/api/error";
 import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
 import type { AppRequestSummary, AppRequestsQuery, AppRequestsResponse } from "@/shared/api/schemas";
 import type { TraceSafeFlowAccess } from "./trace-safe-flow-access";
+import { featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
+import { useTraceReadScope } from "./trace-read-scope";
 
 interface TraceListFrame {
   response: AppRequestsResponse;
@@ -31,6 +33,9 @@ export function useTraceListQuery(
   interval: number | false,
 ) {
   const client = useQueryClient();
+  const scope = useTraceReadScope(access, "trace-list-read");
+  const owner = scope.owner;
+  const denied = owner.denied;
   const mountId = useId();
   const [life, setLife] = useState({ criteriaIdentity, selectionIdentity, serial: 0 });
   if (life.criteriaIdentity !== criteriaIdentity || life.selectionIdentity !== selectionIdentity) {
@@ -42,8 +47,8 @@ export function useTraceListQuery(
   }
   const serial = life.serial;
   const key = useMemo(
-    () => ["admin", "requests", "trace-explorer", access.key, mountId, serial],
-    [access.key, mountId, serial],
+    () => featureOwnedKey(["admin", "requests", "trace-explorer", access.key, mountId, serial], owner),
+    [access.key, mountId, serial, owner],
   );
   const mounted = useRef(false);
   const latest = useRef(life);
@@ -59,7 +64,7 @@ export function useTraceListQuery(
   }, []);
 
   const assertCriteria = () => {
-    access.assertRead();
+    scope.assertCurrent();
     if (
       !mounted.current ||
       latest.current.criteriaIdentity !== criteriaIdentity ||
@@ -69,23 +74,35 @@ export function useTraceListQuery(
   };
   const result = useQuery({
     queryKey: key,
-    enabled: access.readable,
+    enabled: access.readable && owner.readable && !denied,
     queryFn: async ({ signal }): Promise<TraceListFrame> => {
       assertCriteria();
       if (signal.aborted) throw new AppError("목록 조회가 취소되었습니다.", { kind: "aborted" });
       const criteria = { ...query };
-      const response = await apiClient.request(endpoints.admin.requests, {
-        headers: appRequestsContractHeaders,
-        query: criteria,
-        signal,
-        routeId: "observability.traces",
-      });
-      assertCriteria();
-      if (signal.aborted) throw new AppError("목록 조회가 취소되었습니다.", { kind: "aborted" });
-      return { response, criteria, serial };
+      try {
+        const response = await apiClient.request(endpoints.admin.requests, {
+          headers: appRequestsContractHeaders,
+          query: criteria,
+          signal,
+          routeId: "observability.traces",
+        });
+        assertCriteria();
+        if (signal.aborted) throw new AppError("목록 조회가 취소되었습니다.", { kind: "aborted" });
+        return { response, criteria, serial };
+      } catch (error) {
+        assertCriteria();
+        if (signal.aborted) throw new AppError("목록 조회가 취소되었습니다.", { kind: "aborted" });
+        scope.captureDenial(error);
+        throw error;
+      }
     },
     placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[3] === access.key ? previous : undefined,
+      previousQuery?.queryKey[3] === access.key &&
+      previousQuery.queryKey.at(-2) === owner.marker &&
+      previousQuery.queryKey.at(-1) === owner.id &&
+      !denied
+        ? previous
+        : undefined,
     staleTime: 10_000,
     gcTime: 0,
     refetchInterval: (state) => (state.state.status === "error" && !state.state.data ? false : interval),
@@ -153,6 +170,21 @@ export function useTraceListQuery(
 
   return {
     result,
+    denied,
+    denialRequestId: scope.requestId,
+    retry: () => {
+      if (denied) {
+        scope.restart();
+        return;
+      }
+      try {
+        assertCriteria();
+        if (client.getQueryState(key)?.fetchStatus === "fetching") return;
+        void result.refetch({ cancelRefetch: false });
+      } catch {
+        /* Retired callbacks cannot start another read. */
+      }
+    },
     ready,
     belongsToCriteria,
     revision: state?.dataUpdateCount ?? 0,
