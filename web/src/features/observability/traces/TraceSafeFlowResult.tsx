@@ -1,4 +1,14 @@
+import { useState } from "react";
+import { useSearchParams } from "react-router";
 import type { TraceSafeFlow } from "@/shared/api/domains/trace-safe-flow.schema";
+import { Badge } from "@/shared/components/ui/Badge";
+import { TraceStepFilters } from "./TraceStepFilters";
+import {
+  readStepFilters,
+  stepMatches,
+  type StepKind,
+  type StepStatus,
+} from "@/shared/utils/trace-step-query";
 import { flowDisplay } from "./trace-safe-flow-display";
 import { flowTimeline } from "./trace-safe-flow-timeline";
 import { formatTraceDate } from "./trace-utils";
@@ -9,13 +19,42 @@ export function TraceSafeFlowResult({
   data,
   prefixes,
   timeZone,
+  filterPersistence = "url",
 }: {
   data: TraceSafeFlow;
   prefixes: readonly string[];
   timeZone: string;
+  filterPersistence?: "url" | "local";
 }) {
   const count = data.spans.length - 1;
   const timeline = flowTimeline(data.spans);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [localFilters, setLocalFilters] = useState<{ kind: StepKind; status: StepStatus }>({
+    kind: "all",
+    status: "all",
+  });
+  const { kind, status } = filterPersistence === "url" ? readStepFilters(searchParams) : localFilters;
+  // Filter after calculating positions so a hidden sibling cannot change the time scale.
+  const rows = data.spans
+    .map((span, index) => ({ span, index }))
+    .filter(({ span, index }) => index === 0 || stepMatches(span, kind, status));
+  const changeFilters = (nextKind: StepKind, nextStatus: StepStatus) => {
+    if (filterPersistence === "local") {
+      setLocalFilters({ kind: nextKind, status: nextStatus });
+      return;
+    }
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      for (const [key, value] of [
+        ["flow_kind", nextKind],
+        ["flow_status", nextStatus],
+      ] as const) {
+        next.delete(key);
+        if (value !== "all") next.set(key, value);
+      }
+      return next;
+    });
+  };
   const timestamp = (value: string) => {
     const safe = flowDisplay(value, prefixes);
     return safe === value ? (
@@ -28,14 +67,19 @@ export function TraceSafeFlowResult({
   };
   return (
     <>
-      <p>
-        표시된 하위 단계 {count.toLocaleString("ko-KR")}개 · 조회 생성 시각 {timestamp(data.generated_at)}
-      </p>
+      <p>조회 생성 시각 {timestamp(data.generated_at)}</p>
       {count === 0 ? (
         <p role="status">
           표시할 하위 단계가 없습니다. 단계의 존재 여부나 기록의 완전성을 판단할 수 없습니다.
         </p>
       ) : null}
+      <TraceStepFilters
+        spans={data.spans}
+        kind={kind}
+        status={status}
+        visibleCount={rows.length - 1}
+        onChange={changeFilters}
+      />
       <div className="trace-safe-flow-table" role="region" aria-label="단계 표 가로 스크롤" tabIndex={0}>
         <table aria-label="기록된 요청 단계와 시간">
           <thead>
@@ -49,7 +93,7 @@ export function TraceSafeFlowResult({
             </tr>
           </thead>
           <tbody>
-            {data.spans.map((span, index) => (
+            {rows.map(({ span, index }) => (
               <tr key={span.span_ref}>
                 <th scope="row">
                   <span aria-hidden="true">{index === 0 ? "" : "↳ "}</span>
@@ -57,7 +101,13 @@ export function TraceSafeFlowResult({
                   {flowDisplay(span.name, prefixes)}
                   <small>{kinds[span.kind]}</small>
                 </th>
-                <td>{statuses[span.status]}</td>
+                <td>
+                  <Badge
+                    tone={span.status === "error" ? "danger" : span.status === "ok" ? "success" : "muted"}
+                  >
+                    {statuses[span.status]}
+                  </Badge>
+                </td>
                 <td>{span.recorded_at === null ? "기록 시각 확인 불가" : timestamp(span.recorded_at)}</td>
                 <td>
                   {span.offset_ms === null

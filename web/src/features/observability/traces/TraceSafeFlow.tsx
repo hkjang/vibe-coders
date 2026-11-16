@@ -58,7 +58,12 @@ function FlowBody({
       {query.data ? (
         <>
           {previous ? <p role="status">이전 단계 기록입니다. 현재 목록 기준의 재확인이 필요합니다.</p> : null}
-          <TraceSafeFlowResult data={query.data.response} prefixes={access.prefixes} timeZone={timeZone} />
+          <TraceSafeFlowResult
+            data={query.data.response}
+            prefixes={access.prefixes}
+            timeZone={timeZone}
+            filterPersistence={access.routeId === "observability.traces" ? "url" : "local"}
+          />
         </>
       ) : !query.isFetching && !query.isError && selection.ready ? (
         <p role="status">단계 조회를 준비하고 있습니다.</p>
