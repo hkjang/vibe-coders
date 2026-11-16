@@ -1,3 +1,5 @@
+import { Text2SqlFeatureControls } from "./Text2SqlFeatureControls";
+import { Text2SqlProfileConnection } from "./Text2SqlProfileConnection";
 import { Text2SqlHealthResult } from "./Text2SqlHealthResult";
 import { useRef, useState } from "react";
 import { z } from "zod";
@@ -23,7 +25,6 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
-import { Switch } from "@/shared/components/ui/Switch";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
@@ -168,17 +169,6 @@ export function Text2SqlRuntimeTab({
     successMessage: (_result, connectionId) => `실행 DB 연결 삭제 완료: ${connectionId}`,
     errorMessage: "실행 DB 연결을 삭제하지 못했습니다.",
   });
-  const toggleFeature = useText2SqlMutation({
-    authorized: canWrite,
-    mutate: (variables: { name: string; enabled: boolean }) =>
-      apiClient.request(endpoints.domains.text2sql.features.toggle, {
-        body: variables,
-        routeId: text2sqlRouteId,
-      }),
-    invalidates: text2sqlInvalidations.features,
-    successMessage: (_result, variables) =>
-      `${variables.name} 기능을 ${variables.enabled ? "켰습니다" : "껐습니다"}.`,
-  });
 
   const healthcheck = useText2SqlMutation({
     readOnly: true,
@@ -234,7 +224,14 @@ export function Text2SqlRuntimeTab({
     profileColumn.accessor((row) => row.exec_connection_id, {
       id: "connection",
       header: "실행 DB",
-      cell: ({ getValue }) => getValue() || "기본(환경 변수)",
+      cell: ({ getValue }) => (
+        <Text2SqlProfileConnection
+          id={getValue()}
+          connections={connections}
+          loading={connectionsLoading}
+          error={connectionsError}
+        />
+      ),
     }),
     profileColumn.display({
       id: "actions",
@@ -378,41 +375,13 @@ export function Text2SqlRuntimeTab({
         {health ? <Text2SqlHealthResult connectionId={health.id} result={health.result} /> : null}
       </SectionCard>
 
-      <SectionCard
-        title="선택 기능 켜기·끄기"
-        description="Text2SQL 파이프라인의 선택 기능입니다. 긴급 중지와 재개는 화면 상단에서 별도로 검토합니다."
-      >
-        {featuresError ? (
-          <PanelFailure
-            error={featuresError}
-            hasData={features.length > 0}
-            label="기능 토글"
-            onRetry={onRefetchFeatures}
-          />
-        ) : null}
-        <ul className="t2s-toggle-list">
-          {featuresLoading && features.length === 0 ? (
-            <li>
-              <div role="status">기능 목록을 불러오는 중입니다.</div>
-            </li>
-          ) : null}
-          {features.map((feature) => (
-            <li key={feature.name}>
-              <div>
-                <strong>{feature.name}</strong>
-                <p>{feature.description}</p>
-              </div>
-              <Switch
-                checked={feature.enabled}
-                disabled={!canWrite || toggleFeature.isPending}
-                title={writeDisabledTitle(canWrite)}
-                label={feature.enabled ? "켜짐" : "꺼짐"}
-                onCheckedChange={(enabled) => toggleFeature.mutate({ name: feature.name, enabled })}
-              />
-            </li>
-          ))}
-        </ul>
-      </SectionCard>
+      <Text2SqlFeatureControls
+        canWrite={canWrite}
+        features={features}
+        error={featuresError}
+        loading={featuresLoading}
+        onRetry={onRefetchFeatures}
+      />
 
       <FormDialog
         submitDisabled={!canWrite}

@@ -88,3 +88,15 @@ const operationLabels: Record<string, string> = {
 export function operationLabel(value: string): string {
   return operationLabels[value.toLowerCase()] ?? (value || "—");
 }
+
+const featureLabels: Record<string, string> = {
+  self_challenge: "SQL 추가 검토",
+  gateway_memory: "최근 스키마 활용",
+  cumulative_risk_enforce: "누적 위험 차단",
+};
+
+/** Keep an unfamiliar server feature identifiable without inventing its behavior. */
+export function featureLabel(name: string): string {
+  const label = featureLabels[name];
+  return typeof label === "string" ? label : `추가 기능 (${name})`;
+}

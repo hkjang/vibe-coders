@@ -13,8 +13,13 @@
 .t2s-cell-stack span,
 .t2s-column-list li,
 .t2s-suggestion-list li {
-  color: var(--color-muted);
   font-size: 13px;
+}
+
+.t2s-cell-stack span:not(.badge),
+.t2s-column-list li,
+.t2s-suggestion-list li {
+  color: var(--color-muted);
 }
 
 .t2s-column-list,
@@ -59,6 +64,16 @@
 
 .t2s-toggle-list li:last-child {
   border-bottom: 0;
+}
+
+.t2s-toggle-list li > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.t2s-toggle-list .switch {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .t2s-toggle-list p {

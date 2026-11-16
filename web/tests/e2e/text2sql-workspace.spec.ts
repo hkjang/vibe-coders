@@ -58,9 +58,14 @@ test("일부 연결 조회 실패는 프로필과 다른 탭을 유지한다", a
   await page.goto("text2sql?tab=runtime");
   await expect(page.getByText("vibe/text2sql-finance", { exact: true })).toBeVisible();
   await expect(page.getByText("요청 ID: text2sql-workspace-fixture", { exact: true })).toBeVisible();
+  const profiles = page.getByRole("table", { name: "런타임 Text2SQL 프로필" });
+  await expect(profiles.getByText("연결 상태 확인 불가", { exact: true })).toBeVisible();
+  await expect(profiles.getByText("등록되지 않은 연결", { exact: true })).toHaveCount(0);
   fixture.state.fail = "";
   await page.getByRole("button", { name: "실행 DB 연결 재시도" }).click();
-  await expect(page.getByText("분석 DB", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("table", { name: "Text2SQL 실행 DB 연결" }).getByText("분석 DB", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("tab", { name: "위험·이상" }).click();
   await expect(page.getByRole("table", { name: "Text2SQL 위험 요청 큐" })).toBeVisible();
   expect(fixture.writes).toEqual([]);
@@ -120,6 +125,16 @@ for (const theme of ["light", "dark"] as const)
             ).violations,
         );
         expect(violations).toEqual([]);
+        if (tab === "runtime") {
+          const lines = await page.locator(".t2s-toggle-list .switch-label").evaluateAll((labels) =>
+            labels.map((label) => {
+              const range = document.createRange();
+              range.selectNodeContents(label);
+              return range.getClientRects().length;
+            }),
+          );
+          expect(lines).toEqual([1, 1, 1]);
+        }
         await expect(page).toHaveScreenshot(`text2sql-${tab}-${theme}-${width}.png`, {
           animations: "disabled",
           fullPage: true,
@@ -167,4 +182,50 @@ test("스키마 탭을 떠나면 지연된 내보내기로 다운로드를 시�
   expect(downloads).toEqual([]);
   expect(fixture.writes).toEqual([]);
   expect(fixture.unexpected).toEqual([]);
+});
+
+test("한글 이름의 선택 기능을 키보드로 구분하고 선택한 기능만 저장한다", async ({ page }) => {
+  const fixture = await installText2SqlWorkspace(page);
+  await page.goto("text2sql?tab=runtime");
+  const profiles = page.getByRole("table", { name: "런타임 Text2SQL 프로필" });
+  await expect(profiles.getByText("분석 DB", { exact: true })).toBeVisible();
+  const toggle = page.getByRole("switch", { name: "SQL 추가 검토 꺼짐", exact: true });
+  await expect(toggle).not.toBeChecked();
+  await toggle.focus();
+  await expect(toggle).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("switch", { name: "SQL 추가 검토 켜짐", exact: true })).toBeChecked();
+  await expect(page.getByRole("switch", { name: "최근 스키마 활용 켜짐", exact: true })).toBeChecked();
+  await expect(page.getByRole("switch", { name: "누적 위험 차단 꺼짐", exact: true })).not.toBeChecked();
+  expect(
+    fixture.writes.map((request) => ({
+      path: new URL(request.url()).pathname,
+      body: request.postDataJSON(),
+    })),
+  ).toEqual([{ path: "/admin/text2sql/features", body: { name: "self_challenge", enabled: true } }]);
+  expect(fixture.unexpected).toEqual([]);
+});
+
+test("좁은 다크 화면에서 미등록 연결의 상태·식별자와 접근성을 유지한다", async ({ page }) => {
+  const fixture = await installText2SqlWorkspace(page);
+  await page.route("**/admin/text2sql/connections", (route) => route.fulfill({ json: { connections: [] } }));
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  await page.goto("text2sql?tab=runtime");
+  const profiles = page.getByRole("table", { name: "런타임 Text2SQL 프로필" });
+  await expect(profiles.getByText("등록되지 않은 연결", { exact: true })).toBeVisible();
+  await expect(profiles.getByText("analytics_db", { exact: true })).toBeVisible();
+  await expect(profiles.getByText("기본 DB (서버 설정)", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const violations = await page.evaluate(
+    async () =>
+      (
+        await (window as unknown as { axe: { run: (root: Document) => Promise<AxeResults> } }).axe.run(
+          document,
+        )
+      ).violations,
+  );
+  expect(violations).toEqual([]);
+  expect(fixture.writes).toEqual([]);
 });
