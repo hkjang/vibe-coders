@@ -73,5 +73,24 @@ for (const [id, role, account] of [
     await page.goBack();
     await expect(summary).toContainText("적용 중인 조건 1개");
     await expect(page.getByRole("table", { name: "현재 페이지 요청 목록" }).getByRole("row")).toHaveCount(3);
+    const suggested = page.waitForResponse((value) => {
+      const url = new URL(value.url());
+      return (
+        url.pathname === "/admin/suggest" &&
+        url.searchParams.get("field") === "model" &&
+        value.status() === 200
+      );
+    });
+    await page.getByLabel("모델", { exact: true }).focus();
+    const payload: { values?: string[] | null } = await (await suggested).json();
+    // Compare authenticated server values without exposing them in diagnostics.
+    await expect
+      .poll(async () => {
+        const rendered = await page
+          .locator("#request-filter-models option")
+          .evaluateAll((nodes) => nodes.map((node) => (node as HTMLOptionElement).value));
+        return JSON.stringify(rendered) === JSON.stringify(payload.values ?? []);
+      })
+      .toBe(true);
   });
 }

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Filter, Search } from "lucide-react";
 import type { AppRequestsQuery } from "@/shared/api/schemas";
 import { Button } from "@/shared/components/ui/Button";
@@ -61,6 +61,8 @@ export function RequestFilters({
   const deepLinkIP = searchParams.get("ip")?.trim() ?? "";
   const deepLinkIPError = deepLinkIP !== "" && !isValidIPAddress(deepLinkIP);
   const advancedCount = advancedRequestFilterKeys.filter((key) => Boolean(query[key])).length;
+  const modelInput = useRef<HTMLInputElement>(null);
+  const languageInput = useRef<HTMLInputElement>(null);
   // Fetch suggestions only after this field is focused.
   const [suggestFields, setSuggestFields] = useState<Record<string, boolean>>({});
   const enableSuggest = (field: string) => (): void =>
@@ -104,18 +106,26 @@ export function RequestFilters({
             {customStatus ? <option value={customStatus}>HTTP {customStatus}</option> : null}
           </select>
         </label>
-        <label>
-          모델
-          <input
-            name="model"
-            maxLength={256}
-            list="request-filter-models"
-            defaultValue={searchParams.get("model") ?? ""}
-            onFocus={enableSuggest("model")}
+        <div className="request-filter-field">
+          <label>
+            모델
+            <input
+              name="model"
+              ref={modelInput}
+              maxLength={256}
+              list="request-filter-models"
+              defaultValue={searchParams.get("model") ?? ""}
+              onFocus={enableSuggest("model")}
+            />
+          </label>
+          {/* Outside the label: a datalist inside one becomes part of the field's name. */}
+          <FilterSuggestions
+            enabled={suggestFields.model === true}
+            field="model"
+            id="request-filter-models"
+            inputRef={modelInput}
           />
-        </label>
-        {/* Outside the label: a datalist inside one becomes part of the field's name. */}
-        <FilterSuggestions enabled={suggestFields.model === true} field="model" id="request-filter-models" />
+        </div>
         <label>
           요청 ID
           <input name="request_id" maxLength={512} defaultValue={searchParams.get("request_id") ?? ""} />
@@ -143,21 +153,25 @@ export function RequestFilters({
               <input name="api_key_id" maxLength={512} defaultValue={searchParams.get("api_key_id") ?? ""} />
             </label>
             <RequestIPFilter initialValue={deepLinkIP} />
-            <label>
-              언어
-              <input
-                name="language"
-                maxLength={64}
-                list="request-filter-languages"
-                defaultValue={searchParams.get("language") ?? ""}
-                onFocus={enableSuggest("language")}
+            <div className="request-filter-field">
+              <label>
+                언어
+                <input
+                  name="language"
+                  ref={languageInput}
+                  maxLength={64}
+                  list="request-filter-languages"
+                  defaultValue={searchParams.get("language") ?? ""}
+                  onFocus={enableSuggest("language")}
+                />
+              </label>
+              <FilterSuggestions
+                enabled={suggestFields.language === true}
+                field="language"
+                id="request-filter-languages"
+                inputRef={languageInput}
               />
-            </label>
-            <FilterSuggestions
-              enabled={suggestFields.language === true}
-              field="language"
-              id="request-filter-languages"
-            />
+            </div>
             <label>
               표시 건수
               <select name="limit" defaultValue={String(selectedLimit)}>

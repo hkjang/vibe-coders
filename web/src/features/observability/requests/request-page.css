@@ -17,6 +17,7 @@
 }
 .request-filter-grid {
   display: grid;
+  align-items: start;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
 }
@@ -26,6 +27,19 @@
   color: var(--color-muted);
   font-size: 0.8125rem;
   font-weight: 650;
+}
+.request-filter-field {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: var(--space-2);
+}
+.request-suggestion-error {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.875rem;
 }
 .request-filter-grid input,
 .request-filter-grid select {

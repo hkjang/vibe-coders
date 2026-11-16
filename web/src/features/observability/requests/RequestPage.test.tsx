@@ -11,6 +11,7 @@ import { AppError } from "@/shared/api/error";
 import type { AppRequestsResponse } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
+import { mockApi } from "@/test/api";
 
 const authRuntime = vi.hoisted(() => ({
   credentialPrefixes: ["corp_"],
@@ -263,7 +264,10 @@ describe("RequestPage", () => {
   });
 
   it("keeps a configured credential out of the API query and browser URL", async () => {
-    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const request = mockApi({
+      "GET /admin/requests": () => response,
+      "GET /admin/suggest": () => ({ values: [] }),
+    }).spy;
     const user = userEvent.setup();
     renderPage();
 
@@ -304,7 +308,10 @@ describe("RequestPage", () => {
   });
 
   it("validates bounded text and provider reference filters before querying", async () => {
-    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const request = mockApi({
+      "GET /admin/requests": () => response,
+      "GET /admin/suggest": () => ({ values: [] }),
+    }).spy;
     const user = userEvent.setup();
     renderPage();
 
