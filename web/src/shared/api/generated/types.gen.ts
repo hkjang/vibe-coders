@@ -501,6 +501,40 @@ export type CategoryScore = {
     samples: number;
 };
 
+export type ContextRegistryLegacyList = {
+    contexts: Array<{
+        content: string;
+        created_at: string;
+        enabled: boolean;
+        id: string;
+        key: string;
+        last_used_at: string;
+        name: string;
+        token_estimate: number;
+        updated_at: string;
+        use_count: number;
+    }>;
+};
+
+export type ContextRegistryMetadataItem = {
+    enabled: boolean;
+    key: string;
+    last_used_at: string | null;
+    name: string;
+    token_estimate: number | null;
+    updated_at: string | null;
+    use_count: number | null;
+};
+
+export type ContextRegistryMetadataPage = {
+    generated_at: string;
+    items: Array<ContextRegistryMetadataItem>;
+    limit: number;
+    offset: number;
+    state: 'all' | 'enabled' | 'disabled';
+    total: number;
+};
+
 /**
  * Optional fields; an empty object or null body preserves the existing configuration.
  */
@@ -5638,16 +5672,52 @@ export type GetAdminCodeVerifyStatsResponses = {
 export type GetAdminContextsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: 'metadata';
+        state?: 'all' | 'enabled' | 'disabled';
+        limit?: number;
+        offset?: number;
+    };
     url: '/admin/contexts';
 };
 
+export type GetAdminContextsErrors = {
+    /**
+     * Query or authorization failure; metadata errors omit storage details
+     */
+    400: AppError;
+    /**
+     * Query or authorization failure; metadata errors omit storage details
+     */
+    401: AppError;
+    /**
+     * Query or authorization failure; metadata errors omit storage details
+     */
+    403: AppError;
+    /**
+     * Query or authorization failure; metadata errors omit storage details
+     */
+    405: AppError;
+    /**
+     * Query or authorization failure; metadata errors omit storage details
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminContextsError = GetAdminContextsErrors[keyof GetAdminContextsErrors];
+
 export type GetAdminContextsResponses = {
     /**
-     * OK
+     * Legacy content list or explicit metadata page
      */
-    200: unknown;
+    200: ContextRegistryLegacyList | ContextRegistryMetadataPage;
 };
+
+export type GetAdminContextsResponse = GetAdminContextsResponses[keyof GetAdminContextsResponses];
 
 export type GetAdminCostData = {
     body?: never;

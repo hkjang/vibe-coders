@@ -1,5 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { versionAtLeast } from "@/config/migration-registry";
+import { ContextRegistryTab } from "./ContextRegistryTab";
+import { contextMessages } from "./context-registry-messages";
 
 import { LibraryBoundary } from "./LibraryBoundary";
 import { useLibraryOwner } from "./library-context";
@@ -14,7 +18,7 @@ import { TabPanel, Tabs } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import "@/features/prompts/prompts.css";
 
-const tabIds = ["search", "assets", "debt"] as const;
+const tabIds = ["search", "assets", "debt", "contexts"] as const;
 type TabId = (typeof tabIds)[number];
 
 const tabItems = [
@@ -32,19 +36,29 @@ export function PromptLibraryPage(): React.JSX.Element {
 }
 
 function LibraryContent(): React.JSX.Element {
+  const { backendVersion } = useAuth();
   const owner = useLibraryOwner();
   const access = useLibraryAccess();
   const queryClient = useQueryClient();
   const [tab, setTab] = useTabParam<TabId>(tabIds);
   const canWrite = access.allowed;
+  const availableTabs =
+    versionAtLeast(backendVersion, "v0.86.130") || tab === "contexts"
+      ? [...tabItems, { id: "contexts" as const, label: contextMessages.tab }]
+      : tabItems;
 
   return (
     <div className="page-stack">
       <PageHeader
         title="프롬프트 라이브러리"
-        status="preview"
-        description="프롬프트 검색과 지문, 재사용 자산, 프롬프트 부채를 한곳에서 관리합니다."
-        legacyHref="/admin#/prompts"
+        status={tab === "contexts" ? "preview_read_only" : "preview"}
+        readOnly={tab === "contexts"}
+        description={
+          tab === "contexts"
+            ? contextMessages.description
+            : "프롬프트 검색과 지문, 재사용 자산, 프롬프트 부채를 한곳에서 관리합니다."
+        }
+        legacyHref={tab === "contexts" ? undefined : "/admin#/prompts"}
         actions={
           <Button
             variant="primary"
@@ -60,7 +74,7 @@ function LibraryContent(): React.JSX.Element {
         }
       />
 
-      {!canWrite ? (
+      {!canWrite && tab !== "contexts" ? (
         <InlineNotice tone="info" title="읽기 전용으로 열려 있습니다.">
           {access.reason} 초안은 유지되며 조회는 그대로 사용할 수 있습니다.
         </InlineNotice>
@@ -68,7 +82,7 @@ function LibraryContent(): React.JSX.Element {
 
       <Tabs
         ariaLabel="프롬프트 라이브러리 화면"
-        items={tabItems}
+        items={availableTabs}
         value={tab}
         onChange={setTab}
         panelIdPrefix="prompts-library"
@@ -87,6 +101,11 @@ function LibraryContent(): React.JSX.Element {
       {tab === "debt" ? (
         <TabPanel id="debt" panelIdPrefix="prompts-library">
           <PromptDebtTab />
+        </TabPanel>
+      ) : null}
+      {tab === "contexts" ? (
+        <TabPanel id="contexts" panelIdPrefix="prompts-library">
+          <ContextRegistryTab />
         </TabPanel>
       ) : null}
     </div>

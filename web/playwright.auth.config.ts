@@ -34,6 +34,7 @@ export default defineConfig({
     "settings-workspace-live.spec.ts",
     "overview-trend-live.spec.ts",
     "request-bulk-live.spec.ts",
+    "context-registry-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,
