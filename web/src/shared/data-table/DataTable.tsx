@@ -1,5 +1,5 @@
 import type { RowData } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ArrowUpDown, Columns3, GripVertical, MoveHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Columns3, MoveHorizontal } from "lucide-react";
 import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 
 import { Button } from "@/shared/components/ui/Button";
@@ -13,10 +13,7 @@ import {
   useDataTableLayout,
   useDataTableOverflow,
 } from "@/shared/data-table/use-data-table-layout";
-import {
-  maximumDataTableColumnWidth,
-  minimumDataTableColumnWidth,
-} from "@/shared/data-table/table-preferences";
+import { DataTableResizeHandle } from "@/shared/data-table/DataTableResizeHandle";
 
 export interface DataTableSort {
   columnId: string;
@@ -221,27 +218,14 @@ export function DataTable<TData extends RowData>({
                             )}
                           </span>
                           {resizable ? (
-                            <div
-                              className="data-table-resizer"
-                              role="separator"
-                              tabIndex={0}
-                              aria-label={`${label} 열 너비 조절`}
-                              aria-orientation="vertical"
-                              aria-valuemax={maximumDataTableColumnWidth}
-                              aria-valuemin={minimumDataTableColumnWidth}
-                              aria-valuenow={Math.round(size)}
-                              title="드래그하거나 왼쪽·오른쪽 화살표로 너비 조절"
-                              onDoubleClick={() => header.column.resetSize()}
-                              onKeyDown={(event) => {
-                                if (layout.resizeColumnByKey(header.column.id, size, event.key)) {
-                                  event.preventDefault();
-                                }
-                              }}
+                            <DataTableResizeHandle
+                              label={label}
+                              width={size}
+                              onReset={() => header.column.resetSize()}
+                              onKey={(key) => layout.resizeColumnByKey(header.column.id, size, key)}
                               onMouseDown={header.getResizeHandler()}
                               onTouchStart={header.getResizeHandler()}
-                            >
-                              <GripVertical aria-hidden="true" />
-                            </div>
+                            />
                           ) : null}
                         </th>
                       );
