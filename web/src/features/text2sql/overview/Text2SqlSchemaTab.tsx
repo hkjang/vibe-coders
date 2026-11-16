@@ -1,3 +1,4 @@
+import { SchemaDetailLink } from "../schema-detail/SchemaDetailLink";
 import { useRef, useState, type ChangeEvent } from "react";
 import { z } from "zod";
 
@@ -285,7 +286,7 @@ export function Text2SqlSchemaTab({
       header: "이름",
       cell: ({ row }) => (
         <div className="t2s-cell-stack">
-          <strong>{row.original.name}</strong>
+          <SchemaDetailLink name={row.original.name} />
           <span className="badge-list">
             {row.original.is_default ? <Badge tone="info">기본</Badge> : null}
             {row.original.enabled ? null : <Badge tone="danger">중지</Badge>}
@@ -301,7 +302,7 @@ export function Text2SqlSchemaTab({
     }),
     schemaColumn.accessor((row) => row.dialect, {
       id: "dialect",
-      header: "Dialect",
+      header: "SQL 문법",
       cell: ({ getValue }) => getValue() || "—",
     }),
     schemaColumn.accessor((row) => row.allowed_tables.length, {

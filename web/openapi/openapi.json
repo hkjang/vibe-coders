@@ -8714,11 +8714,12 @@
                 "setting",
                 "api_key",
                 "model",
-                "routing_rule"
+                "routing_rule",
+                "text2sql_schema"
               ],
               "type": "string"
             },
-            "maxItems": 15,
+            "maxItems": 16,
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
@@ -8767,7 +8768,8 @@
                           "setting",
                           "api_key",
                           "model",
-                          "routing_rule"
+                          "routing_rule",
+                          "text2sql_schema"
                         ],
                         "type": "string"
                       },
@@ -8822,7 +8824,8 @@
                     "setting",
                     "api_key",
                     "model",
-                    "routing_rule"
+                    "routing_rule",
+                    "text2sql_schema"
                   ],
                   "type": "string"
                 },
@@ -8847,7 +8850,7 @@
               ],
               "type": "object"
             },
-            "maxItems": 15,
+            "maxItems": 16,
             "type": "array"
           },
           "request_id": {
@@ -11082,6 +11085,93 @@
         ],
         "type": "object"
       },
+      "Text2SQLLegacyOverview": {
+        "additionalProperties": true,
+        "description": "Preserved legacy overview; other existing statistics, logs and registry fields are unchanged.",
+        "properties": {
+          "schemas": {
+            "items": {
+              "$ref": "#/components/schemas/Text2SQLSchemaView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "schemas"
+        ],
+        "type": "object"
+      },
+      "Text2SQLSchemaDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "raw_content_available": {
+            "type": "boolean"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/Text2SQLSchemaView"
+          }
+        },
+        "required": [
+          "schema",
+          "raw_content_available"
+        ],
+        "type": "object"
+      },
+      "Text2SQLSchemaView": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_tables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "collected_at": {
+            "type": "string"
+          },
+          "dialect": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "schema_text": {
+            "type": "string"
+          },
+          "source_fingerprint": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team",
+          "name",
+          "dialect",
+          "schema_text",
+          "allowed_tables",
+          "is_default",
+          "enabled",
+          "version",
+          "collected_at",
+          "source_fingerprint",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "TrackingAllowRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12220,7 +12310,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.106"
+    "version": "v0.86.107"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -24203,7 +24293,7 @@
     },
     "/admin/resource-search": {
       "post": {
-        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies. Routing rule search requires routing:read, matching GET /admin/routing-rules; remaining kinds require admin:read. MCP server and tool search additionally require observability:read and never fetch discovery data. MCP server search exposes canonical upstream slug IDs and safe display names; observed tool search uses the exact catalog server-label/tool-name pair. A reader without admin:read must request policy with security:read or routing_rule with routing:read. Other groups remain forbidden; no cross-scope access is inferred. No admin:write required. Team search requires access.users and applies the same exact authenticated team_admin TeamID scope as GET /admin/teams?view=registered, including an empty team scope. It searches registered team names, not usage groups, IDs or members. Account search also requires access.users and matches GET /admin/users?view=accounts primary-team scope, including unassigned accounts for an empty authenticated team. It selects and searches stored login names only, never email, roles, credentials, membership lists or usage identities. Query is trimmed, 2–128 Unicode characters, literal name substring; SQLite uses the embedded Unicode lowercase function and PostgreSQL uses LOWER for both stored names and query. Observed MCP tool search selects only server_label and tool_name from the existing MCP catalog with is_mcp=1, matches tool names only, and orders by tool name then server label. It returns the exact server_label and tool-name id pair, excludes empty servers and names longer than 256 characters/1024 bytes, and never performs discovery or invokes tools. Prompt asset and experiment search require admin:read and their respective prompts.library/prompts.lab feature, matching the existing admin lists. They select stored asset names or experiment titles and IDs only, never prompt bodies, descriptions, inputs, outputs, metrics, owners or team fields. Setting search requires admin:read and system.settings. It searches only static registered keys, categories and Korean descriptions, ordered by key; no effective, stored or environment values are searched or returned. API key search requires admin:read and access.users. It searches only registered key names, never secrets, hashes, owners, scopes or limits. Its exact team_admin TeamID scope, including an empty team, matches GET /admin/api-keys?id; names and safe ASCII database IDs alone are returned. Routing rule search requires the available routing.rules feature and matches generated rule IDs, incoming model patterns and target model names. It selects only the ID and target model as the display title, never notes, providers, complexity or actions. Fifteen supported navigation kinds: provider, workflow, app, skill, mcp_upstream, policy, team, account, mcp_tool, prompt_asset, prompt_experiment, setting, api_key, model and routing_rule. Model search reuses GET /admin/models inventory collection, its configuration-aware 20-second cache, bounded refresh and singleflight; no model inference or business execution. It matches safe model IDs only, returns an opaque provider_ref and safe provider_label, and preserves virtual model namespace identity. Model results may be partial when an upstream failed, cached data is stale or the bounded inventory is truncated. Safe matching results remain usable; partial never means an exhaustive search. Cold cache may require provider catalog I/O, bounded by the shared three-second deadline. Storage-only groups are collected first regardless of requested order, so a slow model upstream cannot starve unrelated kinds. At most ten metadata rows per kind ordered by stored title then ID. IDs are bounded to 512 Unicode characters/2048 UTF-8 bytes and titles to 256 characters/1024 bytes before selection. Unsafe or oversized IDs/titles are omitted for every role without truncating IDs; full team metadata remains available in the registered-team screen. Definitions, policy conditions/actions, instructions, credentials, URLs, members and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Only model groups may report partial and retain items. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
+        "description": "Read-only navigation metadata search. POST body keeps query out of URLs; no query text or result content is logged or audited by this handler. Requires authentication and available non-legacy feature access per kind. Policy search requires security:read, matching GET /admin/policies. Routing rule search requires routing:read, matching GET /admin/routing-rules; remaining kinds require admin:read. MCP server and tool search additionally require observability:read and never fetch discovery data. MCP server search exposes canonical upstream slug IDs and safe display names; observed tool search uses the exact catalog server-label/tool-name pair. A reader without admin:read must request policy with security:read or routing_rule with routing:read. Other groups remain forbidden; no cross-scope access is inferred. No admin:write required. Team search requires access.users and applies the same exact authenticated team_admin TeamID scope as GET /admin/teams?view=registered, including an empty team scope. It searches registered team names, not usage groups, IDs or members. Account search also requires access.users and matches GET /admin/users?view=accounts primary-team scope, including unassigned accounts for an empty authenticated team. It selects and searches stored login names only, never email, roles, credentials, membership lists or usage identities. Query is trimmed, 2–128 Unicode characters, literal name substring; SQLite uses the embedded Unicode lowercase function and PostgreSQL uses LOWER for both stored names and query. Observed MCP tool search selects only server_label and tool_name from the existing MCP catalog with is_mcp=1, matches tool names only, and orders by tool name then server label. It returns the exact server_label and tool-name id pair, excludes empty servers and names longer than 256 characters/1024 bytes, and never performs discovery or invokes tools. Prompt asset and experiment search require admin:read and their respective prompts.library/prompts.lab feature, matching the existing admin lists. They select stored asset names or experiment titles and IDs only, never prompt bodies, descriptions, inputs, outputs, metrics, owners or team fields. Setting search requires admin:read and system.settings. It searches only static registered keys, categories and Korean descriptions, ordered by key; no effective, stored or environment values are searched or returned. API key search requires admin:read and access.users. It searches only registered key names, never secrets, hashes, owners, scopes or limits. Its exact team_admin TeamID scope, including an empty team, matches GET /admin/api-keys?id; names and safe ASCII database IDs alone are returned. Routing rule search requires the available routing.rules feature and matches generated rule IDs, incoming model patterns and target model names. It selects only the ID and target model as the display title, never notes, providers, complexity or actions. Sixteen supported navigation kinds: provider, workflow, app, skill, mcp_upstream, policy, team, account, mcp_tool, prompt_asset, prompt_experiment, setting, api_key, model, routing_rule and text2sql_schema. Text2SQL schema search requires admin:read and text2sql.overview. It selects and searches stored schema names only, never context, table allowlists, team fields or fingerprints. Its global-or-team scope matches GET /admin/text2sql, including resolved team aliases and global-only visibility for missing or empty authenticated teams. Disabled schemas remain visible. Scope lookup failure returns an unavailable group, never unscoped data. Model search reuses GET /admin/models inventory collection, its configuration-aware 20-second cache, bounded refresh and singleflight; no model inference or business execution. It matches safe model IDs only, returns an opaque provider_ref and safe provider_label, and preserves virtual model namespace identity. Model results may be partial when an upstream failed, cached data is stale or the bounded inventory is truncated. Safe matching results remain usable; partial never means an exhaustive search. Cold cache may require provider catalog I/O, bounded by the shared three-second deadline. Storage-only groups are collected first regardless of requested order, so a slow model upstream cannot starve unrelated kinds. At most ten metadata rows per kind ordered by stored title then ID. IDs are bounded to 512 Unicode characters/2048 UTF-8 bytes and titles to 256 characters/1024 bytes before selection. Unsafe or oversized IDs/titles are omitted for every role without truncating IDs; full team metadata remains available in the registered-team screen. Definitions, policy conditions/actions, instructions, credentials, URLs, members and owners are never selected. Provider IDs are opaque references. Limited indicates extra matching storage rows, not an exact count; safe projection may return fewer than ten. Only model groups may report partial and retain items. Forbidden/unavailable groups carry no items, so partial failure does not hide successful kinds. Each group is a separate read under a shared three-second deadline, not a consistent snapshot or pagination. Unknown fields, duplicate kinds, trailing JSON and URL query strings are rejected; request body is limited to 4096 bytes. Response is no-store.",
         "operationId": "post__admin_resource_search",
         "requestBody": {
           "content": {
@@ -27793,10 +27883,115 @@
     },
     "/admin/text2sql": {
       "get": {
+        "description": "Existing admin:read Text2SQL overview. Without view/name, preserves the complete legacy overview and its projection. view=schema&name=... returns one exact stored schema, including disabled entries, using the same global-or-authenticated-team visibility and raw-prompt permission as the overview. Team aliases resolve through the existing checked team-scope helper; lookup failure never broadens access. This mode performs no query execution, connection test, model call or mutation. It does not fall back to a default schema. Names are exact, nonempty trimmed UTF-8, at most 512 Unicode characters/2048 bytes, with no control/format characters. Detail mode rejects duplicate, malformed or extra query parameters. Missing and out-of-scope schemas both return generic 404; no supplied name or storage error is echoed. Detail responses are no-store. raw_content_available is the existing canViewRawPrompts result; false preserves the overview projection, omitting schema text and allowed tables.",
         "operationId": "get__admin_text2sql",
+        "parameters": [
+          {
+            "description": "Existing overview period, only without detail mode.",
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "schema"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required exact name when view=schema; never a pattern or default selector.",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Text2SQLLegacyOverview"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Text2SQLSchemaDetailResponse"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Legacy overview or exact detail selected by view"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Text2SQL query rejected or unavailable; generic error never echoes the schema context."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Text2SQL query rejected or unavailable; generic error never echoes the schema context."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Text2SQL query rejected or unavailable; generic error never echoes the schema context."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Text2SQL query rejected or unavailable; generic error never echoes the schema context."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Text2SQL query rejected or unavailable; generic error never echoes the schema context."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

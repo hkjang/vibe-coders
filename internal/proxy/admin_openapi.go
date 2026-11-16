@@ -655,6 +655,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			map[string]any{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "default": 50}, "description": "Nonpositive or greater than 200 uses the existing default of 50."},
 		}
 		responses["200"] = successResponse("WorkflowRunList")
+	case "get /admin/text2sql":
+		enrichText2SQLSchemaDetailOpenAPI(op, responses)
 	case "get /admin/users":
 		enrichAccountPageOpenAPI(op, responses)
 	case "get /admin/teams":
@@ -1218,6 +1220,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range routingDomainDecisionsOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range text2SQLSchemaDetailOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range resourceSearchOpenAPISchemas() {

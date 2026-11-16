@@ -55,7 +55,7 @@ func (s *SQLStore) SearchResourceMetadata(ctx context.Context, kind, query strin
 func (s *SQLStore) SearchAuthTeamMetadata(ctx context.Context, query string, limit int, scopeTeam *string) ([]ResourceMetadata, bool, error) {
 	var scope *resourceMetadataScope
 	if scopeTeam != nil {
-		scope = &resourceMetadataScope{expression: "id", value: *scopeTeam}
+		scope = &resourceMetadataScope{expression: "id = ?", values: []any{*scopeTeam}}
 	}
 	return s.searchResourceMetadata(ctx, "teams", "id", "name", query, limit, scope)
 }
@@ -67,8 +67,8 @@ func (s *SQLStore) SearchAuthAccountMetadata(ctx context.Context, query string, 
 	var scope *resourceMetadataScope
 	if scopeTeam != nil {
 		scope = &resourceMetadataScope{
-			expression: "COALESCE((SELECT m.team_id FROM user_team_memberships m WHERE m.user_id = u.id ORDER BY m.created_at ASC LIMIT 1), '')",
-			value:      *scopeTeam,
+			expression: "COALESCE((SELECT m.team_id FROM user_team_memberships m WHERE m.user_id = u.id ORDER BY m.created_at ASC LIMIT 1), '') = ?",
+			values:     []any{*scopeTeam},
 		}
 	}
 	return s.searchResourceMetadata(ctx, "users u", "u.id", "u.name", query, limit, scope)
@@ -79,7 +79,7 @@ func (s *SQLStore) SearchAuthAccountMetadata(ctx context.Context, query string, 
 func (s *SQLStore) SearchAPIKeyMetadata(ctx context.Context, query string, limit int, scopeTeam *string) ([]ResourceMetadata, bool, error) {
 	var scope *resourceMetadataScope
 	if scopeTeam != nil {
-		scope = &resourceMetadataScope{expression: "COALESCE(team, '')", value: *scopeTeam}
+		scope = &resourceMetadataScope{expression: "COALESCE(team, '') = ?", values: []any{*scopeTeam}}
 	}
 	return s.searchResourceMetadata(ctx, "api_keys", "id", "name", query, limit, scope)
 }
@@ -88,7 +88,7 @@ func (s *SQLStore) SearchAPIKeyMetadata(ctx context.Context, query string, limit
 // authenticated scope value is always bound, including empty or legacy IDs.
 type resourceMetadataScope struct {
 	expression string
-	value      string
+	values     []any
 }
 
 // All SQL columns and display expressions come from fixed sources above, never request input.
@@ -119,8 +119,8 @@ func (s *SQLStore) searchResourceMetadata(ctx context.Context, table, id, title,
 	}
 	statement += strings.Join(predicates, " OR ") + ")"
 	if scope != nil {
-		statement += " AND " + scope.expression + " = ?"
-		args = append(args, scope.value)
+		statement += " AND (" + scope.expression + ")"
+		args = append(args, scope.values...)
 	}
 	statement += " ORDER BY " + title + ", " + id + " LIMIT ?"
 	args = append(args, limit+1)

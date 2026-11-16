@@ -18,6 +18,7 @@ export const resourceKindSchema = z.enum([
   "api_key",
   "model",
   "routing_rule",
+  "text2sql_schema",
 ]);
 export type ResourceKind = z.infer<typeof resourceKindSchema>;
 const boundedText = (characters: number) =>
@@ -52,7 +53,7 @@ export const resourceSearchSchema = z.strictObject({
           .max(10),
       }),
     )
-    .max(15),
+    .max(16),
 }) satisfies z.ZodType<PostAdminResourceSearchResponse>;
 
 export const resourceSearchEndpoint = operation<

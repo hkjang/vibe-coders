@@ -12,7 +12,7 @@ export async function installSearchWorkspace(page: Page) {
   if (!base || !state.user) throw new Error("Missing fixture identity");
   const ids = new Set(
     Object.entries(resourceSearchTargets)
-      .filter(([kind]) => kind !== "model" && kind !== "routing_rule")
+      .filter(([kind]) => kind !== "model" && kind !== "routing_rule" && kind !== "text2sql_schema")
       .map(([, target]) => target.featureId),
   );
   state.migration_registry = migrationRegistry

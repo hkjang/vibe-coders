@@ -28,6 +28,7 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
       !versionAtLeast(auth.backendVersion, "v0.86.97")
     )
       return false;
+    if (kind === "text2sql_schema" && !versionAtLeast(auth.backendVersion, "v0.86.107")) return false;
     if (kind === "routing_rule" && !versionAtLeast(auth.backendVersion, "v0.86.103")) return false;
     if (kind === "model" && !versionAtLeast(auth.backendVersion, "v0.86.102")) return false;
     if (kind === "api_key" && !versionAtLeast(auth.backendVersion, "v0.86.101")) return false;
