@@ -112,7 +112,7 @@ test("자동완성 거부 뒤 직접 입력과 명시 재조회를 제공하며 
 for (const theme of ["light", "dark"] as const)
   for (const width of [1440, 390]) {
     test(`${theme} ${width}px 자동완성 오류의 한글·접근성·직접 입력`, async ({ page }) => {
-      await page.setViewportSize({ width, height: 900 });
+      await page.setViewportSize({ width, height: 1100 });
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
       await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
       const fixture = await setup(page, 403);

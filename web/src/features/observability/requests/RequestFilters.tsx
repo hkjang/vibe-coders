@@ -4,6 +4,8 @@ import type { AppRequestsQuery } from "@/shared/api/schemas";
 import { Button } from "@/shared/components/ui/Button";
 import { isValidIPAddress } from "@/shared/utils/ip-address";
 import { FilterSuggestions } from "./FilterSuggestions";
+import { RequestTimePresets } from "./RequestTimePresets";
+import { requestPresetRange } from "./request-time-presets";
 import { advancedRequestFilterKeys } from "./request-filter-summary";
 import {
   defaultLimit,
@@ -63,6 +65,8 @@ export function RequestFilters({
   const advancedCount = advancedRequestFilterKeys.filter((key) => Boolean(query[key])).length;
   const modelInput = useRef<HTMLInputElement>(null);
   const languageInput = useRef<HTMLInputElement>(null);
+  const [timeRange, setTimeRange] = useState({ from: query.from ?? "", to: query.to ?? "" });
+  const [timeNotice, setTimeNotice] = useState<string>();
   // Fetch suggestions only after this field is focused.
   const [suggestFields, setSuggestFields] = useState<Record<string, boolean>>({});
   const enableSuggest = (field: string) => (): void =>
@@ -74,6 +78,14 @@ export function RequestFilters({
         <strong>조회 필터</strong>
         <span>필터와 페이지 위치는 URL에 저장됩니다.</span>
       </div>
+      <RequestTimePresets
+        notice={timeNotice}
+        onSelect={(preset) => {
+          setTimeRange(requestPresetRange(preset));
+          setTimeNotice(`${preset.label}을 입력했습니다. 조회를 누르면 적용합니다.`);
+          onInput();
+        }}
+      />
       <div className="request-filter-grid">
         <label>
           시작 시각
@@ -81,8 +93,14 @@ export function RequestFilters({
             name="from"
             type="text"
             maxLength={64}
+            aria-describedby="request-time-preset-help"
             placeholder="예: 2026-09-04T09:00 또는 RFC3339"
-            defaultValue={query.from ?? ""}
+            value={timeRange.from}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setTimeRange((current) => ({ ...current, from: value }));
+              setTimeNotice(undefined);
+            }}
           />
         </label>
         <label>
@@ -91,8 +109,14 @@ export function RequestFilters({
             name="to"
             type="text"
             maxLength={64}
+            aria-describedby="request-time-preset-help"
             placeholder="예: 2026-09-04T18:00 또는 RFC3339"
-            defaultValue={query.to ?? ""}
+            value={timeRange.to}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setTimeRange((current) => ({ ...current, to: value }));
+              setTimeNotice(undefined);
+            }}
           />
         </label>
         <label>

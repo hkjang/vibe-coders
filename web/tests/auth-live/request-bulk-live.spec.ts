@@ -92,5 +92,22 @@ for (const [id, role, account] of [
         return JSON.stringify(rendered) === JSON.stringify(payload.values ?? []);
       })
       .toBe(true);
+    await page.getByRole("button", { name: "최근 1시간", exact: true }).click();
+    const from = await page.getByLabel("시작 시각", { exact: true }).inputValue();
+    const to = await page.getByLabel("종료 시각", { exact: true }).inputValue();
+    expect(Date.parse(to) - Date.parse(from)).toBe(3_600_000);
+    const period = page.waitForResponse((value) => {
+      const url = new URL(value.url());
+      return (
+        url.pathname === "/admin/requests" &&
+        url.searchParams.get("from") === from &&
+        url.searchParams.get("to") === to &&
+        value.status() === 200
+      );
+    });
+    await page.getByRole("button", { name: "조회", exact: true }).click();
+    await period;
+    expect(new URL(page.url()).searchParams.get("from") === from).toBe(true);
+    expect(new URL(page.url()).searchParams.get("to") === to).toBe(true);
   });
 }
