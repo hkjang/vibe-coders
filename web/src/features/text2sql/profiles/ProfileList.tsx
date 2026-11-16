@@ -1,17 +1,13 @@
 import { useMemo, useRef, useState } from "react";
-import { apiClient } from "@/shared/api/client";
-import { endpoints } from "@/shared/api/endpoints";
 import type { Text2SQLConnectionRow, Text2SQLProfileRow } from "@/shared/api/domains/text2sql";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { operationLabel, writeDisabledTitle } from "../overview/text2sql-labels";
-import { text2sqlInvalidations, text2sqlRouteId } from "../overview/use-text2sql-queries";
-import { useText2SqlMutation } from "../overview/use-text2sql-mutation";
 import { Text2SqlProfileConnection } from "../overview/Text2SqlProfileConnection";
+import { ProfileDeleteDialog } from "./ProfileDeleteDialog";
 import { ProfileEditDialog } from "./ProfileEditDialog";
 interface Props {
   canWrite: boolean;
@@ -33,16 +29,6 @@ export function ProfileList({
   const [profileToDelete, setProfileToDelete] = useState("");
   const profileTriggerRef = useRef<HTMLElement | null>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
-  const removeProfile = useText2SqlMutation({
-    authorized: canWrite,
-    mutate: (virtualModel: string) =>
-      apiClient.request(endpoints.domains.text2sql.profiles.remove, {
-        query: { virtual_model: virtualModel },
-        routeId: text2sqlRouteId,
-      }),
-    invalidates: text2sqlInvalidations.overview,
-    successMessage: "런타임 프로필을 삭제했습니다.",
-  });
   const profileColumns = useMemo(() => {
     const profileColumn = createDataTableColumnHelper<Text2SQLProfileRow>();
     return profileColumn.columns([
@@ -163,22 +149,14 @@ export function ProfileList({
         />
       ) : null}
 
-      <ConfirmDialog
-        confirmDisabled={!canWrite}
-        open={profileToDelete !== ""}
-        onOpenChange={(next) => {
-          if (!next) setProfileToDelete("");
-        }}
-        returnFocusRef={rowTriggerRef}
-        tone="danger"
-        title="런타임 프로필 삭제"
-        description={`${profileToDelete} 프로필을 삭제하면 이 가상 모델은 환경 기본값으로 되돌아갑니다.`}
-        confirmLabel="삭제"
-        onConfirm={async () => {
-          await removeProfile.mutateAsync(profileToDelete);
-          setProfileToDelete("");
-        }}
-      />
+      {profileToDelete ? (
+        <ProfileDeleteDialog
+          model={profileToDelete}
+          canWrite={canWrite}
+          returnFocusRef={rowTriggerRef}
+          onClose={() => setProfileToDelete("")}
+        />
+      ) : null}
     </>
   );
 }

@@ -33,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.112"
+var AppVersion = "v0.86.113"
 
 type Server struct {
 	cfg      config.Config
@@ -480,6 +480,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql/spans", s.handleText2SQLSpans)
 	mux.HandleFunc("/admin/text2sql/schemas", s.handleText2SQLSchemas)
 	mux.HandleFunc("/admin/text2sql/profiles", s.handleText2SQLProfiles)
+	mux.HandleFunc("/admin/text2sql/profiles/reviewed-delete", s.handleText2SQLProfileReviewedDelete)
 	mux.HandleFunc("/admin/text2sql/tables", s.handleText2SQLTables)
 	mux.HandleFunc("/admin/text2sql/columns", s.handleText2SQLColumns)
 	mux.HandleFunc("/admin/text2sql/connections", s.handleText2SQLConnections)

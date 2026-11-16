@@ -136,10 +136,17 @@ func (s *Server) handleText2SQLProfileReviewedSave(w http.ResponseWriter, r *htt
 }
 
 func decodeText2SQLProfileReview(raw []byte, input *text2SQLProfileReviewInput) bool {
+	return decodeText2SQLProfileFields(raw, input, []string{"virtual_model", "mode", "upstream_model", "summary_model", "schema_name", "exec_connection_id", "enabled", "expected_revision", "reason"})
+}
+
+func decodeText2SQLProfileFields(raw []byte, input any, fields []string) bool {
 	if !utf8.Valid(raw) {
 		return false
 	}
-	allowed := map[string]bool{"virtual_model": true, "mode": true, "upstream_model": true, "summary_model": true, "schema_name": true, "exec_connection_id": true, "enabled": true, "expected_revision": true, "reason": true}
+	allowed := make(map[string]bool, len(fields))
+	for _, name := range fields {
+		allowed[name] = true
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
 		return false

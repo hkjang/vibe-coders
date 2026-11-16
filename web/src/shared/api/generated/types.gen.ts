@@ -3516,6 +3516,25 @@ export type Text2SqlProfileReview = {
     revision: string;
 };
 
+export type Text2SqlProfileReviewedDeleteInput = {
+    /**
+     * Must exactly equal virtual_model, including case and whitespace.
+     */
+    confirmation: string;
+    expected_revision: string;
+    reason: string;
+    /**
+     * Canonical lowercase virtual model; at most 512 UTF-8 bytes.
+     */
+    virtual_model: string;
+};
+
+export type Text2SqlProfileReviewedDeleted = {
+    reviewed_revision: string;
+    status: 'deleted';
+    virtual_model: string;
+};
+
 export type Text2SqlProfileReviewedInput = {
     enabled: boolean;
     exec_connection_id: string;
@@ -13579,6 +13598,59 @@ export type PutAdminText2SqlProfilesResponses = {
 };
 
 export type PutAdminText2SqlProfilesResponse = PutAdminText2SqlProfilesResponses[keyof PutAdminText2SqlProfilesResponses];
+
+export type PostAdminText2SqlProfilesReviewedDeleteData = {
+    body: Text2SqlProfileReviewedDeleteInput;
+    path?: never;
+    query?: never;
+    url: '/admin/text2sql/profiles/reviewed-delete';
+};
+
+export type PostAdminText2SqlProfilesReviewedDeleteErrors = {
+    /**
+     * Validation, authorization, revision conflict or metadata failure; no unsafe fallback
+     */
+    400: AppError;
+    /**
+     * Validation, authorization, revision conflict or metadata failure; no unsafe fallback
+     */
+    401: AppError;
+    /**
+     * Validation, authorization, revision conflict or metadata failure; no unsafe fallback
+     */
+    403: AppError;
+    /**
+     * Validation, authorization, revision conflict or metadata failure; no unsafe fallback
+     */
+    404: AppError;
+    /**
+     * Validation, authorization, revision conflict or metadata failure; no unsafe fallback
+     */
+    405: AppError;
+    /**
+     * Validation, authorization, revision conflict or metadata failure; no unsafe fallback
+     */
+    409: AppError;
+    /**
+     * Validation, authorization, revision conflict or metadata failure; no unsafe fallback
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminText2SqlProfilesReviewedDeleteError = PostAdminText2SqlProfilesReviewedDeleteErrors[keyof PostAdminText2SqlProfilesReviewedDeleteErrors];
+
+export type PostAdminText2SqlProfilesReviewedDeleteResponses = {
+    /**
+     * OK
+     */
+    200: Text2SqlProfileReviewedDeleted;
+};
+
+export type PostAdminText2SqlProfilesReviewedDeleteResponse = PostAdminText2SqlProfilesReviewedDeleteResponses[keyof PostAdminText2SqlProfilesReviewedDeleteResponses];
 
 export type PostAdminText2SqlPromoteData = {
     body?: never;
