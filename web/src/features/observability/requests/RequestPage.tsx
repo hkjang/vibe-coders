@@ -14,6 +14,7 @@ import { isAppError } from "@/shared/api/error";
 import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
 import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "../traces/trace-safe-flow-access";
 import { requestSelectionIdentity, useRequestSafeFlowSelection } from "./request-safe-flow-selection";
+import { RequestCost } from "./RequestCost";
 import { RequestSavedFilters } from "./saved-filters/RequestSavedFilters";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -549,7 +550,7 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
                     <td>{request.latency_ms.toLocaleString("ko-KR")}ms</td>
                     <td>{request.total_tokens.toLocaleString("ko-KR")}</td>
                     <td>
-                      {request.estimated_cost.toLocaleString("ko-KR")} {request.currency}
+                      <RequestCost value={request.estimated_cost} currency={request.currency} />
                     </td>
                     <td>
                       <Button

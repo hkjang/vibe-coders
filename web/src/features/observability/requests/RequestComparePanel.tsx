@@ -6,33 +6,13 @@ import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { containsPotentialSecret } from "@/shared/security/secrets";
-import { formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
+import { RequestComparisonResult } from "./RequestComparisonResult";
 import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "../traces/trace-safe-flow-access";
 import { comparisonIdError, loadRequestComparison } from "./request-comparison";
 
 interface Props {
   request: AppRequestSummary;
   assertSelected: () => void;
-}
-
-function sideRows(request: AppRequestSummary, prefixes: readonly string[]): Array<[string, string]> {
-  const text = (value: string) => (containsPotentialSecret(value, prefixes) ? "[값 비공개]" : value || "—");
-  return [
-    ["요청 ID", text(request.request_id)],
-    ["모델", text(request.model)],
-    ["공급자", text(request.provider_display)],
-    ["상태", request.status_code ? `HTTP ${request.status_code}` : "확인 불가"],
-    ["지연", formatDuration(request.latency_ms)],
-    [
-      "입력 / 출력 / 전체 토큰",
-      `${formatNumber(request.prompt_tokens)} / ${formatNumber(request.completion_tokens)} / ${formatNumber(request.total_tokens)}`,
-    ],
-    [
-      "캐시 / 추론 토큰",
-      `${formatNumber(request.cached_tokens)} / ${formatNumber(request.reasoning_tokens)}`,
-    ],
-    ["비용", formatKRW(request.estimated_cost)],
-  ];
 }
 
 export function RequestComparePanel(props: Props): React.JSX.Element {
@@ -105,8 +85,6 @@ function Comparison({
   };
   if (!access.readable) return <p role="status">현재 요청 조회 권한을 확인하세요.</p>;
   const pair = diff.isSuccess && !diff.isFetching ? diff.data : undefined;
-  const rows = pair ? sideRows(pair.left, access.prefixes) : [];
-  const otherRows = pair ? sideRows(pair.right, access.prefixes) : [];
   const rawRequestId = isAppError(diff.error) ? diff.error.requestId : undefined;
   const requestId =
     rawRequestId &&
@@ -153,33 +131,12 @@ function Comparison({
         </InlineNotice>
       ) : null}
       {pair ? (
-        <div className="data-table-scroll" role="region" tabIndex={0} aria-label="요청 비교 표 가로 스크롤">
-          <table className="data-table">
-            <caption className="sr-only">두 요청의 운영 지표 비교</caption>
-            <thead>
-              <tr>
-                <th scope="col">항목</th>
-                <th scope="col">이 요청</th>
-                <th scope="col">비교 대상</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(([label, value], index) => {
-                const otherValue = otherRows[index]?.[1] ?? "—";
-                return (
-                  <tr key={label}>
-                    <th scope="row">{label}</th>
-                    <td>{value}</td>
-                    <td className={value === otherValue ? undefined : "request-compare-differs"}>
-                      {otherValue}
-                      {value !== otherValue ? <span className="sr-only"> (값이 다름)</span> : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <RequestComparisonResult
+          key={submitted?.serial}
+          left={pair.left}
+          right={pair.right}
+          prefixes={access.prefixes}
+        />
       ) : null}
     </section>
   );

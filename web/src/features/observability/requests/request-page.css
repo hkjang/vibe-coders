@@ -143,5 +143,41 @@
 
 .request-compare-differs {
   font-weight: 700;
-  color: var(--color-warning);
+  color: var(--color-primary);
+}
+
+.request-comparison-result {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.request-comparison-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.request-comparison-summary label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.request-comparison-result > p {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.request-comparison-table {
+  min-width: 34rem;
+}
+
+.request-comparison-table :is(th, td) {
+  min-width: 7rem;
+  max-width: 16rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

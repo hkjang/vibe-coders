@@ -8,6 +8,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
 import { formatRequestDate } from "@/features/observability/requests/request-date";
 import { RequestComparePanel } from "@/features/observability/requests/RequestComparePanel";
+import { RequestCost } from "./RequestCost";
 import { RequestSafeFlowPanel } from "./RequestSafeFlowPanel";
 
 interface RequestDetailDialogProps {
@@ -141,7 +142,7 @@ export function RequestDetailDialog({
           <div>
             <dt>추정 비용</dt>
             <dd>
-              {request.estimated_cost.toLocaleString("ko-KR")} {request.currency}
+              <RequestCost value={request.estimated_cost} currency={request.currency} />
             </dd>
           </div>
           <div>
