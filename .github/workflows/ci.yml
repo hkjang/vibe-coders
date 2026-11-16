@@ -283,6 +283,8 @@ jobs:
         run: go test -race ./internal/proxy ./internal/store -run '^TestText2SQL(Healthcheck|Profile|ExecutionTarget|SafeConnector)' -count=1 -timeout=5m
       - name: Verify PostgreSQL metadata-only service summaries and full MCP counts
         run: go test -race ./internal/proxy -run '^Test(MCPOverviewCountsBeyondToolListLimit|ServiceSummaryFailureAndValidation|Text2SQLSummaryMatchesScopedLegacyWithoutRawContent)$' -count=1 -timeout=5m
+      - name: Overview activity PostgreSQL contracts
+        run: go test -race ./internal/store ./internal/proxy -run '^Test(Activity|IncidentSignals)' -count=1 -timeout=5m
       - name: Verify PostgreSQL team report decisions and portal ratio precision
         run: go test -race ./internal/proxy -run '^TestTeamConsole(Report|Portal)' -count=1 -timeout=5m
       - name: Verify PostgreSQL personal receipt ownership and recommendation contracts

@@ -250,6 +250,21 @@ export type AgentRouteWriteResponse = {
     agent_route: AgentRoute;
 };
 
+export type AlertActivityResponse = {
+    events: Array<{
+        created_at: string;
+        delivered: boolean;
+        delivery_failed: boolean;
+        metric: 'anomaly_zmax' | 'budget_burn_ratio' | 'errors' | 'failover_rate' | 'failovers' | 'first_chunk_p95_ms' | 'krw' | 'latency_p95_ms' | 'llm_eval_failure_rate' | 'llm_eval_failures' | 'mcp_new_tools' | 'other' | 'requests' | 'tokens' | 'tool_error_rate' | 'tool_errors' | 'tool_loop';
+        threshold: number;
+        value: number;
+    }>;
+    generated_at: string;
+    has_more: boolean;
+    since: string;
+    window: '1h' | '24h' | '7d' | '30d';
+};
+
 export type AppError = {
     error: {
         code: string;
@@ -343,6 +358,18 @@ export type AppRequestsResponse = {
     next_cursor?: string;
     previous_cursor?: string;
     requests: Array<AppRequestSummary>;
+};
+
+export type AuditActivityResponse = {
+    changes: Array<{
+        category: 'provider' | 'model' | 'routing' | 'policy' | 'alert' | 'access' | 'mcp' | 'text2sql' | 'settings' | 'cost' | 'other';
+        created_at: string;
+        operation: 'create' | 'update' | 'delete' | 'enable' | 'disable' | 'revoke' | 'rotate' | 'approve' | 'reject' | 'import' | 'rollback' | 'test' | 'other';
+    }>;
+    generated_at: string;
+    has_more: boolean;
+    since: string;
+    window: '1h' | '24h' | '7d' | '30d';
 };
 
 export type AuthAccount = {
@@ -816,6 +843,24 @@ export type IpUsageSummary = {
     last_seen: string;
     requests: number;
     tokens: number;
+};
+
+export type IncidentActivityResponse = {
+    current_hour: number;
+    generated_at: string;
+    min_events: 5;
+    signals: Array<{
+        current_hour: boolean;
+        ended_at: string;
+        errors_5xx: number;
+        failovers: number;
+        provider: string;
+        requests: number;
+        started_at: string;
+    }>;
+    since: string;
+    total: number;
+    window: '1h' | '24h' | '7d' | '30d';
 };
 
 /**
@@ -4176,6 +4221,53 @@ export type PostAdminAlertsResponses = {
     200: unknown;
 };
 
+export type GetAdminAlertsSummaryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        window?: '1h' | '24h' | '7d' | '30d';
+    };
+    url: '/admin/alerts/summary';
+};
+
+export type GetAdminAlertsSummaryErrors = {
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    400: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    401: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    403: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    405: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminAlertsSummaryError = GetAdminAlertsSummaryErrors[keyof GetAdminAlertsSummaryErrors];
+
+export type GetAdminAlertsSummaryResponses = {
+    /**
+     * OK
+     */
+    200: AlertActivityResponse;
+};
+
+export type GetAdminAlertsSummaryResponse = GetAdminAlertsSummaryResponses[keyof GetAdminAlertsSummaryResponses];
+
 export type DeleteAdminAlertsIdData = {
     body?: never;
     path: {
@@ -4810,6 +4902,53 @@ export type GetAdminAuditLogsCsvResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminAuditLogsSummaryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        window?: '1h' | '24h' | '7d' | '30d';
+    };
+    url: '/admin/audit-logs/summary';
+};
+
+export type GetAdminAuditLogsSummaryErrors = {
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    400: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    401: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    403: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    405: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminAuditLogsSummaryError = GetAdminAuditLogsSummaryErrors[keyof GetAdminAuditLogsSummaryErrors];
+
+export type GetAdminAuditLogsSummaryResponses = {
+    /**
+     * OK
+     */
+    200: AuditActivityResponse;
+};
+
+export type GetAdminAuditLogsSummaryResponse = GetAdminAuditLogsSummaryResponses[keyof GetAdminAuditLogsSummaryResponses];
 
 export type GetAdminAuditAnomaliesData = {
     body?: never;
@@ -6737,6 +6876,53 @@ export type GetAdminIncidentsCandidatesResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminIncidentsSummaryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        window?: '1h' | '24h' | '7d' | '30d';
+    };
+    url: '/admin/incidents/summary';
+};
+
+export type GetAdminIncidentsSummaryErrors = {
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    400: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    401: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    403: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    405: AppError;
+    /**
+     * Summary unavailable; no storage details echoed.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminIncidentsSummaryError = GetAdminIncidentsSummaryErrors[keyof GetAdminIncidentsSummaryErrors];
+
+export type GetAdminIncidentsSummaryResponses = {
+    /**
+     * OK
+     */
+    200: IncidentActivityResponse;
+};
+
+export type GetAdminIncidentsSummaryResponse = GetAdminIncidentsSummaryResponses[keyof GetAdminIncidentsSummaryResponses];
 
 export type GetAdminIndexHealthData = {
     body?: never;

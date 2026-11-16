@@ -11,10 +11,12 @@ export function OverviewDestination({
   featureId,
   label,
   range,
+  tab,
 }: {
   featureId: string;
   label: string;
   range?: HealthRange;
+  tab?: "audit" | "safety";
 }) {
   const auth = useAuth();
   const item = useNavigationItems().find(({ feature }) => feature.featureId === featureId);
@@ -39,7 +41,12 @@ export function OverviewDestination({
       </LegacyLink>
     );
   const base = featurePath(item.feature);
-  const to = featureId === "routing.rules" ? `${base}/health?window=${range ?? "24h"}&threshold=70` : base;
+  const to =
+    featureId === "routing.rules"
+      ? `${base}/health?window=${range ?? "24h"}&threshold=70`
+      : tab
+        ? `${base}?tab=${tab}`
+        : base;
   return (
     <Link className="overview-destination" to={to}>
       {content}

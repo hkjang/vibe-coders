@@ -244,9 +244,26 @@ type Incident struct {
 // A bucket qualifies when failovers >= minEvents or 5xx >= minEvents; adjacent
 // qualifying hours for the same provider merge into one incident.
 func (s *SQLStore) Incidents(ctx context.Context, since time.Time, minEvents int64) ([]Incident, error) {
+	return s.incidents(ctx, since, time.Time{}, minEvents, true)
+}
+
+// IncidentSignals uses the existing hourly clustering without the per-incident
+// actor query. The summary interval is [since, until); no actor count is exposed.
+func (s *SQLStore) IncidentSignals(ctx context.Context, since, until time.Time) ([]Incident, error) {
+	return s.incidents(ctx, since, until, 5, false)
+}
+
+func (s *SQLStore) incidents(ctx context.Context, since, until time.Time, minEvents int64, includeActors bool) ([]Incident, error) {
 	if minEvents <= 0 {
 		minEvents = 5
 	}
+	where := "r.created_at >= ?"
+	args := []any{formatTime(since)}
+	if !until.IsZero() {
+		where = metadataTimestampOrderSQL("r.created_at") + " >= ? AND " + metadataTimestampOrderSQL("r.created_at") + " < ?"
+		args = []any{since.UTC().Format("2006-01-02T15:04:05.000000000"), until.UTC().Format("2006-01-02T15:04:05.000000000")}
+	}
+	args = append(args, minEvents, minEvents)
 	rows, err := s.db.QueryContext(ctx, s.bind(`
 		SELECT COALESCE(NULLIF(r.fallback_from, ''), COALESCE(NULLIF(r.provider, ''), '(unknown)')) AS prov,
 			substr(r.created_at, 1, 13) AS bucket,
@@ -254,10 +271,10 @@ func (s *SQLStore) Incidents(ctx context.Context, since time.Time, minEvents int
 			SUM(CASE WHEN r.status_code >= 500 THEN 1 ELSE 0 END) AS errors5xx,
 			COUNT(*) AS requests
 		FROM request_logs r
-		WHERE r.created_at >= ?
+		WHERE `+where+`
 		GROUP BY prov, bucket
 		HAVING SUM(COALESCE(r.failover, 0)) >= ? OR SUM(CASE WHEN r.status_code >= 500 THEN 1 ELSE 0 END) >= ?
-		ORDER BY prov, bucket`), since.UTC().Format(time.RFC3339Nano), minEvents, minEvents)
+		ORDER BY prov, bucket`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +295,11 @@ func (s *SQLStore) Incidents(ctx context.Context, since time.Time, minEvents int
 		return nil, err
 	}
 
-	nowBucket := time.Now().UTC().Format("2006-01-02T15")
+	now := until
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	nowBucket := now.UTC().Format("2006-01-02T15")
 	incidents := []Incident{}
 	var cur *Incident
 	var lastBucket string
@@ -305,6 +326,9 @@ func (s *SQLStore) Incidents(ctx context.Context, since time.Time, minEvents int
 
 	// exact affected-user counts per incident (few incidents → cheap)
 	for i := range incidents {
+		if !includeActors {
+			break
+		}
 		var affected int64
 		err := s.db.QueryRowContext(ctx, s.bind(`
 			SELECT COUNT(DISTINCT COALESCE(NULLIF(api_key_id, ''), 'anonymous'))
