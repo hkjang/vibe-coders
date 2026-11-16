@@ -1,5 +1,5 @@
 import { Check, CircleDashed } from "lucide-react";
-import { Link } from "react-router";
+import { OverviewDestination } from "./OverviewDestination";
 
 import { setupSteps } from "@/features/overview/setup-steps";
 import type { AdminStats, OpsStatus } from "@/shared/api/schemas";
@@ -18,7 +18,7 @@ interface FirstRunChecklistProps {
  */
 export function FirstRunChecklist({ stats, status }: FirstRunChecklistProps): React.JSX.Element | null {
   // Only while the gateway has never served a request: after that the zeros are real data.
-  if (stats === undefined || stats.total_requests > 0) return null;
+  if (stats === undefined || stats.total_requests > 0 || status === undefined) return null;
 
   const steps = setupSteps(stats, status);
   const remaining = steps.filter((step) => !step.done).length;
@@ -42,9 +42,7 @@ export function FirstRunChecklist({ stats, status }: FirstRunChecklistProps): Re
             {step.done ? (
               <Badge tone="success">완료</Badge>
             ) : (
-              <Link className="button button-secondary button-small" to={step.to}>
-                {step.action}
-              </Link>
+              <OverviewDestination featureId={step.featureId} label={step.action} />
             )}
           </li>
         ))}

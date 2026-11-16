@@ -7,6 +7,7 @@ export interface SetupStep {
   why: string;
   done: boolean;
   to: string;
+  featureId: string;
   action: string;
 }
 
@@ -24,7 +25,8 @@ export function setupSteps(stats: AdminStats | undefined, status: OpsStatus | un
       why: "업스트림 자격 증명을 등록해야 요청을 중계할 수 있습니다.",
       done: providerCount > 0,
       to: "/gateway/providers",
-      action: "공급자 등록",
+      featureId: "gateway.providers",
+      action: "공급자 설정 열기",
     },
     {
       id: "auth",
@@ -32,7 +34,8 @@ export function setupSteps(stats: AdminStats | undefined, status: OpsStatus | un
       why: "인증이 꺼져 있으면 게이트웨이에 닿는 누구나 모델을 호출할 수 있습니다.",
       done: status?.security.auth_enabled ?? false,
       to: "/system/settings",
-      action: "인증 설정",
+      featureId: "system.settings",
+      action: "인증 설정 열기",
     },
     {
       id: "pricing",
@@ -40,7 +43,8 @@ export function setupSteps(stats: AdminStats | undefined, status: OpsStatus | un
       why: "가격이 없으면 비용·예산·절감 화면이 모두 0으로 남습니다.",
       done: status?.security.pricing_configured ?? false,
       to: "/gateway/models",
-      action: "가격 입력",
+      featureId: "gateway.models",
+      action: "모델 가격 확인",
     },
     {
       id: "traffic",
@@ -48,6 +52,7 @@ export function setupSteps(stats: AdminStats | undefined, status: OpsStatus | un
       why: "요청이 하나라도 들어오면 이 화면의 지표와 추적이 채워집니다.",
       done: (stats?.total_requests ?? 0) > 0,
       to: "/gateway/chat",
+      featureId: "gateway.chat",
       action: "채팅 테스트 열기",
     },
   ];

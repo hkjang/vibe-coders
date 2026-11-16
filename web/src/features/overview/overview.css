@@ -141,3 +141,41 @@
 .setup-step-body small {
   color: var(--color-muted);
 }
+
+.overview-destinations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.overview-destination {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  color: var(--color-primary);
+  font-size: 0.875rem;
+}
+.overview-destination svg {
+  width: 1rem;
+  height: 1rem;
+}
+.overview-destination span {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.overview-destinations:empty {
+  display: none;
+}
+
+.overview-page .health-widget-header p {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 22.5rem) and (max-width: 47.9375rem) {
+  .overview-page .metric-pairs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

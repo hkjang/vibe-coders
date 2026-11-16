@@ -1,4 +1,5 @@
-import type { UseQueryResult } from "@tanstack/react-query";
+import { OverviewDestination } from "./OverviewDestination";
+import type { OverviewQuery } from "./use-overview-query";
 import { CircleDollarSign, DatabaseZap, Gauge, LockKeyhole, Route, ShieldAlert } from "lucide-react";
 import { healthStatusLabels, riskLevelLabels } from "@/config/ui-labels";
 import {
@@ -13,10 +14,7 @@ import {
 import { HealthWidget } from "@/features/health/health-ui";
 import type { AdminStats, OpsRiskResponse, RoutingHealth } from "@/shared/api/schemas";
 
-type WidgetQuery<Data> = Pick<
-  UseQueryResult<Data>,
-  "data" | "error" | "isPending" | "isError" | "dataUpdatedAt" | "refetch"
->;
+type WidgetQuery<Data> = OverviewQuery<Data>;
 
 interface OverviewStatusTabProps {
   stats: WidgetQuery<AdminStats>;
@@ -91,6 +89,10 @@ export function OverviewStatusTab({
             </dl>
           </>
         ) : null}
+        <div className="overview-destinations">
+          <OverviewDestination featureId="observability.requests" label="보존 요청 열기" />
+          <OverviewDestination featureId="finops.overview" label="비용 관리 열기" />
+        </div>
       </HealthWidget>
 
       {stats.isPending || stats.data ? (
@@ -131,6 +133,9 @@ export function OverviewStatusTab({
               </dl>
             </>
           ) : null}
+          <div className="overview-destinations">
+            <OverviewDestination featureId="gateway.health" label="게이트웨이 상태 열기" />
+          </div>
         </HealthWidget>
       ) : null}
 
@@ -185,6 +190,9 @@ export function OverviewStatusTab({
             </div>
           </dl>
         ) : null}
+        <div className="overview-destinations">
+          <OverviewDestination featureId="routing.rules" label="선택 기간의 라우팅 상태 열기" range={range} />
+        </div>
       </HealthWidget>
 
       <HealthWidget
@@ -219,6 +227,9 @@ export function OverviewStatusTab({
             </p>
           </>
         ) : null}
+        <div className="overview-destinations">
+          <OverviewDestination featureId="system.health" label="시스템 상태 열기" />
+        </div>
       </HealthWidget>
 
       {operations.isPending || operations.data ? (
@@ -263,6 +274,9 @@ export function OverviewStatusTab({
               </div>
             </dl>
           ) : null}
+          <div className="overview-destinations">
+            <OverviewDestination featureId="system.health" label="저장소 상태 열기" />
+          </div>
         </HealthWidget>
       ) : null}
     </section>

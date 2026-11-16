@@ -1,3 +1,4 @@
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -16,15 +17,12 @@ const authRuntime = vi.hoisted(() => ({
   scopes: ["admin:read", "routing:read"],
 }));
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    backendVersion: "v0.81.0",
-    legacyFallback: authRuntime.legacyFallback,
-    mode: "authenticated",
-    user: { scopes: authRuntime.scopes },
-  }),
-}));
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () => testAuth({ scopes: authRuntime.scopes, legacyFallback: authRuntime.legacyFallback }),
+  };
+});
 
 const provider = {
   provider: "openai",
@@ -158,7 +156,9 @@ function renderOverview(initialEntry = "/app/overview"): ReturnType<typeof rende
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={client}>
-        <OverviewPage />
+        <FeatureAccessHarness featureId="overview" readOnly>
+          <OverviewPage />
+        </FeatureAccessHarness>
       </QueryClientProvider>
     </MemoryRouter>,
   );

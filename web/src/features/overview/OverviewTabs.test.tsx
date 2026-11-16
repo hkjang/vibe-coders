@@ -1,3 +1,4 @@
+import { FeatureAccessHarness } from "@/test/feature-access";
 import { focusManager } from "@tanstack/react-query";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,15 +10,10 @@ import { usePreferences } from "@/shared/stores/preferences";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    backendVersion: "v0.84.0",
-    legacyFallback: true,
-    mode: "authenticated",
-    user: { scopes: ["admin:read", "routing:read"] },
-  }),
-}));
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return { useAuth: () => testAuth({ scopes: ["admin:read", "routing:read"] }) };
+});
 
 const stats = {
   total_requests: 120,
@@ -125,7 +121,12 @@ const baseHandlers = {
 };
 
 function renderPage(route = "/overview"): ReturnType<typeof renderScreen> {
-  return renderScreen(<OverviewPage />, { path: "/overview", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="overview" readOnly>
+      <OverviewPage />
+    </FeatureAccessHarness>,
+    { path: "/overview", route },
+  );
 }
 
 function deferred<Value>() {
