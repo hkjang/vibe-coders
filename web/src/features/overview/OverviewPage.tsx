@@ -9,6 +9,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { FirstRunChecklist } from "@/features/overview/FirstRunChecklist";
 import { OverviewCapabilitiesTab } from "@/features/overview/OverviewCapabilitiesTab";
 import { OverviewStatusTab } from "@/features/overview/OverviewStatusTab";
+import { OverviewServiceSignals } from "./OverviewServiceSignals";
 import { OverviewUsageTab } from "@/features/overview/OverviewUsageTab";
 import { OverviewTrendPanel } from "@/features/overview/OverviewTrendPanel";
 import { useOverviewQuery } from "./use-overview-query";
@@ -209,7 +210,7 @@ function OverviewContent(): React.JSX.Element {
           {health.isPending ? <p>게이트웨이 연결을 확인하는 중입니다.</p> : null}
           {health.data && !health.isError ? (
             <p>
-              게이트웨이 상태 확인 요청에 응답했으며, 운영 신호는 <strong>{overallStatus}</strong> 상태입니다.
+              게이트웨이 연결·라우팅·운영 기반 신호는 <strong>{overallStatus}</strong> 상태입니다.
             </p>
           ) : null}
           {health.isError ? (
@@ -236,6 +237,7 @@ function OverviewContent(): React.JSX.Element {
       />
 
       <TabPanel id={tab} panelIdPrefix="overview">
+        {tab === "status" ? <OverviewServiceSignals range={range} interval={interval} /> : null}
         {tab === "status" ? <FirstRunChecklist stats={stats.data} status={opsStatus} /> : null}
         {tab === "usage" ? (
           <div className="overview-usage-stack">

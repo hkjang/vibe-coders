@@ -214,10 +214,21 @@ func (s *SQLStore) RequestsForToolScoped(ctx context.Context, server, tool strin
 
 // ToolMetricsSince returns (calls, errors) within a window for alerting.
 func (s *SQLStore) ToolMetricsSince(ctx context.Context, since time.Time) (calls int64, errors int64, err error) {
+	return s.toolMetricsSince(ctx, since, false)
+}
+
+// MCPMetricsSince aggregates all MCP records, without the per-tool list limit.
+// Errors count error records (including result records), not unique failed calls.
+func (s *SQLStore) MCPMetricsSince(ctx context.Context, since time.Time) (calls int64, errors int64, err error) {
+	return s.toolMetricsSince(ctx, since, true)
+}
+
+func (s *SQLStore) toolMetricsSince(ctx context.Context, since time.Time, mcpOnly bool) (calls int64, errors int64, err error) {
+	where, args := (ToolFilter{Since: since, MCPOnly: mcpOnly}).where()
 	row := s.db.QueryRowContext(ctx, s.bind(`
 		SELECT SUM(CASE WHEN source = 'call' THEN 1 ELSE 0 END),
 			SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END)
-		FROM tool_invocations WHERE created_at >= ?`), since.UTC().Format(time.RFC3339Nano))
+		FROM tool_invocations WHERE `+where), args...)
 	var c, e *int64
 	if err = row.Scan(&c, &e); err != nil {
 		return 0, 0, err

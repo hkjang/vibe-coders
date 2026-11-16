@@ -27,6 +27,7 @@ type mcpRouteView struct {
 }
 
 func (s *Server) handleMCPOverview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -37,17 +38,21 @@ func (s *Server) handleMCPOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	upstreams, err := s.db.ListMCPUpstreams(r.Context())
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_overview_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP overview could not be loaded", "server_error", "mcp_overview_failed")
 		return
 	}
 	snap := s.mcpToolsSnapshotAdmin()
-	summary, _ := s.db.MCPSummary(r.Context())
-	tools, _ := s.db.ListMCPTools(r.Context(), store.ToolFilter{MCPOnly: true, Since: time.Now().Add(-24 * time.Hour), Limit: 500})
-	recentCalls := int64(0)
-	recentErrors := int64(0)
-	for _, t := range tools {
-		recentCalls += t.Calls
-		recentErrors += t.Errors
+	summary, err := s.db.MCPSummary(r.Context())
+	if err != nil {
+		writeOpenAIError(w, 500, "MCP statistics could not be loaded", "server_error", "mcp_overview_failed")
+		return
+	}
+	generatedAt := time.Now().UTC()
+	since := generatedAt.Add(-24 * time.Hour)
+	recentCalls, recentErrors, err := s.db.MCPMetricsSince(r.Context(), since)
+	if err != nil {
+		writeOpenAIError(w, 500, "MCP statistics could not be loaded", "server_error", "mcp_overview_failed")
+		return
 	}
 	healthy := map[string]bool{}
 	for _, route := range snap.routes {
@@ -72,6 +77,9 @@ func (s *Server) handleMCPOverview(w http.ResponseWriter, r *http.Request) {
 				blockedCount++
 			}
 		}
+	} else {
+		writeOpenAIError(w, 500, "MCP policy counts could not be loaded", "server_error", "mcp_overview_failed")
+		return
 	}
 	if policies, err := s.db.ListMCPPolicies(r.Context()); err == nil {
 		for _, p := range policies {
@@ -79,6 +87,9 @@ func (s *Server) handleMCPOverview(w http.ResponseWriter, r *http.Request) {
 				blockedCount++
 			}
 		}
+	} else {
+		writeOpenAIError(w, 500, "MCP policy counts could not be loaded", "server_error", "mcp_overview_failed")
+		return
 	}
 	errorRate := 0.0
 	if recentCalls > 0 {
@@ -94,6 +105,9 @@ func (s *Server) handleMCPOverview(w http.ResponseWriter, r *http.Request) {
 		"discovery_error_count":  len(snap.errors),
 		"blocked_count":          blockedCount,
 		"recent_call_count":      recentCalls,
+		"recent_error_count":     recentErrors,
+		"since":                  since.Format(time.RFC3339Nano),
+		"generated_at":           generatedAt.Format(time.RFC3339Nano),
 		"recent_error_rate":      errorRate,
 		"summary":                summary,
 		"fetched_at":             snap.fetchedAt.UTC().Format(time.RFC3339),

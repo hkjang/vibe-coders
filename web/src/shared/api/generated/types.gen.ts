@@ -974,6 +974,29 @@ export type McpoAuthStatusResponse = {
     scopes: Array<string>;
 };
 
+export type McpOverviewResponse = {
+    blocked_count: number;
+    discovery_error_count: number;
+    enabled_upstream_count: number;
+    fetched_at: string;
+    generated_at: string;
+    healthy_upstream_count: number;
+    recent_call_count: number;
+    recent_error_count: number;
+    recent_error_rate: number;
+    since: string;
+    summary: {
+        distinct_tools: number;
+        mcp_servers: number;
+        total_calls: number;
+        total_errors: number;
+    };
+    total_prompts: number;
+    total_resources: number;
+    total_tools: number;
+    upstream_count: number;
+};
+
 export type MattermostConfigRequest = {
     channel?: string | null;
     enabled?: boolean | null;
@@ -3568,6 +3591,21 @@ export type Text2SqlSchemaView = {
     team: string;
     updated_at: string;
     version: number;
+};
+
+export type Text2SqlSummaryResponse = {
+    enabled: boolean;
+    generated_at: string;
+    since: string;
+    stats: {
+        cost_krw: number;
+        errors: number;
+        executed: number;
+        total: number;
+        valid: number;
+        valid_rate: number;
+    };
+    window: '1h' | '24h' | '7d' | '30d';
 };
 
 export type TrackingAllowRequest = {
@@ -7465,12 +7503,43 @@ export type GetAdminMcpOverviewData = {
     url: '/admin/mcp/overview';
 };
 
+export type GetAdminMcpOverviewErrors = {
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    400: AppError;
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    401: AppError;
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    403: AppError;
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    405: AppError;
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminMcpOverviewError = GetAdminMcpOverviewErrors[keyof GetAdminMcpOverviewErrors];
+
 export type GetAdminMcpOverviewResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: McpOverviewResponse;
 };
+
+export type GetAdminMcpOverviewResponse = GetAdminMcpOverviewResponses[keyof GetAdminMcpOverviewResponses];
 
 export type GetAdminMcpPoliciesData = {
     body?: never;
@@ -13847,6 +13916,53 @@ export type GetAdminText2SqlSpansResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminText2SqlSummaryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        window?: '1h' | '24h' | '7d' | '30d';
+    };
+    url: '/admin/text2sql/summary';
+};
+
+export type GetAdminText2SqlSummaryErrors = {
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    400: AppError;
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    401: AppError;
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    403: AppError;
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    405: AppError;
+    /**
+     * Summary unavailable; no storage error or private context is echoed.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminText2SqlSummaryError = GetAdminText2SqlSummaryErrors[keyof GetAdminText2SqlSummaryErrors];
+
+export type GetAdminText2SqlSummaryResponses = {
+    /**
+     * OK
+     */
+    200: Text2SqlSummaryResponse;
+};
+
+export type GetAdminText2SqlSummaryResponse = GetAdminText2SqlSummaryResponses[keyof GetAdminText2SqlSummaryResponses];
 
 export type DeleteAdminText2SqlTablesData = {
     body?: never;

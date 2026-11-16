@@ -78,6 +78,7 @@ interface HealthWidgetProps {
   status?: string;
   statusTone?: BadgeProps["tone"];
   children?: ReactNode;
+  errorActions?: ReactNode;
 }
 
 export function HealthWidget({
@@ -91,6 +92,7 @@ export function HealthWidget({
   status,
   statusTone = "muted",
   children,
+  errorActions,
 }: HealthWidgetProps): React.JSX.Element {
   const requestId = isAppError(error) ? error.requestId : undefined;
   const diagnosticCode = isAppError(error) ? error.code : undefined;
@@ -132,6 +134,7 @@ export function HealthWidget({
           ) : null}
         </div>
       ) : null}
+      {showTerminalError ? errorActions : null}
       {error && hasPreviousData ? (
         <div className="widget-stale" role="alert">
           <AlertTriangle aria-hidden="true" />

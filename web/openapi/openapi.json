@@ -3508,6 +3508,113 @@
         ],
         "type": "object"
       },
+      "MCPOverviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "blocked_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "discovery_error_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled_upstream_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "healthy_upstream_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recent_call_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recent_error_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recent_error_rate": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "summary": {
+            "additionalProperties": false,
+            "properties": {
+              "distinct_tools": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "mcp_servers": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total_calls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total_errors": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "distinct_tools",
+              "mcp_servers",
+              "total_calls",
+              "total_errors"
+            ],
+            "type": "object"
+          },
+          "total_prompts": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_resources": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_tools": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "upstream_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "blocked_count",
+          "discovery_error_count",
+          "enabled_upstream_count",
+          "fetched_at",
+          "generated_at",
+          "healthy_upstream_count",
+          "recent_call_count",
+          "recent_error_count",
+          "recent_error_rate",
+          "since",
+          "summary",
+          "total_prompts",
+          "total_resources",
+          "total_tools",
+          "upstream_count"
+        ],
+        "type": "object"
+      },
       "MattermostConfigRequest": {
         "properties": {
           "channel": {
@@ -11494,6 +11601,78 @@
         ],
         "type": "object"
       },
+      "Text2SQLSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "stats": {
+            "additionalProperties": false,
+            "properties": {
+              "cost_krw": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "errors": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "executed": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "valid": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "valid_rate": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "cost_krw",
+              "errors",
+              "executed",
+              "total",
+              "valid",
+              "valid_rate"
+            ],
+            "type": "object"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "generated_at",
+          "since",
+          "stats",
+          "window"
+        ],
+        "type": "object"
+      },
       "TrackingAllowRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12632,7 +12811,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.127"
+    "version": "v0.86.128"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -18786,10 +18965,78 @@
     },
     "/admin/mcp/overview": {
       "get": {
+        "description": "Existing global admin:read MCP overview. Recent counts aggregate all MCP tool records since the inclusive 24-hour lower bound, without the per-tool list's 500-row limit. recent_error_count counts error records including result records, not unique failed calls; the preserved recent_error_rate is errors/calls and can exceed one. summary retains the legacy all-tool, all-time semantics. healthy_upstream_count counts upstreams with discovered routes, not a live connection probe. fetched_at is discovery time (may be zero); generated_at is the current statistics observation start, not an exclusive upper bound. Any storage failure returns a generic error instead of zero counts; no-store.",
         "operationId": "get__admin_mcp_overview",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPOverviewResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -29645,6 +29892,109 @@
           }
         ],
         "summary": "Text2SQL per-request pipeline spans",
+        "tags": [
+          "text2sql"
+        ]
+      }
+    },
+    "/admin/text2sql/summary": {
+      "get": {
+        "description": "Metadata-only statistics using the existing Text2SQLStatsSinceScoped aggregate and checked caller team scope. Excludes shadow mode. valid_rate means validation passed / total, not execution success. No question, SQL, schema, credential or result content; performs no execution or mutation. GET only; no-store. window defaults to 24h and rejects duplicate, malformed or extra parameters. since is inclusive; generated_at is the observation start, not an exclusive upper bound.",
+        "operationId": "get__admin_text2sql_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Text2SQLSummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage error or private context is echoed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Metadata-only scoped Text2SQL statistics",
         "tags": [
           "text2sql"
         ]

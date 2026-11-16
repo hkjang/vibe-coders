@@ -286,6 +286,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/text2sql/permissions", []string{"get", "post", "delete"}, "text2sql", "Permission matrix", false},
 	{"/admin/text2sql/glossary", []string{"get", "post", "delete"}, "text2sql", "Business glossary", false},
 	{"/admin/text2sql/risk-queue", []string{"get"}, "text2sql", "Risky request queue", false},
+	{"/admin/text2sql/summary", []string{"get"}, "text2sql", "Metadata-only scoped Text2SQL statistics", false},
 	{"/admin/text2sql/healthcheck", []string{"get"}, "text2sql", "Execute DB read-only healthcheck", false},
 	{"/admin/text2sql/schema-impact", []string{"get"}, "text2sql", "Schema-change impact report", false},
 	{"/admin/text2sql/replay", []string{"get"}, "text2sql", "Replay bundles", false},
@@ -656,6 +657,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			map[string]any{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "default": 50}, "description": "Nonpositive or greater than 200 uses the existing default of 50."},
 		}
 		responses["200"] = successResponse("WorkflowRunList")
+	case "get /admin/text2sql/summary", "get /admin/mcp/overview":
+		enrichServiceSummaryOpenAPI(route, op, responses)
 	case "get /admin/text2sql/healthcheck":
 		enrichText2SQLHealthcheckOpenAPI(op, responses)
 	case "get /admin/text2sql/profiles", "put /admin/text2sql/profiles", "post /admin/text2sql/profiles", "delete /admin/text2sql/profiles":
@@ -1227,6 +1230,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range routingDomainDecisionsOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range serviceSummaryOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range text2SQLHealthcheckOpenAPISchemas() {
