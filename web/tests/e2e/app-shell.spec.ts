@@ -656,7 +656,7 @@ async function openOverview(page: Page, colorScheme: "dark" | "light" = "light")
   await mockGateway(page);
   await page.goto("overview");
   await expect(page.getByRole("heading", { name: "운영 개요" })).toBeVisible();
-  await expect(page.getByText("게이트웨이 상태 확인 요청에 응답했으며, 운영 신호는")).toBeVisible();
+  await expect(page.getByText("게이트웨이 연결·라우팅·운영 기반 신호는")).toBeVisible();
   await expect(page.getByText("12,840")).toBeVisible();
   await expect(page.getByText("₩428,751")).toBeVisible();
 }
