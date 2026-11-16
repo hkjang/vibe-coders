@@ -428,15 +428,7 @@ export interface Text2SQLSchemaInput {
   enabled?: boolean;
 }
 
-export interface Text2SQLProfileInput {
-  virtual_model: string;
-  mode: string;
-  upstream_model?: string;
-  summary_model?: string;
-  schema_name?: string;
-  exec_connection_id?: string;
-  enabled?: boolean;
-}
+export type Text2SQLProfileInput = NonNullable<PostAdminText2SqlProfilesData["body"]>;
 
 export interface Text2SQLConnectionInput {
   id: string;

@@ -314,6 +314,32 @@ describe("Text2SqlPage", () => {
     });
   });
 
+  it("프로필의 한글 실행 모드와 선택한 DB 식별자를 함께 저장한다", async () => {
+    const api = mockApi({
+      ...shellHandlers,
+      "GET /admin/text2sql/features": () => ({ features: [] }),
+      "POST /admin/text2sql/profiles": (options) => ({ profile: options.body }),
+    });
+    const user = userEvent.setup();
+    renderPage("/text2sql?tab=runtime");
+    expect(await screen.findByText("분석 DB")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "프로필 추가" }));
+    const dialog = await screen.findByRole("dialog", { name: "런타임 프로필 추가" });
+    await user.type(within(dialog).getByRole("textbox", { name: /가상 모델/u }), "vibe/text2sql-selected");
+    expect(within(dialog).getByRole("option", { name: "미리보기 (SQL 생성만)" })).toHaveValue("preview");
+    expect(within(dialog).getByRole("option", { name: "실행 (SQL 조회까지)" })).toHaveValue("execute");
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: /모드/u }), "execute");
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "실행 DB 연결" }), "analytics_db");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(api.bodies("POST /admin/text2sql/profiles")).toHaveLength(1));
+    expect(api.bodies("POST /admin/text2sql/profiles")[0]).toMatchObject({
+      virtual_model: "vibe/text2sql-selected",
+      mode: "execute",
+      exec_connection_id: "analytics_db",
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("runs the execute-database healthcheck only from the button", async () => {
     const api = mockApi({
       ...shellHandlers,

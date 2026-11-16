@@ -657,6 +657,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("WorkflowRunList")
 	case "get /admin/text2sql/healthcheck":
 		enrichText2SQLHealthcheckOpenAPI(op, responses)
+	case "get /admin/text2sql/profiles", "post /admin/text2sql/profiles", "delete /admin/text2sql/profiles":
+		enrichText2SQLProfileOpenAPI(strings.ToLower(method), op, responses)
 	case "get /admin/text2sql":
 		enrichText2SQLSchemaDetailOpenAPI(op, responses)
 	case "get /admin/users":
@@ -1225,6 +1227,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range text2SQLHealthcheckOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range text2SQLProfileOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range text2SQLSchemaDetailOpenAPISchemas() {

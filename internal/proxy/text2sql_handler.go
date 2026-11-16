@@ -36,7 +36,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// add new virtual models) at runtime without a redeploy.
 	profileSchemaName := ""
 	profileExecConnID := ""
-	if dbp, found, _ := s.db.GetText2SQLProfile(r.Context(), meta.Request.Model); found && dbp.Enabled {
+	dbp, found, err := s.db.GetText2SQLProfile(r.Context(), meta.Request.Model)
+	if err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "실행 프로필을 확인하지 못했습니다. 잠시 후 다시 시도하세요.", "server_error", "text2sql_profile_unavailable")
+		return
+	}
+	if found && dbp.Enabled {
 		if dbp.Mode != "" {
 			profile.Mode = text2sql.Mode(dbp.Mode)
 		}
@@ -401,9 +406,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 
 	// 3) Preview mode (default): return the validated SQL + a short note.
-	if profile.Mode != text2sql.ModeExecute || cfg.ExecDSN == "" {
+	connectionID := strings.TrimSpace(profileExecConnID)
+	namedExecution := connectionID != "" && connectionID != "default"
+	executionConfigured := namedExecution || strings.TrimSpace(cfg.ExecDSN) != ""
+	if profile.Mode != text2sql.ModeExecute || !executionConfigured {
 		note := "검증된 읽기 전용 SQL입니다 (실행하지 않음)."
-		if profile.Mode == text2sql.ModeExecute && cfg.ExecDSN == "" {
+		if profile.Mode == text2sql.ModeExecute && !executionConfigured {
 			note = "실행 DB가 설정되지 않아 미리보기만 제공합니다 (TEXT2SQL_EXEC_DSN)."
 		}
 		if challengeNote != "" {

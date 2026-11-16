@@ -11177,6 +11177,109 @@
         ],
         "type": "object"
       },
+      "Text2SQLProfile": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "exec_connection_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "schema_name": {
+            "type": "string"
+          },
+          "summary_model": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "virtual_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "virtual_model",
+          "mode",
+          "upstream_model",
+          "summary_model",
+          "schema_name",
+          "exec_connection_id",
+          "enabled",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "Text2SQLProfileInput": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "nullable": true,
+            "type": "boolean"
+          },
+          "exec_connection_id": {
+            "description": "Trimmed connection identifier. Empty/default selects runtime/environment DB. No credentials.",
+            "nullable": true,
+            "type": "string"
+          },
+          "mode": {
+            "description": "Case-insensitive preview or execute; empty/omitted/null defaults to preview in storage.",
+            "nullable": true,
+            "type": "string"
+          },
+          "schema_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "summary_model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "upstream_model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "virtual_model": {
+            "nullable": false,
+            "type": "string"
+          }
+        },
+        "required": [
+          "virtual_model"
+        ],
+        "type": "object"
+      },
+      "Text2SQLProfileList": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/Text2SQLProfile"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "profiles"
+        ],
+        "type": "object"
+      },
+      "Text2SQLProfileSaved": {
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/Text2SQLProfile"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "type": "object"
+      },
       "Text2SQLSchemaDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -28659,10 +28762,71 @@
     },
     "/admin/text2sql/profiles": {
       "delete": {
+        "description": "Existing administrator-managed virtual-model mappings. exec_connection_id is a stored connection identifier, never a DSN. Empty/default uses the environment/runtime execution DB; a named source can execute without a default DSN and never falls back to another source when unavailable. Named connection availability is checked at execution, not by saving a profile. Existing shared authorization and raw-content restrictions remain. Profile lookup errors stop execution instead of ignoring the mapping.",
         "operationId": "delete__admin_text2sql_profiles",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "virtual_model",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Deleted profile identifier and status"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -28676,10 +28840,68 @@
         ]
       },
       "get": {
+        "description": "Existing administrator-managed virtual-model mappings. exec_connection_id is a stored connection identifier, never a DSN. Empty/default uses the environment/runtime execution DB; a named source can execute without a default DSN and never falls back to another source when unavailable. Named connection availability is checked at execution, not by saving a profile. Existing shared authorization and raw-content restrictions remain. Profile lookup errors stop execution instead of ignoring the mapping.",
         "operationId": "get__admin_text2sql_profiles",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Text2SQLProfileList"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -28693,10 +28915,78 @@
         ]
       },
       "post": {
+        "description": "Existing administrator-managed virtual-model mappings. exec_connection_id is a stored connection identifier, never a DSN. Empty/default uses the environment/runtime execution DB; a named source can execute without a default DSN and never falls back to another source when unavailable. Named connection availability is checked at execution, not by saving a profile. Existing shared authorization and raw-content restrictions remain. Profile lookup errors stop execution instead of ignoring the mapping. Upserts the complete profile. virtual_model and mode are trimmed/lowercased; mode accepts empty, preview or execute and defaults to preview in storage. Other text is trimmed. Omitted/null exec_connection_id selects the default; omitted/null enabled defaults true. No merge, revision guard or connection probe is implied. The response returns the normalized input; updated_at is populated by a subsequent list read.",
         "operationId": "post__admin_text2sql_profiles",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Text2SQLProfileInput"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Text2SQLProfileSaved"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing validation, authorization or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

@@ -443,8 +443,8 @@ export function Text2SqlRuntimeTab({
               {...control}
               {...profileForm.register("mode")}
               options={[
-                { value: "preview", label: "preview (생성만)" },
-                { value: "execute", label: "execute (실행까지)" },
+                { value: "preview", label: "미리보기 (SQL 생성만)" },
+                { value: "execute", label: "실행 (SQL 조회까지)" },
               ]}
             />
           )}

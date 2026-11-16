@@ -1356,7 +1356,7 @@ func (s *Server) handleText2SQLRegistryImport(w http.ResponseWriter, r *http.Req
 
 // handleText2SQLProfiles manages runtime virtual-model profiles (DB overrides of the
 // env defaults; can also define new virtual models).
-// GET /admin/text2sql/profiles · POST {virtual_model,mode,upstream_model,summary_model,schema_name,enabled} · DELETE ?virtual_model=
+// GET /admin/text2sql/profiles · POST {virtual_model,mode,upstream_model,summary_model,schema_name,exec_connection_id,enabled} · DELETE ?virtual_model=
 func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -1375,12 +1375,13 @@ func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, map[string]any{"profiles": list})
 	case http.MethodPost:
 		var p struct {
-			VirtualModel  string `json:"virtual_model"`
-			Mode          string `json:"mode"`
-			UpstreamModel string `json:"upstream_model"`
-			SummaryModel  string `json:"summary_model"`
-			SchemaName    string `json:"schema_name"`
-			Enabled       *bool  `json:"enabled"`
+			VirtualModel     string `json:"virtual_model"`
+			Mode             string `json:"mode"`
+			UpstreamModel    string `json:"upstream_model"`
+			SummaryModel     string `json:"summary_model"`
+			SchemaName       string `json:"schema_name"`
+			ExecConnectionID string `json:"exec_connection_id"`
+			Enabled          *bool  `json:"enabled"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -1399,6 +1400,7 @@ func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) 
 		prof := store.Text2SQLProfile{
 			VirtualModel: vm, Mode: mode, UpstreamModel: strings.TrimSpace(p.UpstreamModel),
 			SummaryModel: strings.TrimSpace(p.SummaryModel), SchemaName: strings.TrimSpace(p.SchemaName), Enabled: true,
+			ExecConnectionID: strings.TrimSpace(p.ExecConnectionID),
 		}
 		if p.Enabled != nil {
 			prof.Enabled = *p.Enabled
