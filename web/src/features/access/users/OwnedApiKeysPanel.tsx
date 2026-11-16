@@ -39,12 +39,15 @@ import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 
+import { featureOwnedKey, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
+
 const access = endpoints.domains.access;
 const routeId = "access.users";
 const emptyKeys: ApiKeyPublic[] = [];
 
 interface ApiKeysTabProps {
   owner: string;
+  readOwner: FeatureReadOwner;
   canWrite: boolean;
   isSuperAdmin: boolean;
   writeDeniedReason: string;
@@ -52,15 +55,20 @@ interface ApiKeysTabProps {
 
 export function OwnedApiKeysPanel({
   owner,
+  readOwner,
   canWrite,
   isSuperAdmin,
   writeDeniedReason,
 }: ApiKeysTabProps): React.JSX.Element {
   const writeAccess = useFeatureMutationAccess([routeId], canWrite, writeDeniedReason);
-  const keys = useApiKeysQuery(true, owner);
+  const keys = useApiKeysQuery(true, owner, readOwner);
   const all = keys.data?.api_keys ?? emptyKeys;
   const now = useKeyExpiryClock(all);
-  const { denied, ownsResult, assertCurrent } = useAdminKeyLifetime(keys.error, writeAccess.assertCurrent);
+  const { denied, ownsResult, assertCurrent } = useAdminKeyLifetime(
+    keys.error,
+    writeAccess.assertCurrent,
+    readOwner.isCurrent,
+  );
   const [search, setSearch] = useState("");
   const [searchError, setSearchError] = useState<string | undefined>();
   const [statusFilter, setStatusFilter] = useState("all");
@@ -294,6 +302,7 @@ export function OwnedApiKeysPanel({
         <ApiKeyEditDialog
           key={editing.id}
           owner={owner}
+          readOwner={readOwner}
           target={editing}
           canWrite={writeAccess.allowed}
           onOpenChange={(open) => {
@@ -307,6 +316,7 @@ export function OwnedApiKeysPanel({
       {scopeTarget ? (
         <ApiKeyScopesDialog
           owner={owner}
+          readOwner={readOwner}
           key={`${scopeTarget.row.id}:${scopeTarget.epoch}`}
           target={scopeTarget.row}
           onOpenChange={(open) => {
@@ -331,7 +341,7 @@ export function OwnedApiKeysPanel({
       {revoking ? (
         <ApiKeyRevokeDialog
           target={revoking}
-          catalogKey={[...accessKeys.apiKeys, owner]}
+          catalogKey={featureOwnedKey([...accessKeys.apiKeys, owner], readOwner)}
           returnFocusRef={rowTrigger}
           canWrite={writeAccess.allowed}
           reason={writeAccess.reason}

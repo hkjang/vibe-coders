@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.100"
+var AppVersion = "v0.86.101"
 
 type Server struct {
 	cfg      config.Config
@@ -911,12 +911,34 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		keys, err := s.db.ListAPIKeys(r.Context())
+		// Resolve once and fail closed if the session became invalid after the
+		// authorization check; a failed lookup must never remove team scope.
+		claims, hasClaims := s.currentAccessClaims(r)
+		if s.cfg.Auth.Enabled && !hasClaims {
+			writeOpenAIError(w, http.StatusUnauthorized, "authentication required", "invalid_request_error", "invalid_access_token")
+			return
+		}
+		id, valid := apiKeyDetailQuery(r)
+		if !valid {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid key detail query", "invalid_request_error", "invalid_api_key_query")
+			return
+		}
+		var keys []store.APIKeyPublic
+		var err error
+		if id != nil {
+			var scopeTeam *string
+			if hasClaims && claims.Role == "team_admin" {
+				scopeTeam = &claims.TeamID
+			}
+			keys, err = s.db.ListAPIKeysByID(r.Context(), *id, scopeTeam)
+		} else {
+			keys, err = s.db.ListAPIKeys(r.Context())
+		}
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_keys_failed")
 			return
 		}
-		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+		if hasClaims && claims.Role == "team_admin" {
 			filtered := keys[:0]
 			for _, key := range keys {
 				if key.Team == claims.TeamID {

@@ -1,3 +1,4 @@
+import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useState, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
@@ -29,6 +30,7 @@ type ScopeForm = z.infer<typeof schema>;
 
 interface Props {
   owner?: string;
+  readOwner?: FeatureReadOwner;
   target: Pick<ApiKeyPublic, "id" | "name" | "scopes" | "revision">;
   onOpenChange: (open: boolean) => void;
   onSubmit: (
@@ -42,6 +44,7 @@ interface Props {
 
 export function ApiKeyScopesDialog({
   owner,
+  readOwner,
   target,
   onOpenChange,
   onSubmit,
@@ -59,7 +62,7 @@ export function ApiKeyScopesDialog({
     revision: target.revision,
     scopes: [...target.scopes].sort(),
   }));
-  const review = useKeyEditReview(baseline, owner);
+  const review = useKeyEditReview(baseline, owner, readOwner);
   const form = useZodForm<ScopeForm, ScopeForm>(schema, { scopes: [...baseline.scopes], reason: "" });
   const signature = JSON.stringify(form.watch());
   const selected = form.watch("scopes");

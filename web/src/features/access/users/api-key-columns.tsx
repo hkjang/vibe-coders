@@ -1,3 +1,4 @@
+import { ApiKeyDetailLink } from "./ApiKeyDetailLink";
 import { keyDeadline, keyLifecycle } from "../key-lifecycle";
 import { roleLabel } from "@/config/ui-labels";
 import type { KeyRowAction } from "./use-key-row-focus";
@@ -24,6 +25,17 @@ function renderKeyActions({
   return (column.columnDef.meta as KeyActionsMetadata).renderActions(row.original);
 }
 
+function renderKeyName({ row }: { row: { original: ApiKeyPublic } }): React.ReactNode {
+  return (
+    <div>
+      <ApiKeyDetailLink row={row.original} />
+      <div className="access-list-detail mono" title={row.original.id}>
+        {shortId(row.original.id, 18)}
+      </div>
+    </div>
+  );
+}
+
 export function apiKeyColumns(
   onEdit: (row: ApiKeyPublic, trigger: HTMLElement) => void,
   onScopes: (row: ApiKeyPublic, trigger: HTMLElement) => void,
@@ -40,14 +52,7 @@ export function apiKeyColumns(
     column.accessor((row) => row.name, {
       id: "name",
       header: "이름",
-      cell: ({ row }) => (
-        <div>
-          <strong className="truncate">{row.original.name || "이름 없음"}</strong>
-          <div className="access-list-detail mono" title={row.original.id}>
-            {shortId(row.original.id, 18)}
-          </div>
-        </div>
-      ),
+      cell: renderKeyName,
     }),
     column.accessor((row) => row.owner, { id: "owner", header: "소유자" }),
     column.accessor((row) => row.team, { id: "team", header: "팀" }),

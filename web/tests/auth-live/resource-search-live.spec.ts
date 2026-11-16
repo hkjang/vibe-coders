@@ -16,6 +16,7 @@ import {
 test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검색 제한", async ({ page }) => {
   await login(page);
   const targets = [
+    { title: "검색검증 API 키", path: "/app/access/users", parameter: "api_key_id" },
     { title: "검색검증 공급자", path: "/app/gateway/providers", parameter: "provider" },
     { title: "검색검증 워크플로", path: "/app/agents/workflows", parameter: "workflow" },
     { title: "검색검증 업무 앱", path: "/app/agents/apps", parameter: "app" },
@@ -76,22 +77,30 @@ test("AUTH-LIVE-015 실제 인증·자원 검색·상세 이동과 역할별 검
           ? page.getByRole("table", { name: "MCP 도구 카탈로그" })
           : page.getByRole("dialog", {
               name:
-                target.parameter === "policy"
-                  ? "정책 상세"
-                  : target.parameter === "registered_team"
-                    ? "등록 팀 상세"
-                    : target.parameter === "account_id"
-                      ? "로그인 계정 상세"
-                      : target.title,
+                target.parameter === "api_key_id"
+                  ? "API 키 상세"
+                  : target.parameter === "policy"
+                    ? "정책 상세"
+                    : target.parameter === "registered_team"
+                      ? "등록 팀 상세"
+                      : target.parameter === "account_id"
+                        ? "로그인 계정 상세"
+                        : target.title,
               exact: true,
             });
     await expect(panel).toBeVisible();
     if (target.parameter === "policy")
       await expect(panel.getByRole("heading", { name: target.title })).toBeVisible();
     if (target.parameter === "registered_team") await expect(panel).toContainText(target.title);
-    if (target.parameter === "account_id") await expect(panel).toContainText(target.title);
+    if (target.parameter === "account_id" || target.parameter === "api_key_id")
+      await expect(panel).toContainText(target.title);
     if (target.parameter === "tool") await expect(panel).toContainText(target.title);
     const destination = new URL(page.url());
+    if (target.parameter === "api_key_id") {
+      expect(destination.searchParams.get("api_key_id")).toBe("browser_search_key");
+      expect(destination.searchParams.get("tab")).toBe("keys");
+      await expect(panel.getByRole("button", { name: /수정|폐기|발급/ })).toHaveCount(0);
+    }
     if (target.parameter === "account_id")
       expect(destination.searchParams.get("account_id")).toBe("browser-search-account");
     if (target.parameter === "tool") {

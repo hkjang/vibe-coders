@@ -411,7 +411,17 @@ export const accessEndpoints = {
     ),
   },
   apiKeys: {
-    list: operation<GetAdminApiKeysData, unknown>()("GET", "/admin/api-keys", adminApiKeysSchema),
+    list: operation<GetAdminApiKeysData, unknown>()(
+      "GET",
+      "/admin/api-keys",
+      adminApiKeysSchema,
+      z.strictObject({
+        id: z
+          .string()
+          .regex(/^[A-Za-z0-9._:-]{1,512}$/u)
+          .optional(),
+      }),
+    ),
     create: operation<WithBody<PostAdminApiKeysData, CreateApiKeyBody>, unknown>()(
       "POST",
       "/admin/api-keys",

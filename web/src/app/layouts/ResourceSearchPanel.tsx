@@ -28,6 +28,7 @@ export default function ResourceSearchPanel({ go, onComposingChange }: Props): R
       !versionAtLeast(auth.backendVersion, "v0.86.97")
     )
       return false;
+    if (kind === "api_key" && !versionAtLeast(auth.backendVersion, "v0.86.101")) return false;
     if (kind === "setting" && !versionAtLeast(auth.backendVersion, "v0.86.99")) return false;
     if (kind === "team" && !versionAtLeast(auth.backendVersion, "v0.86.79")) return false;
     if (kind === "account" && !versionAtLeast(auth.backendVersion, "v0.86.90")) return false;
