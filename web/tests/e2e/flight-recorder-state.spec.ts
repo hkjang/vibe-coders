@@ -519,6 +519,7 @@ test("390px 다크 상세의 긴 한글은 실제 스크롤·키보드 재조회
   page,
   gateway,
 }, testInfo) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   const body = recorder(sessionA.session_id, {
     model: "긴한글모델".repeat(30),
@@ -557,7 +558,6 @@ test("390px 다크 상세의 긴 한글은 실제 스크롤·키보드 재조회
   await noDownload(page, gateway);
   gateway.release(2);
   await expect(csv(page)).toBeEnabled();
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: { id: string }[] }> } }

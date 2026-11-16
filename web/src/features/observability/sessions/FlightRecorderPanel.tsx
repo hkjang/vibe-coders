@@ -1,37 +1,19 @@
-import { Download } from "lucide-react";
-
-import type { FlightRecorderEvent } from "@/shared/api/domains/observability.schemas";
 import { isAppError } from "@/shared/api/error";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
-import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { containsPotentialSecret } from "@/shared/security/secrets";
-import { downloadCsv } from "@/shared/utils/csv";
-import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
+import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
 import { useFlightRecorder } from "./flight-recorder-query";
-import {
-  flightRecorderCodeRisk,
-  flightRecorderCsv,
-  flightRecorderDescription,
-  flightRecorderKind,
-  flightRecorderVerdict,
-} from "./flight-recorder-state";
+import { flightRecorderVerdict } from "./flight-recorder-state";
+import { FlightRecorderTimeline } from "./FlightRecorderTimeline";
 import { useSessionListAccess, type SessionListAccess } from "./session-list-access";
 import "./flight-recorder.css";
 
 interface FlightRecorderPanelProps {
   sessionId: string;
-}
-
-function eventTone(event: FlightRecorderEvent): "danger" | "info" | "success" | "warning" {
-  if (event.is_error) return "danger";
-  if (event.secret_events > 0 || event.policy_blocks > 0 || event.code_risk === "high") return "warning";
-  return "success";
 }
 
 /** Chronological flight recorder for one session (GET /admin/sessions/{id}/flight-recorder). */
@@ -100,11 +82,6 @@ function FlightRecorderContent({
   const startedAt = rollup.started_at ? new Date(rollup.started_at).getTime() : Number.NaN;
   const verdict = flightRecorderVerdict(summary.verdict);
 
-  const exportCsv = (): void => {
-    if (!canExport() || events.length === 0) return;
-    downloadCsv(`flight-recorder-${sessionId || "session"}.csv`, flightRecorderCsv(events));
-  };
-
   return (
     <div className="obs-section-stack flight-recorder-panel">
       {actions}
@@ -162,78 +139,13 @@ function FlightRecorderContent({
         ]}
       />
 
-      <SectionCard
-        headingLevel={3}
-        title="시간순 기록"
-        description={flightRecorderDescription}
-        actions={
-          <Button
-            size="small"
-            onClick={exportCsv}
-            disabled={events.length === 0}
-            aria-disabled={!ready || events.length === 0}
-          >
-            <Download aria-hidden="true" /> CSV 내보내기
-          </Button>
-        }
-      >
-        <p>상대 위치는 첫 기록 시각과의 차이이며 실제 실행 시작·종료를 뜻하지 않습니다.</p>
-        {events.length === 0 ? (
-          <EmptyState
-            title="이 응답에서 확인할 기록이 없습니다."
-            description="세션 전체의 요청 존재 여부나 기록의 완전성을 판단할 수 없습니다."
-          />
-        ) : (
-          <ol className="obs-timeline">
-            {events.map((event, index) => {
-              const at = event.created_at ? new Date(event.created_at).getTime() : Number.NaN;
-              const offset = Number.isFinite(at) && Number.isFinite(startedAt) ? at - startedAt : Number.NaN;
-              const codeRisk = flightRecorderCodeRisk(event.code_risk);
-              return (
-                <li key={`${event.request_id}-${index}`} className="obs-timeline-item">
-                  <div className="obs-timeline-when">
-                    <div>{formatDateTime(event.created_at)}</div>
-                    {Number.isFinite(offset) ? (
-                      <div>
-                        첫 기록 대비 {offset >= 0 ? "+" : ""}
-                        {formatDuration(offset)}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="obs-timeline-body">
-                    <div className="obs-timeline-badges">
-                      <Badge tone={eventTone(event)}>{flightRecorderKind(event.kind)}</Badge>
-                      <Badge tone={event.is_error ? "danger" : "muted"}>
-                        HTTP {formatNumber(event.status_code)}
-                      </Badge>
-                      {event.model ? <Badge tone="info">{event.model}</Badge> : null}
-                      {event.secret_events > 0 ? (
-                        <Badge tone="warning">시크릿 {formatNumber(event.secret_events)}</Badge>
-                      ) : null}
-                      {event.policy_blocks > 0 ? (
-                        <Badge tone="danger">정책 차단 {formatNumber(event.policy_blocks)}</Badge>
-                      ) : null}
-                      {event.code_risk ? (
-                        <Badge tone={codeRisk.tone}>코드 위험 {codeRisk.label}</Badge>
-                      ) : null}
-                    </div>
-                    <div className="mono truncate" title={event.request_id}>
-                      {event.request_id}
-                    </div>
-                    <div className="obs-meta">
-                      <span>{event.endpoint}</span>
-                      <span>기록된 지연 {formatDuration(event.latency_ms)}</span>
-                      <span>토큰 {formatNumber(event.total_tokens)}</span>
-                      <span>비용 {formatKRW(event.cost_krw)}</span>
-                      <span>도구 {formatNumber(event.tool_count)}</span>
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </SectionCard>
+      <FlightRecorderTimeline
+        events={events}
+        startedAt={startedAt}
+        sessionId={sessionId}
+        ready={ready}
+        canExport={canExport}
+      />
     </div>
   );
 }

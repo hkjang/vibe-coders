@@ -220,14 +220,18 @@ describe("상세 조회·한국어 결과 목표", () => {
       event.code_risk = risk;
       const view = renderRecorder({ reply: async () => body });
       await ready();
-      expect(screen.getByText(kindLabel)).toBeVisible();
+      expect(
+        within(screen.getByRole("list", { name: "표시 중인 세션 기록" })).getByText(kindLabel),
+      ).toBeVisible();
       expect(screen.getByText(`코드 위험 ${riskLabel}`)).toBeVisible();
       expect(screen.getByText(`코드 위험 ${riskLabel}`)).toHaveClass(
         risk === "unknown-future" ? "badge-info" : "badge-warning",
       );
       expect(screen.getByText("첫 기록 대비 +0ms")).toBeVisible();
       expect(
-        screen.getByText("상대 위치는 첫 기록 시각과의 차이이며 실제 실행 시작·종료를 뜻하지 않습니다."),
+        screen.getByText("상대 위치는 첫 기록 시각과의 차이이며 실제 실행 시작·종료를 뜻하지 않습니다.", {
+          exact: false,
+        }),
       ).toBeVisible();
       await userEvent.click(await ready());
       expect(view.downloads[0]?.content).toContain(`,${kind},`);
