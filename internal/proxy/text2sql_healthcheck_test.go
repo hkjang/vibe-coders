@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -195,5 +196,48 @@ func TestText2SQLHealthcheckHTTPAuthorizationAndOpenAPI(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestText2SQLHealthcheckOracleRemainsSupported(t *testing.T) {
+	s := &Server{cfg: config.Config{Text2SQL: config.Text2SQLConfig{ExecDriver: "oracle", ExecDSN: "oracle://public-fixture:private-health-sentinel%zz@localhost/service"}}}
+	body := healthcheckResult(t, s, "")
+	if body["driver"] != "oracle" || body["configured"] != true || body["detail_code"] == "unsupported_driver" {
+		t.Fatal("registered Oracle driver was rejected before checking its configured connection")
+	}
+	raw, _ := json.Marshal(body)
+	if strings.Contains(string(raw), "private-health-sentinel") {
+		t.Fatal("Oracle connection error disclosed credentials")
+	}
+}
+
+func TestText2SQLHealthcheckOracleBasicQueryDialect(t *testing.T) {
+	// SQLite validates the DUAL query shape without pretending to be an Oracle
+	// server. The real registered Oracle driver's invalid-DSN path is tested above.
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if text2SQLCheckBasicQuery(t.Context(), db, "oracle") {
+		t.Fatal("Oracle diagnostic omitted its required DUAL source")
+	}
+	if _, err = db.ExecContext(t.Context(), "CREATE TABLE DUAL(dummy text); INSERT INTO DUAL VALUES ('X')"); err != nil {
+		t.Fatal(err)
+	}
+	if !text2SQLCheckBasicQuery(t.Context(), db, "oracle") {
+		t.Fatal("Oracle-shaped constant query failed")
+	}
+	if _, err = db.ExecContext(t.Context(), "DROP TABLE DUAL"); err != nil {
+		t.Fatal(err)
+	}
+	if !text2SQLCheckBasicQuery(t.Context(), db, "sqlite") {
+		t.Fatal("SQLite diagnostic unexpectedly requires DUAL")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if text2SQLCheckBasicQuery(ctx, db, "sqlite") {
+		t.Fatal("cancelled query reported success")
 	}
 }

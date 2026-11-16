@@ -64,7 +64,7 @@ func (s *Server) handleText2SQLHealthcheck(w http.ResponseWriter, r *http.Reques
 	switch driver {
 	case "pgx":
 		result.Driver = "postgres"
-	case "sqlite", "mysql":
+	case "sqlite", "mysql", "oracle":
 		result.Driver = driver
 	default:
 		result.Driver = "unsupported"
@@ -90,8 +90,7 @@ func (s *Server) handleText2SQLHealthcheck(w http.ResponseWriter, r *http.Reques
 	}
 	result.Reachable = healthcheckBool(true)
 	if driver != "pgx" {
-		var one int
-		ok := db.QueryRowContext(ctx, "SELECT 1").Scan(&one) == nil && one == 1
+		ok := text2SQLCheckBasicQuery(ctx, db, driver)
 		result.QueryOK = healthcheckBool(ok)
 		if !ok {
 			respond("error", "query_failed", "연결은 되었지만 기본 조회에 실패했습니다. 조회 권한과 DB 상태를 확인하세요.")
@@ -132,4 +131,15 @@ func (s *Server) handleText2SQLHealthcheck(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	respond("ok", "checks_passed", "연결, 읽기 전용 트랜잭션과 점검 제한 시간을 확인했습니다. 계정 전체의 쓰기 권한은 별도로 확인해야 합니다.")
+}
+
+// Oracle versions supported by the registered driver require a FROM clause for
+// a constant expression. Other supported drivers accept the simple SELECT.
+func text2SQLCheckBasicQuery(ctx context.Context, db *sql.DB, driver string) bool {
+	query := "SELECT 1"
+	if driver == "oracle" {
+		query = "SELECT 1 FROM DUAL"
+	}
+	var one int
+	return db.QueryRowContext(ctx, query).Scan(&one) == nil && one == 1
 }

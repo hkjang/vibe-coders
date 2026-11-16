@@ -6,7 +6,7 @@ v0.86.109 후보. 기존 `/admin/text2sql/healthcheck` API와 관리자 조회 �
 - 이름 있는 연결의 현재 드라이버와 암호화된 설정을 사용한다. 실행용 캐시가 남아 있어도 비활성·삭제·변경된 연결을 대신 점검하지 않는다. 점검용 연결은 종료 시 닫는다.
 - DB 오류 원문·연결 문자열을 응답에 넣지 않는다. 실패 단계에 맞는 한글 안내와 고정 진단 코드를 제공하며, 결과는 `no-store`로 반환한다.
 - PostgreSQL은 읽기 전용 트랜잭션, 점검용 1초 제한 시간과 기본 조회를 확인한다. 전체 점검은 10초 이내의 컨텍스트를 사용한다. 임시 테이블 생성이나 데이터 변경은 수행하지 않는다.
-- 다른 드라이버에서는 연결과 기본 조회만 확인한다. 수행하지 않은 항목은 `null`이며 성공이나 실패로 해석하지 않는다. 임시 테이블 생성 가능 여부로 계정 전체의 쓰기 권한을 판단하지 않는다.
+- Oracle을 포함한 다른 등록 드라이버에서는 연결과 기본 조회만 확인한다. Oracle 기본 조회에는 `SELECT 1 FROM DUAL`을 사용한다. 수행하지 않은 항목은 `null`이며 성공이나 실패로 해석하지 않는다. 임시 테이블 생성 가능 여부로 계정 전체의 쓰기 권한을 판단하지 않는다.
 - React 결과는 정상·실패·확인 안 함을 구분한다. 설정된 실행 제한 시간과 점검 제한 시간을 따로 표시한다. 계정 쓰기 제한은 별도 확인이 필요하다는 안내를 제공한다. 이전 서버의 민감한 진단 문자열도 화면에서 숨긴다.
 - 점검은 버튼으로만 실행하고 탭의 자동·수동 새로고침에 포함하지 않는다. 이전 마일스톤의 계정·권한·팀·화면 전환 보호를 유지한다.
 
@@ -21,6 +21,12 @@ v0.86.109 후보. 기존 `/admin/text2sql/healthcheck` API와 관리자 조회 �
 - 내장 자산 193개의 해시·CSP·캐시·MIME·깊은 주소·404·405·기존 관리자 접근을 확인했다. 초기 압축 261,801/350,000바이트, 화면 48개·선택 도구 6개가 예산 안이다. Go 19개·npm 389개 통합 SBOM과 라이선스를 갱신했다.
 - 검사 중 소스 해시를 확인했다. 이후 결과 문서와 이동한 함수의 오래된 주석 3줄만 정리했으며 실행 코드는 동일하다.
 
+## PR 리뷰 후 보완
+
+Oracle을 지원 드라이버 목록에서 누락한 문제를 수정 전 실패로 재현하고 복원했다. 등록된 Oracle 드라이버의 잘못된 연결 문자열 처리와 자격 증명 비노출을 검증했다. SQLite에 DUAL 표를 구성한 쿼리 형식 검사는 실제 Oracle 서버 검증과 구분하며, 실제 Oracle 연결 성공 검증은 수행하지 않았다. 기존 SQLite·PostgreSQL 점검의 의미는 유지한다.
+
+CI의 SBOM 생성 버전과 오프라인 배포 초기화 기본 버전 누락을 v0.86.109로 수정했다. 기존 `TestSourceSBOMVersionMatchesAppVersion`, `TestDeploymentEnvHelperReleaseVersion`과 DB 진단 race 검사를 통과했고, CI와 같은 생성 시각으로 SBOM을 재생성해 변경 없음도 확인했다. React 실행 코드는 변경하지 않았다.
+
 PR·실제 메인 CI·정식 컨테이너·공개 릴리즈 검증은 별도 출고 게이트다. 운영 Stable 승격과 전체 Phase 0–6 인수는 진행 중이다.
 
-참고: [PostgreSQL 트랜잭션 접근 모드](https://www.postgresql.org/docs/17/sql-set-transaction.html), [연결 기본 설정](https://www.postgresql.org/docs/17/runtime-config-client.html).
+참고: [Oracle DUAL 조회](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Selecting-from-the-DUAL-Table.html), [PostgreSQL 트랜잭션 접근 모드](https://www.postgresql.org/docs/17/sql-set-transaction.html), [연결 기본 설정](https://www.postgresql.org/docs/17/runtime-config-client.html).
