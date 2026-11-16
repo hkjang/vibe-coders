@@ -3,7 +3,7 @@
 .ops-card-grid {
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
   margin: 0;
   padding: 0;
   list-style: none;
@@ -106,7 +106,7 @@
 .ops-sql {
   display: block;
   overflow-wrap: anywhere;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
 
@@ -121,12 +121,55 @@
 .ops-sql-list {
   display: grid;
   gap: var(--space-3);
-  max-height: 26rem;
-  overflow-y: auto;
   margin: 0;
   padding: 0 0 0 var(--space-4);
 }
 .ops-sql-list li {
   display: grid;
   gap: var(--space-1);
+}
+
+.system-health-workspace .page-stack > *,
+.system-health-workspace [role="tabpanel"],
+.system-health-workspace .health-widget-body {
+  min-width: 0;
+}
+.system-health-workspace .ops-check-table {
+  min-width: 34rem;
+}
+.system-health-workspace .health-widget-header p,
+.system-health-workspace p,
+.system-health-workspace .ops-card,
+.system-health-workspace .ops-incident {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.ops-sql-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ops-sql-pagination p {
+  flex-basis: 100%;
+}
+.system-health-workspace .status-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.system-health-workspace .status-meta time {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+@media (min-width: 22.5rem) and (max-width: 47.9375rem) {
+  .system-health-workspace .metric-pairs,
+  .system-health-workspace .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .system-health-workspace .stat-grid .stat-card:first-child {
+    grid-column: 1 / -1;
+  }
 }

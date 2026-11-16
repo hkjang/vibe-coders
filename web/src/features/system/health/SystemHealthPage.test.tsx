@@ -1,3 +1,5 @@
+import { FeatureAccessHarness } from "@/test/feature-access";
+import { testAuth } from "@/test/auth";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
@@ -10,15 +12,7 @@ import { endpoints, type ApiEndpointBase } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import { usePreferences } from "@/shared/stores/preferences";
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    backendVersion: "v0.81.0",
-    legacyFallback: true,
-    mode: "authenticated",
-    user: { scopes: ["admin:read"] },
-  }),
-}));
+vi.mock("@/app/auth/AuthProvider", () => ({ useAuth: () => testAuth() }));
 
 const providerRef = `prv_${"a".repeat(43)}`;
 
@@ -124,7 +118,12 @@ function mockSystemApi(failFirstRisk = false, mediumRisk = false, partialFailure
 }
 
 function renderPage(route = "/system/health"): ReturnType<typeof renderScreen> {
-  return renderScreen(<SystemHealthPage />, { path: "/system/health/*", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="system.health">
+      <SystemHealthPage />
+    </FeatureAccessHarness>,
+    { path: "/system/health/*", route },
+  );
 }
 
 describe("SystemHealthPage", () => {

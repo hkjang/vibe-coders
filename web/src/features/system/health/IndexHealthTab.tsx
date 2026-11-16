@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useSystemHealthQuery } from "./use-system-health-query";
 import { FileText } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
+import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 
 import { MigrationSqlDialog } from "@/features/system/health/MigrationSqlDialog";
 import { opsRouteId } from "@/features/system/health/OpsHomeTab";
@@ -14,6 +15,7 @@ import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
+import { useSystemText } from "./system-health-labels";
 
 const driftKindLabels: Record<string, string> = {
   mismatched: "정의 불일치",
@@ -35,12 +37,13 @@ const driftKindTones: Record<string, "danger" | "warning" | "muted"> = {
  * runs no DDL, and neither does the endpoint behind it.
  */
 export function IndexHealthTab(): React.JSX.Element {
-  const [sqlOpen, setSqlOpen] = useState(false);
+  const safe = useSystemText();
+  const [sqlOwner, setSqlOwner] = useState<FeatureReadOwner>();
   const sqlTriggerRef = useRef<HTMLButtonElement>(null);
 
-  const health = useQuery({
-    queryKey: ["system", "ops", "index-health"],
-    queryFn: ({ signal }) =>
+  const health = useSystemHealthQuery({
+    key: ["system", "ops", "index-health"],
+    read: (signal) =>
       apiClient.request(endpoints.domains.system.ops.indexHealth, { routeId: opsRouteId, signal }),
   });
 
@@ -51,6 +54,22 @@ export function IndexHealthTab(): React.JSX.Element {
     () => [...(advice?.items ?? [])].sort((left, right) => bySeverity(left.severity, right.severity)),
     [advice],
   );
+
+  if (!health.data)
+    return (
+      <SectionCard title="인덱스 상태" description="데이터베이스의 현재 인덱스를 확인합니다.">
+        {health.isError ? (
+          <QueryNotice
+            error={health.error}
+            hasPreviousData={false}
+            label="인덱스 상태"
+            onRetry={health.refetch}
+          />
+        ) : (
+          <p role="status">인덱스 상태를 불러오는 중입니다.</p>
+        )}
+      </SectionCard>
+    );
 
   return (
     <div className="page-stack">
@@ -65,9 +84,13 @@ export function IndexHealthTab(): React.JSX.Element {
 
       <SectionCard
         title="인덱스 상태"
-        description={summary?.headline ?? "선언한 인덱스와 이 데이터베이스의 실제 인덱스를 비교합니다."}
+        description={
+          summary?.headline
+            ? safe(summary.headline)
+            : "선언한 인덱스와 이 데이터베이스의 실제 인덱스를 비교합니다."
+        }
         actions={
-          <Button ref={sqlTriggerRef} size="small" onClick={() => setSqlOpen(true)}>
+          <Button ref={sqlTriggerRef} size="small" onClick={() => setSqlOwner(health.owner)}>
             <FileText aria-hidden="true" /> 마이그레이션 SQL 보기
           </Button>
         }
@@ -75,55 +98,59 @@ export function IndexHealthTab(): React.JSX.Element {
         <StatGrid label="인덱스 상태 요약">
           <StatCard
             label="스키마"
-            tone={summary?.in_sync ? "success" : "danger"}
-            value={summary?.in_sync ? "일치" : "불일치"}
-            hint={drift?.dialect ?? undefined}
+            tone={summary?.in_sync === true ? "success" : summary?.in_sync === false ? "danger" : "default"}
+            value={summary?.in_sync === true ? "일치" : summary?.in_sync === false ? "불일치" : "미확인"}
+            hint={safe(drift?.dialect, "")}
           />
-          <StatCard label="정의 불일치" value={summary?.mismatched ?? 0} />
-          <StatCard label="DB에 없음" value={summary?.missing ?? 0} />
-          <StatCard label="선언에 없음" value={summary?.undeclared ?? 0} />
+          <StatCard label="정의 불일치" value={summary?.mismatched ?? "—"} />
+          <StatCard label="DB에 없음" value={summary?.missing ?? "—"} />
+          <StatCard label="선언에 없음" value={summary?.undeclared ?? "—"} />
           <StatCard
             label="추천"
-            value={summary?.advice_total ?? 0}
-            hint={`중요 ${summary?.advice_high ?? 0}건`}
+            value={summary?.advice_total ?? "—"}
+            hint={`중요 ${summary?.advice_high ?? "—"}건`}
           />
         </StatGrid>
 
         {health.isPending ? (
           <p className="metric-note">불러오는 중…</p>
-        ) : (drift?.items.length ?? 0) === 0 ? (
+        ) : !drift ? (
+          <p className="metric-note">인덱스 비교 결과를 확인하지 못했습니다.</p>
+        ) : (drift.items.length ?? 0) === 0 ? (
           <p className="metric-note">
             선언한 인덱스 {drift?.declared_count ?? 0}개가 모두 이 데이터베이스에 그대로 있습니다.
           </p>
         ) : (
-          <table className="ops-check-table">
-            <caption className="sr-only">인덱스 차이</caption>
-            <thead>
-              <tr>
-                <th scope="col">구분</th>
-                <th scope="col">인덱스</th>
-                <th scope="col">내용</th>
-                <th scope="col">검토할 SQL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(drift?.items ?? []).map((item) => (
-                <tr key={`${item.kind ?? ""}-${item.name}`}>
-                  <td>
-                    <Badge tone={driftKindTones[item.kind ?? ""] ?? "muted"}>
-                      {driftKindLabels[item.kind ?? ""] ?? item.kind ?? "-"}
-                    </Badge>
-                  </td>
-                  <td>
-                    <span className="mono">{item.name}</span>
-                    {item.table ? <div className="metric-note">{item.table}</div> : null}
-                  </td>
-                  <td className="metric-note">{item.detail ?? ""}</td>
-                  <td>{item.fix ? <code className="ops-sql">{item.fix}</code> : null}</td>
+          <div className="health-table-wrap" role="region" aria-label="인덱스 차이 표" tabIndex={0}>
+            <table className="ops-check-table">
+              <caption className="sr-only">인덱스 차이</caption>
+              <thead>
+                <tr>
+                  <th scope="col">구분</th>
+                  <th scope="col">인덱스</th>
+                  <th scope="col">내용</th>
+                  <th scope="col">검토할 SQL</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {(drift?.items ?? []).map((item) => (
+                  <tr key={`${item.kind ?? ""}-${item.name}`}>
+                    <td>
+                      <Badge tone={driftKindTones[item.kind ?? ""] ?? "muted"}>
+                        {driftKindLabels[item.kind ?? ""] ?? "확인 필요"}
+                      </Badge>
+                    </td>
+                    <td>
+                      <span className="mono">{safe(item.name)}</span>
+                      {item.table ? <div className="metric-note">{safe(item.table)}</div> : null}
+                    </td>
+                    <td className="metric-note">{safe(item.detail, "")}</td>
+                    <td>{item.fix ? <code className="ops-sql">{safe(item.fix)}</code> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         <UpdatedAt at={health.dataUpdatedAt} />
       </SectionCard>
@@ -134,55 +161,69 @@ export function IndexHealthTab(): React.JSX.Element {
       >
         {health.isPending ? (
           <p className="metric-note">불러오는 중…</p>
+        ) : !advice ? (
+          <p className="metric-note">추가·삭제 후보를 확인하지 못했습니다.</p>
         ) : adviceItems.length === 0 ? (
           <EmptyState
             title="눈에 띄는 후보가 없습니다."
             description="접근 통계에서 추가하거나 지울 만한 인덱스를 찾지 못했습니다."
           />
         ) : (
-          <table className="ops-check-table">
-            <caption className="sr-only">인덱스 추가·삭제 후보</caption>
-            <thead>
-              <tr>
-                <th scope="col">중요도</th>
-                <th scope="col">구분</th>
-                <th scope="col">대상</th>
-                <th scope="col">근거</th>
-                <th scope="col">검토할 SQL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {adviceItems.map((item, index) => (
-                <tr key={`${item.table}-${item.index ?? index}`}>
-                  <td>
-                    <Badge tone={opsStatusTone(item.severity === "high" ? "critical" : item.severity)}>
-                      {item.severity === "high" ? "높음" : item.severity === "medium" ? "보통" : "낮음"}
-                    </Badge>
-                  </td>
-                  <td>{item.kind === "drop" ? "삭제 후보" : "추가 후보"}</td>
-                  <td>
-                    <span className="mono">{item.table}</span>
-                    {item.columns?.length ? <span className="mono"> ({item.columns.join(", ")})</span> : null}
-                    {item.index ? <div className="metric-note">{item.index}</div> : null}
-                  </td>
-                  <td className="metric-note">
-                    {item.reason ?? ""}
-                    {item.evidence ? <div>{item.evidence}</div> : null}
-                  </td>
-                  <td>{item.sql ? <code className="ops-sql">{item.sql}</code> : null}</td>
+          <div className="health-table-wrap" role="region" aria-label="인덱스 개선 후보 표" tabIndex={0}>
+            <table className="ops-check-table">
+              <caption className="sr-only">인덱스 추가·삭제 후보</caption>
+              <thead>
+                <tr>
+                  <th scope="col">중요도</th>
+                  <th scope="col">구분</th>
+                  <th scope="col">대상</th>
+                  <th scope="col">근거</th>
+                  <th scope="col">검토할 SQL</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {adviceItems.map((item, index) => (
+                  <tr key={`${item.table}-${item.index ?? index}`}>
+                    <td>
+                      <Badge tone={opsStatusTone(item.severity === "high" ? "critical" : item.severity)}>
+                        {item.severity === "high" ? "높음" : item.severity === "medium" ? "보통" : "낮음"}
+                      </Badge>
+                    </td>
+                    <td>{item.kind === "drop" ? "삭제 후보" : "추가 후보"}</td>
+                    <td>
+                      <span className="mono">{safe(item.table)}</span>
+                      {item.columns?.length ? (
+                        <span className="mono"> ({safe(item.columns.join(", "))})</span>
+                      ) : null}
+                      {item.index ? <div className="metric-note">{safe(item.index)}</div> : null}
+                    </td>
+                    <td className="metric-note">
+                      {safe(item.reason, "")}
+                      {item.evidence ? <div>{safe(item.evidence)}</div> : null}
+                    </td>
+                    <td>{item.sql ? <code className="ops-sql">{safe(item.sql)}</code> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         {advice?.limitations?.length ? (
           <InlineNotice tone="info" title="이 드라이버가 답할 수 없는 것">
-            {advice.limitations.join(" ")}
+            {safe(advice.limitations.join(" "))}
           </InlineNotice>
         ) : null}
       </SectionCard>
 
-      <MigrationSqlDialog open={sqlOpen} onOpenChange={setSqlOpen} returnFocusRef={sqlTriggerRef} />
+      {sqlOwner === health.owner && health.owner.isCurrent() ? (
+        <MigrationSqlDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setSqlOwner(undefined);
+          }}
+          returnFocusRef={sqlTriggerRef}
+        />
+      ) : null}
     </div>
   );
 }
