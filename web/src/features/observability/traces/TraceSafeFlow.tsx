@@ -10,6 +10,7 @@ import {
 import { useTraceSafeFlowQuery, type TraceFlowSelection } from "./trace-safe-flow-query";
 import { TraceSafeFlowResult } from "./TraceSafeFlowResult";
 import { flowDisplay } from "./trace-safe-flow-display";
+import { TraceReadDenied } from "./TraceReadDenied";
 import "./trace-safe-flow.css";
 
 function FlowBody({
@@ -21,9 +22,11 @@ function FlowBody({
   access: TraceSafeFlowAccess;
   timeZone: string;
 }) {
-  const { query, retry, previous } = useTraceSafeFlowQuery(selection, access);
+  const { query, retry, previous, denied, denialRequestId } = useTraceSafeFlowQuery(selection, access);
   const error = isAppError(query.error) ? query.error : undefined;
   const unavailable = error?.status === 404;
+  if (denied)
+    return <TraceReadDenied detail disabled={!selection.ready} onRetry={retry} requestId={denialRequestId} />;
   return (
     <>
       <Button
