@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"strings"
+	"time"
 
 	"modernc.org/sqlite"
 )
@@ -39,4 +40,19 @@ func (s *SQLStore) metadataLowerSQL(expression string) string {
 // timestamp cast, this retains every stored nanosecond on PostgreSQL as well.
 func metadataTimestampOrderSQL(field string) string {
 	return "(SUBSTR(" + field + ", 1, 19) || '.' || SUBSTR(SUBSTR(REPLACE(" + field + ", 'Z', ''), 21) || '000000000', 1, 9))"
+}
+
+// Retain the ordinary created_at index before applying precise nanosecond
+// bounds. UTC second prefixes include every fractional representation in the
+// boundary seconds; the exact comparison then excludes the extra edge rows.
+// field is an internal SQL identifier, never a caller-supplied expression.
+func metadataTimestampWindowSQL(field string, since, until time.Time) (string, []any) {
+	const secondPrefix = "2006-01-02T15:04:05"
+	const precise = "2006-01-02T15:04:05.000000000"
+	normalized := metadataTimestampOrderSQL(field)
+	return field + " >= ? AND " + field + " < ? AND " + normalized + " >= ? AND " + normalized + " < ?", []any{
+		since.UTC().Format(secondPrefix),
+		until.UTC().Truncate(time.Second).Add(time.Second).Format(secondPrefix),
+		since.UTC().Format(precise), until.UTC().Format(precise),
+	}
 }

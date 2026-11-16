@@ -260,8 +260,7 @@ func (s *SQLStore) incidents(ctx context.Context, since, until time.Time, minEve
 	where := "r.created_at >= ?"
 	args := []any{formatTime(since)}
 	if !until.IsZero() {
-		where = metadataTimestampOrderSQL("r.created_at") + " >= ? AND " + metadataTimestampOrderSQL("r.created_at") + " < ?"
-		args = []any{since.UTC().Format("2006-01-02T15:04:05.000000000"), until.UTC().Format("2006-01-02T15:04:05.000000000")}
+		where, args = metadataTimestampWindowSQL("r.created_at", since, until)
 	}
 	args = append(args, minEvents, minEvents)
 	rows, err := s.db.QueryContext(ctx, s.bind(`

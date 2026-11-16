@@ -17,11 +17,6 @@ type activityPeriod struct {
 }
 
 func (s *Server) activitySummaryPeriod(w http.ResponseWriter, r *http.Request) (activityPeriod, bool) {
-	w.Header().Set("Cache-Control", "no-store")
-	if !s.authorizeAdmin(r) {
-		writeOpenAIError(w, 401, "invalid admin token", "invalid_request_error", "invalid_api_key")
-		return activityPeriod{}, false
-	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
 		writeOpenAIError(w, 405, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -46,6 +41,11 @@ func activitySummaryFailure(w http.ResponseWriter) {
 }
 
 func (s *Server) handleAlertSummary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, 401, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
 	period, ok := s.activitySummaryPeriod(w, r)
 	if !ok {
 		return
@@ -120,6 +120,11 @@ func auditActivityKinds(action string) (string, string) {
 }
 
 func (s *Server) handleAuditSummary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, 401, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
 	period, ok := s.activitySummaryPeriod(w, r)
 	if !ok {
 		return
@@ -156,6 +161,11 @@ type incidentActivity struct {
 }
 
 func (s *Server) handleIncidentSummary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, 401, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
 	period, ok := s.activitySummaryPeriod(w, r)
 	if !ok {
 		return

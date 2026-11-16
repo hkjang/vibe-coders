@@ -13,8 +13,9 @@ type AdminAuditMetadata struct {
 }
 
 func (s *SQLStore) RecentAdminAuditMetadata(ctx context.Context, since, until time.Time) ([]AdminAuditMetadata, error) {
+	where, args := metadataTimestampWindowSQL("created_at", since, until)
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT action, created_at FROM admin_audit_logs
-		WHERE `+metadataTimestampOrderSQL("created_at")+` >= ? AND `+metadataTimestampOrderSQL("created_at")+` < ? ORDER BY `+metadataTimestampOrderSQL("created_at")+` DESC, id DESC LIMIT 6`), since.UTC().Format("2006-01-02T15:04:05.000000000"), until.UTC().Format("2006-01-02T15:04:05.000000000"))
+		WHERE `+where+` ORDER BY `+metadataTimestampOrderSQL("created_at")+` DESC, id DESC LIMIT 6`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -40,9 +41,10 @@ type AlertEventMetadata struct {
 }
 
 func (s *SQLStore) RecentAlertEventMetadata(ctx context.Context, since, until time.Time) ([]AlertEventMetadata, error) {
+	where, args := metadataTimestampWindowSQL("created_at", since, until)
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT metric, value, threshold, delivered,
 		CASE WHEN COALESCE(delivery_error, '') <> '' THEN 1 ELSE 0 END, created_at FROM alert_events
-		WHERE `+metadataTimestampOrderSQL("created_at")+` >= ? AND `+metadataTimestampOrderSQL("created_at")+` < ? ORDER BY `+metadataTimestampOrderSQL("created_at")+` DESC, id DESC LIMIT 6`), since.UTC().Format("2006-01-02T15:04:05.000000000"), until.UTC().Format("2006-01-02T15:04:05.000000000"))
+		WHERE `+where+` ORDER BY `+metadataTimestampOrderSQL("created_at")+` DESC, id DESC LIMIT 6`), args...)
 	if err != nil {
 		return nil, err
 	}
