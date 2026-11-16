@@ -17,6 +17,7 @@ import type {
   GetAdminText2SqlFeaturesData,
   GetAdminText2SqlGlossaryData,
   GetAdminText2SqlHealthcheckData,
+  GetAdminText2SqlHealthcheckResponse,
   GetAdminText2SqlKillSwitchData,
   GetAdminText2SqlMinersData,
   GetAdminText2SqlRegistryExportData,
@@ -43,7 +44,8 @@ import type {
 import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import { acknowledgementSchema, looseList, looseObject, numberish, orDefault } from "@/shared/api/loose";
 
-// The legacy Text2SQL admin APIs are documented without response schemas, so these
+// Most legacy Text2SQL admin APIs lack response schemas; explicit contracts such as
+// healthcheck use generated response types. The remaining
 // zod shapes are the contract: they normalise the fields the screens render and let
 // every other field through untouched.
 const text = (fallback = "") => orDefault(z.string(), fallback);
@@ -233,16 +235,19 @@ export const text2sqlConnectionsSchema = looseObject({
 });
 
 export const text2sqlHealthcheckSchema = looseObject({
-  status: text(),
+  status: z.enum(["ok", "warn", "error", "preview_only"]).catch("warn"),
   detail: text(),
+  detail_code: text(),
   configured: flag(),
-  reachable: orDefault(z.boolean(), false),
+  reachable: z.boolean().nullable().catch(null),
+  query_ok: z.boolean().nullable().catch(null),
   driver: text(),
   statement_timeout: text(),
+  probe_timeout: text(),
   connection_id: text(),
-  read_only_tx_ok: orDefault(z.boolean(), false),
-  statement_timeout_ok: orDefault(z.boolean(), false),
-  account_write_restricted: z.boolean().nullish(),
+  read_only_tx_ok: z.boolean().nullable().catch(null),
+  statement_timeout_ok: z.boolean().nullable().catch(null),
+  account_write_restricted: z.boolean().nullable().catch(null),
 });
 
 export const text2sqlTablesSchema = looseObject({
@@ -565,7 +570,7 @@ export const text2sqlEndpoints = {
       connectionIdQuerySchema,
     ),
     // Probes the execute database, so it must stay behind an explicit button.
-    healthcheck: operation<WithQuery<GetAdminText2SqlHealthcheckData, { connection_id?: string }>, unknown>()(
+    healthcheck: operation<GetAdminText2SqlHealthcheckData, GetAdminText2SqlHealthcheckResponse>()(
       "GET",
       "/admin/text2sql/healthcheck",
       text2sqlHealthcheckSchema,

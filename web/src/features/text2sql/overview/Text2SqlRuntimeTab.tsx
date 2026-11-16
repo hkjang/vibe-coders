@@ -1,13 +1,8 @@
-import { useAuth } from "@/app/auth/AuthProvider";
-import { containsPotentialSecret } from "@/shared/security/secrets";
+import { Text2SqlHealthResult } from "./Text2SqlHealthResult";
 import { useRef, useState } from "react";
 import { z } from "zod";
 
-import {
-  PanelFailure,
-  ReadOnlyNotice,
-  StatusBadge,
-} from "@/features/text2sql/overview/text2sql-presentation";
+import { PanelFailure, ReadOnlyNotice } from "@/features/text2sql/overview/text2sql-presentation";
 import { writeDisabledTitle, operationLabel } from "@/features/text2sql/overview/text2sql-labels";
 import { text2sqlInvalidations, text2sqlRouteId } from "@/features/text2sql/overview/use-text2sql-queries";
 import { apiClient } from "@/shared/api/client";
@@ -26,7 +21,6 @@ import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
-import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { Switch } from "@/shared/components/ui/Switch";
@@ -107,11 +101,6 @@ export function Text2SqlRuntimeTab({
   profiles,
   profilesLoading,
 }: Text2SqlRuntimeTabProps): React.JSX.Element {
-  const auth = useAuth();
-  const diagnostic = (value: string | undefined): string =>
-    value && containsPotentialSecret(value, auth.credentialPrefixes)
-      ? "민감한 연결 정보는 표시하지 않습니다."
-      : value || "—";
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const [profileToDelete, setProfileToDelete] = useState("");
@@ -386,34 +375,7 @@ export function Text2SqlRuntimeTab({
             {healthError}
           </InlineNotice>
         ) : null}
-        {health ? (
-          <InlineNotice
-            tone={
-              health.result.status === "ok" ? "success" : health.result.status === "warn" ? "warning" : "info"
-            }
-            title={`연결 점검 결과 — ${diagnostic(health.id)}`}
-          >
-            <KeyValueList
-              items={[
-                { label: "상태", value: <StatusBadge value={diagnostic(health.result.status)} /> },
-                { label: "설명", value: diagnostic(health.result.detail) },
-                { label: "드라이버", value: diagnostic(health.result.driver) },
-                { label: "문장 제한 시간", value: diagnostic(health.result.statement_timeout) },
-                { label: "읽기 전용 트랜잭션", value: health.result.read_only_tx_ok ? "정상" : "실패" },
-                {
-                  label: "계정 쓰기 제한",
-                  value:
-                    health.result.account_write_restricted === null ||
-                    health.result.account_write_restricted === undefined
-                      ? "확인 안 함"
-                      : health.result.account_write_restricted
-                        ? "읽기 전용"
-                        : "쓰기 가능",
-                },
-              ]}
-            />
-          </InlineNotice>
-        ) : null}
+        {health ? <Text2SqlHealthResult connectionId={health.id} result={health.result} /> : null}
       </SectionCard>
 
       <SectionCard

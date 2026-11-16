@@ -3,12 +3,12 @@ import { installSettingsWorkspace } from "./settings-workspace-browser";
 import { migrationRegistry } from "../../src/config/migration-registry";
 import { workspaceOverview } from "../../src/features/text2sql/overview/text2sql-workspace-fixture";
 
-export async function installText2SqlWorkspace(page: Page) {
+export async function installText2SqlWorkspace(page: Page, health?: Record<string, unknown>) {
   const fixture = await installSettingsWorkspace(page, "admin");
   const bootstrap = fixture.bootstrap;
   const base = bootstrap.migration_registry[0];
   if (!base || !bootstrap.user) throw new Error("Missing fixture identity");
-  bootstrap.backend_version = "v0.86.108";
+  bootstrap.backend_version = "v0.86.109";
   bootstrap.ui.default_entry = "/app/text2sql";
   bootstrap.migration_registry = migrationRegistry
     .filter((feature) => feature.featureId === "text2sql.overview")
@@ -63,7 +63,7 @@ export async function installText2SqlWorkspace(page: Page) {
       tables: [{ schema_name: "analytics", table_name: "orders", description: "주문", enabled: true }],
       columns: [],
     },
-    "/admin/text2sql/healthcheck": {
+    "/admin/text2sql/healthcheck": health ?? {
       status: "ok",
       detail: "읽기 전용 연결 정상",
       read_only_tx_ok: true,

@@ -239,6 +239,8 @@ jobs:
         run: go test -race ./internal/store -run '^TestRequestIOSamples' -count=1 -timeout=5m
       - name: Verify PostgreSQL prompt CSV team scope, masking and spreadsheet safety
         run: go test -race ./internal/proxy -run '^TestPromptExportCSV' -count=1 -timeout=5m
+      - name: Verify PostgreSQL Text2SQL connection diagnostics
+        run: go test -race ./internal/proxy -run '^TestText2SQLHealthcheck' -count=1 -timeout=5m
       - name: Verify PostgreSQL team report decisions and portal ratio precision
         run: go test -race ./internal/proxy -run '^TestTeamConsole(Report|Portal)' -count=1 -timeout=5m
       - name: Verify PostgreSQL personal receipt ownership and recommendation contracts
@@ -338,7 +340,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.108
+      SOURCE_SBOM_VERSION: v0.86.109
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

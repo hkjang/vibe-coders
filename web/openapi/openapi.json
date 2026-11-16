@@ -11085,6 +11085,82 @@
         ],
         "type": "object"
       },
+      "Text2SQLHealthcheck": {
+        "additionalProperties": false,
+        "properties": {
+          "account_write_restricted": {
+            "description": "Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "detail_code": {
+            "type": "string"
+          },
+          "driver": {
+            "type": "string"
+          },
+          "probe_timeout": {
+            "type": "string"
+          },
+          "query_ok": {
+            "description": "Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "reachable": {
+            "description": "Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "read_only_tx_ok": {
+            "description": "Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "statement_timeout": {
+            "type": "string"
+          },
+          "statement_timeout_ok": {
+            "description": "Null means not checked. Account-wide write restrictions are not inferred by this diagnostic.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "warn",
+              "error",
+              "preview_only"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "detail",
+          "detail_code",
+          "configured",
+          "driver",
+          "statement_timeout",
+          "connection_id",
+          "reachable",
+          "query_ok",
+          "read_only_tx_ok",
+          "statement_timeout_ok",
+          "account_write_restricted",
+          "probe_timeout"
+        ],
+        "type": "object"
+      },
       "Text2SQLLegacyOverview": {
         "additionalProperties": true,
         "description": "Preserved legacy overview; other existing statistics, logs and registry fields are unchanged.",
@@ -12310,7 +12386,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.108"
+    "version": "v0.86.109"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -28312,10 +28388,58 @@
     },
     "/admin/text2sql/healthcheck": {
       "get": {
+        "description": "Explicit admin:read connectivity diagnostic. Uses the currently stored enabled named connection's driver and encrypted DSN, or environment/runtime defaults for empty/default ID; never reuses a stale execution pool. No DDL/DML or account-wide privilege inference. PostgreSQL checks a READ ONLY transaction, a local 1s diagnostic statement timeout, and SELECT 1. Other registered drivers check connectivity and a constant query only (Oracle: SELECT 1 FROM DUAL). The whole diagnostic is bounded by a 10s context. statement_timeout is the configured execution setting, not the diagnostic timeout or proof it is enforced. Nullable checks mean not performed, never success/failure. account_write_restricted is always null: a temporary-table probe cannot establish account-wide privileges. Database/driver error text and DSNs are never returned. Diagnostics use 200 with status; authorization remains 401/403. Responses are no-store.",
         "operationId": "get__admin_text2sql_healthcheck",
+        "parameters": [
+          {
+            "description": "Stored connection ID; empty/default selects environment/runtime defaults.",
+            "in": "query",
+            "name": "connection_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Text2SQLHealthcheck"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing admin authorization denied"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing admin authorization denied"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
