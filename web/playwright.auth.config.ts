@@ -35,6 +35,7 @@ export default defineConfig({
     "overview-trend-live.spec.ts",
     "request-bulk-live.spec.ts",
     "context-registry-live.spec.ts",
+    "product-registry-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

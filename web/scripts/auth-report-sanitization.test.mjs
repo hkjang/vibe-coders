@@ -76,6 +76,8 @@ const allowedScenarios = [
   "AUTH-LIVE-050",
   "AUTH-LIVE-051",
   "AUTH-LIVE-052",
+  "AUTH-LIVE-053",
+  "AUTH-LIVE-054",
   "KEYCLOAK-LIVE-001",
   "KEYCLOAK-LIVE-002",
   "KEYCLOAK-LIVE-003",

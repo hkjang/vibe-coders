@@ -2206,6 +2206,44 @@ export type PricingWriteResponse = {
     version: ModelPricingVersion;
 };
 
+export type PromptProductLegacyList = {
+    products: Array<{
+        category: string;
+        created_at: string;
+        created_by: string;
+        description: string;
+        distinct_users: number;
+        id: string;
+        name: string;
+        request_count: number;
+        source_fingerprint: string;
+        template_id: string;
+        template_last_used: string;
+        template_use_count: number;
+        updated_at: string;
+    }>;
+};
+
+export type PromptProductMetadataItem = {
+    category: string;
+    created_at: string | null;
+    last_used_at: string | null;
+    name: string;
+    source_distinct_keys: number | null;
+    source_requests: number | null;
+    template_state: 'enabled' | 'disabled' | 'missing';
+    use_count: number | null;
+};
+
+export type PromptProductMetadataPage = {
+    generated_at: string;
+    items: Array<PromptProductMetadataItem>;
+    limit: number;
+    offset: number;
+    state: 'all' | 'enabled' | 'disabled' | 'missing';
+    total: number;
+};
+
 export type ProtectedResourceMetadata = {
     authorization_servers: Array<string>;
     bearer_methods_supported: Array<string>;
@@ -9666,16 +9704,52 @@ export type DeleteAdminPromptProductsResponses = {
 export type GetAdminPromptProductsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: 'metadata';
+        state?: 'all' | 'enabled' | 'disabled' | 'missing';
+        limit?: number;
+        offset?: number;
+    };
     url: '/admin/prompt-products';
 };
 
+export type GetAdminPromptProductsErrors = {
+    /**
+     * Query, permission or storage failure; metadata errors omit storage details
+     */
+    400: AppError;
+    /**
+     * Query, permission or storage failure; metadata errors omit storage details
+     */
+    401: AppError;
+    /**
+     * Query, permission or storage failure; metadata errors omit storage details
+     */
+    403: AppError;
+    /**
+     * Query, permission or storage failure; metadata errors omit storage details
+     */
+    405: AppError;
+    /**
+     * Query, permission or storage failure; metadata errors omit storage details
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminPromptProductsError = GetAdminPromptProductsErrors[keyof GetAdminPromptProductsErrors];
+
 export type GetAdminPromptProductsResponses = {
     /**
-     * OK
+     * Legacy product list or explicit metadata page
      */
-    200: unknown;
+    200: PromptProductLegacyList | PromptProductMetadataPage;
 };
+
+export type GetAdminPromptProductsResponse = GetAdminPromptProductsResponses[keyof GetAdminPromptProductsResponses];
 
 export type PostAdminPromptProductsData = {
     body?: never;

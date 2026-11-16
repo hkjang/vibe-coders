@@ -7689,6 +7689,183 @@
         ],
         "type": "object"
       },
+      "PromptProductLegacyList": {
+        "additionalProperties": false,
+        "properties": {
+          "products": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "created_by": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "distinct_users": {
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "request_count": {
+                  "type": "integer"
+                },
+                "source_fingerprint": {
+                  "type": "string"
+                },
+                "template_id": {
+                  "type": "string"
+                },
+                "template_last_used": {
+                  "type": "string"
+                },
+                "template_use_count": {
+                  "type": "integer"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "category",
+                "created_at",
+                "created_by",
+                "description",
+                "distinct_users",
+                "id",
+                "name",
+                "request_count",
+                "source_fingerprint",
+                "template_id",
+                "template_last_used",
+                "template_use_count",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "products"
+        ],
+        "type": "object"
+      },
+      "PromptProductMetadataItem": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_distinct_keys": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "source_requests": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "template_state": {
+            "enum": [
+              "enabled",
+              "disabled",
+              "missing"
+            ],
+            "type": "string"
+          },
+          "use_count": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "category",
+          "created_at",
+          "last_used_at",
+          "name",
+          "source_distinct_keys",
+          "source_requests",
+          "template_state",
+          "use_count"
+        ],
+        "type": "object"
+      },
+      "PromptProductMetadataPage": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PromptProductMetadataItem"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "all",
+              "enabled",
+              "disabled",
+              "missing"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "items",
+          "limit",
+          "offset",
+          "state",
+          "total"
+        ],
+        "type": "object"
+      },
       "ProtectedResourceMetadata": {
         "properties": {
           "authorization_servers": {
@@ -13230,7 +13407,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.130"
+    "version": "v0.86.131"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -22955,10 +23132,131 @@
         ]
       },
       "get": {
+        "description": "Existing global admin:read product registry. Default GET keeps the legacy list. view=metadata returns a bounded no-store projection without bodies, descriptions, authors, fingerprints or mutation IDs. Sorted by stored created_at descending then product ID ascending; count and page share one read snapshot. source_requests and source_distinct_keys are saved registration snapshots; keys are not people. Without a source fingerprint these saved default counts are returned as null. use_count counts current template expansion touches, not model success or billing. Missing templates have null use_count. Invalid counts/timestamps are null. Unsafe names/categories are hidden. Metadata requests reject duplicate, extra and malformed parameters.",
         "operationId": "get__admin_prompt_products",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "metadata"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "enabled",
+                "disabled",
+                "missing"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PromptProductLegacyList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PromptProductMetadataPage"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Legacy product list or explicit metadata page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, permission or storage failure; metadata errors omit storage details"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, permission or storage failure; metadata errors omit storage details"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, permission or storage failure; metadata errors omit storage details"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, permission or storage failure; metadata errors omit storage details"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, permission or storage failure; metadata errors omit storage details"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -57,12 +58,22 @@ func (s *Server) handlePromptProductCandidates(w http.ResponseWriter, r *http.Re
 //
 // DELETE ?id= → remove the product (the underlying template is left intact).
 func (s *Server) handlePromptProducts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			writeOpenAIError(w, 400, "invalid prompt product query", "invalid_request_error", "invalid_product_page")
+			return
+		}
+		if _, ok := query["view"]; ok {
+			s.writePromptProductMetadata(w, r, query)
+			return
+		}
 		products, err := s.db.ListPromptProducts(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "prompt_products_failed")
