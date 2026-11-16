@@ -3475,6 +3475,41 @@ export type Text2SqlLegacyOverview = {
     [key: string]: unknown;
 };
 
+export type Text2SqlProfile = {
+    enabled: boolean;
+    exec_connection_id: string;
+    mode: string;
+    schema_name: string;
+    summary_model: string;
+    updated_at: string;
+    upstream_model: string;
+    virtual_model: string;
+};
+
+export type Text2SqlProfileInput = {
+    enabled?: boolean | null;
+    /**
+     * Trimmed connection identifier. Empty/default selects runtime/environment DB. No credentials.
+     */
+    exec_connection_id?: string | null;
+    /**
+     * Case-insensitive preview or execute; empty/omitted/null defaults to preview in storage.
+     */
+    mode?: string | null;
+    schema_name?: string | null;
+    summary_model?: string | null;
+    upstream_model?: string | null;
+    virtual_model: string;
+};
+
+export type Text2SqlProfileList = {
+    profiles: Array<Text2SqlProfile>;
+};
+
+export type Text2SqlProfileSaved = {
+    profile: Text2SqlProfile;
+};
+
 export type Text2SqlSchemaDetailResponse = {
     raw_content_available: boolean;
     schema: Text2SqlSchemaView;
@@ -13348,13 +13383,40 @@ export type PostAdminText2SqlPermissionsResponses = {
 export type DeleteAdminText2SqlProfilesData = {
     body?: never;
     path?: never;
-    query?: never;
+    query: {
+        virtual_model: string;
+    };
     url: '/admin/text2sql/profiles';
 };
 
+export type DeleteAdminText2SqlProfilesErrors = {
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    403: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminText2SqlProfilesError = DeleteAdminText2SqlProfilesErrors[keyof DeleteAdminText2SqlProfilesErrors];
+
 export type DeleteAdminText2SqlProfilesResponses = {
     /**
-     * OK
+     * Deleted profile identifier and status
      */
     200: unknown;
 };
@@ -13366,26 +13428,80 @@ export type GetAdminText2SqlProfilesData = {
     url: '/admin/text2sql/profiles';
 };
 
+export type GetAdminText2SqlProfilesErrors = {
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    403: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminText2SqlProfilesError = GetAdminText2SqlProfilesErrors[keyof GetAdminText2SqlProfilesErrors];
+
 export type GetAdminText2SqlProfilesResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: Text2SqlProfileList;
 };
 
+export type GetAdminText2SqlProfilesResponse = GetAdminText2SqlProfilesResponses[keyof GetAdminText2SqlProfilesResponses];
+
 export type PostAdminText2SqlProfilesData = {
-    body?: never;
+    body: Text2SqlProfileInput;
     path?: never;
     query?: never;
     url: '/admin/text2sql/profiles';
 };
 
+export type PostAdminText2SqlProfilesErrors = {
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    400: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    401: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    403: AppError;
+    /**
+     * Existing validation, authorization or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminText2SqlProfilesError = PostAdminText2SqlProfilesErrors[keyof PostAdminText2SqlProfilesErrors];
+
 export type PostAdminText2SqlProfilesResponses = {
     /**
      * OK
      */
-    200: unknown;
+    201: Text2SqlProfileSaved;
 };
+
+export type PostAdminText2SqlProfilesResponse = PostAdminText2SqlProfilesResponses[keyof PostAdminText2SqlProfilesResponses];
 
 export type PostAdminText2SqlPromoteData = {
     body?: never;

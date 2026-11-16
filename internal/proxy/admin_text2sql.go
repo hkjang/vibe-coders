@@ -1178,19 +1178,12 @@ func (s *Server) handleText2SQLCollect(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "execute DB is not configured (TEXT2SQL_EXEC_DSN or connection_id required)", "invalid_request_error", "no_exec_db")
 		return
 	}
-	db, err := s.text2sqlExecDBByID(r.Context(), connID)
+	target, _, err := s.text2sqlResolveDB(r.Context(), connID, false)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, "exec DB open failed: "+err.Error(), "server_error", "exec_db_failed")
 		return
 	}
-	// Determine driver: named connection owns its own driver; default falls back to env config.
-	driver := s.t2sConf().ExecDriver
-	if connID != "" && connID != "default" {
-		if conn, found, cerr := s.db.GetText2SQLExecConnection(r.Context(), connID); cerr == nil && found {
-			driver = conn.Driver
-		}
-	}
-	tables, cols, err := s.db.CollectInformationSchema(r.Context(), db, driver, strings.TrimSpace(p.DBSchema), strings.TrimSpace(p.SchemaName))
+	tables, cols, err := s.db.CollectInformationSchema(r.Context(), target.db, target.driver, strings.TrimSpace(p.DBSchema), strings.TrimSpace(p.SchemaName))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "collect_failed")
 		return
@@ -1253,12 +1246,10 @@ func (s *Server) handleText2SQLConnections(w http.ResponseWriter, r *http.Reques
 			}
 			c.EncryptedDSN = enc
 		}
-		if err := s.db.UpsertText2SQLExecConnection(r.Context(), c); err != nil {
+		if err := s.mutateText2SQLConnection(p.ID, func() error { return s.db.UpsertText2SQLExecConnection(r.Context(), c) }); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "connection_save_failed")
 			return
 		}
-		// Invalidate cached *sql.DB for this connection so next request re-opens it.
-		s.t2sExecConns.Delete(p.ID)
 		s.auditAdmin(r, "text2sql.connection.upsert", "", auditJSON(map[string]any{"id": c.ID, "name": c.Name, "driver": c.Driver}))
 		writeJSON(w, http.StatusCreated, map[string]any{"connection": c})
 	case http.MethodDelete:
@@ -1267,11 +1258,10 @@ func (s *Server) handleText2SQLConnections(w http.ResponseWriter, r *http.Reques
 			writeOpenAIError(w, http.StatusBadRequest, "id query param required", "invalid_request_error", "missing_id")
 			return
 		}
-		if err := s.db.DeleteText2SQLExecConnection(r.Context(), id); err != nil {
+		if err := s.mutateText2SQLConnection(id, func() error { return s.db.DeleteText2SQLExecConnection(r.Context(), id) }); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "connection_delete_failed")
 			return
 		}
-		s.t2sExecConns.Delete(id)
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -1366,7 +1356,7 @@ func (s *Server) handleText2SQLRegistryImport(w http.ResponseWriter, r *http.Req
 
 // handleText2SQLProfiles manages runtime virtual-model profiles (DB overrides of the
 // env defaults; can also define new virtual models).
-// GET /admin/text2sql/profiles · POST {virtual_model,mode,upstream_model,summary_model,schema_name,enabled} · DELETE ?virtual_model=
+// GET /admin/text2sql/profiles · POST {virtual_model,mode,upstream_model,summary_model,schema_name,exec_connection_id,enabled} · DELETE ?virtual_model=
 func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -1385,12 +1375,13 @@ func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, map[string]any{"profiles": list})
 	case http.MethodPost:
 		var p struct {
-			VirtualModel  string `json:"virtual_model"`
-			Mode          string `json:"mode"`
-			UpstreamModel string `json:"upstream_model"`
-			SummaryModel  string `json:"summary_model"`
-			SchemaName    string `json:"schema_name"`
-			Enabled       *bool  `json:"enabled"`
+			VirtualModel     string `json:"virtual_model"`
+			Mode             string `json:"mode"`
+			UpstreamModel    string `json:"upstream_model"`
+			SummaryModel     string `json:"summary_model"`
+			SchemaName       string `json:"schema_name"`
+			ExecConnectionID string `json:"exec_connection_id"`
+			Enabled          *bool  `json:"enabled"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -1409,6 +1400,7 @@ func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) 
 		prof := store.Text2SQLProfile{
 			VirtualModel: vm, Mode: mode, UpstreamModel: strings.TrimSpace(p.UpstreamModel),
 			SummaryModel: strings.TrimSpace(p.SummaryModel), SchemaName: strings.TrimSpace(p.SchemaName), Enabled: true,
+			ExecConnectionID: strings.TrimSpace(p.ExecConnectionID),
 		}
 		if p.Enabled != nil {
 			prof.Enabled = *p.Enabled

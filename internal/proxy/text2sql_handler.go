@@ -36,7 +36,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// add new virtual models) at runtime without a redeploy.
 	profileSchemaName := ""
 	profileExecConnID := ""
-	if dbp, found, _ := s.db.GetText2SQLProfile(r.Context(), meta.Request.Model); found && dbp.Enabled {
+	dbp, found, err := s.db.GetText2SQLProfile(r.Context(), meta.Request.Model)
+	if err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "실행 프로필을 확인하지 못했습니다. 잠시 후 다시 시도하세요.", "server_error", "text2sql_profile_unavailable")
+		return
+	}
+	if found && dbp.Enabled {
 		if dbp.Mode != "" {
 			profile.Mode = text2sql.Mode(dbp.Mode)
 		}
@@ -401,9 +406,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 
 	// 3) Preview mode (default): return the validated SQL + a short note.
-	if profile.Mode != text2sql.ModeExecute || cfg.ExecDSN == "" {
+	connectionID := strings.TrimSpace(profileExecConnID)
+	namedExecution := connectionID != "" && connectionID != "default"
+	executionConfigured := namedExecution || strings.TrimSpace(cfg.ExecDSN) != ""
+	if profile.Mode != text2sql.ModeExecute || !executionConfigured {
 		note := "검증된 읽기 전용 SQL입니다 (실행하지 않음)."
-		if profile.Mode == text2sql.ModeExecute && cfg.ExecDSN == "" {
+		if profile.Mode == text2sql.ModeExecute && !executionConfigured {
 			note = "실행 DB가 설정되지 않아 미리보기만 제공합니다 (TEXT2SQL_EXEC_DSN)."
 		}
 		if challengeNote != "" {
@@ -944,27 +952,29 @@ func normalizeExecDriver(driver string) string {
 // and runs the validated query. connID "" or "default" uses the env-configured DB.
 // The returned explainRisk is recorded even when the query is allowed (risk < 50).
 func (s *Server) execText2SQL(ctx context.Context, connID, query string) ([]string, [][]string, int64, explainRisk, error) {
-	db, err := s.text2sqlExecDBByID(ctx, connID)
+	target, cfg, err := s.text2sqlResolveDB(ctx, connID, false)
 	if err != nil {
 		return nil, nil, 0, explainRisk{}, err
 	}
-	rowLimit := s.t2sConf().MaxLimit
+	db, driver := target.db, target.driver
+	ctx, cancel := context.WithTimeout(ctx, execQueryDeadline(cfg.StatementTimeout))
+	defer cancel()
+	rowLimit := cfg.MaxLimit
 	if rowLimit <= 0 {
 		rowLimit = 1000
 	}
-	driver := strings.ToLower(strings.TrimSpace(s.t2sConf().ExecDriver))
 	var risk explainRisk
 	// EXPLAIN risk guard (PostgreSQL): score the plan (cost + seq-scan/nested-loop on
 	// large row estimates) and reject high-risk plans before running the query.
-	if s.t2sConf().MaxExplainCost > 0 && (driver == "postgres" || driver == "postgresql" || driver == "pgx") {
+	if cfg.MaxExplainCost > 0 && (driver == "postgres" || driver == "postgresql" || driver == "pgx") {
 		if plan, err := explainPlanFor(ctx, db, query); err == nil {
-			risk = scoreExplainPlan(plan, s.t2sConf().MaxExplainCost)
+			risk = scoreExplainPlan(plan, cfg.MaxExplainCost)
 			if risk.Score >= 50 {
 				return nil, nil, 0, risk, fmt.Errorf("EXPLAIN risk %d/100: %s", risk.Score, strings.Join(risk.Reasons, "; "))
 			}
 		}
 	}
-	cols, rows, count, err := executeReadOnlyQuery(ctx, db, driver, query, rowLimit, s.t2sConf().StatementTimeout, s.t2sConf().WorkMem)
+	cols, rows, count, err := executeReadOnlyQuery(ctx, db, driver, query, rowLimit, cfg.StatementTimeout, cfg.WorkMem)
 	return cols, rows, count, risk, err
 }
 
@@ -1007,78 +1017,16 @@ func classifyText2SQLFailure(v text2sql.ValidationResult, executed bool, rowCoun
 func explainPlanFor(ctx context.Context, db *sql.DB, query string) (explainPlan, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return explainPlan{}, err
+	}
+	defer tx.Rollback()
 	var raw string
-	if err := db.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+query).Scan(&raw); err != nil {
+	if err := tx.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+query).Scan(&raw); err != nil {
 		return explainPlan{}, err
 	}
 	return parseExplainPlan([]byte(raw))
-}
-
-// text2sqlValidationDB returns the database to use for safe validation (golden
-// result-equivalence): the SQL Digital Twin (masked/sample) when configured, else the
-// production execute DB. Also returns the driver name for the chosen DB.
-func (s *Server) text2sqlValidationDB() (*sql.DB, string, error) {
-	if strings.TrimSpace(s.t2sConf().TwinDSN) != "" {
-		if db := s.t2sTwin.Load(); db != nil {
-			return db, s.t2sConf().TwinDriver, nil
-		}
-		driver := normalizeExecDriver(s.t2sConf().TwinDriver)
-		db, err := sql.Open(driver, s.t2sConf().TwinDSN)
-		if err != nil {
-			return nil, "", err
-		}
-		db.SetMaxOpenConns(4)
-		s.t2sTwin.Store(db)
-		return db, s.t2sConf().TwinDriver, nil
-	}
-	db, err := s.text2sqlExecDB()
-	return db, s.t2sConf().ExecDriver, err
-}
-
-func (s *Server) text2sqlExecDB() (*sql.DB, error) {
-	if db := s.t2sExec.Load(); db != nil {
-		return db, nil
-	}
-	driver := normalizeExecDriver(s.t2sConf().ExecDriver)
-	db, err := sql.Open(driver, s.t2sConf().ExecDSN)
-	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(4)
-	s.t2sExec.Store(db)
-	return db, nil
-}
-
-// text2sqlExecDBByID returns the execution DB for a named connection ID.
-// "" / "default" falls back to the env-configured TEXT2SQL_EXEC_DSN (existing
-// behaviour). Named connections are looked up in text2sql_exec_connections and
-// cached in t2sExecConns (sync.Map) for the lifetime of the process.
-func (s *Server) text2sqlExecDBByID(ctx context.Context, connID string) (*sql.DB, error) {
-	if connID == "" || connID == "default" {
-		return s.text2sqlExecDB()
-	}
-	if cached, ok := s.t2sExecConns.Load(connID); ok {
-		return cached.(*sql.DB), nil
-	}
-	conn, found, err := s.db.GetText2SQLExecConnection(ctx, connID)
-	if err != nil {
-		return nil, fmt.Errorf("exec connection %q: %w", connID, err)
-	}
-	if !found || !conn.Enabled {
-		return nil, fmt.Errorf("exec connection %q not found or disabled", connID)
-	}
-	dsn, err := s.secrets.Load().Decrypt(conn.EncryptedDSN)
-	if err != nil {
-		return nil, fmt.Errorf("exec connection %q: decrypt DSN: %w", connID, err)
-	}
-	driver := normalizeExecDriver(conn.Driver)
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		return nil, fmt.Errorf("exec connection %q: open: %w", connID, err)
-	}
-	db.SetMaxOpenConns(4)
-	s.t2sExecConns.Store(connID, db)
-	return db, nil
 }
 
 // execQueryHardCap bounds every execute query regardless of configuration; a configured

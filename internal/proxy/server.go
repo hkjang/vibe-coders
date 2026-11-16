@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -34,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.109"
+var AppVersion = "v0.86.110"
 
 type Server struct {
 	cfg      config.Config
@@ -63,9 +62,10 @@ type Server struct {
 	learnCache      atomic.Pointer[routingLearnSnapshot]
 	priceCache      atomic.Pointer[pricingSnapshot]
 	mmCache         atomic.Pointer[mattermostSnapshot]
-	t2sExec         atomic.Pointer[sql.DB]                  // lazily-opened read-only DB for Text2SQL execute mode (default / env)
-	t2sExecConns    sync.Map                                // named exec connections: connID → *sql.DB
-	t2sTwin         atomic.Pointer[sql.DB]                  // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
+	t2sExec         atomic.Pointer[text2sqlDBPool]          // lazily-opened read-only DB for Text2SQL execute mode (default / env)
+	t2sPoolMu       sync.Mutex                              // serializes Text2SQL pool publication with local configuration writes
+	t2sExecConns    map[string]*text2sqlDBPool              // named exec connections: connID → immutable driver/connection pair; guarded by t2sPoolMu
+	t2sTwin         atomic.Pointer[text2sqlDBPool]          // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
 	t2sKilled       atomic.Bool                             // runtime kill switch: when set, Text2SQL is disabled regardless of config
 	t2sKillMu       sync.Mutex                              // serializes reviewed emergency changes and remediation writes
 	t2sKillReview   string                                  // opaque, process-local revision; guarded by t2sKillMu
