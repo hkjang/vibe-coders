@@ -70,6 +70,9 @@ func TestSystemErrorsClearAliasRejectsGet(t *testing.T) {
 	}
 
 	listed := requestMethod(t, http.MethodGet, proxy.URL+"/admin/system-errors")
+	if got := listed.Header.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("system errors cache policy = %q, want no-store", got)
+	}
 	defer listed.Body.Close()
 	if listed.StatusCode != http.StatusOK {
 		t.Fatalf("GET /admin/system-errors status = %d, want 200", listed.StatusCode)
