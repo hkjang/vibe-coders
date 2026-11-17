@@ -2805,6 +2805,10 @@ export type RedTeamReviewedExecutionResponse = {
         failed_cases: number;
         id: string;
         mode: string;
+        /**
+         * Admitted campaign review ID persisted before provider execution since v0.86.148
+         */
+        review_id?: string;
         risk_score: number;
         started_at: string;
         status: string;

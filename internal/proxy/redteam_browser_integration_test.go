@@ -224,6 +224,17 @@ func verifyRedTeamBrowserStorage(t *testing.T, h *browserAuthHarness) {
 	for _, row := range audits {
 		if row.Action == "redteam.campaign.run.reviewed" {
 			admissions++
+			var admission struct {
+				CampaignID string `json:"campaign_id"`
+				ReviewID   string `json:"review_id"`
+			}
+			if json.Unmarshal([]byte(row.AfterValue), &admission) != nil || admission.ReviewID == "" {
+				t.Fatal("review admission identity missing")
+			}
+			matched, total, err := h.db.RedTeamRunPage(t.Context(), store.RedTeamRunQuery{Limit: 25, CampaignID: admission.CampaignID, ReviewID: admission.ReviewID, Kind: "campaign"})
+			if err != nil || total != 1 || len(matched) != 1 || matched[0].ReviewID != admission.ReviewID || matched[0].Status == "running" {
+				t.Fatal("browser execution cannot be traced to its admission review")
+			}
 		}
 	}
 	if admissions != 4 {

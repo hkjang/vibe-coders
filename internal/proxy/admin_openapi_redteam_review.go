@@ -45,11 +45,21 @@ func redTeamRunReviewOpenAPISchemas() map[string]any {
 		run[name] = count
 	}
 	run["cost_krw"] = amount
+	run["review_id"] = map[string]any{"type": "string", "description": "Admitted campaign review ID persisted before provider execution since v0.86.148"}
 	summary := map[string]any{"mode": text, "live_cost_krw": amount}
 	for _, name := range []string{"runs", "results", "warnings", "failures", "critical", "live_calls"} {
 		summary[name] = count
 	}
-	execution := map[string]any{"campaign_id": text, "status": map[string]any{"type": "string", "enum": []string{"completed", "stopped"}}, "stopped": text, "runs": array(object(run)), "summary": object(summary), "note": text, "review_id": text, "execution_kind": kind, "limits": schemaRef("RedTeamRunLimits"), "planned_live_calls": count, "planned_case_executions": count, "complete": boolean, "recording": schemaRef("RedTeamRecording")}
+	runSchema := object(run)
+	// Older supported servers omit the per-run review ID.
+	required := []string{}
+	for _, name := range runSchema["required"].([]string) {
+		if name != "review_id" {
+			required = append(required, name)
+		}
+	}
+	runSchema["required"] = required
+	execution := map[string]any{"campaign_id": text, "status": map[string]any{"type": "string", "enum": []string{"completed", "stopped"}}, "stopped": text, "runs": array(runSchema), "summary": object(summary), "note": text, "review_id": text, "execution_kind": kind, "limits": schemaRef("RedTeamRunLimits"), "planned_live_calls": count, "planned_case_executions": count, "complete": boolean, "recording": schemaRef("RedTeamRecording")}
 	body := object(map[string]any{"review_token": token, "proxy_key": map[string]any{"type": "string", "maxLength": 8192}})
 	body["required"] = []string{"review_token"}
 	return map[string]any{

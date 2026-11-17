@@ -2,6 +2,8 @@ import { useRedTeamMutation } from "./use-redteam-mutation";
 import { campaignColumns } from "./campaign-columns";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/app/auth/AuthProvider";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { reviewHistoryLink } from "./review-history-link";
 import { tokenStore } from "@/shared/auth/token-store";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { RedTeamReviewedExecution } from "./RedTeamReviewedExecution";
@@ -84,6 +86,8 @@ function CampaignsTab({
   proxyKey,
 }: CampaignsTabProps): React.JSX.Element {
   const client = useQueryClient();
+  const { backendVersion, credentialPrefixes } = useAuth();
+  const [, updateSearch] = useSearchState();
   const { campaigns, probePacks, runs, targets } = data;
   const packs = probePacks.data?.probe_packs ?? [];
   const packIds = packs.map((pack) => pack.id);
@@ -288,6 +292,13 @@ function CampaignsTab({
           campaign={pendingRun}
           proxyKey={proxyKey}
           canWrite={canWrite}
+          historyAvailable={(reviewId) =>
+            Boolean(reviewHistoryLink(backendVersion, pendingRun.id, reviewId, credentialPrefixes))
+          }
+          onOpenHistory={(reviewId) => {
+            const link = reviewHistoryLink(backendVersion, pendingRun.id, reviewId, credentialPrefixes);
+            if (link) updateSearch(link, { replace: false });
+          }}
           onClose={() => {
             setPendingRun(undefined);
             setPollingCampaignId("");

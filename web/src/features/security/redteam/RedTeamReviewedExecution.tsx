@@ -27,7 +27,7 @@ const prepareError =
   "등록 대상·정확한 모델 이름·승인·외부 제공자 허용·한도를 확인하세요. 이전 서버는 실행 검토를 지원하지 않을 수 있습니다.";
 const keyError = "실제 실행 모드와 상단의 전용 실행 키를 확인하세요.";
 const unknownOutcome =
-  "실행 결과를 확정할 수 없습니다. 같은 검토로 다시 실행하지 않습니다. 패널을 닫고 실행 이력을 새로 조회한 뒤 새로 검토하세요.";
+  "실행 결과를 확정할 수 없습니다. 같은 검토로 다시 실행하지 않습니다. 실행 이력을 새로 조회해 상태를 확인하세요.";
 const unavailable = () =>
   new AppError("현재 권한·캠페인·실행 키를 확인하고 새로 검토하세요.", { kind: "aborted" });
 export function RedTeamReviewedExecution({
@@ -37,6 +37,8 @@ export function RedTeamReviewedExecution({
   onClose,
   onResult,
   onPending,
+  historyAvailable,
+  onOpenHistory,
   returnFocusRef,
 }: {
   campaign: RedTeamCampaign;
@@ -45,6 +47,8 @@ export function RedTeamReviewedExecution({
   onClose: () => void;
   onResult: (outcome: ReviewedRedTeamOutcome) => void;
   onPending: (pending: boolean) => void;
+  historyAvailable?: (reviewId: string) => boolean;
+  onOpenHistory?: (reviewId: string) => void;
   returnFocusRef: RefObject<HTMLElement | null>;
 }): React.JSX.Element {
   const access = useFeatureMutationAccess(["security.redteam"], canWrite);
@@ -61,8 +65,11 @@ export function RedTeamReviewedExecution({
   const [expired, setExpired] = useState(false);
   const [error, setError] = useState<{ message: string; requestId?: string }>();
   useLayoutEffect(() => {
-    if (consumed) feedbackRef.current?.focus();
-  }, [consumed]);
+    if (consumed) {
+      feedbackRef.current?.focus();
+      if (error) feedbackRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [consumed, error]);
   const form = useZodForm<ExecutionFormInput, ExecutionForm>(executionFormSchema, {
     kind: campaign.execution_mode === "active-controlled" ? "live" : "simulation",
     reason: "",
@@ -214,8 +221,19 @@ export function RedTeamReviewedExecution({
           }
         }}
         footer={
-          <>
+          <div className="rt-execution-actions">
             <Button onClick={close}>닫기</Button>
+            {consumed && onOpenHistory && historyAvailable?.(review.review_id) ? (
+              <Button
+                onClick={() => {
+                  const id = review.review_id;
+                  close();
+                  onOpenHistory(id);
+                }}
+              >
+                이 검토의 실행 이력
+              </Button>
+            ) : null}
             <Button
               variant={review.kind === "live" ? "danger" : "primary"}
               disabled={
@@ -225,7 +243,7 @@ export function RedTeamReviewedExecution({
             >
               {pending ? "실행 결과 확인 중…" : "검토한 조건으로 한 번 실행"}
             </Button>
-          </>
+          </div>
         }
       >
         <div className="rt-stack">
@@ -235,7 +253,7 @@ export function RedTeamReviewedExecution({
               닫고 현재 조건으로 다시 검토하세요.
             </InlineNotice>
           ) : null}
-          <div ref={feedbackRef} tabIndex={-1} role="status">
+          <div ref={feedbackRef} className="rt-execution-feedback" tabIndex={-1} role="status">
             {pending ? (
               <p role="status">실행 중입니다. 패널을 닫아도 이미 전송한 호출은 취소되지 않을 수 있습니다.</p>
             ) : null}

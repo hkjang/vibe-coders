@@ -168,6 +168,9 @@ func (s *Server) handleRedTeamReviewedExecution(w http.ResponseWriter, r *http.R
 	if review.Kind == "simulation" {
 		execution.ExecutionMode = "dry-run"
 	}
+	// Persist the admitted review on every run before calling the provider, so
+	// pending and uncertain responses can be inspected without executing again.
+	plan.ReviewID = review.ID
 	result, err := s.runRedTeamSelectionReviewed(r.WithContext(ctx), execution, body.ProxyKey, plan.Targets, plan.Packs, plan.Cases, plan)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "reviewed execution outcome unavailable", "server_error", "redteam_run_review_outcome_unknown")

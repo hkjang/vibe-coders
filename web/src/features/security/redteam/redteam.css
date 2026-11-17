@@ -1,5 +1,17 @@
 /* Red Team screen: layout only. Colours come from the shared design tokens. */
 
+.rt-execution-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.rt-execution-feedback {
+  scroll-margin-block: var(--space-2);
+}
+
 .rt-stack {
   display: flex;
   flex-direction: column;
