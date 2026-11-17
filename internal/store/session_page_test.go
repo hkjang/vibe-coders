@@ -161,3 +161,45 @@ func TestSessionPageNaturalPlannerAtScale(t *testing.T) {
 		t.Fatal("ignored cancellation")
 	}
 }
+
+func TestSessionPageLiteralBytesAndBounds(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	now := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
+	for i, tc := range []struct{ name, id, prompt string }{
+		{"literal escapes", `session\n\t`, `print("hello\nworld")`},
+		{"windows paths", `C:\users\session`, `C:\work\new\test.sql`},
+		{"hex input", `\x4142`, `\x414243`},
+		{"id exact bytes", strings.Repeat("한", 1365) + "a", "message"},
+		{"id over bytes", strings.Repeat("한", 1366), "message"},
+		{"prompt exact bytes", "exact", strings.Repeat("한", 2730) + "ab"},
+		{"prompt over bytes", "over", strings.Repeat("한", 2731)},
+		{"hex id over bytes", `\x` + strings.Repeat("41", 2048), "message"},
+		{"hex prompt over bytes", "hex-prompt", `\x` + strings.Repeat("41", 4096)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			at := now.Add(time.Duration(i) * time.Second)
+			requestID := fmt.Sprintf("literal-bytes-%d", i)
+			if err := db.InsertLogRecord(t.Context(), LogRecord{Request: RequestLog{ID: requestID, SessionID: tc.id, StatusCode: 200, CreatedAt: at}, Prompts: []PromptLog{{ID: requestID + "p", RequestID: requestID, Role: "user", RedactedText: tc.prompt, CreatedAt: at}}}); err != nil {
+				t.Fatal(err)
+			}
+			rows, total, err := db.SessionPage(t.Context(), SessionPageQuery{Since: at, Until: at.Add(time.Nanosecond), Limit: 25})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || total.Sessions != 1 || total.Requests != 1 {
+				t.Fatal("literal text changed row/totals")
+			}
+			wantID, wantPrompt := tc.id, tc.prompt
+			if len(wantID) > 4096 {
+				wantID = ""
+			}
+			if len(wantPrompt) > 8192 {
+				wantPrompt = ""
+			}
+			if rows[0].SessionID != wantID || rows[0].LastMessage != wantPrompt {
+				t.Fatal("text byte bounds or literal contents changed")
+			}
+		})
+	}
+}
