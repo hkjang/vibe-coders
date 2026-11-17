@@ -5,6 +5,7 @@ import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { readRunQuery } from "@/shared/utils/redteam-run-query";
 import { Button } from "@/shared/components/ui/Button";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
@@ -55,6 +56,12 @@ export function RedTeamRunExplorer({
     >
       <div className="rt-stack">
         <RunHistoryFilters />
+        {search.query.review_id ? (
+          <InlineNotice tone="info" title="검토별 실행 이력">
+            이 검토에서 기록된 실행을 조회합니다. 결과가 없거나 실행 중이면 이력을 새로고침하세요. 기록이
+            없다는 이유만으로 호출되지 않았다고 판단하거나 다시 실행하지 마세요.
+          </InlineNotice>
+        ) : null}
         <div className="rt-history-summary" role="status">
           <span>
             {query.data ? `조건에 맞는 실행 ${formatNumber(query.data.total)}건` : "실행 이력 조회"}

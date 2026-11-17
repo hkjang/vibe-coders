@@ -88,6 +88,7 @@ export const reviewedOutcomeSchema = z
       z.object({
         id: z.string().min(1),
         campaign_id: z.string(),
+        review_id: z.string().optional(),
         target_id: z.string(),
         started_at: z.string(),
         ended_at: z.string(),
@@ -123,6 +124,7 @@ export const reviewedOutcomeSchema = z
       value.summary.live_calls > value.planned_live_calls ||
       value.summary.results > value.planned_case_executions ||
       value.summary.runs !== value.runs.length ||
+      value.runs.some((run) => run.review_id !== undefined && run.review_id !== value.review_id) ||
       (value.complete &&
         (!value.recording.confirmed ||
           value.status !== "completed" ||

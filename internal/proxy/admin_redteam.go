@@ -710,8 +710,11 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			break
 		}
 		run := store.RedTeamRun{ID: newID("rtrun"), CampaignID: c.ID, TargetID: t.ID, Status: "running", Mode: c.ExecutionMode}
-		if review != nil && review.ReplaySource != nil {
-			run.ID, run.SourceResultID, run.ReviewID = review.ExecutionID, review.ReplaySource.Result.ID, review.ReviewID
+		if review != nil {
+			run.ReviewID = review.ReviewID
+			if review.ReplaySource != nil {
+				run.ID, run.SourceResultID = review.ExecutionID, review.ReplaySource.Result.ID
+			}
 		}
 		if err := s.db.InsertRedTeamRun(r.Context(), run); err != nil && review != nil {
 			recording.fail("run_start", &stopped)

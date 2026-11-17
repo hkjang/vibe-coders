@@ -16,8 +16,9 @@ const campaign = redTeamCampaignSchema.parse({
   name: "공개 실행",
   execution_mode: "active-controlled",
 });
-function mount(onResult = vi.fn(), proxyKey = "public-synthetic-key", canWrite = true) {
+function mount(onResult = vi.fn(), proxyKey = "public-synthetic-key", canWrite = true, history = false) {
   const onClose = vi.fn();
+  const onOpenHistory = vi.fn();
   const props = {
     campaign,
     proxyKey,
@@ -25,6 +26,8 @@ function mount(onResult = vi.fn(), proxyKey = "public-synthetic-key", canWrite =
     onResult,
     onClose,
     onPending: vi.fn(),
+    onOpenHistory,
+    historyAvailable: () => history,
     returnFocusRef: createRef<HTMLElement>(),
   };
   const ui = (key = proxyKey, write = canWrite) => (
@@ -34,7 +37,7 @@ function mount(onResult = vi.fn(), proxyKey = "public-synthetic-key", canWrite =
       <RedTeamReviewedExecution {...props} proxyKey={key} canWrite={write} />
     </FeatureAccessContext.Provider>
   );
-  return { ...render(ui()), onResult, onClose, ui };
+  return { ...render(ui()), onResult, onClose, onOpenHistory, ui };
 }
 async function review() {
   const user = userEvent.setup();
@@ -47,6 +50,67 @@ async function confirm() {
   await userEvent.click(screen.getByRole("button", { name: "검토한 조건으로 한 번 실행" }));
 }
 describe("검토한 레드팀 실행", () => {
+  it("실행 중 이력 이동은 다시 실행하지 않고 늦은 결과로 화면을 바꾸지 않는다", async () => {
+    let finish: ((value: unknown) => void) | undefined;
+    const record = executionReviewFixture();
+    const api = mockApi({
+      [prepare]: () => record,
+      [execute]: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const view = mount(vi.fn(), "public-synthetic-key", true, true);
+    await review();
+    expect(screen.queryByRole("button", { name: "이 검토의 실행 이력" })).toBeNull();
+    await confirm();
+    await userEvent.click(await screen.findByRole("button", { name: "이 검토의 실행 이력" }));
+    expect(view.onOpenHistory).toHaveBeenCalledWith(record.review_id);
+    expect(view.onClose).toHaveBeenCalledOnce();
+    await act(async () => {
+      finish?.(executionOutcomeFixture(record));
+    });
+    expect(view.onResult).not.toHaveBeenCalled();
+    expect(api.bodies(execute)).toHaveLength(1);
+  });
+  it("응답 오류 후 해당 검토 이력으로 이동할 수 있다", async () => {
+    const api = mockApi({
+      [prepare]: () => executionReviewFixture(),
+      [execute]: () => {
+        throw apiFailure("private", 503);
+      },
+    });
+    const view = mount(vi.fn(), "public-synthetic-key", true, true);
+    await review();
+    await confirm();
+    await screen.findByText(/실행 결과를 확정할 수 없습니다/);
+    await userEvent.click(screen.getByRole("button", { name: "이 검토의 실행 이력" }));
+    expect(view.onOpenHistory).toHaveBeenCalledWith("public-review");
+    expect(api.bodies(execute)).toHaveLength(1);
+  });
+  it("이전 서버에서는 지원하지 않는 이력 링크를 표시하지 않는다", async () => {
+    mockApi({
+      [prepare]: () => executionReviewFixture(),
+      [execute]: () => {
+        throw apiFailure("private", 503);
+      },
+    });
+    mount();
+    await review();
+    await confirm();
+    await screen.findByText(/실행 결과를 확정할 수 없습니다/);
+    expect(screen.queryByRole("button", { name: "이 검토의 실행 이력" })).toBeNull();
+  });
+  it("다른 검토에 속한 실행 영수증을 거부하고 이전 서버의 생략은 허용한다", () => {
+    const outcome = executionOutcomeFixture();
+    expect(reviewedOutcomeSchema.safeParse(outcome).success).toBe(true);
+    const run = outcome.runs[0];
+    if (!run) throw Error("missing run");
+    run.review_id = "another-review";
+    expect(reviewedOutcomeSchema.safeParse(outcome).success).toBe(false);
+    run.review_id = outcome.review_id;
+    expect(reviewedOutcomeSchema.safeParse(outcome).success).toBe(true);
+  });
   it("검토와 실행을 구분하고 한글 대상·한도를 보여준다", async () => {
     const record = executionReviewFixture(),
       api = mockApi({ [prepare]: () => record, [execute]: () => executionOutcomeFixture(record) }),
