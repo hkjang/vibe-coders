@@ -835,4 +835,33 @@ describe("TracePage", () => {
     expect(screen.queryByText("서버 상세 오류")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "기존 관리자 화면 열기" })).not.toBeInTheDocument();
   });
+  it("추적별 표시를 주소·뒤로 이동에 보존하며 목록을 중복 요청하지 않는다", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response);
+    const user = userEvent.setup();
+    renderPage("/observability/traces?status=5xx&tz=UTC");
+    await screen.findByRole("heading", { name: "요청 처리 흐름" });
+    await user.click(screen.getByRole("button", { name: "추적별 보기" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("status=5xx&tz=UTC&timeline_view=trace");
+    expect(document.querySelectorAll("details.trace-timeline-group")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "테스트 기록 뒤로" }));
+    expect(screen.getByRole("button", { name: "시간순 보기" })).toHaveAttribute("aria-pressed", "true");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  it("선택한 묶음을 접어도 상세를 닫으면 원래 요청을 펼쳐 초점을 돌린다", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response);
+    const user = userEvent.setup();
+    renderPage("/observability/traces?timeline_view=trace");
+    await screen.findByRole("heading", { name: "요청 처리 흐름" });
+    const disclosure = document.querySelector("details.trace-timeline-group") as HTMLDetailsElement;
+    const summary = disclosure.querySelector("summary");
+    if (!summary) throw new Error("Expected group summary");
+    await user.click(summary);
+    const trigger = screen.getByRole("button", { name: "1번째 요청 req-001 흐름 선택" });
+    await user.click(trigger);
+    await user.click(summary);
+    expect(disclosure.open).toBe(false);
+    await user.click(screen.getByRole("button", { name: "요청 상세 닫기" }));
+    expect(disclosure.open).toBe(true);
+    expect(trigger).toHaveFocus();
+  });
 });

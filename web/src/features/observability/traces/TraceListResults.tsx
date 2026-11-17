@@ -1,3 +1,5 @@
+import { useSearchParams } from "react-router";
+import { readTraceTimelineView } from "@/shared/utils/trace-timeline-query";
 import type { AppRequestsResponse, AppRequestSummary } from "@/shared/api/schemas";
 import { Button } from "@/shared/components/ui/Button";
 import { TraceRequestTable } from "./TraceRequestTable";
@@ -23,6 +25,7 @@ export function TraceListResults({
   onSelect,
   onPage,
 }: TraceListResultsProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const requests = data.requests;
   const averageLatency = requests.length
     ? requests.reduce((total, request) => total + request.latency_ms, 0) / requests.length
@@ -40,7 +43,7 @@ export function TraceListResults({
           <strong>{requests.length.toLocaleString("ko-KR")}건</strong>
         </article>
         <article>
-          <span>추적 ID</span>
+          <span>공개 추적 ID</span>
           <strong>{traceCount(requests).toLocaleString("ko-KR")}개</strong>
         </article>
         <article>
@@ -54,6 +57,15 @@ export function TraceListResults({
       </section>
 
       <TraceTimeline
+        view={readTraceTimelineView(searchParams)}
+        onViewChange={(view) =>
+          setSearchParams((current) => {
+            const next = new URLSearchParams(current);
+            next.delete("timeline_view");
+            if (view === "trace") next.set("timeline_view", view);
+            return next;
+          })
+        }
         requests={requests}
         selectionEnabled={selectionEnabled}
         selectionDisabledReason={selectionDisabledReason}

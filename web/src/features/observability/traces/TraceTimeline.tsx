@@ -1,41 +1,34 @@
-import { useId, type CSSProperties } from "react";
-
-import {
-  buildTraceTimeline,
-  formatTraceDate,
-  formatTraceDuration,
-  traceStatusTone,
-} from "@/features/observability/traces/trace-utils";
+import { useId } from "react";
 import type { AppRequestSummary } from "@/shared/api/schemas";
 import { Badge } from "@/shared/components/ui/Badge";
-
-interface TraceTimelineProps {
-  onSelect: (request: AppRequestSummary, trigger: HTMLButtonElement) => void;
+import { Button } from "@/shared/components/ui/Button";
+import { buildTraceTimeline, formatTraceDuration } from "./trace-utils";
+import { TraceTimelineLane, type TraceLaneControls } from "./TraceTimelineLane";
+import { TraceTimelineGroup } from "./TraceTimelineGroup";
+import { groupTraceTimeline } from "./trace-timeline-groups";
+import type { TraceTimelineView } from "@/shared/utils/trace-timeline-query";
+import "./trace-timeline-groups.css";
+interface TraceTimelineProps extends Omit<TraceLaneControls, "reasonId"> {
   requests: readonly AppRequestSummary[];
-  selectionEnabled: boolean;
-  selectionDisabledReason?: string;
-  selectedRequestRef?: string;
-  timeZone: string;
+  view?: TraceTimelineView;
+  onViewChange?: (view: TraceTimelineView) => void;
 }
-
-type TimelineStyle = CSSProperties & {
-  "--trace-offset": string;
-  "--trace-width": string;
-};
-
 export function TraceTimeline({
-  onSelect,
   requests,
-  selectionEnabled,
-  selectionDisabledReason,
-  selectedRequestRef,
-  timeZone,
+  view = "time",
+  onViewChange,
+  ...controls
 }: TraceTimelineProps): React.JSX.Element {
   const timeline = buildTraceTimeline(requests);
   const reasonId = useId();
-
+  const groupHelpId = useId();
+  const laneControls = { ...controls, reasonId };
   return (
-    <section className="trace-panel" aria-labelledby="trace-timeline-title">
+    <section
+      className="trace-panel trace-timeline"
+      data-timeline-view={view}
+      aria-labelledby="trace-timeline-title"
+    >
       <header className="trace-panel-header">
         <div>
           <h2 id="trace-timeline-title">요청 처리 흐름</h2>
@@ -46,72 +39,56 @@ export function TraceTimeline({
         </div>
         <Badge tone="info">요청 단위</Badge>
       </header>
-      {selectionDisabledReason ? <p id={reasonId}>{selectionDisabledReason}</p> : null}
-
+      {onViewChange ? (
+        <div className="trace-timeline-toolbar" role="group" aria-label="요청 흐름 표시 방식">
+          <Button
+            variant="secondary"
+            size="small"
+            aria-pressed={view === "time"}
+            onClick={() => onViewChange("time")}
+          >
+            시간순 보기
+          </Button>
+          <Button
+            variant="secondary"
+            size="small"
+            aria-pressed={view === "trace"}
+            onClick={() => onViewChange("trace")}
+          >
+            추적별 보기
+          </Button>
+        </div>
+      ) : null}
+      {controls.selectionDisabledReason ? <p id={reasonId}>{controls.selectionDisabledReason}</p> : null}
+      {view === "trace" ? (
+        <p className="trace-group-help" id={groupHelpId}>
+          현재 페이지에서 공개된 추적 ID가 같은 요청만 묶습니다. 전체 추적 집계나 부모·자식 관계를 뜻하지
+          않습니다. 추적 ID를 확인할 수 없는 요청은 각각 표시합니다.
+        </p>
+      ) : null}
       <div className="trace-scale" aria-hidden="true">
         <span>0ms</span>
         <span>{formatTraceDuration(timeline.spanMs / 2)}</span>
         <span>{formatTraceDuration(timeline.spanMs)}</span>
       </div>
-      <ol className="trace-lanes">
-        {timeline.lanes.map(({ offsetPercent, request, startOffsetMs, widthPercent }, index) => {
-          const selected = request.request_ref === selectedRequestRef;
-          const style: TimelineStyle = {
-            "--trace-offset": `${offsetPercent}%`,
-            "--trace-width": `${widthPercent}%`,
-          };
-          return (
-            <li key={request.request_ref}>
-              <button
-                type="button"
-                className="trace-lane"
-                aria-controls={selected ? "trace-request-detail" : undefined}
-                aria-expanded={selected}
-                aria-label={`${index + 1}번째 요청 ${request.request_id} 흐름 선택`}
-                aria-pressed={selected}
-                disabled={!selectionEnabled}
-                aria-disabled={selectionDisabledReason ? true : undefined}
-                aria-describedby={selectionDisabledReason ? reasonId : undefined}
-                title={
-                  selectionEnabled ? selectionDisabledReason : "서버 배포 완료 후 요청 상세를 열 수 있습니다."
-                }
-                onClick={(event) => {
-                  if (selectionEnabled && !selectionDisabledReason) onSelect(request, event.currentTarget);
-                }}
-              >
-                <span className="trace-lane-heading">
-                  <span>
-                    <code title={request.request_id}>{request.request_id}</code>
-                    <small>{request.model || "모델 미확인"}</small>
-                  </span>
-                  <Badge tone={traceStatusTone(request.status_code)}>HTTP {request.status_code}</Badge>
-                </span>
-                <span className="trace-lane-track" style={style} aria-hidden="true">
-                  <span className="trace-lane-bar" />
-                </span>
-                <span className="trace-lane-facts">
-                  <span>
-                    기록 +{formatTraceDuration(startOffsetMs)} · 기록된 지연{" "}
-                    {formatTraceDuration(request.latency_ms)}
-                  </span>
-                  <time dateTime={request.created_at}>
-                    {formatTraceDate(request.created_at, timeZone, {
-                      dateStyle: "short",
-                      timeStyle: "medium",
-                    })}
-                  </time>
-                </span>
-                <span className="trace-lane-context">
-                  <span>{request.provider_display}</span>
-                  <code title={request.trace_id || undefined}>
-                    {request.trace_id ? `추적 ${request.trace_id}` : "추적 ID 없음"}
-                  </code>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+      {view === "trace" ? (
+        <div className="trace-timeline-groups" aria-describedby={groupHelpId}>
+          {groupTraceTimeline(timeline.lanes).map((group) => (
+            <TraceTimelineGroup key={group.key} group={group} controls={laneControls} />
+          ))}
+        </div>
+      ) : (
+        <ol className="trace-lanes">
+          {timeline.lanes.map((lane, index) => (
+            <TraceTimelineLane
+              key={lane.request.request_ref}
+              lane={lane}
+              ordinal={index + 1}
+              {...laneControls}
+            />
+          ))}
+        </ol>
+      )}
     </section>
   );
 }

@@ -141,7 +141,11 @@ export function buildTraceTimeline(requests: readonly AppRequestSummary[]): Trac
 }
 
 export function traceCount(requests: readonly AppRequestSummary[]): number {
-  return new Set(requests.map((request) => request.trace_id).filter(Boolean)).size;
+  return new Set(
+    requests
+      .filter((request) => request.trace_filterable && request.trace_id)
+      .map((request) => request.trace_id),
+  ).size;
 }
 
 export function formatTraceDate(

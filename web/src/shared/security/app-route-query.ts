@@ -1,3 +1,4 @@
+import { validTraceTimelineView } from "@/shared/utils/trace-timeline-query";
 import { validSessionPageValue } from "@/shared/utils/session-page-query";
 import { traceRelatedQueryKeys, validTraceRelatedQueryValue } from "@/shared/utils/trace-related-query";
 import { runQueryKeys, validRunSort } from "@/shared/utils/redteam-run-query";
@@ -121,6 +122,11 @@ export function sanitizeAppRouteSearch(
     }
   }
   if (route === "/observability/traces" || route.startsWith("/observability/traces/")) {
+    if (
+      parameters.has("timeline_view") &&
+      (route !== "/observability/traces" || !validTraceTimelineView(parameters.getAll("timeline_view")))
+    )
+      invalidOperationalKeys.add("timeline_view");
     for (const key of traceRelatedQueryKeys) {
       if (
         parameters.has(key) &&

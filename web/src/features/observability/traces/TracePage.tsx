@@ -157,8 +157,11 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
     if (!previousSelectionKey) return;
     if (pendingPageFocusRef.current) return;
     const target = selectionTriggersByKeyRef.current.get(previousSelectionKey);
-    if (target?.isConnected) target.focus();
-    else pageHeadingRef.current?.focus();
+    if (target?.isConnected) {
+      const disclosure = target.closest("details");
+      if (disclosure) disclosure.open = true;
+      target.focus();
+    } else pageHeadingRef.current?.focus();
   }, [selectionKey, selectionPresence]);
 
   useEffect(() => {

@@ -1,0 +1,72 @@
+.trace-timeline-toolbar,
+.trace-group-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.trace-timeline-toolbar button[aria-pressed="true"] {
+  border-color: var(--color-primary);
+  background: var(--color-info-soft);
+  color: var(--color-foreground);
+}
+.trace-group-help {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+.trace-timeline-groups {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.trace-timeline-group {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+}
+.trace-timeline-group > summary {
+  cursor: pointer;
+  padding: var(--space-3);
+  border-radius: var(--radius-small);
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+.trace-timeline-group > summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.trace-group-title {
+  font-weight: 650;
+}
+.trace-group-title code {
+  font-size: 0.875rem;
+}
+.trace-group-metrics {
+  margin-top: var(--space-2);
+  color: var(--color-muted);
+}
+.trace-timeline-group > .trace-lanes {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Align the shared ruler with the actual track inset in each display mode. */
+.trace-timeline > .trace-scale {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-left: 0;
+  padding-inline: calc(var(--space-3) + 1px);
+}
+.trace-timeline[data-timeline-view="trace"] > .trace-scale {
+  padding-inline: calc(var(--space-3) + var(--space-3) + 2px);
+}
+.trace-timeline > .trace-scale > span:first-child {
+  justify-self: start;
+}
+.trace-timeline > .trace-scale > span:nth-child(2) {
+  justify-self: center;
+}
+.trace-timeline > .trace-scale > span:last-child {
+  justify-self: end;
+}
