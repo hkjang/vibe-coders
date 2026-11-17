@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 	"vibe-coders/internal/store"
 )
 
@@ -163,4 +165,34 @@ func TestSessionPageTeamAuthorization(t *testing.T) {
 	}
 	denied := issueLLMScopedTestToken(t, db, server, "denied", "member", "team-a", nil, now)
 	readSessionPage(t, gateway.URL, denied, "", 401)
+}
+
+func TestSessionPageMessagePreviewLengthIncludesEllipsis(t *testing.T) {
+	for _, unit := range []string{"x", "가", "🙂"} {
+		for _, length := range []int{159, 160, 161} {
+			t.Run(fmt.Sprintf("%s-%d", unit, length), func(t *testing.T) {
+				_, db, gateway := newAdminModelsTestServer(t, "preview-admin")
+				now := time.Now().UTC().Add(-time.Minute)
+				input := strings.Repeat(unit, length)
+				if err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: store.RequestLog{ID: "preview-request", SessionID: "preview-session", StatusCode: 200, CreatedAt: now}, Prompts: []store.PromptLog{{ID: "preview-prompt", RequestID: "preview-request", Role: "user", RedactedText: input, CreatedAt: now}}}); err != nil {
+					t.Fatal(err)
+				}
+				var page sessionPageResponse
+				if err := json.Unmarshal(readSessionPage(t, gateway.URL, "preview-admin", "", 200), &page); err != nil {
+					t.Fatal(err)
+				}
+				if len(page.Sessions) != 1 {
+					t.Fatal("missing row")
+				}
+				want := input
+				if length > 160 {
+					want = strings.Repeat(unit, 159) + "…"
+				}
+				got := page.Sessions[0].LastMessage
+				if got != want || utf8.RuneCountInString(got) > 160 {
+					t.Fatalf("preview runes=%d want=%d; ellipsis must fit in the 160-code-point API contract", utf8.RuneCountInString(got), utf8.RuneCountInString(want))
+				}
+			})
+		}
+	}
 }

@@ -129,7 +129,13 @@ func (s *Server) handleSessionPage(w http.ResponseWriter, r *http.Request) {
 		}
 		// Always project stored redacted text, including for raw-prompt admins. Mask
 		// before truncating so a credential cannot be cut into an unrecognized fragment.
-		item.LastMessage = truncateRunes(strings.Join(strings.Fields(audit.Redact(boundedExternalProviderText(row.LastMessage, projection...))), " "), 160)
+		preview := []rune(strings.Join(strings.Fields(audit.Redact(boundedExternalProviderText(row.LastMessage, projection...))), " "))
+		if len(preview) > 160 {
+			// The ellipsis is part of the 160-code-point response contract.
+			item.LastMessage = string(preview[:159]) + "…"
+		} else {
+			item.LastMessage = string(preview)
+		}
 		result.Sessions = append(result.Sessions, item)
 	}
 	writeJSON(w, 200, result)

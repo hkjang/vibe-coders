@@ -267,4 +267,16 @@ describe("기간 전체 세션 탐색", () => {
     expect(new URLSearchParams(sanitized.search).get("page_size")).toBe("50");
     expect(new URLSearchParams(sanitized.search).get("offset")).toBe("250");
   });
+  it.each(["x", "가", "🙂"])("미리보기 %s는 말줄임표를 포함해 160코드포인트까지만 허용한다", (unit) => {
+    for (const value of [unit.repeat(159), unit.repeat(160), unit.repeat(159) + "…"])
+      expect(
+        sessionExplorerPageSchema.safeParse({ ...page, sessions: [{ ...row, last_message: value }] }).success,
+      ).toBe(true);
+    expect(
+      sessionExplorerPageSchema.safeParse({
+        ...page,
+        sessions: [{ ...row, last_message: unit.repeat(160) + "…" }],
+      }).success,
+    ).toBe(false);
+  });
 });

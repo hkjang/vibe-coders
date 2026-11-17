@@ -4,7 +4,13 @@ import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 
 // Embedded Go assets and CSP; management APIs use public synthetic fixtures.
 async function install(page: Page) {
-  const state = { fail: 0, denied: false, reads: [] as URL[], unexpected: [] as string[] };
+  const state = {
+    preview: "마스킹된 질문 미리보기",
+    fail: 0,
+    denied: false,
+    reads: [] as URL[],
+    unexpected: [] as string[],
+  };
   const features = ["observability.sessions", "agents.workflows", "agents.apps"];
   const bootstrap: UiBootstrapResponse = {
     backend_version: "v0.86.153",
@@ -92,7 +98,7 @@ async function install(page: Page) {
         cost_krw: 5,
         first_seen: "2026-11-17T00:00:00Z",
         last_seen: "2026-11-17T01:00:00Z",
-        last_message: "마스킹된 질문 미리보기",
+        last_message: state.preview,
       }));
       return route.fulfill({
         headers: { "Cache-Control": "no-store" },
@@ -199,3 +205,13 @@ for (const empty of [false, true])
         expect((await heading.boundingBox())?.y).toBeGreaterThanOrEqual(56);
         expect(api.unexpected).toEqual([]);
       });
+
+test("160코드포인트의 한글·이모지 미리보기도 목록과 전체 합계를 표시한다", async ({ page }) => {
+  const state = await install(page);
+  state.preview = "가".repeat(80) + "🙂".repeat(79) + "…";
+  await page.goto("observability/sessions");
+  await expect(page.getByText(state.preview, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "다음 세션" })).toBeEnabled();
+  expect(state.reads).toHaveLength(1);
+  expect(state.unexpected).toEqual([]);
+});
