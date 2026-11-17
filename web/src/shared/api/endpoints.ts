@@ -1,4 +1,5 @@
 import { activitySummaryEndpoints } from "./domains/activity-summaries";
+import { contextRegistryEndpoint } from "./domains/context-registry";
 import { z } from "zod";
 import { serviceSummaryEndpoints } from "./domains/service-summaries";
 import { resourceSearchEndpoint } from "@/shared/api/resource-search";
@@ -179,6 +180,7 @@ export const endpoints = {
   admin: {
     serviceSummaries: serviceSummaryEndpoints,
     activitySummaries: activitySummaryEndpoints,
+    contextRegistry: contextRegistryEndpoint,
     resourceSearch: resourceSearchEndpoint,
     stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),
     // The dashboard's two chart sources: totals over time and the weekday/hour heatmap.

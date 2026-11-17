@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -1021,12 +1022,23 @@ runLoop:
 }
 
 func (s *Server) handleContexts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			w.Header().Set("Cache-Control", "no-store")
+			writeOpenAIError(w, 400, "invalid context query", "invalid_request_error", "invalid_context_page")
+			return
+		}
+		if _, ok := query["view"]; ok {
+			s.writeContextMetadata(w, r, query)
+			return
+		}
 		contexts, err := s.db.ListContextRegistry(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "contexts_failed")

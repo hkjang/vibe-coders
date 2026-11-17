@@ -118,6 +118,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	seedBrowserUserFixture(t, db)
 	seedBrowserFinopsFixture(t, db)
 	seedBrowserOverviewFixture(t, db)
+	seedBrowserContextFixture(t, db)
 	seedBrowserRequestBulkFixture(t, db)
 	seedBrowserMcpRiskFixture(t, db)
 	h.verifyMcpCall = seedBrowserMcpCallFixture(t, db)
