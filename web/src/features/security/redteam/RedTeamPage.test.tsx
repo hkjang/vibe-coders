@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { RedTeamPage } from "@/features/security/redteam/RedTeamPage";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
@@ -255,7 +256,15 @@ const emptyHandlers = {
   "GET /admin/redteam/schedules": () => ({ schedules: [], count: 0, note: "" }),
 } satisfies Record<string, ApiHandler>;
 
-const renderPage = (route = "/redteam") => renderScreen(<RedTeamPage />, { route, path: "/redteam" });
+const renderPage = (route = "/redteam") =>
+  renderScreen(
+    <FeatureAccessContext.Provider
+      value={{ featureId: "security.redteam", permitted: true, readOnly: false }}
+    >
+      <RedTeamPage />
+    </FeatureAccessContext.Provider>,
+    { route, path: "/redteam" },
+  );
 
 describe("RedTeamPage", () => {
   beforeEach(() => {
@@ -279,7 +288,7 @@ describe("RedTeamPage", () => {
     expect(within(failing).getByText("provider:openai")).toBeVisible();
     const drift = screen.getByRole("table", { name: "기준선 대비 위험 점수가 상승한 대상" });
     expect(within(drift).getByText("10 → 70")).toBeVisible();
-    expect(screen.getByText("킬 스위치: 꺼짐")).toBeVisible();
+    expect(screen.getByText("긴급 중지 해제")).toBeVisible();
 
     const results = await axe.run(view.container);
     expect(results.violations).toHaveLength(0);
@@ -328,19 +337,15 @@ describe("RedTeamPage", () => {
     const create = await screen.findByRole("button", { name: /캠페인 만들기/ });
     expect(create).toBeDisabled();
     expect(create).toHaveAttribute("title", "쓰기 권한(admin:write)이 없어 사용할 수 없습니다.");
-    expect(screen.getByRole("button", { name: "전체 중지(킬 스위치)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "레드팀 처리 중지 검토" })).toBeDisabled();
   });
 
-  it("킬 스위치는 확인 후 enabled=true 로 호출한다", async () => {
-    const api = mockApi(listHandlers({ "POST /admin/redteam/kill-switch": () => ({ enabled: true }) }));
-    const user = userEvent.setup();
+  it("구형 서버는 중지 상태만 조회하고 미지원 변경을 보내지 않는다", async () => {
+    const api = mockApi(listHandlers());
     renderPage();
-
-    await user.click(await screen.findByRole("button", { name: "전체 중지(킬 스위치)" }));
-    expect(await screen.findByRole("heading", { name: "레드팀 전체 중지" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "전체 중지" }));
-
-    await waitFor(() => expect(api.bodies("POST /admin/redteam/kill-switch")).toEqual([{ enabled: true }]));
+    expect(await screen.findByText("서버의 안전한 변경 검토 지원이 필요합니다.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "레드팀 처리 중지 검토" })).toBeDisabled();
+    expect(api.bodies("POST /admin/redteam/kill-switch")).toEqual([]);
   });
 
   it("캠페인 삭제는 확인 후 해당 캠페인 경로로 DELETE 한다", async () => {

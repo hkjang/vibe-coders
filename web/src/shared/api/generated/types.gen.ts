@@ -2585,6 +2585,24 @@ export type ReadyResponse = {
     status: 'ready';
 };
 
+export type RedTeamEmergencyChangeRequest = {
+    enabled?: boolean | null;
+    expected_review_token?: string | null;
+    reason?: string | null;
+} | null;
+
+export type RedTeamEmergencyState = {
+    enabled: boolean;
+    instance_ref: string;
+    observed_at: string;
+    /**
+     * Trimmed reason echoed only in the change acknowledgment, not stored in process memory for GET
+     */
+    reason?: string;
+    review_token: string;
+    scope: 'responding_process';
+};
+
 export type RegisteredTeam = {
     created_at: string;
     id: string;
@@ -10518,26 +10536,68 @@ export type GetAdminRedteamKillSwitchData = {
     url: '/admin/redteam/kill-switch';
 };
 
+export type GetAdminRedteamKillSwitchErrors = {
+    /**
+     * redteam_review_unavailable: no safe review token could be prepared; no change applied
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRedteamKillSwitchError = GetAdminRedteamKillSwitchErrors[keyof GetAdminRedteamKillSwitchErrors];
+
 export type GetAdminRedteamKillSwitchResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RedTeamEmergencyState;
 };
 
+export type GetAdminRedteamKillSwitchResponse = GetAdminRedteamKillSwitchResponses[keyof GetAdminRedteamKillSwitchResponses];
+
 export type PostAdminRedteamKillSwitchData = {
-    body?: never;
+    body: RedTeamEmergencyChangeRequest;
     path?: never;
     query?: never;
     url: '/admin/redteam/kill-switch';
 };
 
+export type PostAdminRedteamKillSwitchErrors = {
+    /**
+     * invalid_body or redteam_review_required: reviewed changes require an explicit state, nonempty reason and 32-character review token
+     */
+    400: AppError;
+    /**
+     * redteam_review_conflict: reviewed process or state revision changed
+     */
+    409: AppError;
+    /**
+     * redteam_kill_audit_failed: audit acknowledgment failed; flag not applied; read and review again, never blindly replay
+     */
+    500: AppError;
+    /**
+     * redteam_review_unavailable: no safe review token could be prepared; no change applied
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRedteamKillSwitchError = PostAdminRedteamKillSwitchErrors[keyof PostAdminRedteamKillSwitchErrors];
+
 export type PostAdminRedteamKillSwitchResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RedTeamEmergencyState;
 };
+
+export type PostAdminRedteamKillSwitchResponse = PostAdminRedteamKillSwitchResponses[keyof PostAdminRedteamKillSwitchResponses];
 
 export type DeleteAdminRedteamProbeCasesData = {
     body?: never;

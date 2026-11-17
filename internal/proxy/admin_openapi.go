@@ -127,7 +127,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/remediation/playbooks", []string{"get"}, "admin", "Auto-remediation action candidates (dry-run/impact)", false},
 	{"/admin/remediation/apply", []string{"post"}, "admin", "Apply an approved reversible remediation action (audited, rollback)", false},
 	{"/admin/redteam/dashboard", []string{"get"}, "redteam", "Red Team dashboard: risk rollup, target×pack result matrix, top failing targets, baseline drift", false},
-	{"/admin/redteam/kill-switch", []string{"get", "post"}, "redteam", "Red Team global runner kill switch (halt all active runs)", false},
+	{"/admin/redteam/kill-switch", []string{"get", "post"}, "redteam", "Red Team responding-process admission control", false},
 	{"/admin/redteam/targets", []string{"get"}, "redteam", "Red Team target inventory collected from registered providers/MCP/Text2SQL/apps/workflows", false},
 	{"/admin/redteam/targets/{id}", []string{"get"}, "redteam", "Red Team target detail", false},
 	{"/admin/redteam/probe-packs", []string{"get", "post"}, "redteam", "Red Team probe pack registry", false},
@@ -797,6 +797,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichCostGuardOpenAPIOperation(method, op, responses)
 	case "get /admin/kill-switch", "post /admin/kill-switch":
 		enrichKillSwitchOpenAPIOperation(method, op, responses)
+	case "get /admin/redteam/kill-switch", "post /admin/redteam/kill-switch":
+		enrichRedTeamEmergencyOpenAPI(method, op, responses)
 	case "get /admin/text2sql/kill-switch", "post /admin/text2sql/kill-switch":
 		enrichText2SQLEmergencyOpenAPI(method, op, responses)
 	case "get /admin/requests/{id}/note", "post /admin/requests/{id}/note", "put /admin/requests/{id}/note", "patch /admin/requests/{id}/note", "delete /admin/requests/{id}/note":
@@ -1184,6 +1186,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range killSwitchOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range redTeamEmergencyOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range text2SQLEmergencyOpenAPISchemas() {
