@@ -25,7 +25,7 @@ import (
 // keep the simulation. Destructive/high-risk MCP surfaces are NEVER invoked here. A global kill
 // switch and the campaign budget guard can abort the run mid-flight.
 
-// redteamKillSwitch blocks new runs and subsequent case admissions in this process.
+// redteamKillSwitch blocks new runs and subsequent model-call admissions in this process.
 // It neither cancels an already dispatched upstream call nor changes another process.
 var redteamKillSwitch atomic.Bool
 
@@ -401,6 +401,11 @@ func (s *Server) rerunRedTeamCaseLive(r *http.Request, resultID, proxyKey string
 // Evaluator. It mirrors evaluateRedTeamCase's return shape so the runner can treat both uniformly.
 // The returned invoked=false means the live call failed and the caller should fall back.
 func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache, forcedModel string) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
+	return s.evaluateRedTeamCaseActiveGuarded(r, proxyKey, t, pack, cs, c, cache, forcedModel, nil)
+}
+
+// The campaign runner rechecks admission after potentially slow model discovery.
+func (s *Server) evaluateRedTeamCaseActiveGuarded(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache, forcedModel string, admit func() bool) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
 	var model, provider string
 	var ok bool
 	// A forced model (from the campaign's model selection) is used directly for provider/model
@@ -418,7 +423,7 @@ func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t s
 	} else {
 		model, provider, ok = s.resolveRedTeamModel(r, proxyKey, t, cache)
 	}
-	if !ok {
+	if (admit != nil && !admit()) || !ok {
 		return store.RedTeamCaseResult{}, store.RedTeamEvidence{}, store.RedTeamRemediation{}, false
 	}
 	prompt := redTeamRenderTemplate(cs.InputTemplate, t, pack)
