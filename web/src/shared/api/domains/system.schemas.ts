@@ -1,6 +1,10 @@
 import { z } from "zod";
-
 import { acknowledgementSchema, looseList, looseObject, numberish, unknownRecord } from "@/shared/api/loose";
+
+export const auditCsvQuerySchema = z.object({ limit: z.number().int().min(1).max(10000).optional() });
+export const auditCsvSchema = z
+  .string()
+  .refine((value) => /^\uFEFF?created_at,kind,actor,action,detail_before,detail_after\r?\n/u.test(value));
 
 // Response contracts for the system domain. The legacy admin API documents no
 // response schemas, so these declare only the fields the screens render and let

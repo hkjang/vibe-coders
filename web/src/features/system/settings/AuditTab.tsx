@@ -1,10 +1,11 @@
 import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { Download } from "lucide-react";
-import { useState } from "react";
+import { useRef } from "react";
+import { useAuditCsvDownload } from "./use-audit-csv-download";
+import { useFeatureReadOwner, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import { useAuditLogs, useAuthEvents } from "@/features/system/settings/use-system-settings";
-import { tokenStore } from "@/shared/auth/token-store";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -15,37 +16,34 @@ import { useSearchState } from "@/shared/hooks/use-search-state";
 import { formatDateTime } from "@/shared/utils/format";
 
 const limitOptions = ["50", "100", "200"] as const;
-const csvLimit = 5000;
-
-async function downloadAuditCsv(): Promise<void> {
-  const token = tokenStore.getAccessToken() || tokenStore.getLegacyToken();
-  const response = await fetch(`/admin/audit-logs.csv?limit=${csvLimit}`, {
-    headers: {
-      Accept: "text/csv",
-      "X-Vibe-UI": "app",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `audit-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+export function AuditTab(): React.JSX.Element {
+  const owner = useFeatureReadOwner("system.settings", "audit-workspace");
+  if (!owner.readable || owner.denied)
+    return (
+      <InlineNotice
+        tone="danger"
+        title="감사 기록 조회 권한 확인 필요"
+        actions={owner.readable ? <Button onClick={owner.restart}>권한 확인 후 다시 조회</Button> : undefined}
+      >
+        이전 기록과 진행 중인 다운로드를 폐기했습니다. 관리자에게 admin:read 권한과 시스템 설정 접근 조건을
+        확인해 달라고 요청하세요.
+      </InlineNotice>
+    );
+  return <AuditWorkspace key={owner.id} owner={owner} />;
 }
 
-export function AuditTab(): React.JSX.Element {
+function AuditWorkspace({ owner }: { owner: FeatureReadOwner }): React.JSX.Element {
   const [params, updateParams] = useSearchState();
   const requestedLimit = params.get("limit") ?? "";
   const limit = (limitOptions as readonly string[]).includes(requestedLimit) ? requestedLimit : "50";
-  const logs = useAuditLogs(Number(limit));
-  const events = useAuthEvents(Number(limit));
-  const [downloadError, setDownloadError] = useState<string | undefined>();
-  const [downloading, setDownloading] = useState(false);
+  const logs = useAuditLogs(Number(limit), owner);
+  const events = useAuthEvents(Number(limit), owner);
+  const download = useAuditCsvDownload(owner);
+  const downloadButton = useRef<HTMLButtonElement>(null);
+  const cancelDownload = () => {
+    download.cancel();
+    window.requestAnimationFrame(() => downloadButton.current?.focus());
+  };
 
   const logRows = logs.data?.audit_logs ?? [];
   const eventRows = events.data?.events ?? [];
@@ -56,15 +54,10 @@ export function AuditTab(): React.JSX.Element {
         label="변경 이력 필터"
         end={
           <Button
+            ref={downloadButton}
             size="small"
-            disabled={downloading}
-            onClick={() => {
-              setDownloading(true);
-              setDownloadError(undefined);
-              void downloadAuditCsv()
-                .catch(() => setDownloadError("감사 로그 CSV를 내려받지 못했습니다."))
-                .finally(() => setDownloading(false));
-            }}
+            disabled={download.pending}
+            onClick={() => void download.start()}
           >
             <Download aria-hidden="true" /> 감사 로그 CSV 다운로드
           </Button>
@@ -82,15 +75,35 @@ export function AuditTab(): React.JSX.Element {
         </label>
       </Toolbar>
 
-      {downloadError ? (
-        <InlineNotice tone="danger" title="다운로드 실패">
-          {downloadError}
+      {download.pending ? (
+        <InlineNotice
+          title="감사 로그 CSV 준비 중"
+          actions={
+            <Button size="small" onClick={cancelDownload}>
+              다운로드 취소
+            </Button>
+          }
+        >
+          감사 기록과 알림 기록을 각각 최대 5,000건 조회합니다. 화면을 떠나면 다운로드를 취소합니다.
+        </InlineNotice>
+      ) : null}
+      {download.error ? (
+        <QueryNotice
+          error={download.error}
+          hasPreviousData={false}
+          label="감사 로그 CSV 다운로드"
+          onRetry={() => void download.start()}
+        />
+      ) : null}
+      {download.complete ? (
+        <InlineNotice tone="success" title="CSV 다운로드 시작">
+          브라우저 다운로드 목록에서 파일을 확인하세요.
         </InlineNotice>
       ) : null}
 
       <SectionCard
         title="관리자 변경 이력"
-        headingLevel={3}
+        headingLevel={2}
         description="설정과 자원 변경을 남긴 감사 기록입니다."
       >
         {logs.isError ? (
@@ -146,7 +159,7 @@ export function AuditTab(): React.JSX.Element {
 
       <SectionCard
         title="최근 인증 이벤트"
-        headingLevel={3}
+        headingLevel={2}
         description="로그인·SSO·토큰 관련 인증 기록입니다."
       >
         {events.isError ? (

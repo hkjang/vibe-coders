@@ -379,6 +379,12 @@ func validSavedTimezone(value string) bool {
 // ---------- audit CSV ----------
 
 func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -386,7 +392,7 @@ func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
 	limit := exportLimit(r)
 	audits, err := s.db.ListAdminAudit(r.Context(), limit)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "audit_export_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "failed to load audit export", "server_error", "audit_export_failed")
 		return
 	}
 	showRaw := s.canViewRawPrompts(r)
@@ -395,7 +401,7 @@ func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := s.db.ListAlertEvents(r.Context(), limit)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "audit_export_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "failed to load audit export", "server_error", "audit_export_failed")
 		return
 	}
 
@@ -407,7 +413,7 @@ func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
 	wr := csv.NewWriter(w)
 	_ = wr.Write([]string{"created_at", "kind", "actor", "action", "detail_before", "detail_after"})
 	for _, a := range audits {
-		_ = wr.Write([]string{a.CreatedAt, "admin_audit", a.AdminID, a.Action, a.BeforeValue, a.AfterValue})
+		_ = wr.Write([]string{a.CreatedAt, "admin_audit", csvTextCell(a.AdminID), csvTextCell(a.Action), csvTextCell(a.BeforeValue), csvTextCell(a.AfterValue)})
 	}
 	for _, e := range events {
 		detail := fmt.Sprintf("rule=%s metric=%s value=%.2f threshold=%.2f delivered=%t err=%s",
@@ -418,7 +424,7 @@ func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
 			actor = audit.Redact(boundedExternalProviderText(actor, projectionArgs...))
 			detail = audit.Redact(boundedExternalProviderText(detail, projectionArgs...))
 		}
-		_ = wr.Write([]string{e.CreatedAt.UTC().Format(time.RFC3339), "alert_event", actor, "alert.fire", "", detail})
+		_ = wr.Write([]string{e.CreatedAt.UTC().Format(time.RFC3339), "alert_event", csvTextCell(actor), "alert.fire", "", csvTextCell(detail)})
 	}
 	wr.Flush()
 }
