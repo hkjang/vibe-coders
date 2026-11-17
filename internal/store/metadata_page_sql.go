@@ -39,7 +39,10 @@ func (s *SQLStore) metadataLowerSQL(expression string) string {
 // Both supported databases implement these string operations; unlike a native
 // timestamp cast, this retains every stored nanosecond on PostgreSQL as well.
 func metadataTimestampOrderSQL(field string) string {
-	return "(SUBSTR(" + field + ", 1, 19) || '.' || SUBSTR(SUBSTR(REPLACE(" + field + ", 'Z', ''), 21) || '000000000', 1, 9))"
+	// Keep PostgreSQL's explicit operator grouping, including the expression-index
+	// wrapper, so its catalog definition and SQLite's original SQL have the same
+	// index-drift signature. The operations and nanosecond ordering are unchanged.
+	return "(((SUBSTR(" + field + ", 1, 19) || '.') || SUBSTR((SUBSTR(REPLACE(" + field + ", 'Z', ''), 21) || '000000000'), 1, 9)))"
 }
 
 // Retain the ordinary created_at index before applying precise nanosecond
