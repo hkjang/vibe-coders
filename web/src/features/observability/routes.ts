@@ -45,7 +45,7 @@ export const observabilityFeatureModules = defineFeatureModules([
   {
     featureId: "observability.sessions",
     load: () => import("@/features/observability/sessions/SessionPage").then((module) => module.SessionPage),
-    queryKeys: ["days", "q", "session_id"],
+    queryKeys: ["days", "q", "session_id", "page_size", "offset"],
   },
   {
     featureId: "observability.io",

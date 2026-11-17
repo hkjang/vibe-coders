@@ -281,7 +281,7 @@ jobs:
       - name: Verify PostgreSQL 200k-row plans and oversized legacy upgrade
         run: go test ./internal/store -run '^(TestAppRecentRequestsPostgresNaturalPlannerAtScale|TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys)$' -count=1 -timeout=5m
       - name: Verify PostgreSQL trace execution metadata, scope and bounded pages
-        run: go test -race ./internal/store ./internal/proxy -run 'TestTrace(RunPage|RelatedRuns)' -count=1
+        run: go test -race ./internal/store ./internal/proxy -run 'TestTrace(RunPage|RelatedRuns)|TestSessionPage' -count=1
       - name: Verify PostgreSQL safe trace flow privacy, scope and natural query plans
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestAppRequestFlow' -count=1 -timeout=7m
       - name: Verify PostgreSQL request input/output order, bounds and team scope
@@ -399,7 +399,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.152
+      SOURCE_SBOM_VERSION: v0.86.153
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

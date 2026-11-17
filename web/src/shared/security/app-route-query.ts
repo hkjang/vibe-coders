@@ -1,3 +1,4 @@
+import { validSessionPageValue } from "@/shared/utils/session-page-query";
 import { traceRelatedQueryKeys, validTraceRelatedQueryValue } from "@/shared/utils/trace-related-query";
 import { runQueryKeys, validRunSort } from "@/shared/utils/redteam-run-query";
 import { validContextSort } from "@/shared/utils/context-registry-query";
@@ -132,6 +133,12 @@ export function sanitizeAppRouteSearch(
         parameters.has(key) &&
         (route !== "/observability/traces" || !isValidTraceStepFilter(key, parameters.getAll(key)))
       )
+        invalidOperationalKeys.add(key);
+    }
+  }
+  if (route === "/observability/sessions") {
+    for (const key of ["page_size", "offset"]) {
+      if (parameters.has(key) && !validSessionPageValue(key, parameters.getAll(key)))
         invalidOperationalKeys.add(key);
     }
   }

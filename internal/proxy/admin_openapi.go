@@ -109,6 +109,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/productivity", []string{"get"}, "admin", "AI usage vs delivery (VCS commits/MRs) correlation per repo", false},
 	{"/admin/apps/onboarding-check", []string{"post"}, "admin", "Pre-publish onboarding readiness checklist for an AI app draft", false},
 	{"/admin/mcp/onboarding-check", []string{"post"}, "admin", "Pre-register onboarding readiness checklist for an MCP upstream draft", false},
+	{"/admin/sessions/page", []string{"get"}, "observability", "Team-scoped session search, totals and server pagination", false},
 	{"/admin/sessions", []string{"get"}, "admin", "Recent coding sessions (flight-recorder index)", false},
 	{"/admin/sessions/{session_id}/flight-recorder", []string{"get"}, "admin", "Chronological flight recorder for one agent session", false},
 	{"/admin/requests/diff", []string{"get"}, "admin", "Diff two requests", false},
@@ -703,6 +704,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichTeamConsoleOpenAPI(route, strings.ToLower(method), op, responses)
 	case "get /admin/export.csv":
 		enrichPromptExportOpenAPI(op, responses)
+	case "get /admin/sessions/page":
+		enrichSessionPageOpenAPI(op, responses)
 	case "get /admin/traces/{trace_id}/runs":
 		enrichTraceRelatedRunsOpenAPI(op, responses)
 	case "get /admin/audit-logs.csv":
@@ -1175,6 +1178,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range accountPageOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range sessionPageSchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range traceRelatedRunSchemas() {
