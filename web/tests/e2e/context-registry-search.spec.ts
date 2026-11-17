@@ -121,7 +121,7 @@ for (const version of ["v0.86.130", "v0.86.134"]) {
       expect(fixture.reads).toEqual([]);
       await page.getByRole("button", { name: "조회 조건 초기화" }).click();
       await expect(page.getByRole("table")).toBeVisible();
-      expect(fixture.reads.length).toBeGreaterThan(0);
+      await expect.poll(() => fixture.reads.length).toBeGreaterThan(0);
       expect(fixture.reads.every((q) => !q.has("q") && !q.has("sort"))).toBe(true);
       fixture.check();
     });

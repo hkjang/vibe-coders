@@ -10,6 +10,11 @@ import {
   mutationCount,
 } from "./fixtures/routing-delete";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 const dialogFor = (page: Page) => page.getByRole("dialog", { name: "라우팅 규칙 삭제", exact: true });
 const phraseFor = (dialog: Locator) => dialog.getByRole("textbox", { name: "삭제 확인 문구", exact: true });
 const activeFor = (dialog: Locator) =>
@@ -224,7 +229,7 @@ test("390px 다크 화면의 삭제 확인을 키보드로 읽고 접근성 오�
   await page.keyboard.press("Tab");
   expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as {

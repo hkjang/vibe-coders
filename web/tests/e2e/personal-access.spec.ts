@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import type axe from "axe-core";
 import { accessSession, installPersonalAccess } from "../fixtures/personal-access-browser";
+
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
 async function violations(page: Page) {
   return page.evaluate(async () => {
     await Promise.all(
@@ -129,7 +134,7 @@ for (const theme of ["light", "dark"] as const) {
       await page.getByRole("button", { name: "설정 불러오기" }).click();
       await page.getByRole("button", { name: "진단 실행" }).click();
       await expect(page.getByText("브라우저 로그인 설정 검사", { exact: false })).toBeVisible();
-      await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
       await expect.poll(() => violations(page)).toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(
         true,

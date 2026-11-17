@@ -2,6 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 import type axe from "axe-core";
 import { installTeamPortal, teamReport } from "../fixtures/team-portal-browser";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 async function openReview(page: Page) {
   await page.getByRole("button", { name: "승인", exact: true }).first().click();
   return page.getByRole("dialog", { name: "리포트 승인" });
@@ -135,7 +140,7 @@ for (const theme of ["light", "dark"] as const) {
       const fixture = await installTeamPortal(page);
       await page.goto("team");
       const dialog = await openReview(page);
-      await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
       await expect.poll(() => violations(page)).toEqual([]);
       await expect(dialog.getByRole("button", { name: "취소" })).toBeInViewport();
       await page.screenshot({ path: info.outputPath("team-review.png") });

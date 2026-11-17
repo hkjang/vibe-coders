@@ -1,3 +1,4 @@
+import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { Plus } from "lucide-react";
 import type { RefObject } from "react";
 import type { ChangeSet } from "@/shared/api/domains/system.schemas";
@@ -94,9 +95,9 @@ export function ChangeSetList({
               <tbody>
                 {changeSets.isPending ? (
                   <tr>
-                    <td colSpan={7} className="data-table-state">
+                    <TableStateCell colSpan={7}>
                       <span role="status">변경 세트를 불러오는 중입니다.</span>
-                    </td>
+                    </TableStateCell>
                   </tr>
                 ) : (
                   rows.map((row: ChangeSet) => (

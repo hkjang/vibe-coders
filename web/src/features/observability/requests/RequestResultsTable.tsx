@@ -1,3 +1,4 @@
+import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { useMemo, useRef, useState } from "react";
 import { Columns3, MoveHorizontal } from "lucide-react";
 import type { AppRequestSummary, AppRequestsResponse } from "@/shared/api/schemas";
@@ -207,9 +208,9 @@ export function RequestResultsTable({
                 })
               ) : (
                 <tr>
-                  <td className="data-table-state" colSpan={layout.visibleColumnCount + (selecting ? 2 : 1)}>
+                  <TableStateCell colSpan={layout.visibleColumnCount + (selecting ? 2 : 1)}>
                     조건에 맞는 요청이 없습니다. 기간이나 필터를 조정해 보세요.
-                  </td>
+                  </TableStateCell>
                 </tr>
               )}
             </tbody>

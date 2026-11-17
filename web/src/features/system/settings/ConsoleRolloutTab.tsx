@@ -1,3 +1,4 @@
+import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSearchState } from "@/shared/hooks/use-search-state";
@@ -311,11 +312,11 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
             <tbody>
               {featureRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="data-table-state">
+                  <TableStateCell colSpan={6}>
                     {settingsQuery.isPending
                       ? "콘솔 전환 설정을 불러오는 중입니다."
                       : "전환 설정을 제공하는 기능이 없습니다."}
-                  </td>
+                  </TableStateCell>
                 </tr>
               ) : (
                 featureRows.map((row) => {

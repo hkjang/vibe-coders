@@ -11,6 +11,11 @@ import {
   type LLMReadOwnerGateway,
 } from "../fixtures/llm-read-owner-gateway";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 // Actual browser AuthProvider/ApiClient plus synthetic HTTP; not Go/IdP/SQL proof.
 // Do not run until the root's frozen build and pinned-browser signal are ready.
 // Principal replacement is conservative ownership coverage, not a claim that an
@@ -154,7 +159,7 @@ test("390px 다크 화면에서 note403 뒤 명시적 새 조회·계속 편집�
   expect(count(gateway, "POST", "/auth/refresh")).toBe(1);
   await expect(refresh(page)).toBeFocused();
   await noOverflow(page);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as {

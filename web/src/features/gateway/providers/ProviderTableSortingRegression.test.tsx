@@ -324,35 +324,41 @@ describe("independent ProviderPage local table controls", () => {
     expectReadOnlyTransport(calls);
   });
 
-  it("applies a Korean multi-sort draft once, restores history and keeps header sorting single-column", async () => {
-    const user = userEvent.setup();
-    const { calls, router } = await mount("/gateway/providers?sort=name_desc&page_size=25&page=2");
-    const trigger = screen.getByRole("button", { name: "다중 정렬" });
-    await user.click(trigger);
-    await user.selectOptions(screen.getByRole("combobox", { name: "1순위 정렬 열" }), "failover");
-    await user.selectOptions(screen.getByRole("combobox", { name: "1순위 정렬 방향" }), "desc");
-    await user.click(screen.getByRole("button", { name: "정렬 기준 추가" }));
-    await user.selectOptions(screen.getByRole("combobox", { name: "2순위 정렬 열" }), "timeout");
-    await user.selectOptions(screen.getByRole("combobox", { name: "2순위 정렬 방향" }), "asc");
-    expect(params(router).get("sort")).toBe("name_desc");
-    await user.click(screen.getByRole("button", { name: "정렬 적용" }));
-    await waitFor(() => expect(trigger).toHaveFocus());
-    expect(params(router).get("sort")).toBe("priority_desc,timeout_asc");
-    expect(params(router).get("page")).toBeNull();
-    expect(params(router).get("page_size")).toBe("25");
-    expect(names().slice(0, 2)).toEqual(["z-late-zero", "a-late-slow"]);
-    await act(async () => {
-      await router.navigate(-1);
-    });
-    expect(params(router).get("sort")).toBe("name_desc");
-    expect(params(router).get("page")).toBe("2");
-    await act(async () => {
-      await router.navigate(1);
-    });
-    await sortOnce(user, "우선순위", "asc");
-    expect(params(router).get("sort")).toBe("priority_asc");
-    expectReadOnlyTransport(calls);
-  });
+  // Multiple interactions over 25/50 jsdom rows need headroom under parallel CI load.
+  // The timeout is scoped to these two sequences; all behavior assertions remain.
+  it(
+    "applies a Korean multi-sort draft once, restores history and keeps header sorting single-column",
+    { timeout: 10_000 },
+    async () => {
+      const user = userEvent.setup();
+      const { calls, router } = await mount("/gateway/providers?sort=name_desc&page_size=25&page=2");
+      const trigger = screen.getByRole("button", { name: "다중 정렬" });
+      await user.click(trigger);
+      await user.selectOptions(screen.getByRole("combobox", { name: "1순위 정렬 열" }), "failover");
+      await user.selectOptions(screen.getByRole("combobox", { name: "1순위 정렬 방향" }), "desc");
+      await user.click(screen.getByRole("button", { name: "정렬 기준 추가" }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "2순위 정렬 열" }), "timeout");
+      await user.selectOptions(screen.getByRole("combobox", { name: "2순위 정렬 방향" }), "asc");
+      expect(params(router).get("sort")).toBe("name_desc");
+      await user.click(screen.getByRole("button", { name: "정렬 적용" }));
+      await waitFor(() => expect(trigger).toHaveFocus());
+      expect(params(router).get("sort")).toBe("priority_desc,timeout_asc");
+      expect(params(router).get("page")).toBeNull();
+      expect(params(router).get("page_size")).toBe("25");
+      expect(names().slice(0, 2)).toEqual(["z-late-zero", "a-late-slow"]);
+      await act(async () => {
+        await router.navigate(-1);
+      });
+      expect(params(router).get("sort")).toBe("name_desc");
+      expect(params(router).get("page")).toBe("2");
+      await act(async () => {
+        await router.navigate(1);
+      });
+      await sortOnce(user, "우선순위", "asc");
+      expect(params(router).get("sort")).toBe("priority_asc");
+      expectReadOnlyTransport(calls);
+    },
+  );
 
   it("preserves default ties under descending priority and restores the original order", async () => {
     const user = userEvent.setup();
@@ -381,13 +387,27 @@ describe("independent ProviderPage local table controls", () => {
     expectReadOnlyTransport(calls);
   });
 
-  it("uses 10/25/50 local rows and restores sort and page-size history without refetching", async () => {
+  it("uses 10/25/50 local rows without refetching", async () => {
     const user = userEvent.setup();
     const { calls, router } = await mount();
     expect(sizeControl()).toHaveValue("10");
     await user.selectOptions(sizeControl(), "25");
     expect(links()).toHaveLength(25);
     expect(params(router).get("page_size")).toBe("25");
+    await user.selectOptions(sizeControl(), "50");
+    expect(links()).toHaveLength(50);
+    expect(params(router).get("page_size")).toBe("50");
+    await user.selectOptions(sizeControl(), "10");
+    expect(links()).toHaveLength(10);
+    expect(params(router).get("page_size")).toBeNull();
+    expectReadOnlyTransport(calls);
+  });
+
+  it("restores sort and page-size history without refetching", { timeout: 10_000 }, async () => {
+    const user = userEvent.setup();
+    const { calls, router } = await mount("/gateway/providers?page_size=25");
+    expect(sizeControl()).toHaveValue("25");
+    expect(links()).toHaveLength(25);
     await user.selectOptions(sizeControl(), "50");
     expect(links()).toHaveLength(50);
     await sortOnce(user, "제한 시간", "asc");
@@ -405,9 +425,7 @@ describe("independent ProviderPage local table controls", () => {
       await router.navigate(1);
     });
     await waitFor(() => expect(sizeControl()).toHaveValue("50"));
-    await user.selectOptions(sizeControl(), "10");
-    expect(links()).toHaveLength(10);
-    expect(params(router).get("page_size")).toBeNull();
+    expect(links()).toHaveLength(50);
     expectReadOnlyTransport(calls);
   });
 

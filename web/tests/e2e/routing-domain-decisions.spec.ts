@@ -9,6 +9,11 @@ import {
   rawDecisionMarker,
 } from "./fixtures/routing-domain-decisions";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 const sectionFor = (page: Page) =>
   page
     .locator("section.section-card")
@@ -368,7 +373,7 @@ test("390px 다크 결정 상세는 제목·키보드·고정 하단·포커스 
     }),
   ).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as {

@@ -1,6 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 import { modelPath, ordinaryIds, test } from "../fixtures/model-catalog-sorting-gateway";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 // Independent additions only. The original eight scenarios and synthetic fixture
 // remain unchanged; no application internals or live gateway are used here.
 const caption = "공급자별 모델 상태, 품질과 가격";
@@ -206,7 +211,7 @@ test("390px 다크에서 공급자 한글 정렬과 10·25·50건 선택을 키�
   expect(params(page).get("page_size")).toBeNull();
   expect(params(page).get("sort")).toBe("provider_desc");
   await expect(page.getByText("정렬: 공급자 내림차순", { exact: true })).toBeVisible();
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: unknown[] }> } }

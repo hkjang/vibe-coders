@@ -9,6 +9,11 @@ import {
   reportFor,
 } from "./fixtures/routing-learning-create";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 const dialogFor = (page: Page) =>
   page.getByRole("dialog", { name: "학습 추천으로 규칙 만들기", exact: true });
 const finalFor = (dialog: Locator) => dialog.getByRole("button", { name: "규칙 만들기", exact: true });
@@ -259,7 +264,7 @@ test("390px 다크 화면에서 한글 검토와 동의를 키보드로 읽고 �
     }),
   ).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as {

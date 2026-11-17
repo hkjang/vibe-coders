@@ -1,6 +1,11 @@
 import { expect, type Download, type Page } from "@playwright/test";
 import { test } from "../fixtures/provider-catalog-sorting-gateway";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 const table = (page: Page) => page.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
 async function ready(page: Page) {
   await expect(table(page)).toBeVisible();
@@ -87,7 +92,7 @@ test("390px 다크에서 세 기준과 적용 버튼이 보이고 키보드 초�
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(844);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   expect(
     await page.evaluate(
       async () =>
