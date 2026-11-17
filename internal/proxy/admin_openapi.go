@@ -662,6 +662,19 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichPromptProductMetadataOpenAPI(op, responses)
 	case "get /admin/apps":
 		enrichWorkAppPageOpenAPI(op, responses)
+	case "post /admin/workflows/{id}/publish":
+		enrichWorkflowGraphPublishOpenAPI(op, responses)
+	case "get /admin/workflows/{id}/versions":
+		op["description"] = "Immutable published definition snapshots, newest first, including complete graph flow when present. These snapshots do not select the execution version. Requires existing admin read authorization."
+		responses["200"] = successResponse("WorkflowPublishedVersions")
+	case "get /v1/workflow-runs/{run_id}/receipt":
+		op["description"] = "Existing authenticated owner's execution receipt. No raw input, output, SQL or tool arguments. Steps are actual execution order; graph runs additionally include stable step_id, zero-based definition_index, and the selected condition branch. Missing graph metadata identifies historical sequence runs. Missing run 404; another owner's run 403."
+		responses["200"] = successResponse("WorkflowExecutionReceipt")
+		for _, code := range []string{"400", "401", "403", "404", "500"} {
+			responses[code] = map[string]any{"description": "Receipt authorization, address or lookup error.", "content": jsonContent(schemaRef("AppError"))}
+		}
+	case "post /admin/workflows":
+		enrichWorkflowGraphWriteOpenAPI(op, responses)
 	case "get /admin/workflows":
 		enrichWorkflowPageOpenAPI(op, responses)
 	case "get /me/app-runs":
@@ -1184,6 +1197,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range traceRelatedRunSchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range workflowGraphOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range workflowPageOpenAPISchemas() {

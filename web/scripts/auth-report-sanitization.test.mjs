@@ -24,6 +24,10 @@ const markers = [
 ];
 const sensitive = markers.join(" ");
 const allowedScenarios = [
+  "WORKFLOW-GRAPH-LIVE-001",
+  "WORKFLOW-GRAPH-LIVE-002",
+  "WORKFLOW-GRAPH-LIVE-003",
+  "WORKFLOW-GRAPH-LIVE-004",
   "ROUTING-DRAFT-LIVE-001",
   "ROUTING-DRAFT-LIVE-002",
   "ROUTING-DRAFT-LIVE-003",
@@ -185,11 +189,13 @@ async function report(rows, status = "failed", product = false, reporterOptions 
     assert.deepEqual(await readdir(temporaryDirectory), ["test-results"]);
     const summaryName = product
       ? "keycloak-live-summary.json"
-      : reporterOptions.report === "routing-draft"
-        ? "routing-draft-live-summary.json"
-        : reporterOptions.report === "simulation"
-          ? "simulation-live-summary.json"
-          : "auth-live-summary.json";
+      : reporterOptions.report === "workflow-graph"
+        ? "workflow-graph-live-summary.json"
+        : reporterOptions.report === "routing-draft"
+          ? "routing-draft-live-summary.json"
+          : reporterOptions.report === "simulation"
+            ? "simulation-live-summary.json"
+            : "auth-live-summary.json";
     assert.deepEqual(await readdir(join(temporaryDirectory, "test-results")), [summaryName]);
     const raw = await readFile(join(temporaryDirectory, "test-results", summaryName), "utf8");
     for (const marker of markers) {
@@ -840,4 +846,11 @@ test("simulation reporter uses a fixed sanitized result name and ignores arbitra
 test("routing draft reporter uses a fixed sanitized result name", async () => {
   const result = await report([row("ROUTING-DRAFT-LIVE-001")], "failed", false, { report: "routing-draft" });
   assert.equal(result.tests[0].scenario, "ROUTING-DRAFT-LIVE-001");
+});
+
+test("workflow graph reporter only records allowlisted scenario metadata", async () => {
+  const result = await report([row("WORKFLOW-GRAPH-LIVE-001")], "failed", false, {
+    report: "workflow-graph",
+  });
+  assert.equal(result.tests[0].scenario, "WORKFLOW-GRAPH-LIVE-001");
 });

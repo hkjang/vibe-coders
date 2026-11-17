@@ -3,6 +3,7 @@
 // schemas are the contract: only the fields the screens render are declared and
 // everything else passes through (`looseObject`).
 import { z } from "zod";
+import { workflowGraphFlowSchema, workflowGraphConditionSchema } from "./workflow-graph.schemas";
 
 import { looseList, looseObject, numberish, unknownRecord } from "@/shared/api/loose";
 
@@ -13,6 +14,8 @@ const optionalFlag = z.boolean().optional();
 // ── workflows ───────────────────────────────────────────────────────────────
 
 export const workflowStepSchema = looseObject({
+  id: optionalText,
+  condition: workflowGraphConditionSchema.optional(),
   name: optionalText,
   type: optionalText,
   ref: optionalText,
@@ -26,6 +29,7 @@ export const workflowStepSchema = looseObject({
 export type WorkflowStep = z.output<typeof workflowStepSchema>;
 
 export const workflowSchema = looseObject({
+  flow: workflowGraphFlowSchema.optional(),
   id: z.string(),
   name: optionalText,
   description: optionalText,
@@ -79,6 +83,7 @@ export const workflowVersionListSchema = looseObject({
     name: optionalText,
     description: optionalText,
     steps: z.array(workflowStepSchema).nullish(),
+    flow: workflowGraphFlowSchema.optional(),
     allowed_teams: optionalText,
     published_by: optionalText,
     published_at: optionalText,
@@ -120,6 +125,9 @@ export const workflowRunReceiptSchema = looseObject({
   created_at: optionalText,
   steps: looseList({
     step_index: optionalNumber,
+    step_id: optionalText,
+    definition_index: optionalNumber,
+    branch: z.enum(["true", "false"]).optional(),
     name: optionalText,
     type: optionalText,
     ref: optionalText,

@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import type { FullResult, Reporter, TestCase, TestResult, TestStep } from "@playwright/test/reporter";
 
 const scenarios = new Set([
+  "WORKFLOW-GRAPH-LIVE-001",
+  "WORKFLOW-GRAPH-LIVE-002",
+  "WORKFLOW-GRAPH-LIVE-003",
+  "WORKFLOW-GRAPH-LIVE-004",
   "ROUTING-DRAFT-LIVE-001",
   "ROUTING-DRAFT-LIVE-002",
   "ROUTING-DRAFT-LIVE-003",
@@ -78,6 +82,7 @@ const scenarios = new Set([
   "AUTH-LIVE-060",
 ]);
 const sourceFiles = new Set([
+  "workflow-graph-live.spec.ts",
   "routing-draft-live.spec.ts",
   "simulation-live.spec.ts",
   "keycloak-product.spec.ts",
@@ -135,11 +140,13 @@ export default class SafeAuthReporter implements Reporter {
   constructor(options: { report?: string } = {}) {
     // Never derive an output path from an arbitrary reporter option.
     this.summaryName =
-      options.report === "routing-draft"
-        ? "routing-draft-live-summary.json"
-        : options.report === "simulation"
-          ? "simulation-live-summary.json"
-          : "auth-live-summary.json";
+      options.report === "workflow-graph"
+        ? "workflow-graph-live-summary.json"
+        : options.report === "routing-draft"
+          ? "routing-draft-live-summary.json"
+          : options.report === "simulation"
+            ? "simulation-live-summary.json"
+            : "auth-live-summary.json";
   }
   private results: {
     scenario: string;

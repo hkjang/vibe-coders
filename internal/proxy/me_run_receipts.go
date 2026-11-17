@@ -77,10 +77,20 @@ func (s *Server) handleWorkflowRunReceipt(w http.ResponseWriter, r *http.Request
 	steps := []map[string]any{}
 	if stepRuns, err := s.db.ListWorkflowStepRuns(r.Context(), run.ID); err == nil {
 		for _, st := range stepRuns {
-			steps = append(steps, map[string]any{
+			item := map[string]any{
 				"step_index": st.StepIndex, "name": st.Name, "type": st.Type, "ref": st.Ref,
 				"status": st.Status, "output_chars": st.OutputChars, "error_class": st.ErrorClass,
-			})
+			}
+			if st.StepID != "" {
+				item["step_id"] = st.StepID
+			}
+			if st.DefinitionIndex != nil {
+				item["definition_index"] = *st.DefinitionIndex
+			}
+			if st.Branch != "" {
+				item["branch"] = st.Branch
+			}
+			steps = append(steps, item)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

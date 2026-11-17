@@ -17,6 +17,14 @@ const operationalMessages = {
   prompt_lab_busy: "진행 중인 실험실 작업이 있습니다. 완료 후 다시 확인하세요.",
   prompt_lab_models: "저장된 실행 모델을 확인해 주세요.",
   mcp_call_in_progress: "다른 탭에서 MCP 호출이 진행 중입니다. 완료 후 다시 검토하세요.",
+  invalid_workflow_graph:
+    "단계·연결·비교 값·제한·사유를 확인하세요. 지원하지 않는 필드나 빈 필드는 저장할 수 없습니다.",
+  workflow_graph_publish_reason: "게시 사유는 비밀키 없이 500자 이하로 입력하세요.",
+  workflow_graph_conflict:
+    "검토한 뒤 정의가 변경되거나 삭제됐습니다. 닫고 최신 정의를 조회한 뒤 다시 검토하세요.",
+  workflow_graph_failed:
+    "처리 결과를 확인하지 못했습니다. 반복 전송하지 말고 최신 정의와 버전·감사 이력을 확인하세요.",
+  workflow_not_found: "워크플로가 없거나 삭제됐습니다. 목록을 다시 조회하세요.",
   mcp_call_lock_unavailable: "탭 간 호출 잠금을 사용할 수 없습니다. HTTPS와 지원 브라우저를 확인하세요.",
   team_write_in_progress: "팀 변경을 처리 중입니다. 완료 후 다시 확인하세요.",
   team_catalog_unconfirmed: "최신 팀 목록을 확인한 뒤 다시 시도하세요.",

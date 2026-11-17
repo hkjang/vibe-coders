@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,6 +29,10 @@ func (s *Server) handleAdminWorkflows(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	switch r.Method {
 	case http.MethodGet:
+		if r.URL.Query().Get("view") == "review" {
+			s.handleWorkflowGraphReview(w, r)
+			return
+		}
 		values, queryErr := url.ParseQuery(r.URL.RawQuery)
 		views, present := values["view"]
 		if queryErr != nil || (present && (len(views) != 1 || views[0] != "")) {
@@ -41,6 +46,10 @@ func (s *Server) handleAdminWorkflows(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"workflows": wfs})
 	case http.MethodPost:
+		if _, present := r.URL.Query()["review"]; present {
+			s.handleWorkflowGraphWrite(w, r)
+			return
+		}
 		var p struct {
 			ID           string               `json:"id"`
 			Name         string               `json:"name"`
@@ -73,6 +82,10 @@ func (s *Server) handleAdminWorkflows(w http.ResponseWriter, r *http.Request) {
 			Enabled: enabled, CreatedBy: adminID(r),
 		}
 		if err := s.db.UpsertWorkflow(ctx, wf); err != nil {
+			if errors.Is(err, store.ErrInvalidWorkflowGraph) || errors.Is(err, store.ErrWorkflowGraphEditRequired) {
+				writeWorkflowGraphError(w, err)
+				return
+			}
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "upsert_failed")
 			return
 		}
@@ -118,6 +131,10 @@ func (s *Server) handleAdminWorkflowDryRun(w http.ResponseWriter, r *http.Reques
 	}
 	switch {
 	case action == "publish" && r.Method == http.MethodPost:
+		if wf.Flow != nil {
+			s.handlePublishWorkflowGraph(w, r, wf)
+			return
+		}
 		var p struct {
 			Note string `json:"note"`
 		}
@@ -132,7 +149,7 @@ func (s *Server) handleAdminWorkflowDryRun(w http.ResponseWriter, r *http.Reques
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "publish_failed")
 			return
 		}
-		s.auditAdmin(r, "workflow.publish", id, auditJSON(map[string]any{"version": version}))
+		// Publication and audit are committed together by the store.
 		writeJSON(w, http.StatusOK, map[string]any{"workflow_id": id, "version": version, "enabled": true, "published": true})
 	case action == "versions" && r.Method == http.MethodGet:
 		versions, err := s.db.ListWorkflowVersions(r.Context(), id)
@@ -146,7 +163,7 @@ func (s *Server) handleAdminWorkflowDryRun(w http.ResponseWriter, r *http.Reques
 		plan, issues := s.planWorkflow(r, wf)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"workflow_id": wf.ID, "name": wf.Name, "steps": plan, "issues": issues, "ok": len(issues) == 0,
-			"note": "dry-run: 단계 검증과 안전 한도만 확인하며 실제 실행은 하지 않습니다.",
+			"note": "단계 종류·참조·분기 연결을 검사합니다. 실제 호출이나 등록 한도의 실행 시 적용까지 검증하지 않습니다.",
 		})
 	}
 }
@@ -155,6 +172,9 @@ func (s *Server) handleAdminWorkflowDryRun(w http.ResponseWriter, r *http.Reques
 func (s *Server) planWorkflow(r *http.Request, wf store.Workflow) ([]map[string]any, []string) {
 	plan := make([]map[string]any, 0, len(wf.Steps))
 	issues := []string{}
+	if err := store.ValidateWorkflowGraph(wf); err != nil {
+		issues = append(issues, err.Error())
+	}
 	for i, st := range wf.Steps {
 		resolved, detail := true, ""
 		switch st.Type {
@@ -181,8 +201,8 @@ func (s *Server) planWorkflow(r *http.Request, wf store.Workflow) ([]map[string]
 	return plan, issues
 }
 
-// handleV1WorkflowRun re-validates and records a workflow run for the caller, returning the plan.
-// (Server-side step execution is a follow-up; this validates permissions and records the run.)
+// handleV1WorkflowRun validates or executes the current enabled definition for
+// the authenticated caller, preserving existing team restrictions.
 // POST /v1/workflows/{id}/run
 func (s *Server) handleV1WorkflowRun(w http.ResponseWriter, r *http.Request) {
 	claims, ok := s.currentAccessClaims(r)
@@ -242,19 +262,20 @@ func (s *Server) handleV1WorkflowRun(w http.ResponseWriter, r *http.Request) {
 	runID := newID("wfrun")
 	_ = s.db.RecordWorkflowRun(r.Context(), store.WorkflowRun{
 		ID: runID, WorkflowID: wf.ID, UserID: claims.Subject, Team: claims.TeamID, Status: "planned",
-		StepsTotal: len(wf.Steps), StepsOK: len(wf.Steps) - len(issues), LatencyMS: time.Since(start).Milliseconds(), ErrorClass: errClass,
+		StepsTotal: len(wf.Steps), StepsOK: max(0, len(wf.Steps)-len(issues)), LatencyMS: time.Since(start).Milliseconds(), ErrorClass: errClass,
 	})
 	s.auditAuthEvent(r.Context(), "workflow_run", claims.Subject, "", claims.TeamID, "workflow="+wf.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"run_id": runID, "workflow_id": wf.ID, "name": wf.Name, "status": "planned", "steps": plan, "issues": issues,
-		"note": "각 step을 순서대로 호출해 실행하세요. 실행 이력은 /me/workflow-runs에서 확인할 수 있습니다.",
+		"note": "실제 호출 없이 현재 정의를 검증했습니다. 실행하려면 execute=true를 지정하세요. 실행 이력은 /me/workflow-runs에서 확인할 수 있습니다.",
 	})
 }
 
 // executeWorkflowRun runs a workflow's steps sequentially, chaining each step's output into the
 // next step's input. chat/skill/text2sql steps run through the real /v1 pipeline (governance,
 // quota, policy all apply); approval pauses; condition can stop; transform passes through;
-// mcp_tool is skipped (not yet executable). Live step outputs are returned to the caller; only
+// graph-mode mcp_tool uses the authenticated MCP gateway; legacy mcp_tool stays skipped.
+// Live step outputs are returned to the caller; only
 // aggregate metadata is persisted.
 func (s *Server) executeWorkflowRun(w http.ResponseWriter, r *http.Request, wf store.Workflow, input string, claims accessClaims) {
 	start := time.Now()
@@ -268,13 +289,48 @@ func (s *Server) executeWorkflowRun(w http.ResponseWriter, r *http.Request, wf s
 // condition_failed.
 func (s *Server) executeWorkflowSteps(r *http.Request, wf store.Workflow, input string, claims accessClaims) ([]map[string]any, string, int, string) {
 	results := make([]map[string]any, 0, len(wf.Steps))
+	if err := store.ValidateWorkflowGraph(wf); err != nil {
+		return results, "error", 0, "invalid_workflow_graph"
+	}
+	indices := map[string]int{}
+	for i, st := range wf.Steps {
+		indices[st.ID] = i
+	}
+	nextStep := func(i int, when string) int {
+		if wf.Flow == nil {
+			return i + 1
+		}
+		for _, edge := range wf.Flow.Edges {
+			if edge.From == wf.Steps[i].ID && edge.When == when {
+				if edge.To == store.WorkflowGraphEnd {
+					return -1
+				}
+				return indices[edge.To]
+			}
+		}
+		return -1
+	}
+	cursor := 0
+	if wf.Flow != nil {
+		cursor = indices[wf.Flow.Entry]
+	}
 	cur := input
 	status := "ok"
 	stepsOK := 0
 	errClass := ""
 
-	for i, st := range wf.Steps {
+	for cursor >= 0 && cursor < len(wf.Steps) {
+		i := cursor
+		st := wf.Steps[i]
+		cursor = nextStep(i, "next")
+		if r.Context().Err() != nil {
+			return results, "error", stepsOK, "cancelled"
+		}
 		stepRes := map[string]any{"name": firstNonEmpty(st.Name, st.Type), "type": st.Type}
+		if wf.Flow != nil {
+			stepRes["step_id"] = st.ID
+			stepRes["definition_index"] = i
+		}
 		stepReq := r
 		if st.TimeoutMS > 0 {
 			ctx, cancel := context.WithTimeout(r.Context(), time.Duration(st.TimeoutMS)*time.Millisecond)
@@ -290,6 +346,18 @@ func (s *Server) executeWorkflowSteps(r *http.Request, wf store.Workflow, input 
 			s.notifyMattermost(r.Context(), "approval", "워크플로 승인 대기: "+wf.Name+" step "+itoaProxy(i)+" (사용자 "+claims.Subject+")")
 			return results, "pending_approval", stepsOK, errClass
 		case "condition":
+			if wf.Flow != nil {
+				branch := "false"
+				if st.Condition.Matches(cur) {
+					branch = "true"
+				}
+				cursor = nextStep(i, branch)
+				stepRes["branch"] = branch
+				stepRes["status"] = "passed"
+				stepsOK++
+				results = append(results, stepRes)
+				continue
+			}
 			if strings.TrimSpace(cur) == "" {
 				stepRes["status"] = "stopped"
 				results = append(results, stepRes)
@@ -305,6 +373,10 @@ func (s *Server) executeWorkflowSteps(r *http.Request, wf store.Workflow, input 
 			results = append(results, stepRes)
 			continue
 		case "mcp_tool":
+			if wf.Flow != nil {
+				out, err = s.workflowMCPToolStep(stepReq, st, cur)
+				break
+			}
 			stepRes["status"] = "skipped"
 			stepRes["detail"] = "mcp_tool 실행은 후속 예정"
 			results = append(results, stepRes)
@@ -359,7 +431,7 @@ func (s *Server) finishWorkflowRun(w http.ResponseWriter, r *http.Request, wf st
 	writeJSON(w, http.StatusOK, map[string]any{
 		"run_id": runID, "workflow_id": wf.ID, "name": wf.Name, "status": status,
 		"steps_total": len(wf.Steps), "steps_ok": stepsOK, "results": results,
-		"note": "서버측 순차 실행 결과입니다. step 출력은 호출자에게만 반환되며 저장은 집계 메타데이터만 남습니다.",
+		"note": "서버측 실행 결과입니다. 단계 출력은 호출자에게만 반환되며 실행 이력에는 단계 상태 등 메타데이터만 남습니다.",
 	})
 }
 
@@ -372,8 +444,19 @@ func (s *Server) recordWorkflowStepRuns(r *http.Request, runID string, wf store.
 	stepRuns := make([]store.WorkflowStepRun, 0, len(results))
 	for i, res := range results {
 		ref := ""
-		if i < len(wf.Steps) {
-			ref = wf.Steps[i].Ref
+		definitionIndex := i
+		var recordedIndex *int
+		stepID, branch := "", ""
+		if wf.Flow != nil {
+			if index, ok := res["definition_index"].(int); ok && index >= 0 && index < len(wf.Steps) {
+				definitionIndex = index
+				recordedIndex = &definitionIndex
+				stepID = wf.Steps[index].ID
+			}
+			branch, _ = res["branch"].(string)
+		}
+		if definitionIndex < len(wf.Steps) {
+			ref = wf.Steps[definitionIndex].Ref
 		}
 		typ, _ := res["type"].(string)
 		name, _ := res["name"].(string)
@@ -387,7 +470,7 @@ func (s *Server) recordWorkflowStepRuns(r *http.Request, runID string, wf store.
 			errClass = "step_error"
 		}
 		stepRuns = append(stepRuns, store.WorkflowStepRun{
-			StepIndex: i, Name: name, Type: typ, Ref: ref, Status: st, OutputChars: chars, ErrorClass: errClass,
+			StepIndex: i, DefinitionIndex: recordedIndex, StepID: stepID, Branch: branch, Name: name, Type: typ, Ref: ref, Status: st, OutputChars: chars, ErrorClass: errClass,
 		})
 	}
 	_ = s.db.RecordWorkflowStepRuns(r.Context(), runID, stepRuns)

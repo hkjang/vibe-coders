@@ -56,7 +56,7 @@ export function WorkflowFormDialog({
 
   return (
     <FormDialog
-      description="워크플로 이름과 실행 단계를 정의합니다. 저장해도 게시되지 않으며, 드라이런으로 검증한 뒤 게시하세요."
+      description="사용 중인 정의를 저장하면 다음 실행부터 바로 반영됩니다. 게시는 현재 정의를 버전 이력으로 남기고 실행을 허용합니다."
       form={form}
       onOpenChange={onOpenChange}
       onSubmit={onSubmit}

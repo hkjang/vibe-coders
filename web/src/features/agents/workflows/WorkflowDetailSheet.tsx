@@ -1,3 +1,5 @@
+import { WorkflowVersionHistory } from "./WorkflowVersionHistory";
+import { WorkflowGraphRead } from "./WorkflowGraphRead";
 import { useId, useRef, useState, type RefObject } from "react";
 import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useWorkflowRead } from "./use-workflow-queries";
@@ -31,12 +33,15 @@ interface WorkflowDetailSheetProps {
   canWrite: boolean;
   onDelete: () => void;
   onEdit: () => void;
+  onEditGraph?: () => void;
   onOpenChange: (open: boolean) => void;
   onPublish: () => void;
   open: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
   workflow: Workflow | undefined;
   writeDisabledReason: string;
+  restoreAction?: "edit" | "convert" | "publish";
+  onRestoreFocus?: (target: HTMLElement) => void;
 }
 
 function StepTable({ steps }: { steps: readonly WorkflowStep[] }): React.JSX.Element {
@@ -89,14 +94,20 @@ export function WorkflowDetailSheet({
   canWrite,
   onDelete,
   onEdit,
+  onEditGraph,
   onOpenChange,
   onPublish,
   open,
   returnFocusRef,
   workflow,
   writeDisabledReason,
+  restoreAction,
+  onRestoreFocus,
 }: WorkflowDetailSheetProps): React.JSX.Element {
   const auth = useAuth();
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const publishButtonRef = useRef<HTMLButtonElement>(null);
+  const convertButtonRef = useRef<HTMLButtonElement>(null);
   const [stepView, setStepView] = useState<"table" | "flow">("table");
   const [showVersions, setShowVersions] = useState(false);
   const versionsButtonRef = useRef<HTMLButtonElement>(null);
@@ -142,6 +153,20 @@ export function WorkflowDetailSheet({
         onOpenChange(next);
       }}
       open={open}
+      onOpenAutoFocus={(event) => {
+        const target =
+          restoreAction === "publish"
+            ? publishButtonRef.current
+            : restoreAction === "convert"
+              ? (convertButtonRef.current ?? editButtonRef.current)
+              : restoreAction === "edit"
+                ? editButtonRef.current
+                : null;
+        if (!target || target.disabled) return;
+        event.preventDefault();
+        target.focus();
+        onRestoreFocus?.(target);
+      }}
       returnFocusRef={returnFocusRef}
       size="wide"
       title={workflow?.name ?? "워크플로"}
@@ -187,6 +212,7 @@ export function WorkflowDetailSheet({
               {dryRunPending ? "검증 중" : "드라이런"}
             </Button>
             <Button
+              ref={publishButtonRef}
               onClick={onPublish}
               disabled={!canWrite}
               title={canWrite ? undefined : writeDisabledReason}
@@ -200,7 +226,12 @@ export function WorkflowDetailSheet({
             >
               버전 이력
             </Button>
-            <Button onClick={onEdit} disabled={!canWrite} title={canWrite ? undefined : writeDisabledReason}>
+            <Button
+              ref={editButtonRef}
+              onClick={onEdit}
+              disabled={!canWrite}
+              title={canWrite ? undefined : writeDisabledReason}
+            >
               수정
             </Button>
             <Button
@@ -212,6 +243,11 @@ export function WorkflowDetailSheet({
               삭제
             </Button>
           </div>
+          {onEditGraph ? (
+            <Button ref={convertButtonRef} onClick={onEditGraph} disabled={!canWrite}>
+              분기 편집기로 전환
+            </Button>
+          ) : null}
           {!canWrite ? (
             <InlineNotice tone="info" title="읽기 전용">
               {writeDisabledReason}
@@ -231,7 +267,11 @@ export function WorkflowDetailSheet({
             />
             <TabPanel id={stepView} panelIdPrefix="workflow-step-view">
               {stepView === "flow" ? (
-                <WorkflowFlow steps={steps} prefixes={auth.credentialPrefixes} />
+                workflow.flow ? (
+                  <WorkflowGraphRead workflow={workflow} prefixes={auth.credentialPrefixes} />
+                ) : (
+                  <WorkflowFlow steps={steps} prefixes={auth.credentialPrefixes} />
+                )
               ) : (
                 <StepTable steps={steps} />
               )}
@@ -303,31 +343,10 @@ export function WorkflowDetailSheet({
                   description="드라이런을 통과한 뒤 게시하면 첫 버전이 만들어집니다."
                 />
               ) : (
-                <div className="data-table-scroll" tabIndex={0} aria-label="워크플로 버전 표 영역">
-                  <table className="data-table">
-                    <caption className="sr-only">워크플로 게시 버전 이력</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">버전</th>
-                        <th scope="col">게시자</th>
-                        <th scope="col">게시일</th>
-                        <th scope="col">단계</th>
-                        <th scope="col">메모</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(versions.data?.versions ?? []).map((version) => (
-                        <tr key={version.id ?? String(version.version)}>
-                          <td className="cell-number">v{formatNumber(version.version)}</td>
-                          <td>{version.published_by ?? "—"}</td>
-                          <td>{formatDateTime(version.published_at)}</td>
-                          <td className="cell-number">{formatNumber(version.steps?.length ?? 0)}</td>
-                          <td className="truncate">{version.note || "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <WorkflowVersionHistory
+                  versions={versions.data?.versions ?? []}
+                  prefixes={auth.credentialPrefixes}
+                />
               )}
             </SectionCard>
           ) : null}
