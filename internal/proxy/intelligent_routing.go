@@ -43,6 +43,14 @@ type intelligentRoutingPlan struct {
 }
 
 func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoint string, pinned, noRoute bool, authCtx *store.AuthContext) intelligentRoutingPlan {
+	return s.planIntelligentRoutingUsing(ctx, body, endpoint, pinned, noRoute, authCtx, func(model string, score int) routingDecision {
+		return s.evaluateRoutingRules(ctx, model, score)
+	})
+}
+
+// A draft supplies only the rule evaluator. All other routing decisions use
+// the same planner as live requests; the live rule cache is never replaced.
+func (s *Server) planIntelligentRoutingUsing(ctx context.Context, body []byte, endpoint string, pinned, noRoute bool, authCtx *store.AuthContext, evaluate func(string, int) routingDecision) intelligentRoutingPlan {
 	model, _, prompts, _ := extractAudit(body, endpoint, false)
 	toolCount := 0
 	if root := jsonMap(body); root != nil {
@@ -84,7 +92,7 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 		}
 	} else if pinned {
 		reasons = append(reasons, "provider pinned by client")
-	} else if d := s.evaluateRoutingRules(ctx, model, complexity.Score); d.Applied {
+	} else if d := evaluate(model, complexity.Score); d.Applied {
 		selectedModel = d.TargetModel
 		forcedProvider = d.TargetProvider
 		forceProvider = forcedProvider != ""

@@ -16,7 +16,9 @@ const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  // This fixture serves the legacy edit contract; draft review has its own
+  // v0.86.159 transport and lifecycle scenarios in RoutingDraftSafety.
+  return { useAuth: () => testAuth({ scopes: authRuntime.scopes, backendVersion: "v0.86.158" }) };
 });
 
 vi.mock("sonner", () => ({ toast: { success: toastSpy.success, error: toastSpy.error } }));

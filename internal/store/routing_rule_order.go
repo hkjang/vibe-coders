@@ -48,6 +48,10 @@ func (s *SQLStore) GetRoutingOrderSnapshot(ctx context.Context) (RoutingOrderSna
 }
 
 func (s *SQLStore) routingOrderSnapshot(ctx context.Context, db routingOrderQueryer) (RoutingOrderSnapshot, error) {
+	return s.routingOrderSnapshotWithStored(ctx, db, nil)
+}
+
+func (s *SQLStore) routingOrderSnapshotWithStored(ctx context.Context, db routingOrderQueryer, ordered *[]routingOrderStored) (RoutingOrderSnapshot, error) {
 	rows, err := db.QueryContext(ctx, s.bind(`SELECT id, enabled, priority, match_pattern, min_complexity, max_complexity,
 		target_model, COALESCE(target_provider, ''), COALESCE(note, ''), created_at
 		FROM routing_rules ORDER BY priority ASC, created_at ASC LIMIT ?`), MaxRoutingOrderRules+1)
@@ -80,6 +84,9 @@ func (s *SQLStore) routingOrderSnapshot(ctx context.Context, db routingOrderQuer
 	}
 	if err := rows.Err(); err != nil {
 		return RoutingOrderSnapshot{}, err
+	}
+	if ordered != nil {
+		*ordered = append([]routingOrderStored(nil), stored...)
 	}
 	// A backend's unspecified ordering of legacy ties must not change the token.
 	sort.Slice(stored, func(i, j int) bool { return stored[i].ID < stored[j].ID })

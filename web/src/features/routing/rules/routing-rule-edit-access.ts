@@ -1,5 +1,6 @@
 import { useContext, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
+import { versionAtLeast } from "@/config/migration-registry";
 import { AppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
@@ -7,6 +8,7 @@ import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mu
 
 export function useRoutingEditAccess(canWrite: boolean) {
   const auth = useAuth();
+  const draftSupported = versionAtLeast(auth.backendVersion, "v0.86.159");
   const context = useContext(FeatureAccessContext);
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const owner = context?.featureId;
@@ -23,7 +25,7 @@ export function useRoutingEditAccess(canWrite: boolean) {
     context?.permitted === true &&
     typeof context.readOnly === "boolean" &&
     auth.user?.scopes.includes("routing:read") === true;
-  const key = JSON.stringify([epoch, owner, principal, readable]);
+  const key = JSON.stringify([epoch, owner, principal, readable, draftSupported]);
   const lifetime = useMemo(() => ({ key }), [key]);
   const prefixes = auth.credentialPrefixes;
   const prefixKey = JSON.stringify(prefixes);
@@ -63,6 +65,7 @@ export function useRoutingEditAccess(canWrite: boolean) {
       throw new AppError("권한 또는 표시 보호 기준이 바뀌었습니다. 다시 검토하세요.", { kind: "permission" });
   };
   return {
+    draftSupported,
     key,
     lifetime,
     epoch,

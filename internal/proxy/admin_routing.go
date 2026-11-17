@@ -72,6 +72,10 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	_, comparingOrder := probe["rule_order"]
 	_, reviewingOrder := probe["rule_revision"]
+	if _, comparingDraft := probe["rule_edit"]; comparingDraft {
+		s.handleRoutingDraftPreview(w, r, body)
+		return
+	}
 	if comparingOrder || reviewingOrder {
 		s.handleRoutingOrderPreview(w, r, body)
 		return
@@ -81,6 +85,10 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plan := s.planIntelligentRouting(r.Context(), body, "/v1/chat/completions", false, false, authCtx)
+	writeJSON(w, http.StatusOK, s.routingPreviewResult(r, plan, policyKeyID))
+}
+
+func (s *Server) routingPreviewResult(r *http.Request, plan intelligentRoutingPlan, policyKeyID string) map[string]any {
 	requestedModel := plan.RequestedModel
 	selectedModel := plan.SelectedModel
 	selectedProvider := plan.SelectedProvider
@@ -98,7 +106,7 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		routeReason = audit.Redact(boundedExternalProviderText(routeReason, projectionArgs...))
 		decisionReason = audit.Redact(boundedExternalProviderText(decisionReason, projectionArgs...))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"requested_model":   requestedModel,
 		"selected_model":    selectedModel,
 		"selected_provider": selectedProvider,
@@ -113,7 +121,7 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		"route_reason":    routeReason,
 		"decision_reason": decisionReason,
 		"would_rewrite":   plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
-	})
+	}
 }
 
 func (s *Server) routingPreviewAuthContext(w http.ResponseWriter, r *http.Request, probe map[string]any) (*store.AuthContext, string, bool) {

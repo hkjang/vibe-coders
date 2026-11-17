@@ -3,6 +3,7 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 import { apiClient } from "@/shared/api/client";
 import type { RoutingRule } from "@/shared/api/domains/routing";
 import { routingEditEndpoints, type RoutingEditInput } from "@/shared/api/domains/routing-edit";
+import { routingDraftEndpoints, type DraftWriteProof } from "@/shared/api/domains/routing-draft";
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import { AppError } from "@/shared/api/error";
 import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
@@ -30,12 +31,14 @@ export function useRoutingEditOperation({
   dirty,
   onClose,
   isReview,
+  draftProof,
 }: {
   baseline: RoutingRule;
   access: RoutingEditAccess;
   dirty: boolean;
   onClose: () => void;
   isReview: (review: RuleReview) => boolean;
+  draftProof?: (review: RuleReview) => DraftWriteProof | undefined;
 }) {
   const client = useQueryClient();
   const lifetime = useId();
@@ -157,8 +160,11 @@ export function useRoutingEditOperation({
   };
   const save = (review: RuleReview) => {
     if (!active.current || flight.current || completed.current || sentUnconfirmed.current) return;
+    const proof = draftProof?.(review);
     try {
       assertReview(review);
+      if (access.draftSupported && !proof)
+        throw new AppError("초안 결과와 변경 사유를 먼저 검토하세요.", { kind: "contract" });
     } catch (cause) {
       setError(cause);
       return;
@@ -174,21 +180,36 @@ export function useRoutingEditOperation({
           current(controller);
           assertReview(review);
           assertRuleBaseline(before.rules, baseline);
+          if (access.draftSupported && (!proof || draftProof?.(review) !== proof))
+            throw new AppError("초안 검토가 바뀌었습니다. 다시 비교하세요.", { kind: "contract" });
           // Current permission/review checks and dispatch have no intervening await.
           sentUnconfirmed.current = true;
           setUnconfirmed(true);
           setPhase("saving");
-          const response = await apiClient.request(
-            withPathParams(routingEditEndpoints.update, { id: baseline.id }),
-            {
-              body: review.patch,
-              signal: controller.signal,
-              routeId: "routing.rules",
-            },
-          );
+          const response =
+            access.draftSupported && proof
+              ? await apiClient.request(withPathParams(routingDraftEndpoints.save, { id: baseline.id }), {
+                  query: { review: "edit" },
+                  body: { expected_revision: proof.revision, patch: review.patch, reason: proof.reason },
+                  signal: controller.signal,
+                  routeId: "routing.rules",
+                })
+              : await apiClient.request(withPathParams(routingEditEndpoints.update, { id: baseline.id }), {
+                  body: review.patch,
+                  signal: controller.signal,
+                  routeId: "routing.rules",
+                });
           current(controller);
           if (!ruleAcknowledged(response.rule, baseline, review.patch))
             throw new AppError("저장 응답을 확인할 수 없습니다.", { kind: "contract" });
+          if (
+            access.draftSupported &&
+            proof &&
+            (!sameRoutingRule(response.rule, { ...baseline, ...review.patch }) ||
+              !("revision" in response) ||
+              response.revision === proof.revision)
+          )
+            throw new AppError("검토한 초안과 저장 응답이 다릅니다.", { kind: "contract" });
           completed.current = true;
           sentUnconfirmed.current = false;
           setUnconfirmed(false);

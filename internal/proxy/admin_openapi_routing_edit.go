@@ -12,11 +12,16 @@ func enrichRoutingEditOpenAPI(method string, op, responses map[string]any) {
 		return
 	}
 	op["description"] = "Partially update an existing rule with routing:write authorization. Omitted or null fields retain their database values at the actual UPDATE, not an earlier handler snapshot. The rule is never inserted by PATCH. Complexity bounds are validated together against the values at that write. Success returns the row from UPDATE RETURNING, not a later reread. Explicit concurrent writes to the same field remain last-writer-wins; there is no revision/CAS or idempotency token. Local routing cache invalidation and best-effort audit follow a successful update; other processes retain the existing five-second cache TTL. Configured post-change checks may run and record state. Response loss may occur after the write, so an unconfirmed response is not evidence that it is safe to reapply. Empty object or null body is a no-op update of an existing valid rule. Unknown fields, case-insensitive field aliases and the existing Go JSON decoder behavior are preserved."
-	op["requestBody"] = requestBody("RoutingRulePatchRequest")
-	responses["200"] = successResponse("RoutingRuleWriteResponse")
-	responses["400"] = errorResponse("invalid_rule_id, invalid_body, invalid_priority, missing_target_model or invalid_range. After a no-row UPDATE, existence is diagnosed by a separate current read; concurrent changes can affect that diagnosis.")
-	responses["404"] = errorResponse("rule_not_found: rule absent at initial lookup or no-row UPDATE diagnosis; PATCH never recreates it.")
-	responses["500"] = errorResponse("routing_rule_lookup_failed or routing_rule_save_failed: lookup, UPDATE or returned-row processing failed. A client must not infer non-application solely from a lost or unconfirmed response.")
+	op["requestBody"] = requestBody("RoutingRuleEditRequest")
+	responses["200"] = successResponse("RoutingRuleEditResponse")
+	parameters, _ := op["parameters"].([]any)
+	op["parameters"] = append(parameters, map[string]any{"name": "review", "in": "query", "schema": map[string]any{"type": "string", "enum": []string{"edit"}}, "description": "Explicit revision-bound edit mode; no other query allowed."})
+	op["description"] = op["description"].(string) + " With exactly review=edit, require RoutingDraftWriteRequest: canonical non-null fields, nonblank reason, strict partial patch and complete configuration revision. Recheck that revision under the database write lock and commit the edit plus audit atomically. This mode requires both routing:read and routing:write, uses no-store and a five-second context, rejects ambiguous rule precedence, and never calls upstream. Content revisions do not detect ABA or provide idempotency."
+	responses["409"] = errorResponse("routing_draft_conflict: the complete reviewed configuration changed; no write or audit committed.")
+	responses["422"] = errorResponse("routing_draft_limit or routing_draft_ambiguous: cannot safely compare this bounded rule set.")
+	responses["400"] = errorResponse("invalid_rule_id, invalid_body, invalid_priority, missing_target_model or invalid_range. In review=edit mode, invalid_routing_draft also covers strict field/query/size validation or an unchanged patch. After a legacy no-row UPDATE, existence is diagnosed by a separate current read; concurrent changes can affect that diagnosis.")
+	responses["404"] = errorResponse("rule_not_found (legacy) or routing_rule_not_found (review=edit): rule absent at initial lookup or no-row UPDATE diagnosis; PATCH never recreates it.")
+	responses["500"] = errorResponse("routing_rule_lookup_failed, routing_rule_save_failed, or routing_draft_failed (review=edit): lookup, UPDATE or returned-row processing failed. A client must not infer non-application solely from a lost or unconfirmed response.")
 }
 
 func routingEditOpenAPISchemas() map[string]any {

@@ -24,6 +24,9 @@ const markers = [
 ];
 const sensitive = markers.join(" ");
 const allowedScenarios = [
+  "ROUTING-DRAFT-LIVE-001",
+  "ROUTING-DRAFT-LIVE-002",
+  "ROUTING-DRAFT-LIVE-003",
   "SIMULATION-LIVE-001",
   "SIMULATION-LIVE-002",
   "SIMULATION-LIVE-003",
@@ -182,9 +185,11 @@ async function report(rows, status = "failed", product = false, reporterOptions 
     assert.deepEqual(await readdir(temporaryDirectory), ["test-results"]);
     const summaryName = product
       ? "keycloak-live-summary.json"
-      : reporterOptions.report === "simulation"
-        ? "simulation-live-summary.json"
-        : "auth-live-summary.json";
+      : reporterOptions.report === "routing-draft"
+        ? "routing-draft-live-summary.json"
+        : reporterOptions.report === "simulation"
+          ? "simulation-live-summary.json"
+          : "auth-live-summary.json";
     assert.deepEqual(await readdir(join(temporaryDirectory, "test-results")), [summaryName]);
     const raw = await readFile(join(temporaryDirectory, "test-results", summaryName), "utf8");
     for (const marker of markers) {
@@ -613,6 +618,7 @@ for (const [filename, scenario, timedOut = false] of [
   ["mcp-risk-live.spec.ts", "AUTH-LIVE-035"],
   ["mcp-risk-live.spec.ts", "AUTH-LIVE-036"],
   ["routing-order-live.spec.ts", "AUTH-LIVE-037"],
+  ["routing-draft-live.spec.ts", "ROUTING-DRAFT-LIVE-001"],
   ["routing-order-live.spec.ts", "AUTH-LIVE-038"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011", true],
@@ -829,4 +835,9 @@ test("simulation reporter uses a fixed sanitized result name and ignores arbitra
   const result = await report([row("SIMULATION-LIVE-001")], "failed", false, { report: "simulation" });
   assert.equal(result.tests[0].scenario, "SIMULATION-LIVE-001");
   await report([row("SIMULATION-LIVE-002")], "failed", false, { report: "../private-token" });
+});
+
+test("routing draft reporter uses a fixed sanitized result name", async () => {
+  const result = await report([row("ROUTING-DRAFT-LIVE-001")], "failed", false, { report: "routing-draft" });
+  assert.equal(result.tests[0].scenario, "ROUTING-DRAFT-LIVE-001");
 });

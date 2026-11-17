@@ -1277,6 +1277,9 @@ func appUIOpenAPISchemas() map[string]any {
 	for name, schema := range routingOrderOpenAPISchemas() {
 		schemas[name] = schema
 	}
+	for name, schema := range routingDraftOpenAPISchemas() {
+		schemas[name] = schema
+	}
 	for name, schema := range routingLearningOpenAPISchemas() {
 		schemas[name] = schema
 	}

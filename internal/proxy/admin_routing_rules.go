@@ -126,6 +126,10 @@ func (s *Server) handleRoutingRuleByID(w http.ResponseWriter, r *http.Request) {
 		s.auditAdmin(r, "routing_rule.delete", auditJSON(map[string]string{"id": id}), "")
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
 	case http.MethodPatch:
+		if _, reviewed := r.URL.Query()["review"]; reviewed {
+			s.handleRoutingDraftWrite(w, r, id)
+			return
+		}
 		rules, err := s.db.ListRoutingRules(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_rule_lookup_failed")

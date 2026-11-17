@@ -3334,6 +3334,76 @@ export type RoutingDomainSignal = {
     source: string;
 };
 
+export type RoutingDraftPatch = {
+    match_pattern?: string;
+    max_complexity?: number;
+    min_complexity?: number;
+    note?: string;
+    priority?: number;
+    target_model?: string;
+    target_provider?: string;
+};
+
+export type RoutingDraftPlan = {
+    complexity: {
+        [key: string]: unknown;
+    };
+    decision_reason: string;
+    fallback_plan: Array<string>;
+    health_score: number;
+    policy_api_key_id: string;
+    requested_model: string;
+    risk: {
+        [key: string]: unknown;
+    };
+    route_reason: string;
+    selected_model: string;
+    selected_provider: string;
+    would_rewrite: boolean;
+};
+
+export type RoutingDraftPreviewRequest = {
+    request: {
+        /**
+         * Optional existing policy key ID; own-team restriction is enforced. Not an API key secret.
+         */
+        api_key_id?: string;
+        messages: Array<{
+            /**
+             * At most 65536 UTF-8 bytes per message. Never persisted by preview.
+             */
+            content: string;
+            role: 'user' | 'assistant' | 'system' | 'developer';
+        }>;
+        model: string;
+    };
+    rule_edit: {
+        expected_revision: string;
+        id: string;
+        patch: RoutingDraftPatch;
+    };
+};
+
+export type RoutingDraftPreviewResponse = {
+    after: RoutingDraftPlan;
+    before: RoutingDraftPlan;
+    observed_at: string;
+    revision: string;
+    runtime_consistency: 'sequential_live_reads';
+    stage: 'routing_plan';
+};
+
+export type RoutingDraftWriteRequest = {
+    expected_revision: string;
+    patch: RoutingDraftPatch;
+    reason: string;
+};
+
+export type RoutingDraftWriteResponse = {
+    revision: string;
+    rule: RoutingRuleView;
+};
+
 export type RoutingHealthResponse = {
     alerts: Array<ProviderHealthAlert>;
     breakers: RoutingBreakerSummary;
@@ -3496,11 +3566,11 @@ export type RoutingOrderSnapshot = {
     rules: Array<RoutingRuleView>;
 };
 
-export type RoutingPreviewRequest = RoutingOrderPreviewRequest | {
+export type RoutingPreviewRequest = RoutingOrderPreviewRequest | RoutingDraftPreviewRequest | {
     [key: string]: unknown;
 };
 
-export type RoutingPreviewResponse = RoutingOrderPreviewResponse | {
+export type RoutingPreviewResponse = RoutingOrderPreviewResponse | RoutingDraftPreviewResponse | {
     [key: string]: unknown;
 };
 
@@ -3553,6 +3623,13 @@ export type RoutingRuleDeleteResponse = {
      */
     status: 'deleted';
 };
+
+/**
+ * review=edit requires RoutingDraftWriteRequest. Without review, preserve the nullable legacy partial PATCH contract.
+ */
+export type RoutingRuleEditRequest = RoutingRulePatchRequest | RoutingDraftWriteRequest;
+
+export type RoutingRuleEditResponse = RoutingRuleWriteResponse | RoutingDraftWriteResponse;
 
 export type RoutingRuleListResponse = {
     rules: Array<RoutingRuleView>;
@@ -12596,17 +12673,22 @@ export type DeleteAdminRoutingRulesIdResponses = {
 export type DeleteAdminRoutingRulesIdResponse = DeleteAdminRoutingRulesIdResponses[keyof DeleteAdminRoutingRulesIdResponses];
 
 export type PatchAdminRoutingRulesIdData = {
-    body: RoutingRulePatchRequest;
+    body: RoutingRuleEditRequest;
     path: {
         id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Explicit revision-bound edit mode; no other query allowed.
+         */
+        review?: 'edit';
+    };
     url: '/admin/routing-rules/{id}';
 };
 
 export type PatchAdminRoutingRulesIdErrors = {
     /**
-     * invalid_rule_id, invalid_body, invalid_priority, missing_target_model or invalid_range. After a no-row UPDATE, existence is diagnosed by a separate current read; concurrent changes can affect that diagnosis.
+     * invalid_rule_id, invalid_body, invalid_priority, missing_target_model or invalid_range. In review=edit mode, invalid_routing_draft also covers strict field/query/size validation or an unchanged patch. After a legacy no-row UPDATE, existence is diagnosed by a separate current read; concurrent changes can affect that diagnosis.
      */
     400: AppError;
     /**
@@ -12614,11 +12696,19 @@ export type PatchAdminRoutingRulesIdErrors = {
      */
     401: AppError;
     /**
-     * rule_not_found: rule absent at initial lookup or no-row UPDATE diagnosis; PATCH never recreates it.
+     * rule_not_found (legacy) or routing_rule_not_found (review=edit): rule absent at initial lookup or no-row UPDATE diagnosis; PATCH never recreates it.
      */
     404: AppError;
     /**
-     * routing_rule_lookup_failed or routing_rule_save_failed: lookup, UPDATE or returned-row processing failed. A client must not infer non-application solely from a lost or unconfirmed response.
+     * routing_draft_conflict: the complete reviewed configuration changed; no write or audit committed.
+     */
+    409: AppError;
+    /**
+     * routing_draft_limit or routing_draft_ambiguous: cannot safely compare this bounded rule set.
+     */
+    422: AppError;
+    /**
+     * routing_rule_lookup_failed, routing_rule_save_failed, or routing_draft_failed (review=edit): lookup, UPDATE or returned-row processing failed. A client must not infer non-application solely from a lost or unconfirmed response.
      */
     500: AppError;
     /**
@@ -12633,7 +12723,7 @@ export type PatchAdminRoutingRulesIdResponses = {
     /**
      * OK
      */
-    200: RoutingRuleWriteResponse;
+    200: RoutingRuleEditResponse;
 };
 
 export type PatchAdminRoutingRulesIdResponse = PatchAdminRoutingRulesIdResponses[keyof PatchAdminRoutingRulesIdResponses];
@@ -13052,7 +13142,7 @@ export type PostAdminRoutingPreviewData = {
 
 export type PostAdminRoutingPreviewErrors = {
     /**
-     * invalid_routing_order: malformed, duplicate, unknown, missing or null fields, invalid complete permutation or query. New order operations require canonical fields and valid UTF-8 JSON, at most 512 KiB.
+     * invalid_routing_order or invalid_routing_draft: malformed, duplicate, unknown, missing or null canonical fields, invalid trial or patch, unexpected query, or additional 512 KiB comparison limit exceeded.
      */
     400: AppError;
     /**
@@ -13060,19 +13150,23 @@ export type PostAdminRoutingPreviewErrors = {
      */
     401: AppError;
     /**
-     * routing_order_conflict: reviewed configuration changed; no comparison result is returned.
+     * routing_rule_not_found: the rule being reviewed no longer exists.
+     */
+    404: AppError;
+    /**
+     * routing_order_conflict or routing_draft_conflict: reviewed configuration changed; no comparison result is returned.
      */
     409: AppError;
     /**
-     * body_too_large: existing preview request exceeds 4 MiB; order comparisons have an additional 512 KiB limit.
+     * body_too_large: existing preview request exceeds 4 MiB; order and draft comparisons have an additional 512 KiB limit reported as 400.
      */
     413: AppError;
     /**
-     * routing_order_limit: more than 1000 stored rules or a legacy identifier outside safe order bounds; no partial snapshot or mutation is returned.
+     * routing_order_limit, routing_draft_limit or routing_draft_ambiguous: the bounded rule set cannot be safely compared; no partial result is returned.
      */
     422: AppError;
     /**
-     * routing_order_failed: read, transaction or audit failed. An unconfirmed response is not evidence that a write was not applied; never automatically retry a mutation.
+     * routing_order_failed or routing_draft_failed: comparison or revision verification failed.
      */
     500: AppError;
     /**
