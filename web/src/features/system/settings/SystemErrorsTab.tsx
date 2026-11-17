@@ -1,3 +1,4 @@
+import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
@@ -90,33 +91,35 @@ export function SystemErrorsTab({ hasAdminWrite }: { hasAdminWrite: boolean }): 
             description="게이트웨이 내부 작업이 실패하면 이곳에 남습니다."
           />
         ) : (
-          <table className="data-table">
-            <caption className="sr-only">시스템 오류 로그</caption>
-            <thead>
-              <tr>
-                <th scope="col">시각</th>
-                <th scope="col">컴포넌트</th>
-                <th scope="col">오류 메시지</th>
-              </tr>
-            </thead>
-            <tbody>
-              {errors.isPending ? (
+          <div className="data-table-scroll" role="region" aria-label="시스템 오류 로그 표" tabIndex={0}>
+            <table className="data-table">
+              <caption className="sr-only">시스템 오류 로그</caption>
+              <thead>
                 <tr>
-                  <td colSpan={3} className="data-table-state">
-                    <span role="status">시스템 오류를 불러오는 중입니다.</span>
-                  </td>
+                  <th scope="col">시각</th>
+                  <th scope="col">컴포넌트</th>
+                  <th scope="col">오류 메시지</th>
                 </tr>
-              ) : (
-                rows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{formatDateTime(row.created_at)}</td>
-                    <td className="mono">{row.component || "—"}</td>
-                    <td>{row.error_message || "—"}</td>
+              </thead>
+              <tbody>
+                {errors.isPending ? (
+                  <tr>
+                    <TableStateCell colSpan={3}>
+                      <span role="status">시스템 오류를 불러오는 중입니다.</span>
+                    </TableStateCell>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  rows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{formatDateTime(row.created_at)}</td>
+                      <td className="mono">{row.component || "—"}</td>
+                      <td>{row.error_message || "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
         <UpdatedAt at={errors.dataUpdatedAt} />
       </SectionCard>

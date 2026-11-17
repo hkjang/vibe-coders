@@ -1,3 +1,4 @@
+import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { Plus, Trash2 } from "lucide-react";
 
 import type { SsoRoleRow } from "@/features/system/settings/use-sso-draft";
@@ -32,9 +33,9 @@ export function SsoRoleMapEditor({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={3} className="data-table-state">
+                <TableStateCell colSpan={3}>
                   매핑이 없습니다. 행을 추가하면 Keycloak 역할을 내부 역할로 연결할 수 있습니다.
-                </td>
+                </TableStateCell>
               </tr>
             ) : (
               rows.map((row, index) => (

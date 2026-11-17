@@ -1,3 +1,4 @@
+import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { ShieldCheck, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router";
@@ -145,53 +146,55 @@ export function TrackingTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Reac
             }
           />
         ) : (
-          <table className="data-table">
-            <caption className="sr-only">차단된 출처</caption>
-            <thead>
-              <tr>
-                <th scope="col">출처</th>
-                <th scope="col">지시어</th>
-                <th scope="col">페이지</th>
-                <th scope="col">횟수</th>
-                <th scope="col">마지막</th>
-                <th scope="col">상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              {status.isPending ? (
+          <div className="data-table-scroll" role="region" aria-label="차단된 출처 표" tabIndex={0}>
+            <table className="data-table">
+              <caption className="sr-only">차단된 출처</caption>
+              <thead>
                 <tr>
-                  <td colSpan={6} className="data-table-state">
-                    <span role="status">차단 기록을 불러오는 중입니다.</span>
-                  </td>
+                  <th scope="col">출처</th>
+                  <th scope="col">지시어</th>
+                  <th scope="col">페이지</th>
+                  <th scope="col">횟수</th>
+                  <th scope="col">마지막</th>
+                  <th scope="col">상태</th>
                 </tr>
-              ) : (
-                violations.map((violation) => (
-                  <tr key={`${violation.directive} ${violation.origin}`}>
-                    <td className="mono">{violation.origin}</td>
-                    <td className="mono">{violation.directive}</td>
-                    <td className="mono">{violation.page || "—"}</td>
-                    <td>{formatNumber(violation.count)}</td>
-                    <td>{formatDateTime(violation.last_seen)}</td>
-                    <td>
-                      {violation.allowed ? (
-                        <Badge tone="success">허용됨</Badge>
-                      ) : (
-                        <Button
-                          size="small"
-                          variant="primary"
-                          disabled={!hasAdminWrite || allow.isPending}
-                          onClick={() => allow.mutate(violation.origin)}
-                          aria-label={`${violation.origin} 허용`}
-                        >
-                          <ShieldCheck aria-hidden="true" /> 허용
-                        </Button>
-                      )}
-                    </td>
+              </thead>
+              <tbody>
+                {status.isPending ? (
+                  <tr>
+                    <TableStateCell colSpan={6}>
+                      <span role="status">차단 기록을 불러오는 중입니다.</span>
+                    </TableStateCell>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  violations.map((violation) => (
+                    <tr key={`${violation.directive} ${violation.origin}`}>
+                      <td className="mono">{violation.origin}</td>
+                      <td className="mono">{violation.directive}</td>
+                      <td className="mono">{violation.page || "—"}</td>
+                      <td>{formatNumber(violation.count)}</td>
+                      <td>{formatDateTime(violation.last_seen)}</td>
+                      <td>
+                        {violation.allowed ? (
+                          <Badge tone="success">허용됨</Badge>
+                        ) : (
+                          <Button
+                            size="small"
+                            variant="primary"
+                            disabled={!hasAdminWrite || allow.isPending}
+                            onClick={() => allow.mutate(violation.origin)}
+                            aria-label={`${violation.origin} 허용`}
+                          >
+                            <ShieldCheck aria-hidden="true" /> 허용
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
         {blocked.length > 0 ? (
           <p className="settings-permission-note">

@@ -13,6 +13,7 @@ import {
   useDataTableLayout,
   useDataTableOverflow,
 } from "@/shared/data-table/use-data-table-layout";
+import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { DataTableResizeHandle } from "@/shared/data-table/DataTableResizeHandle";
 
 export interface DataTableSort {
@@ -92,7 +93,6 @@ export function DataTable<TData extends RowData>({
   const columnCount = Math.max(1, layout.visibleColumnCount + (onRowClick ? 1 : 0));
   const rows = table.getRowModel().rows;
   const currentPage = Math.min(Math.max(pageIndex, 0), Math.max(pageCount - 1, 0));
-
   const activateRow = (event: ReactMouseEvent<HTMLTableRowElement>, original: TData): void => {
     if (!onRowClick || event.defaultPrevented || interactiveRowTarget(event.target, event.currentTarget))
       return;
@@ -265,22 +265,18 @@ export function DataTable<TData extends RowData>({
                   ))
                 ) : error ? (
                   <tr>
-                    <td colSpan={columnCount} className="data-table-state data-table-error">
-                      <div role="alert">
-                        <span>{error}</span>
-                        {onRetry ? (
-                          <Button size="small" onClick={onRetry}>
-                            다시 시도
-                          </Button>
-                        ) : null}
-                      </div>
-                    </td>
+                    <TableStateCell colSpan={columnCount} error>
+                      <span>{error}</span>
+                      {onRetry ? (
+                        <Button size="small" onClick={onRetry}>
+                          다시 시도
+                        </Button>
+                      ) : null}
+                    </TableStateCell>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={columnCount} className="data-table-state">
-                      {emptyMessage}
-                    </td>
+                    <TableStateCell colSpan={columnCount}>{emptyMessage}</TableStateCell>
                   </tr>
                 ) : (
                   rows.map((row, rowIndex) => (

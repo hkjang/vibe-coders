@@ -1,6 +1,11 @@
 import { expect, type Download, type Page } from "@playwright/test";
 import { test } from "../fixtures/model-catalog-sorting-gateway";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 const table = (page: Page) => page.getByRole("table", { name: "공급자별 모델 상태, 품질과 가격" });
 async function ready(page: Page) {
   await expect(table(page)).toBeVisible();
@@ -83,7 +88,7 @@ test("390px 다크 설정에서 키보드 이동·삭제·취소와 초점·접�
   await page.keyboard.press("Enter");
   await expect(page.getByRole("combobox", { name: "1순위 정렬 열" })).toBeFocused();
   await expect(page.getByRole("combobox", { name: "1순위 정렬 열" })).toHaveValue("input-price");
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   expect(
     await page.evaluate(
       async () =>

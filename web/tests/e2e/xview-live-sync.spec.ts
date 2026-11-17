@@ -2,6 +2,11 @@ import { expect, type Page } from "@playwright/test";
 import { firstEmail, firstId, initial, xviewUrl } from "../fixtures/request-note-gateway";
 import { cursor, livePoint, serverStart, test } from "../fixtures/xview-live-gateway";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 async function login(page: Page, suffix = "?window=5m") {
   await page.goto(`login?return_to=${encodeURIComponent(xviewUrl + suffix)}`);
   await page.getByLabel("이메일", { exact: true }).fill(firstEmail);
@@ -210,7 +215,7 @@ test("390px 다크 화면에서 상태·키보드 선택·초점 복귀와 axe�
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as { axe: { run: (root: Document) => Promise<{ violations: unknown[] }> } }

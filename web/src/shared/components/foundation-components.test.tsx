@@ -160,6 +160,7 @@ describe("foundation form, dialog, and table components", () => {
     rerender(
       <DataTable caption="요청" columns={personColumns} data={[]} error="조회 실패" onRetry={retry} />,
     );
+    expect(screen.getByRole("alert").closest("td")).toHaveClass("data-table-state", "data-table-error");
     await user.click(screen.getByRole("button", { name: "다시 시도" }));
     expect(retry).toHaveBeenCalledOnce();
   });

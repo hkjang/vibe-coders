@@ -2,6 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 import type axe from "axe-core";
 import { installPersonalConsole, personalRequest } from "../fixtures/personal-console-browser";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 async function violations(page: Page) {
   return page.evaluate(async () => {
     await Promise.all(
@@ -152,7 +157,7 @@ for (const theme of ["light", "dark"] as const) {
       const fixture = await installPersonalConsole(page);
       await page.goto("me");
       await expect(page.getByRole("region", { name: "내 사용 요약" })).toContainText("48,200");
-      await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
       await expect.poll(() => violations(page)).toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(
         true,

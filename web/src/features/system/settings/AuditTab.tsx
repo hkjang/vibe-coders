@@ -1,3 +1,4 @@
+import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { Download } from "lucide-react";
 import { useState } from "react";
 
@@ -106,37 +107,39 @@ export function AuditTab(): React.JSX.Element {
             description="설정을 저장하거나 자원을 만들면 이곳에 남습니다."
           />
         ) : (
-          <table className="data-table">
-            <caption className="sr-only">관리자 변경 이력</caption>
-            <thead>
-              <tr>
-                <th scope="col">시각</th>
-                <th scope="col">관리자</th>
-                <th scope="col">작업</th>
-                <th scope="col">변경 전</th>
-                <th scope="col">변경 후</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.isPending ? (
+          <div className="data-table-scroll" role="region" aria-label="관리자 변경 이력 표" tabIndex={0}>
+            <table className="data-table">
+              <caption className="sr-only">관리자 변경 이력</caption>
+              <thead>
                 <tr>
-                  <td colSpan={5} className="data-table-state">
-                    <span role="status">변경 이력을 불러오는 중입니다.</span>
-                  </td>
+                  <th scope="col">시각</th>
+                  <th scope="col">관리자</th>
+                  <th scope="col">작업</th>
+                  <th scope="col">변경 전</th>
+                  <th scope="col">변경 후</th>
                 </tr>
-              ) : (
-                logRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{formatDateTime(row.created_at)}</td>
-                    <td>{row.admin_id || "—"}</td>
-                    <td className="mono">{row.action || "—"}</td>
-                    <td className="mono truncate">{row.before_value || "—"}</td>
-                    <td className="mono truncate">{row.after_value || "—"}</td>
+              </thead>
+              <tbody>
+                {logs.isPending ? (
+                  <tr>
+                    <TableStateCell colSpan={5}>
+                      <span role="status">변경 이력을 불러오는 중입니다.</span>
+                    </TableStateCell>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  logRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{formatDateTime(row.created_at)}</td>
+                      <td>{row.admin_id || "—"}</td>
+                      <td className="mono">{row.action || "—"}</td>
+                      <td className="mono truncate">{row.before_value || "—"}</td>
+                      <td className="mono truncate">{row.after_value || "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
         <UpdatedAt at={logs.dataUpdatedAt} />
       </SectionCard>
@@ -160,39 +163,41 @@ export function AuditTab(): React.JSX.Element {
             description="로그인이 발생하면 이곳에 남습니다."
           />
         ) : (
-          <table className="data-table">
-            <caption className="sr-only">최근 인증 이벤트</caption>
-            <thead>
-              <tr>
-                <th scope="col">시각</th>
-                <th scope="col">유형</th>
-                <th scope="col">사용자</th>
-                <th scope="col">팀</th>
-                <th scope="col">IP</th>
-                <th scope="col">상세</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.isPending ? (
+          <div className="data-table-scroll" role="region" aria-label="최근 인증 이벤트 표" tabIndex={0}>
+            <table className="data-table">
+              <caption className="sr-only">최근 인증 이벤트</caption>
+              <thead>
                 <tr>
-                  <td colSpan={6} className="data-table-state">
-                    <span role="status">인증 이벤트를 불러오는 중입니다.</span>
-                  </td>
+                  <th scope="col">시각</th>
+                  <th scope="col">유형</th>
+                  <th scope="col">사용자</th>
+                  <th scope="col">팀</th>
+                  <th scope="col">IP</th>
+                  <th scope="col">상세</th>
                 </tr>
-              ) : (
-                eventRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{formatDateTime(row.created_at)}</td>
-                    <td className="mono">{row.event_type || "—"}</td>
-                    <td>{row.actor_user_id || "—"}</td>
-                    <td>{row.team_id || "—"}</td>
-                    <td className="mono">{row.ip || "—"}</td>
-                    <td className="truncate">{row.detail || "—"}</td>
+              </thead>
+              <tbody>
+                {events.isPending ? (
+                  <tr>
+                    <TableStateCell colSpan={6}>
+                      <span role="status">인증 이벤트를 불러오는 중입니다.</span>
+                    </TableStateCell>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  eventRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{formatDateTime(row.created_at)}</td>
+                      <td className="mono">{row.event_type || "—"}</td>
+                      <td>{row.actor_user_id || "—"}</td>
+                      <td>{row.team_id || "—"}</td>
+                      <td className="mono">{row.ip || "—"}</td>
+                      <td className="truncate">{row.detail || "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </SectionCard>
     </div>

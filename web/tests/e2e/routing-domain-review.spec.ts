@@ -10,6 +10,11 @@ import {
   rawQueryMarker,
 } from "./fixtures/routing-domain-review";
 
+// Install the audit before navigation so the production CSP stays in force.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+});
+
 const dialogFor = (page: Page) => page.getByRole("dialog", { name: "도메인 검토 상태 기록", exact: true });
 const finalFor = (dialog: Locator, action: "approve" | "reject" = "approve") =>
   dialog.getByRole("button", {
@@ -286,7 +291,7 @@ test("390px 다크 검토창은 키보드 동의와 포커스 복귀, 넘침 및
   ).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.locator("body")).not.toContainText(rawQueryMarker);
-  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+
   const violations = await page.evaluate(async () => {
     const axe = (
       window as unknown as {

@@ -337,9 +337,22 @@
 
 .data-table-state {
   min-height: 8rem;
-  padding: var(--space-8) !important;
+  padding: 0 !important;
   color: var(--color-muted);
   text-align: center;
+}
+
+/* Keep feedback inside its semantic table cell while following the visible
+   viewport, including at the middle/end of a horizontally scrolled table. */
+.data-table-state-content {
+  position: sticky;
+  left: 0;
+  box-sizing: border-box;
+  width: var(--data-table-state-width, 100%);
+  max-width: 100%;
+  padding: var(--space-8);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .data-table-error {
