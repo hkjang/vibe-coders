@@ -8,6 +8,7 @@ import type {
   DeleteAdminSettingsByKeyKeyResponse,
   GetAdminAuditAuthEventsData,
   GetAdminAuditLogsData,
+  GetAdminAuditLogsCsvData,
   GetAdminChangeSetsData,
   GetAdminChangeSetsIdData,
   GetAdminFallbackData,
@@ -59,6 +60,8 @@ import type {
 import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import {
   auditLogListSchema,
+  auditCsvSchema,
+  auditCsvQuerySchema,
   authEventListSchema,
   changeImpactSchema,
   changeSetApplySchema,
@@ -371,6 +374,12 @@ export const systemEndpoints = {
   },
   roles: operation<GetAdminRolesData, unknown>()("GET", "/admin/roles", roleCatalogSchema),
   audit: {
+    csv: operation<GetAdminAuditLogsCsvData, string>()(
+      "GET",
+      "/admin/audit-logs.csv",
+      auditCsvSchema,
+      auditCsvQuerySchema,
+    ),
     logs: operation<WithQuery<GetAdminAuditLogsData, { limit?: number }>, unknown>()(
       "GET",
       "/admin/audit-logs",

@@ -3,7 +3,11 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { useSettingsWorkspace } from "./settings-workspace-context";
-import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
+import {
+  assertFeatureRead,
+  featureOwnedKey,
+  type FeatureReadOwner,
+} from "@/shared/hooks/use-feature-read-owner";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
 
 export const routeId = "system.settings";
@@ -118,21 +122,44 @@ export function useRoleCatalog(enabled: boolean) {
   });
 }
 
-export function useAuditLogs(limit: number) {
+export function useAuditLogs(limit: number, owner: FeatureReadOwner) {
   const refetchInterval = useRefreshInterval();
   return useQuery({
-    queryKey: [...systemSettingsKeys.auditLogs, limit],
-    queryFn: ({ signal }) => apiClient.request(system.audit.logs, { query: { limit }, signal, routeId }),
+    queryKey: featureOwnedKey([...systemSettingsKeys.auditLogs, limit], owner),
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(system.audit.logs, {
+        query: { limit },
+        signal,
+        routeId,
+        cache: "no-store",
+      });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
     refetchInterval,
     refetchIntervalInBackground: false,
   });
 }
 
-export function useAuthEvents(limit: number) {
+export function useAuthEvents(limit: number, owner: FeatureReadOwner) {
   return useQuery({
-    queryKey: [...systemSettingsKeys.authEvents, limit],
-    queryFn: ({ signal }) =>
-      apiClient.request(system.audit.authEvents, { query: { limit }, signal, routeId }),
+    queryKey: featureOwnedKey([...systemSettingsKeys.authEvents, limit], owner),
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(system.audit.authEvents, {
+        query: { limit },
+        signal,
+        routeId,
+        cache: "no-store",
+      });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
   });
 }
 

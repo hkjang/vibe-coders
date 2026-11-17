@@ -5406,16 +5406,44 @@ export type GetAdminAuditLogsResponses = {
 export type GetAdminAuditLogsCsvData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Per-kind row limit. Missing, invalid or non-positive values use 1000; values above 10000 clamp to 10000.
+         */
+        limit?: number;
+    };
     url: '/admin/audit-logs.csv';
 };
 
+export type GetAdminAuditLogsCsvErrors = {
+    /**
+     * invalid_api_key: existing admin read access is required
+     */
+    401: AppError;
+    /**
+     * method_not_allowed: only GET is supported
+     */
+    405: AppError;
+    /**
+     * audit_export_failed: no successful CSV is returned
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminAuditLogsCsvError = GetAdminAuditLogsCsvErrors[keyof GetAdminAuditLogsCsvErrors];
+
 export type GetAdminAuditLogsCsvResponses = {
     /**
-     * OK
+     * CSV columns: created_at, kind, actor, action, detail_before, detail_after. Administrator audit rows precede alert event rows; empty results include the header. Timestamps use ISO 8601.
      */
-    200: unknown;
+    200: string;
 };
+
+export type GetAdminAuditLogsCsvResponse = GetAdminAuditLogsCsvResponses[keyof GetAdminAuditLogsCsvResponses];
 
 export type GetAdminAuditLogsSummaryData = {
     body?: never;

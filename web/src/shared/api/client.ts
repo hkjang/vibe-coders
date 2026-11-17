@@ -305,7 +305,7 @@ export class ApiClient {
 
   private headers(source?: HeadersInit, includeAuth = true, routeId?: string): Headers {
     const headers = new Headers(source);
-    headers.set("Accept", "application/json");
+    if (!headers.has("Accept")) headers.set("Accept", "application/json");
     headers.set("X-Vibe-UI", "app");
     headers.set("X-Vibe-UI-Version", __UI_VERSION__);
     if (routeId) headers.set("X-Vibe-Route", routeId);
