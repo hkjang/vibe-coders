@@ -1,5 +1,9 @@
 # 신규 콘솔 인수 검증표
 
+## v0.86.155 후보: 라우팅·정책 미리보기 실제 서버 검증
+
+내장 React에서 실제 로그인과 Go API를 거쳐 라우팅 선택·키 정책 오류 복구·정책 추천·기간별 집계·권한 거부를 확인한다. 별도 SQLite 데이터베이스와 모델 호출 계수로 설정·과거 평가 표본 보존 및 실제 모델 미호출을 검증한다. [검증 범위와 실행 방법](APP_UI_SIMULATION_LIVE_CONTRACT.md). 관련 React 1,129개(71개 파일), 기본 Node 검사 58개, 실제 시뮬레이션 5개와 기존 인증·SSO·API 키 업무 60개를 통과했다. 기본 Node 명령의 외부 산출물 선택 검사 15개는 제외 항목이며, 전체 React 회귀를 새로 수행한 것으로 표시하지 않는다. 타입·린트·포맷·실제 Go OpenAPI 생성 계약·빌드·관련 Go 회귀·vet·통합 SBOM(19 Go/389 npm)을 검증했다. 초기 전송 크기는 268,939바이트다. CI·리뷰·실제 메인·공개 출고 및 운영 Stable은 별도 검증하며 전체 Phase 0–6 인수는 계속 진행한다.
+
 ## v0.86.154 후보: 추적별 요청 흐름 보기
 
 현재 페이지의 공개 추적 ID별로 요청을 접고 펼치며 요청 수·오류·최대 기록 지연을 확인한다.
@@ -2416,8 +2420,8 @@ Node 검사는 49개 통과·호스트에서 브라우저 전용 4개 생략이�
 | E2E-006 | 공급자 목록·상세 | UI 흐름 | `app-shell.spec.ts`; 실제 API 데이터 정합성 추가 확인 |
 | E2E-007 | 공급자 연결 테스트 | 구현·격리 브라우저 검증 | 추가·수정의 저장 전 검사와 명시적 저장 분리를 실제 Go·임시 DB·로컬 공급자로 확인. 운영 공급자 호환성·정식 승격은 별도 |
 | E2E-008 | 요청 필터·상세 | UI 흐름 | `request-explorer.spec.ts` |
-| E2E-009 | 라우팅 미리보기 | UI 흐름 | `routing-preview-safety.spec.ts` 20개 합성 HTTP 브라우저 검사: 입력 기준·수동 재실행·읽기 전용 조회·키 원문 차단·세션 경계·모바일 접근성. 실제 Go 업무 브라우저 및 초안 영향 시뮬레이션과 구분 |
-| E2E-010 | 정책 시뮬레이션 | UI 흐름 + 별도 Go HTTP | `policy-simulation.spec.ts` 전용 합성 브라우저 13개. 실제 Go·임시 SQLite HTTP 계약 4개와 하위 사례 8개는 별도 근거이며 실제 브라우저→Go 동일 실행이나 운영 안전성 검증은 아님 |
+| E2E-009 | 라우팅 미리보기 | 실제 UI → Go | `simulation-live.spec.ts`의 실제 로그인·저장 규칙 선택·404 복구·권한 거부와 모델 호출 0회·설정 보존. 기존 합성 화면 검사도 유지하며 초안의 전체 운영 영향 검증과 구분 |
+| E2E-010 | 정책 시뮬레이션 | 실제 UI → Go | `simulation-live.spec.ts`에서 실제 추천·기간별 집계·복원 불가 조건의 안내·조회 계정 실행 차단을 검증한다. 별도 DB의 정책·설정·평가 표본은 보존되며 미래 정책 안전성이나 전체 과거 맥락 복원을 뜻하지 않는다 |
 | E2E-011 | API Key 최초 발급 | 실제 서버 흐름 | `AUTH-LIVE-006`: 실제 발급 201·기본 권한·비밀 일회 표시·저장소 비저장·닫기/새로고침/재로그인 후 비노출·공개 GET. `009`: 발급 후 늦은 실제 응답을 다른 계정에서 격리. 회전·소유권의 모든 조합은 별도 |
 | E2E-012 | 미저장 변경 경고 | 부분 UI 흐름 | `unsaved-changes.spec.ts`의 공통 폼, `settings-unsaved.spec.ts`의 콘솔 전환·개별 설정, `settings-inline-unsaved.spec.ts`의 SSO·알림, `provider-review.spec.ts`의 공급자 검토·뒤로가기, `key-scope-drafts.spec.ts`의 관리자 API 키와 `me-key-scope-drafts.spec.ts`의 개인 키 권한, `app-permission-drafts.spec.ts`의 앱 추가 접근 권한, `cost-guard-drafts.spec.ts`의 확인된 비용 설정, `request-note-drafts.spec.ts`의 원본 유지·상위 상세창, `model-governance-safety.spec.ts`의 모델 계약·지원 종료 초안 보호와 `policy-editor.spec.ts`의 비활성 정책 복수 규칙 편집. 닫기·이동·저장 잠금·세션 격리·좁은 다크 화면을 확인하며 다른 자체 편집창은 잔여 |
 | E2E-013 | 오류 후 재시도 | 부분 실제 서버 흐름 | `AUTH-LIVE-011`: 정확한 공급자 청크 실패의 오류 제목 초점·키보드 재시도·실제 GET·목록 복구. 기존 `app-shell.spec.ts`의 합성 API 오류 검사와 구분 |

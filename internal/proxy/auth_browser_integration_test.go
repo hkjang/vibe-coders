@@ -63,6 +63,10 @@ func browserFixtureConfig(idp *browserOIDCFixture) config.Config {
 }
 
 func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
+	return newBrowserAuthHarnessWithDomainFixtures(t, true)
+}
+
+func newBrowserAuthHarnessWithDomainFixtures(t *testing.T, domainFixtures bool) *browserAuthHarness {
 	t.Helper()
 	gateway := httptest.NewUnstartedServer(nil)
 	t.Cleanup(func() {
@@ -114,21 +118,23 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 		}
 	}
 	logger := store.NewAsyncLogger(db, 32, filepath.Join(scratch, "fallback.ndjson"))
-	seedBrowserChangeSetFixture(t, db)
-	seedBrowserUserFixture(t, db)
-	seedBrowserFinopsFixture(t, db)
-	seedBrowserOverviewFixture(t, db)
-	seedBrowserContextFixture(t, db)
-	seedBrowserProductFixture(t, db)
-	seedBrowserStageFixture(t, db)
-	seedBrowserStageBulkFixture(t, db)
-	seedBrowserRequestBulkFixture(t, db)
-	seedBrowserMcpRiskFixture(t, db)
-	h.verifyMcpCall = seedBrowserMcpCallFixture(t, db)
-	seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
-	seedBrowserRoutingOrderFixture(t, db)
-	seedBrowserExecutionReceipts(t, db)
-	seedBrowserOperationsFixture(t, db, filepath.Join(scratch, "fallback.ndjson"))
+	if domainFixtures {
+		seedBrowserChangeSetFixture(t, db)
+		seedBrowserUserFixture(t, db)
+		seedBrowserFinopsFixture(t, db)
+		seedBrowserOverviewFixture(t, db)
+		seedBrowserContextFixture(t, db)
+		seedBrowserProductFixture(t, db)
+		seedBrowserStageFixture(t, db)
+		seedBrowserStageBulkFixture(t, db)
+		seedBrowserRequestBulkFixture(t, db)
+		seedBrowserMcpRiskFixture(t, db)
+		h.verifyMcpCall = seedBrowserMcpCallFixture(t, db)
+		seedBrowserResourceSearchFixture(t, db, upstream.server.URL)
+		seedBrowserRoutingOrderFixture(t, db)
+		seedBrowserExecutionReceipts(t, db)
+		seedBrowserOperationsFixture(t, db, filepath.Join(scratch, "fallback.ndjson"))
+	}
 	logger.Start()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -193,40 +199,7 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(previousLog) })
 	h := newBrowserAuthHarness(t)
 	h.providerChunk = providerChunk
-	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
-	defer cancel()
-	// Invoke the already-installed CLI directly. Package-manager exec can
-	// reinstall dependencies when a checkout crosses host/container platforms.
-	cmd := exec.CommandContext(ctx, "node", playwrightCLI, "test", "--config", "playwright.auth.config.ts")
-	cmd.Dir = webDir
-	cmd.Env = h.childEnvironment()
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.WaitDelay = 2 * time.Second
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return os.ErrProcessDone
-		}
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		} else {
-			return err
-		}
-	}
-	err = cmd.Run()
-	if cmd.Process != nil {
-		// Also clean up any orphaned browser descendants after an abnormal exit.
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	if err != nil {
-		if ctx.Err() != nil {
-			t.Fatal("real authentication browser suite exceeded its bounded run budget")
-		}
-		if cmd.ProcessState != nil {
-			t.Fatalf("real authentication browser suite failed (exit code %d); raw child output intentionally suppressed", cmd.ProcessState.ExitCode())
-		}
-		t.Fatal("real authentication browser runner could not be started")
-	}
+	runBrowserAuthSuite(t, h, webDir, playwrightCLI, "playwright.auth.config.ts", 4*time.Minute)
 	if h.upstream.calls.Load() < 2 || h.upstream.deniedModelCalls.Load() != 0 {
 		t.Fatal("live key authorization did not reach the local model as expected, or a denied call reached it")
 	}
@@ -270,6 +243,46 @@ func TestAuthBrowserIntegration(t *testing.T) {
 	verifyBrowserRoutingOrderFixture(t, h.db)
 	verifyBrowserStageFixture(t, h.db)
 	verifyBrowserStageBulkFixture(t, h.db)
+}
+
+// Runs only the fixed, repository-owned Playwright configuration against this
+// private Go harness. All browser output remains suppressed.
+func runBrowserAuthSuite(t *testing.T, h *browserAuthHarness, webDir, playwrightCLI, configFile string, budget time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), budget)
+	defer cancel()
+	// Invoke the already-installed CLI directly. Package-manager exec can
+	// reinstall dependencies when a checkout crosses host/container platforms.
+	cmd := exec.CommandContext(ctx, "node", playwrightCLI, "test", "--config", configFile)
+	cmd.Dir = webDir
+	cmd.Env = h.childEnvironment()
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 2 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		} else {
+			return err
+		}
+	}
+	err := cmd.Run()
+	if cmd.Process != nil {
+		// Also clean up any orphaned browser descendants after an abnormal exit.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			t.Fatal("real authentication browser suite exceeded its bounded run budget")
+		}
+		if cmd.ProcessState != nil {
+			t.Fatalf("real authentication browser suite failed (exit code %d); raw child output intentionally suppressed", cmd.ProcessState.ExitCode())
+		}
+		t.Fatal("real authentication browser runner could not be started")
+	}
 }
 
 func browserAuthWebDirectory(t *testing.T) string {

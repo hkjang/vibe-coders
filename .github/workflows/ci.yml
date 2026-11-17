@@ -159,12 +159,19 @@ jobs:
         # Real login, authorization, reviewed execution, loopback provider,
         # SQLite failure injection and audit verification; numeric-only report.
         run: go test ./internal/proxy -run '^TestRedTeamBrowserIntegration$' -count=1 -timeout=4m
+      - name: Verify routing preview and policy simulation against isolated Go server
+        env:
+          VIBE_SIMULATION_BROWSER_TEST: "1"
+          CGO_ENABLED: "0"
+        run: go test ./internal/proxy -run '^TestSimulationBrowserIntegration$' -count=1 -timeout=3m
       - name: Upload sanitized authentication summary only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: auth-browser-sanitized-summary
-          path: web/test-results/auth-live-summary.json
+          path: |
+            web/test-results/auth-live-summary.json
+            web/test-results/simulation-live-summary.json
           if-no-files-found: error
           retention-days: 7
 
@@ -399,7 +406,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.154
+      SOURCE_SBOM_VERSION: v0.86.155
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

@@ -24,6 +24,11 @@ const markers = [
 ];
 const sensitive = markers.join(" ");
 const allowedScenarios = [
+  "SIMULATION-LIVE-001",
+  "SIMULATION-LIVE-002",
+  "SIMULATION-LIVE-003",
+  "SIMULATION-LIVE-004",
+  "SIMULATION-LIVE-005",
   "AUTH-LIVE-001",
   "AUTH-LIVE-002",
   "AUTH-LIVE-003",
@@ -98,7 +103,7 @@ const runner = `
   import { readFileSync } from "node:fs";
   const { default: SafeAuthReporter } = await import(process.argv[1]);
   const input = JSON.parse(readFileSync(0, "utf8"));
-  const reporter = new SafeAuthReporter();
+  const reporter = new SafeAuthReporter(input.reporterOptions);
   if (reporter.printsToStdio() !== false) process.exit(2);
   reporter.onBegin?.(input.config, input.suite);
   for (const row of input.rows) {
@@ -148,7 +153,7 @@ function row(id, status = "failed", steps = []) {
   };
 }
 
-async function report(rows, status = "failed", product = false) {
+async function report(rows, status = "failed", product = false, reporterOptions = {}) {
   const originalCwd = process.cwd();
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "vibe-auth-report-sanitization-"));
   try {
@@ -161,6 +166,7 @@ async function report(rows, status = "failed", product = false) {
       input: JSON.stringify({
         sensitive,
         rows,
+        reporterOptions,
         config: { metadata: { secret: sensitive }, use: { extraHTTPHeaders: { Authorization: sensitive } } },
         suite: { title: sensitive, tests: rows.map((entry) => entry.test) },
         fullResult: { status, startTime: sensitive, duration: 456, error: { message: sensitive } },
@@ -174,7 +180,11 @@ async function report(rows, status = "failed", product = false) {
     assert.equal(child.stdout.length, 0, "The reporter must not write to stdout");
     assert.equal(child.stderr.length, 0, "The reporter must not write to stderr");
     assert.deepEqual(await readdir(temporaryDirectory), ["test-results"]);
-    const summaryName = product ? "keycloak-live-summary.json" : "auth-live-summary.json";
+    const summaryName = product
+      ? "keycloak-live-summary.json"
+      : reporterOptions.report === "simulation"
+        ? "simulation-live-summary.json"
+        : "auth-live-summary.json";
     assert.deepEqual(await readdir(join(temporaryDirectory, "test-results")), [summaryName]);
     const raw = await readFile(join(temporaryDirectory, "test-results", summaryName), "utf8");
     for (const marker of markers) {
@@ -814,3 +824,9 @@ export default {
       }
     },
   );
+
+test("simulation reporter uses a fixed sanitized result name and ignores arbitrary paths", async () => {
+  const result = await report([row("SIMULATION-LIVE-001")], "failed", false, { report: "simulation" });
+  assert.equal(result.tests[0].scenario, "SIMULATION-LIVE-001");
+  await report([row("SIMULATION-LIVE-002")], "failed", false, { report: "../private-token" });
+});
