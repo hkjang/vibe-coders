@@ -2603,6 +2603,28 @@ export type RedTeamEmergencyState = {
     scope: 'responding_process';
 };
 
+export type RedTeamPreflightResponse = {
+    active_eligible_targets: number;
+    approved: boolean;
+    campaign_id: string;
+    can_run: boolean;
+    case_executions: number;
+    destructive_tool_targets: number;
+    estimated_cost_krw: number;
+    external_targets: number;
+    limits: {
+        budget_limit_krw: number;
+        concurrency: number;
+        qps_limit: number;
+        timeout_ms: number;
+    };
+    models_selected: number;
+    note: string;
+    probe_packs: number;
+    requires_approval: boolean;
+    targets: number;
+};
+
 export type RegisteredTeam = {
     created_at: string;
     id: string;
@@ -10478,12 +10500,23 @@ export type PostAdminRedteamCampaignsIdDryRunData = {
     url: '/admin/redteam/campaigns/{id}/dry-run';
 };
 
+export type PostAdminRedteamCampaignsIdDryRunErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRedteamCampaignsIdDryRunError = PostAdminRedteamCampaignsIdDryRunErrors[keyof PostAdminRedteamCampaignsIdDryRunErrors];
+
 export type PostAdminRedteamCampaignsIdDryRunResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RedTeamPreflightResponse;
 };
+
+export type PostAdminRedteamCampaignsIdDryRunResponse = PostAdminRedteamCampaignsIdDryRunResponses[keyof PostAdminRedteamCampaignsIdDryRunResponses];
 
 export type PostAdminRedteamCampaignsIdRunData = {
     body?: never;

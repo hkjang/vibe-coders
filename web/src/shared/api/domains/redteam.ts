@@ -4,6 +4,7 @@
 import { z } from "zod";
 
 import type {
+  RedTeamPreflightResponse,
   DeleteAdminRedteamCampaignsIdData,
   DeleteAdminRedteamProbeCasesIdData,
   GetAdminRedteamBaselinesData,
@@ -338,30 +339,29 @@ export const redTeamEmergencySchema = z.object({
 });
 export type RedTeamEmergencyState = z.output<typeof redTeamEmergencySchema>;
 
-export const redTeamDryRunSchema = looseObject({
-  campaign_id: text(),
-  targets: count(),
-  probe_packs: count(),
-  case_executions: count(),
-  estimated_cost_krw: count(),
-  external_targets: count(),
-  destructive_tool_targets: count(),
-  active_eligible_targets: count(),
-  models_selected: count(),
-  requires_approval: flag(),
-  approved: flag(),
-  can_run: flag(),
-  limits: orDefault(
-    looseObject({
-      budget_limit_krw: count(),
-      qps_limit: count(),
-      concurrency: count(),
-      timeout_ms: count(),
-    }),
-    { budget_limit_krw: 0, qps_limit: 0, concurrency: 0, timeout_ms: 0 },
-  ),
-  note: text(),
-});
+const preflightCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const preflightAmount = z.number().finite().nonnegative();
+export const redTeamDryRunSchema = z.object({
+  campaign_id: z.string().min(1),
+  targets: preflightCount,
+  probe_packs: preflightCount,
+  case_executions: preflightCount,
+  estimated_cost_krw: preflightAmount,
+  external_targets: preflightCount,
+  destructive_tool_targets: preflightCount,
+  active_eligible_targets: preflightCount,
+  models_selected: preflightCount,
+  requires_approval: z.boolean(),
+  approved: z.boolean(),
+  can_run: z.boolean(),
+  limits: z.object({
+    budget_limit_krw: preflightAmount,
+    qps_limit: preflightAmount,
+    concurrency: preflightCount,
+    timeout_ms: preflightCount,
+  }),
+  note: z.string(),
+}) satisfies z.ZodType<RedTeamPreflightResponse>;
 
 export const redTeamRunOutcomeSchema = looseObject({
   campaign_id: text(),

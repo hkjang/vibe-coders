@@ -8,6 +8,8 @@ import {
   type CampaignDraft,
   type CampaignFormValues,
 } from "@/features/security/redteam/campaign-draft";
+import { usePreflightReturnFocus } from "./use-preflight-return-focus";
+import { readPreflight } from "./read-preflight";
 import { DryRunSheet } from "@/features/security/redteam/DryRunSheet";
 import { FieldRow, PanelFailure } from "@/features/security/redteam/RedTeamParts";
 import { scoreTone, statusTone, writeDeniedReason } from "@/features/security/redteam/redteam-ui";
@@ -63,6 +65,7 @@ export function RedTeamCampaignsTab({
   const postChange = campaigns.data?.post_change;
 
   const { remember, returnFocusRef } = useReturnFocus();
+  const preflightFocus = usePreflightReturnFocus(returnFocusRef);
   const [draft, setDraft] = useState<CampaignDraft>(() => emptyDraft([]));
   const [formOpen, setFormOpen] = useState(false);
   const [dryRun, setDryRun] = useState<RedTeamDryRun | undefined>();
@@ -119,9 +122,8 @@ export function RedTeamCampaignsTab({
   });
 
   const runDryRun = useMutationFeedback({
-    mutate: (campaign: RedTeamCampaign) =>
-      apiClient.request(withPathParams(redteam.campaigns.dryRun, { id: campaign.id }), { routeId }),
-    errorMessage: "드라이런을 실행하지 못했습니다.",
+    mutate: (campaign: RedTeamCampaign) => readPreflight(campaign.id),
+    errorMessage: "사전 점검 결과를 확인하지 못했습니다.",
     onSuccess: (result) => setDryRun(result),
   });
 
@@ -184,6 +186,8 @@ export function RedTeamCampaignsTab({
   const liveRuns = runs.data?.runs.filter((run) => run.campaign_id === pollingCampaignId) ?? [];
   const columns = campaignColumns({
     canWrite,
+    checking: runDryRun.isPending,
+    preflightTriggerRef: preflightFocus.register,
     onClone: (campaign, event) => {
       remember(event);
       setDraft(campaignToDraft(campaign, "clone", packIds));
@@ -194,6 +198,7 @@ export function RedTeamCampaignsTab({
       setPendingDelete(campaign);
     },
     onDryRun: (campaign, event) => {
+      preflightFocus.remember(campaign.id);
       remember(event);
       runDryRun.mutate(campaign);
     },
@@ -222,7 +227,7 @@ export function RedTeamCampaignsTab({
 
       <SectionCard
         title="캠페인"
-        description="드라이런으로 규모·비용을 확인한 뒤, (고위험 팩이면) 승인하고 실행하세요."
+        description="사전 점검으로 대상·예상 비용·승인 조건을 확인한 뒤 실행하세요."
         actions={
           <>
             {postChange ? (
@@ -335,7 +340,7 @@ export function RedTeamCampaignsTab({
           if (!open) setDryRun(undefined);
         }}
         preview={dryRun}
-        returnFocusRef={returnFocusRef}
+        returnFocusRef={preflightFocus.returnFocusRef}
       />
 
       <Sheet
@@ -411,6 +416,8 @@ export function RedTeamCampaignsTab({
 
 interface CampaignActionHandlers {
   canWrite: boolean;
+  checking: boolean;
+  preflightTriggerRef: (id: string, node: HTMLButtonElement | null) => void;
   onApprove: (campaign: RedTeamCampaign) => void;
   onClone: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
   onDelete: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
@@ -474,12 +481,13 @@ function campaignColumns(handlers: CampaignActionHandlers): ReadonlyArray<DataTa
           <div className="table-actions">
             <Button
               size="small"
-              disabled={!handlers.canWrite}
+              disabled={!handlers.canWrite || handlers.checking}
               title={writeTitle}
-              aria-label={`${campaign.name} 드라이런`}
+              aria-label={`${campaign.name} 사전 점검`}
+              ref={(node) => handlers.preflightTriggerRef(campaign.id, node)}
               onClick={(event) => handlers.onDryRun(campaign, event)}
             >
-              드라이런
+              {handlers.checking ? "점검 중" : "사전 점검"}
             </Button>
             {automatic ? null : (
               <Button
