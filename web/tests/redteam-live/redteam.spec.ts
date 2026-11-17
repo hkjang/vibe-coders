@@ -11,10 +11,14 @@ const names = {
 type Scenario = keyof typeof names;
 let reviews = 0;
 let executions = 0;
+let replayReviews = 0;
+let replays = 0;
 
 test.beforeEach(async ({ context, baseURL }) => {
   reviews = 0;
   executions = 0;
+  replayReviews = 0;
+  replays = 0;
   const origin = new URL(baseURL ?? required("APP_BASE_URL")).origin;
   await context.route("**/*", async (route) => {
     const request = route.request();
@@ -22,6 +26,9 @@ test.beforeEach(async ({ context, baseURL }) => {
     expect(url.origin).toBe(origin);
     if (request.method() === "POST" && url.pathname.endsWith("/run-review")) reviews += 1;
     if (request.method() === "POST" && url.pathname.endsWith("/run-reviewed")) executions += 1;
+    if (request.method() === "POST" && url.pathname.endsWith("/rerun-review")) replayReviews += 1;
+    if (request.method() === "POST" && url.pathname.endsWith("/rerun-reviewed")) replays += 1;
+    expect(url.pathname.endsWith("/rerun")).toBe(false);
     return route.continue(); // Real Go authentication and business responses only.
   });
 });
@@ -169,3 +176,65 @@ test("REDTEAM-LIVE-006 검토 후 변경된 캠페인을 실행하지 않는다"
   expect(executions).toBe(1);
   expect(reviews).toBe(1);
 });
+
+for (const scenario of ["replay", "replay-recording"] as const)
+  test(`REDTEAM-LIVE-${scenario === "replay" ? "007" : "008"} 한 건 재실행과 ${scenario === "replay" ? "원본 보존" : "저장 실패"}`, async ({
+    page,
+  }) => {
+    await login(page, undefined, "/app/redteam?tab=runs");
+    await page.getByLabel("레드팀 실행 키", { exact: true }).fill(required("VIBE_REDTEAM_BROWSER_KEY"));
+    await page.getByRole("button", { name: `browser-source-${scenario} 결과 보기`, exact: true }).click();
+    await page.getByRole("button", { name: "browser-redteam-case 증적 보기", exact: true }).click();
+    await expect(
+      page
+        .getByRole("dialog", { name: "증적 상세", exact: true })
+        .getByLabel("요청 프롬프트 (실제 전송 형태 · 마스킹)", { exact: true }),
+    ).toHaveText("원본 공개 검사");
+    await page.getByRole("button", { name: "조건 검토 후 한 건 재실행", exact: true }).click();
+    await page.getByLabel("재실행 사유", { exact: false }).fill("격리 브라우저 한 건 재실행 검증");
+    await page.getByLabel("출력 토큰 요청 상한", { exact: false }).fill("77");
+    await expect(page.getByRole("checkbox", { name: "새 증적에 입력·응답 원문 보관" })).not.toBeChecked();
+    await page.getByRole("button", { name: "재실행 조건 검토", exact: true }).click();
+    const panel = page.getByRole("dialog", { name: "한 건 재실행 최종 확인", exact: true });
+    await expect(panel).toBeVisible();
+    expect(replayReviews).toBe(1);
+    expect(replays).toBe(0);
+    await expect(panel.getByText("실제 모델 호출", { exact: true }).locator("..")).toContainText(
+      "1건 / 상한 1건",
+    );
+    const action = panel.getByRole("button", { name: "검토한 한 건만 실제 재실행", exact: true });
+    await expect(action).toBeDisabled();
+    await panel.getByLabel("원본 결과 ID 확인", { exact: false }).fill(`browser-result-${scenario}`);
+    await action.click();
+    await expect(
+      panel.getByText(
+        scenario === "replay"
+          ? "재실행과 새 결과 저장을 확인했습니다."
+          : "일부 실행 또는 저장을 확인하지 못했습니다.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(replays).toBe(1);
+    await expect(action).toBeDisabled();
+    await expect(panel.getByText("private-browser-recording-fault", { exact: false })).toHaveCount(0);
+    await panel.getByRole("button", { name: "새 실행 결과 보기", exact: true }).click();
+    const results = page.getByRole("dialog", { name: "레드팀 결과", exact: true });
+    await expect(results).toBeVisible();
+    await expect(
+      results.getByRole("button", { name: "browser-redteam-case 증적 보기", exact: true }),
+    ).toHaveCount(scenario === "replay" ? 1 : 0);
+    await results.getByRole("button", { name: "패널 닫기", exact: true }).click();
+    await page.getByRole("button", { name: `browser-source-${scenario} 결과 보기`, exact: true }).click();
+    await page.getByRole("button", { name: "browser-redteam-case 증적 보기", exact: true }).click();
+    await expect(
+      page
+        .getByRole("dialog", { name: "증적 상세", exact: true })
+        .getByLabel("요청 프롬프트 (실제 전송 형태 · 마스킹)", { exact: true }),
+    ).toHaveText("원본 공개 검사");
+    await expect(
+      page
+        .getByRole("dialog", { name: "증적 상세", exact: true })
+        .getByLabel("대상 응답 (마스킹)", { exact: true }),
+    ).toHaveText("원본 공개 응답");
+    expect(replays).toBe(1);
+  });

@@ -2,15 +2,24 @@ import type { ReviewedRedTeamRun } from "@/shared/api/domains/redteam-reviewed";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { formatNumber, formatKRW, formatDateTime } from "@/shared/utils/format";
-export function RedTeamExecutionReviewDetails({ review }: { review: ReviewedRedTeamRun }): React.JSX.Element {
+export function RedTeamExecutionReviewDetails({
+  review,
+  singleCase = false,
+}: {
+  review: ReviewedRedTeamRun;
+  singleCase?: boolean;
+}): React.JSX.Element {
   return (
     <div className="rt-stack">
       <KeyValueList
         items={[
           {
             label: "실행 방식",
-            value:
-              review.kind === "live" ? "실제 호출 + 지원하지 않는 대상의 시뮬레이션" : "시뮬레이션만 실행",
+            value: singleCase
+              ? "단일 LLM 검사 실제 재실행"
+              : review.kind === "live"
+                ? "실제 호출 + 지원하지 않는 대상의 시뮬레이션"
+                : "시뮬레이션만 실행",
           },
           { label: "캠페인", value: review.campaign_name },
           { label: "실행 사유", value: review.reason },
@@ -59,10 +68,10 @@ export function RedTeamExecutionReviewDetails({ review }: { review: ReviewedRedT
         <p className="rt-note">증적은 마스킹해 보관합니다.</p>
       )}
       <p className="rt-note">
-        Text2SQL·MCP·앱·워크플로 대상은 시뮬레이션만 수행합니다. 다단계 가상 모델은 실제 호출에서 제외합니다.
-        비용은 호출 후 확인하므로 마지막 호출로 중단 기준을 넘을 수 있습니다. 출력 토큰은 제공자에 보내는 요청
-        상한이며 실제 과금 한도를 보장하지 않습니다. 게이트웨이 내부 재시도와 확장된 입력은 위 호출·입력
-        합계에 포함되지 않습니다.
+        {(singleCase
+          ? "Text2SQL·MCP·앱·워크플로와 다단계 가상 모델은 이 재실행에서 지원하지 않습니다."
+          : "Text2SQL·MCP·앱·워크플로 대상은 시뮬레이션만 수행합니다. 다단계 가상 모델은 실제 호출에서 제외합니다.") +
+          " 비용은 호출 후 확인하므로 마지막 호출로 중단 기준을 넘을 수 있습니다. 출력 토큰은 제공자에 보내는 요청 상한이며 실제 과금 한도를 보장하지 않습니다. 게이트웨이 내부 재시도와 확장된 입력은 위 호출·입력 합계에 포함되지 않습니다."}
       </p>
       <p className="rt-note">
         이 검토는 응답한 서버에서 5분 동안 한 번만 사용합니다. 다른 서버나 재시작 후에는 다시 검토해야 합니다.

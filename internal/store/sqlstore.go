@@ -2194,6 +2194,8 @@ func migrationStatements() []string {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_redteam_runs_campaign ON redteam_runs(campaign_id, created_at)`,
+		`ALTER TABLE redteam_runs ADD COLUMN source_result_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE redteam_runs ADD COLUMN review_id TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS redteam_case_results (
 			id TEXT PRIMARY KEY,
 			run_id TEXT NOT NULL,

@@ -4,6 +4,7 @@ import { redTeamRecordingSchema } from "./redteam-recording";
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
 import { redTeamReviewedEndpoints } from "./redteam-reviewed";
+import { redTeamReplayEndpoints } from "./redteam-replay";
 
 import type {
   RedTeamPreflightResponse,
@@ -127,6 +128,8 @@ export const redTeamCampaignSchema = looseObject({
 });
 
 export const redTeamRunSchema = looseObject({
+  source_result_id: z.string().optional(),
+  review_id: z.string().optional(),
   id: text(),
   campaign_id: text(),
   target_id: text(),
@@ -522,6 +525,7 @@ export const redteamEndpoints = {
     ),
   },
   results: {
+    ...redTeamReplayEndpoints,
     evidence: operation<GetAdminRedteamResultsIdEvidenceData, unknown>()(
       "GET",
       "/admin/redteam/results/{id}/evidence",

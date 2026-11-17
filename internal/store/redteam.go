@@ -94,18 +94,20 @@ type RedTeamCampaign struct {
 }
 
 type RedTeamRun struct {
-	ID          string  `json:"id"`
-	CampaignID  string  `json:"campaign_id"`
-	TargetID    string  `json:"target_id"`
-	StartedAt   string  `json:"started_at"`
-	EndedAt     string  `json:"ended_at"`
-	Status      string  `json:"status"`
-	TotalCases  int     `json:"total_cases"`
-	FailedCases int     `json:"failed_cases"`
-	RiskScore   int     `json:"risk_score"`
-	CostKRW     float64 `json:"cost_krw"`
-	Mode        string  `json:"mode"`
-	CreatedAt   string  `json:"created_at"`
+	SourceResultID string  `json:"source_result_id,omitempty"`
+	ReviewID       string  `json:"review_id,omitempty"`
+	ID             string  `json:"id"`
+	CampaignID     string  `json:"campaign_id"`
+	TargetID       string  `json:"target_id"`
+	StartedAt      string  `json:"started_at"`
+	EndedAt        string  `json:"ended_at"`
+	Status         string  `json:"status"`
+	TotalCases     int     `json:"total_cases"`
+	FailedCases    int     `json:"failed_cases"`
+	RiskScore      int     `json:"risk_score"`
+	CostKRW        float64 `json:"cost_krw"`
+	Mode           string  `json:"mode"`
+	CreatedAt      string  `json:"created_at"`
 }
 
 type RedTeamCaseResult struct {
@@ -580,9 +582,9 @@ func (s *SQLStore) InsertRedTeamRun(ctx context.Context, r RedTeamRun) error {
 		r.CreatedAt = now
 	}
 	result, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_runs
-		(id, campaign_id, target_id, started_at, ended_at, status, total_cases, failed_cases, risk_score, cost_krw, mode, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		r.ID, r.CampaignID, r.TargetID, r.StartedAt, r.EndedAt, r.Status, r.TotalCases, r.FailedCases, r.RiskScore, r.CostKRW, r.Mode, r.CreatedAt)
+		(id, campaign_id, target_id, started_at, ended_at, status, total_cases, failed_cases, risk_score, cost_krw, mode, created_at, source_result_id, review_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		r.ID, r.CampaignID, r.TargetID, r.StartedAt, r.EndedAt, r.Status, r.TotalCases, r.FailedCases, r.RiskScore, r.CostKRW, r.Mode, r.CreatedAt, r.SourceResultID, r.ReviewID)
 	if err != nil {
 		return err
 	}
@@ -606,7 +608,7 @@ func (s *SQLStore) ListRedTeamRuns(ctx context.Context, limit int) ([]RedTeamRun
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, campaign_id, target_id, started_at, ended_at, status, total_cases, failed_cases, risk_score, cost_krw, mode, created_at
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, campaign_id, target_id, started_at, ended_at, status, total_cases, failed_cases, risk_score, cost_krw, mode, created_at, source_result_id, review_id
 		FROM redteam_runs ORDER BY created_at DESC LIMIT ?`), limit)
 	if err != nil {
 		return nil, err
@@ -624,7 +626,7 @@ func (s *SQLStore) ListRedTeamRuns(ctx context.Context, limit int) ([]RedTeamRun
 }
 
 func (s *SQLStore) GetRedTeamRun(ctx context.Context, id string) (RedTeamRun, bool, error) {
-	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, campaign_id, target_id, started_at, ended_at, status, total_cases, failed_cases, risk_score, cost_krw, mode, created_at
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, campaign_id, target_id, started_at, ended_at, status, total_cases, failed_cases, risk_score, cost_krw, mode, created_at, source_result_id, review_id
 		FROM redteam_runs WHERE id = ?`), id)
 	r, err := scanRedTeamRun(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -638,7 +640,7 @@ func (s *SQLStore) GetRedTeamRun(ctx context.Context, id string) (RedTeamRun, bo
 
 func scanRedTeamRun(sc interface{ Scan(...any) error }) (RedTeamRun, error) {
 	var r RedTeamRun
-	if err := sc.Scan(&r.ID, &r.CampaignID, &r.TargetID, &r.StartedAt, &r.EndedAt, &r.Status, &r.TotalCases, &r.FailedCases, &r.RiskScore, &r.CostKRW, &r.Mode, &r.CreatedAt); err != nil {
+	if err := sc.Scan(&r.ID, &r.CampaignID, &r.TargetID, &r.StartedAt, &r.EndedAt, &r.Status, &r.TotalCases, &r.FailedCases, &r.RiskScore, &r.CostKRW, &r.Mode, &r.CreatedAt, &r.SourceResultID, &r.ReviewID); err != nil {
 		return RedTeamRun{}, err
 	}
 	return r, nil

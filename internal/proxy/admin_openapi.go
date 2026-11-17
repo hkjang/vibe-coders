@@ -148,6 +148,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/redteam/results/{id}/evidence", []string{"get"}, "redteam", "Masked Red Team evidence", false},
 	{"/admin/redteam/results/{id}/remediation", []string{"post"}, "redteam", "Create a Red Team remediation action", false},
 	{"/admin/redteam/results/{id}/rerun", []string{"post"}, "redteam", "Re-run one Red Team case result; body {proxy_key}", false},
+	{"/admin/redteam/results/{id}/rerun-review", []string{"post"}, "redteam", "Review a bounded single-case replay preserving historical evidence", false},
+	{"/admin/redteam/results/{id}/rerun-reviewed", []string{"post"}, "redteam", "Execute one reviewed replay into a new run receipt", false},
 	{"/admin/redteam/remediations", []string{"get"}, "redteam", "List Red Team remediation actions", false},
 	{"/admin/redteam/remediations/{id}", []string{"post"}, "redteam", "Update a Red Team remediation status; body {status}", false},
 	{"/admin/redteam/remediations/{id}/apply", []string{"post"}, "redteam", "Apply a Red Team remediation where supported", false},
@@ -803,6 +805,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichRedTeamEmergencyOpenAPI(method, op, responses)
 	case "post /admin/redteam/campaigns/{id}/run-review", "post /admin/redteam/campaigns/{id}/run-reviewed":
 		enrichRedTeamRunReviewOpenAPI(key, op, responses)
+	case "post /admin/redteam/results/{id}/rerun-review", "post /admin/redteam/results/{id}/rerun-reviewed":
+		enrichRedTeamReplayOpenAPI(key, op, responses)
 	case "post /admin/redteam/campaigns/{id}/dry-run":
 		responses["200"] = successResponse("RedTeamPreflightResponse")
 		op["description"] = "Synchronizes the registered target catalog and estimates campaign scope without upstream model calls. can_run only describes approval gating (including the dry-run mode exception), not overall execution readiness: budget, emergency state, credentials and connectivity are checked separately at execution. Concurrency and timeout values are stored configuration, not a promise of enforcement."
@@ -1196,6 +1200,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range redTeamRunReviewOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range redTeamReplayOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	schemas["RedTeamPreflightResponse"] = redTeamPreflightOpenAPISchema()

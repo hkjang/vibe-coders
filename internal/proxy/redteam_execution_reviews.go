@@ -19,6 +19,8 @@ type redTeamExecutionReviews struct {
 }
 
 type redTeamExecutionReview struct {
+	SourceResultID                                string // empty for whole-campaign execution; bound before token consumption
+	RetainRawEvidence                             bool
 	Actor, CampaignID, Revision, Kind, Reason, ID string
 	Models                                        []string
 	Limits                                        redTeamRunLimits
@@ -51,10 +53,14 @@ func (reviews *redTeamExecutionReviews) issue(review redTeamExecutionReview) (st
 // Consume BEFORE audit or dispatch. A lost response cannot reuse this review.
 // Different valid reviews of the same campaign cannot overlap on this Server.
 func (reviews *redTeamExecutionReviews) consume(token, actor, campaign string) (redTeamExecutionReview, bool) {
+	return reviews.consumeForSource(token, actor, campaign, "")
+}
+
+func (reviews *redTeamExecutionReviews) consumeForSource(token, actor, campaign, sourceResult string) (redTeamExecutionReview, bool) {
 	reviews.Lock()
 	defer reviews.Unlock()
 	review, ok := reviews.entries[token]
-	if !ok || review.Actor != actor || review.CampaignID != campaign {
+	if !ok || review.Actor != actor || review.CampaignID != campaign || review.SourceResultID != sourceResult {
 		return redTeamExecutionReview{}, false
 	}
 	if !time.Now().Before(review.ExpiresAt) {

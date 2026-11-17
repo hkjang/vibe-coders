@@ -1,4 +1,5 @@
 import { executionReviewFixture } from "./reviewed-execution-fixture";
+import { replayReviewFixture, replayOutcomeFixture } from "./reviewed-replay-fixture";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
@@ -404,6 +405,19 @@ describe("RedTeamPage", () => {
   });
 
   it("증적에서 실제 재실행하면 세션 메모리의 실행 키만 사용한다", async () => {
+    const replay = replayReviewFixture({
+      source_result: { ...replayReviewFixture().source_result, id: "rtr_1", run_id: "rtrun_1" },
+      targets: [
+        {
+          id: "public-target",
+          target_ref: "공개 모델",
+          provider: "openai",
+          models: ["gpt-test"],
+          live_calls: 1,
+          case_executions: 1,
+        },
+      ],
+    });
     const api = mockApi(
       listHandlers({
         "GET /admin/redteam/runs/rtrun_1/results": () => ({
@@ -426,14 +440,8 @@ describe("RedTeamPage", () => {
             created_at: "2026-09-05T00:00:30Z",
           },
         }),
-        "POST /admin/redteam/results/rtr_1/rerun": () => ({
-          result_id: "rtr_1",
-          decision: "fail",
-          policy_decision: "allow",
-          severity: "high",
-          cost_krw: 1,
-          note: "",
-        }),
+        "POST /admin/redteam/results/rtr_1/rerun-review": () => replay,
+        "POST /admin/redteam/results/rtr_1/rerun-reviewed": () => replayOutcomeFixture(replay),
       }),
     );
     const user = userEvent.setup();
@@ -442,12 +450,18 @@ describe("RedTeamPage", () => {
     await user.type(await screen.findByLabelText(/실행 키/), "rt-secret-key");
     await user.click(screen.getByRole("button", { name: "rtrun_1 결과 보기" }));
     await user.click(await screen.findByRole("button", { name: "rtc_case_1 증적 보기" }));
-    await user.click(await screen.findByRole("button", { name: "원문 보관으로 실제 재실행" }));
-    await user.click(await screen.findByRole("button", { name: "실제 재실행" }));
+    await user.click(await screen.findByRole("button", { name: "조건 검토 후 한 건 재실행" }));
+    await user.type(screen.getByLabelText("재실행 사유", { exact: false }), "공개 실행 점검");
+    await user.click(screen.getByRole("button", { name: "재실행 조건 검토" }));
+    await user.type(await screen.findByLabelText("원본 결과 ID 확인", { exact: false }), "rtr_1");
+    await user.click(screen.getByRole("button", { name: "검토한 한 건만 실제 재실행" }));
 
     await waitFor(() =>
-      expect(api.bodies("POST /admin/redteam/results/rtr_1/rerun")).toEqual([{ proxy_key: "rt-secret-key" }]),
+      expect(api.bodies("POST /admin/redteam/results/rtr_1/rerun-reviewed")).toEqual([
+        { review_token: replay.review_token, proxy_key: "rt-secret-key" },
+      ]),
     );
+    expect(api.bodies("POST /admin/redteam/results/rtr_1/rerun")).toEqual([]);
     expect(window.localStorage.getItem("rt_proxy_key")).toBeNull();
     expect(window.sessionStorage.getItem("rt_proxy_key")).toBeNull();
   });
