@@ -457,10 +457,11 @@ func (s *Server) evaluateRedTeamCaseActivePlanned(r *http.Request, proxyKey stri
 	expected := redTeamExpectedDecision(cs.ExpectedPolicy)
 	var findings []string
 	var decision, policy string
-	if call.Code >= 400 {
+	if call.Code >= 400 || (review != nil && call.Code != http.StatusOK) {
 		// The probe could not be delivered/answered (upstream error). Record it as an explicit
 		// error outcome — NOT a pass/fail of the model's safety — so the operator can fix routing
 		// (e.g. a 404 usually means the resolved model does not exist at the target provider).
+		// Reviewed probes also refuse redirects instead of evaluating their response body.
 		decision, policy = "error", "upstream_error_"+itoaProxy(call.Code)
 	} else {
 		findings = redteamLeakFindings(call.RespText)
