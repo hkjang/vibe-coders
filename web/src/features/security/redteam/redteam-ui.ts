@@ -66,6 +66,7 @@ export function statusLabel(value: string | undefined): string {
 
 export function stopReasonLabel(value: string): string {
   const reasons: Readonly<Record<string, string>> = {
+    recording_failed: "실행 결과 저장을 확인하지 못했습니다",
     configuration_changed: "제공자 또는 실행 설정이 바뀌었습니다",
     model_unavailable: "검토한 모델을 호출할 수 없습니다",
     budget_exceeded: "비용 중단 기준에 도달했습니다",
@@ -164,3 +165,12 @@ export const cronPresets = [
 ] as const;
 
 export const writeDeniedReason = "쓰기 권한(admin:write)이 없어 사용할 수 없습니다.";
+
+export function recordingStageLabel(stage: string | undefined): string {
+  const labels: Readonly<Record<string, string>> = {
+    run_start: "대상별 실행 기록 생성",
+    case_result: "검사 결과·증적·조치 저장",
+    finalize: "실행·캠페인 상태와 기준선 갱신",
+  };
+  return labels[stage ?? ""] ?? "저장 확인";
+}

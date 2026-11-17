@@ -6,9 +6,9 @@ import { expect, test, type Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import { installPromptLibrary } from "../fixtures/prompt-library-browser";
 
-async function fixture(page: Page, stopped = "budget_exceeded", status = 200) {
+async function fixture(page: Page, stopped = "budget_exceeded", status = 200, recordingFailure = false) {
   const base = await installPromptLibrary(page);
-  base.bootstrap.backend_version = "v0.86.139";
+  base.bootstrap.backend_version = "v0.86.140";
   base.bootstrap.allowed_features = ["security.redteam"];
   const feature = base.bootstrap.migration_registry[0];
   if (!feature) throw Error("missing fixture feature");
@@ -69,6 +69,11 @@ async function fixture(page: Page, stopped = "budget_exceeded", status = 200) {
               status: "stopped",
               stopped,
               complete: false,
+              recording: {
+                confirmed: !recordingFailure,
+                stage: recordingFailure ? "finalize" : "",
+                results: 1,
+              },
               runs: [{ ...executionOutcomeFixture().runs[0], ...run }],
               summary: { ...executionOutcomeFixture().summary, live_cost_krw: 20 },
             }
@@ -170,6 +175,41 @@ for (const theme of ["light", "dark"] as const)
       }
       await page.keyboard.press("Escape");
       await expect(panel).not.toBeVisible();
+      await expect(page.getByRole("button", { name: "공개 실행 실제 실행", exact: true })).toBeFocused();
+      expect(api.writes).toHaveLength(2);
+      api.check();
+    });
+
+for (const theme of ["light", "dark"] as const)
+  for (const width of [1440, 390])
+    test(`${theme} ${width}px 저장 확인 실패·키보드·접근성`, async ({ page }) => {
+      const api = await fixture(page, "recording_failed", 200, true);
+      await page.setViewportSize({ width, height: 1100 });
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+      const panel = await open(page);
+      await expect(panel.getByText("결과 저장을 확인하지 못했습니다.", { exact: true })).toBeVisible();
+      await expect(panel.getByText("저장 확인 필요", { exact: true })).toBeVisible();
+      await expect(panel.getByText("완료", { exact: true })).toHaveCount(0);
+      await expect(panel.getByRole("button", { name: /재실행|재개/ })).toHaveCount(0);
+      await expect(panel).toHaveScreenshot(`redteam-recording-${theme}-${width}.png`, {
+        animations: "disabled",
+      });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      const scan = await page.evaluate(
+        async () =>
+          await (window as unknown as { axe: { run: (root: Document) => Promise<AxeResults> } }).axe.run(
+            document,
+          ),
+      );
+      expect(scan.violations).toEqual([]);
+      await panel.getByRole("region", { name: "캠페인 실행 결과 내용" }).focus();
+      await page.keyboard.press("End");
+      for (let i = 0; i < 6; i++) {
+        await page.keyboard.press("Tab");
+        expect(await panel.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+      }
+      await page.keyboard.press("Escape");
       await expect(page.getByRole("button", { name: "공개 실행 실제 실행", exact: true })).toBeFocused();
       expect(api.writes).toHaveLength(2);
       api.check();

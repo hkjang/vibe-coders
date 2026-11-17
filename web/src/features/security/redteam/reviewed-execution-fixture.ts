@@ -33,6 +33,7 @@ export function executionReviewFixture(overrides: Partial<ReviewedRedTeamRun> = 
 }
 export function executionOutcomeFixture(review = executionReviewFixture()): ReviewedRedTeamOutcome {
   return {
+    recording: { confirmed: true, stage: "", results: 1 },
     campaign_id: review.campaign_id,
     status: "completed",
     stopped: "",

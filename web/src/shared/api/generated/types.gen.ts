@@ -2625,6 +2625,12 @@ export type RedTeamPreflightResponse = {
     targets: number;
 };
 
+export type RedTeamRecording = {
+    confirmed: boolean;
+    results: number;
+    stage: '' | 'run_start' | 'case_result' | 'finalize';
+};
+
 export type RedTeamReviewedExecutionRequest = {
     proxy_key?: string;
     review_token: string;
@@ -2638,6 +2644,7 @@ export type RedTeamReviewedExecutionResponse = {
     note: string;
     planned_case_executions: number;
     planned_live_calls: number;
+    recording: RedTeamRecording;
     review_id: string;
     runs: Array<{
         campaign_id: string;

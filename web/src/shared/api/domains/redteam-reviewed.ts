@@ -1,3 +1,4 @@
+import { redTeamRecordingSchema } from "./redteam-recording";
 import { z } from "zod";
 import type {
   PostAdminRedteamCampaignsIdRunReviewData,
@@ -78,6 +79,7 @@ export const redTeamReviewSchema = z
   }) satisfies z.ZodType<RedTeamRunReviewResponse>;
 export const reviewedOutcomeSchema = z
   .object({
+    recording: redTeamRecordingSchema,
     campaign_id: z.string().min(1),
     status: z.enum(["completed", "stopped"]),
     stopped: z.string(),
@@ -117,11 +119,13 @@ export const reviewedOutcomeSchema = z
   })
   .superRefine((value, ctx) => {
     if (
+      value.recording.results !== value.summary.results ||
       value.summary.live_calls > value.planned_live_calls ||
       value.summary.results > value.planned_case_executions ||
       value.summary.runs !== value.runs.length ||
       (value.complete &&
-        (value.status !== "completed" ||
+        (!value.recording.confirmed ||
+          value.status !== "completed" ||
           value.stopped !== "" ||
           value.summary.live_calls !== value.planned_live_calls ||
           value.summary.results !== value.planned_case_executions))
