@@ -4167,6 +4167,27 @@ export type Text2SqlSummaryResponse = {
     window: '1h' | '24h' | '7d' | '30d';
 };
 
+export type TraceRelatedRun = {
+    cost_krw: number | null;
+    created_at: string | null;
+    id: string | null;
+    latency_ms: number | null;
+    receipt_available: boolean;
+    resource_id: string | null;
+    resource_name: string | null;
+    row_key: string;
+    status: 'ok' | 'error' | 'planned' | 'pending_approval' | 'condition_failed' | 'passed' | 'stopped' | 'skipped' | 'unknown';
+};
+
+export type TraceRelatedRunPage = {
+    items: Array<TraceRelatedRun>;
+    kind: 'workflow' | 'app';
+    limit: 25 | 50 | 100;
+    offset: number;
+    related_runs_version: 1;
+    total: number;
+};
+
 export type TrackingAllowRequest = {
     /**
      * An http(s) origin such as https://cdn.example
@@ -15316,6 +15337,53 @@ export type GetAdminTracesTraceIdResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminTracesTraceIdRunsData = {
+    body?: never;
+    path: {
+        trace_id: string;
+    };
+    query: {
+        kind: 'workflow' | 'app';
+        limit?: 25 | 50 | 100;
+        offset?: number;
+    };
+    url: '/admin/traces/{trace_id}/runs';
+};
+
+export type GetAdminTracesTraceIdRunsErrors = {
+    /**
+     * Invalid kind, duplicate/unknown parameter, bounds or sensitive trace ID
+     */
+    400: AppError;
+    /**
+     * Existing administrator read authentication required
+     */
+    401: AppError;
+    /**
+     * GET required
+     */
+    405: AppError;
+    /**
+     * Trace query failed; no partial page or count returned
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminTracesTraceIdRunsError = GetAdminTracesTraceIdRunsErrors[keyof GetAdminTracesTraceIdRunsErrors];
+
+export type GetAdminTracesTraceIdRunsResponses = {
+    /**
+     * Related execution page; existing trace export is separate and unchanged.
+     */
+    200: TraceRelatedRunPage;
+};
+
+export type GetAdminTracesTraceIdRunsResponse = GetAdminTracesTraceIdRunsResponses[keyof GetAdminTracesTraceIdRunsResponses];
 
 export type DeleteAdminTrackingViolationsData = {
     body?: never;

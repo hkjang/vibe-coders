@@ -393,7 +393,7 @@ func renderForDialect(statement, dialect string) string {
 	// These indexes are introduced on high-write observability tables. PostgreSQL's
 	// ordinary CREATE INDEX blocks writers for the duration of the build; each migration
 	// statement runs outside an explicit transaction, so the concurrent form is safe here.
-	if strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
+	if strings.Contains(out, "idx_workflow_runs_trace_metadata") || strings.Contains(out, "idx_ai_app_runs_trace_metadata") || strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
 		out = strings.Replace(out, "CREATE INDEX IF NOT EXISTS", "CREATE INDEX CONCURRENTLY IF NOT EXISTS", 1)
 	}
 	return out
@@ -1998,6 +1998,7 @@ func migrationStatements() []string {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_workflow_runs_user ON workflow_runs(user_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_workflow_runs_trace_metadata ON workflow_runs(trace_id) WHERE ` + traceRunIndexPredicate(),
 		`CREATE TABLE IF NOT EXISTS ai_app_runs (
 			id TEXT PRIMARY KEY,
 			app_id TEXT NOT NULL,
@@ -2013,6 +2014,7 @@ func migrationStatements() []string {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_app_runs_user ON ai_app_runs(user_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_app_runs_trace_metadata ON ai_app_runs(trace_id) WHERE ` + traceRunIndexPredicate(),
 		`CREATE TABLE IF NOT EXISTS model_contracts (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL DEFAULT '',

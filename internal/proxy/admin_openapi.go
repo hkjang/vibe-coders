@@ -99,6 +99,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/requests/{id}/analyze", []string{"post"}, "admin", "Model-written analysis of one request", false},
 	{"/admin/requests/{id}/replay", []string{"post"}, "admin", "Replay one request against the upstream", false},
 	{"/admin/traces/{trace_id}", []string{"get"}, "admin", "All requests + workflow/app runs sharing a trace_id", false},
+	{"/admin/traces/{trace_id}/runs", []string{"get"}, "observability", "Team-scoped related workflow and app execution metadata page", false},
 	{"/admin/code-verify", []string{"post"}, "admin", "Static verification gate for AI-generated code blocks (risk/secret/syntax)", false},
 	{"/admin/code-verify/stats", []string{"get"}, "admin", "Per-model code risk leaderboard from persisted verdicts", false},
 	{"/admin/sbom", []string{"get"}, "admin", "AI asset SBOM: ownership/dependency manifest across skills/workflows/apps/contracts/prompts", false},
@@ -702,6 +703,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichTeamConsoleOpenAPI(route, strings.ToLower(method), op, responses)
 	case "get /admin/export.csv":
 		enrichPromptExportOpenAPI(op, responses)
+	case "get /admin/traces/{trace_id}/runs":
+		enrichTraceRelatedRunsOpenAPI(op, responses)
 	case "get /admin/audit-logs.csv":
 		enrichAuditCSVOpenAPI(op, responses)
 	case "get /admin/golden-prompts", "get /admin/golden-workflows":
@@ -1172,6 +1175,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range accountPageOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range traceRelatedRunSchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range workflowPageOpenAPISchemas() {

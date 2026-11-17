@@ -1,3 +1,4 @@
+import { traceRelatedQueryKeys, validTraceRelatedQueryValue } from "@/shared/utils/trace-related-query";
 import { runQueryKeys, validRunSort } from "@/shared/utils/redteam-run-query";
 import { validContextSort } from "@/shared/utils/context-registry-query";
 import {
@@ -119,6 +120,13 @@ export function sanitizeAppRouteSearch(
     }
   }
   if (route === "/observability/traces" || route.startsWith("/observability/traces/")) {
+    for (const key of traceRelatedQueryKeys) {
+      if (
+        parameters.has(key) &&
+        (route !== "/observability/traces" || !validTraceRelatedQueryValue(key, parameters.getAll(key)))
+      )
+        invalidOperationalKeys.add(key);
+    }
     for (const key of ["flow_kind", "flow_status"] as const) {
       if (
         parameters.has(key) &&

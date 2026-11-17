@@ -14,6 +14,10 @@ import (
 // across /v1 requests, workflows, and apps — the trace-wide companion to the per-request waterfall.
 // GET /admin/traces/{trace_id}
 func (s *Server) handleTraceByID(w http.ResponseWriter, r *http.Request) {
+	metadata := strings.HasSuffix(strings.TrimPrefix(r.URL.Path, "/admin/traces/"), "/runs")
+	if metadata {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -22,9 +26,17 @@ func (s *Server) handleTraceByID(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	traceID, valid := adminTracePathID(r.URL.Path, "/admin/traces/", "")
+	suffix := ""
+	if metadata {
+		suffix = "/runs"
+	}
+	traceID, valid := adminTracePathID(r.URL.Path, "/admin/traces/", suffix)
 	if !valid {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid trace id", "invalid_request_error", "invalid_trace_id")
+		return
+	}
+	if metadata {
+		s.handleTraceRelatedRuns(w, r, traceID)
 		return
 	}
 	ctx := r.Context()

@@ -468,3 +468,34 @@
     scroll-behavior: auto;
   }
 }
+
+.trace-related {
+  min-width: 0;
+}
+.trace-related-controls,
+.trace-related-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.trace-related-controls label {
+  display: grid;
+  gap: var(--space-2);
+}
+.trace-related .trace-panel-header {
+  flex-wrap: wrap;
+}
+.trace-related .trace-panel-header > div {
+  min-width: 0;
+  flex: 1 1 20rem;
+}
+.trace-related .trace-panel-header p,
+.trace-related-help {
+  font-size: 0.875rem;
+}
+.trace-related code {
+  overflow-wrap: anywhere;
+}
+.trace-related .trace-pagination {
+  flex-wrap: wrap;
+}
