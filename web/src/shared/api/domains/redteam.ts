@@ -322,7 +322,21 @@ const dashboardSchema = looseObject({
   note: text(),
 });
 
-const killSwitchSchema = looseObject({ enabled: flag() });
+export const redTeamEmergencySchema = z.object({
+  enabled: z.boolean(),
+  scope: z.literal("responding_process").optional(),
+  instance_ref: z
+    .string()
+    .regex(/^process_[a-f0-9]{16}$/)
+    .optional(),
+  review_token: z
+    .string()
+    .regex(/^[a-f0-9]{32}$/)
+    .optional(),
+  observed_at: z.iso.datetime({ offset: true }).optional(),
+  reason: z.string().max(1000).optional(),
+});
+export type RedTeamEmergencyState = z.output<typeof redTeamEmergencySchema>;
 
 export const redTeamDryRunSchema = looseObject({
   campaign_id: text(),
@@ -570,13 +584,19 @@ export const redteamEndpoints = {
     read: operation<GetAdminRedteamKillSwitchData, unknown>()(
       "GET",
       "/admin/redteam/kill-switch",
-      killSwitchSchema,
+      redTeamEmergencySchema,
     ),
-    set: operation<WithBody<PostAdminRedteamKillSwitchData, { readonly enabled: boolean }>, unknown>()(
-      "POST",
-      "/admin/redteam/kill-switch",
-      killSwitchSchema,
-    ),
+    set: operation<
+      WithBody<
+        PostAdminRedteamKillSwitchData,
+        {
+          readonly enabled: boolean;
+          readonly reason: string;
+          readonly expected_review_token: string;
+        }
+      >,
+      unknown
+    >()("POST", "/admin/redteam/kill-switch", redTeamEmergencySchema),
   },
   schedules: {
     list: operation<GetAdminRedteamSchedulesData, unknown>()(

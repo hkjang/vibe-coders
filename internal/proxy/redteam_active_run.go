@@ -25,33 +25,11 @@ import (
 // keep the simulation. Destructive/high-risk MCP surfaces are NEVER invoked here. A global kill
 // switch and the campaign budget guard can abort the run mid-flight.
 
-// redteamKillSwitch, when true, halts all Active Controlled Runs (§22 Kill Switch).
+// redteamKillSwitch blocks new runs and subsequent case admissions in this process.
+// It neither cancels an already dispatched upstream call nor changes another process.
 var redteamKillSwitch atomic.Bool
 
 const redteamActiveMaxCalls = 200 // hard safety cap on live calls per run
-
-// handleRedTeamKillSwitch reads or toggles the global red-team runner kill switch.
-// GET returns state; POST {enabled:bool} sets it. Requires admin.
-func (s *Server) handleRedTeamKillSwitch(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeAdmin(r) {
-		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": redteamKillSwitch.Load()})
-	case http.MethodPost:
-		var body struct {
-			Enabled bool `json:"enabled"`
-		}
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body)
-		redteamKillSwitch.Store(body.Enabled)
-		s.auditAdmin(r, "redteam.kill_switch", "", auditJSON(map[string]any{"enabled": body.Enabled}))
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": body.Enabled})
-	default:
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-	}
-}
 
 // pickRedTeamModel returns a concrete model name for live invocation, if the target has one.
 // Wildcard-only patterns (e.g. "*") cannot be invoked and fall back to simulation.

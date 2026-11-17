@@ -66,11 +66,6 @@ export function useRedTeamData() {
     queryFn: ({ signal }) => apiClient.request(redteam.dashboard, { signal, routeId }),
     ...shared,
   });
-  const killSwitch = useQuery({
-    queryKey: redteamKeys.killSwitch,
-    queryFn: ({ signal }) => apiClient.request(redteam.killSwitch.read, { signal, routeId }),
-    ...shared,
-  });
   const schedules = useQuery({
     queryKey: redteamKeys.schedules,
     queryFn: ({ signal }) => apiClient.request(redteam.schedules.list, { signal, routeId }),
@@ -81,7 +76,6 @@ export function useRedTeamData() {
     baselines,
     campaigns,
     dashboard,
-    killSwitch,
     probePacks,
     remediations,
     runs,
