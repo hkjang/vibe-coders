@@ -7866,6 +7866,173 @@
         ],
         "type": "object"
       },
+      "PromptStageBulkApply": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "revision": {
+            "maxLength": 43,
+            "minLength": 43,
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "revision",
+          "since",
+          "until",
+          "window"
+        ],
+        "type": "object"
+      },
+      "PromptStageBulkReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "review_revision": {
+            "maxLength": 43,
+            "minLength": 43,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "review_revision",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "PromptStageBulkReview": {
+        "additionalProperties": false,
+        "properties": {
+          "blocked_count": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "criteria": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "maximum_error_rate": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "maximum_evaluation_failures_per_call": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "minimum_calls": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "stage": {
+                  "enum": [
+                    "validation",
+                    "production"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "maximum_error_rate",
+                "maximum_evaluation_failures_per_call",
+                "minimum_calls",
+                "stage"
+              ],
+              "type": "object"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ignored_count": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PromptStageWorkspaceItem"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          },
+          "observed_count": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "blocked_count",
+          "criteria",
+          "expires_at",
+          "ignored_count",
+          "items",
+          "observed_count",
+          "revision",
+          "since",
+          "until",
+          "window"
+        ],
+        "type": "object"
+      },
       "PromptStageChange": {
         "additionalProperties": false,
         "properties": {
@@ -13758,7 +13925,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.132"
+    "version": "v0.86.133"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -23716,7 +23883,7 @@
     },
     "/admin/prompts/promotions": {
       "get": {
-        "description": "Existing prompt lifecycle API. view=workspace opts into bounded metadata (GET) or a reviewed manual stage change (POST). Global admin:read/write authorization is unchanged. No model deployment or routing changes. Workspace reads combine registered stages and observed versions in one read snapshot. Statistics count requests once and evaluation failure records separately. Stage changes require a keyed revision and a safe non-empty reason, reject concurrent changes with 409, and commit an audit with the stage. No automatic mutation retries. Unsafe identities are hidden and cannot be changed through this view. Legacy requests without view retain their original bodies and success responses.",
+        "description": "Existing prompt lifecycle API. view=workspace opts into bounded metadata (GET) or a reviewed manual stage change (POST). Global admin:read/write authorization is unchanged. No model deployment or routing changes. Workspace reads combine registered stages and observed versions in one read snapshot. Statistics count requests once and evaluation failure records separately. Stage changes require a keyed revision and a safe non-empty reason, reject concurrent changes with 409, and commit an audit with the stage. No automatic mutation retries. Unsafe identities are hidden and cannot be changed through this view. Legacy requests without view retain their original bodies and success responses. view=promotion-review provides a GET-only full candidate review over a fixed interval (at most 1000 observed versions), with a five-minute actor-bound keyed revision. POST rechecks observations, criteria and stages in the write transaction, then atomically applies all eligible one-step changes and their audit. Any unsafe eligible identity blocks the whole review. No partial application, retry or model deployment.",
         "operationId": "get__admin_prompts_promotions",
         "parameters": [
           {
@@ -23758,7 +23925,8 @@
             "name": "view",
             "schema": {
               "enum": [
-                "workspace"
+                "workspace",
+                "promotion-review"
               ],
               "type": "string"
             }
@@ -23789,12 +23957,15 @@
                     },
                     {
                       "$ref": "#/components/schemas/PromptStageWorkspacePage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PromptStageBulkReview"
                     }
                   ]
                 }
               }
             },
-            "description": "Legacy view or workspace page"
+            "description": "Legacy view, workspace page or complete bulk review"
           },
           "400": {
             "content": {
@@ -23878,7 +24049,7 @@
         ]
       },
       "post": {
-        "description": "Existing prompt lifecycle API. view=workspace opts into bounded metadata (GET) or a reviewed manual stage change (POST). Global admin:read/write authorization is unchanged. No model deployment or routing changes. Workspace reads combine registered stages and observed versions in one read snapshot. Statistics count requests once and evaluation failure records separately. Stage changes require a keyed revision and a safe non-empty reason, reject concurrent changes with 409, and commit an audit with the stage. No automatic mutation retries. Unsafe identities are hidden and cannot be changed through this view. Legacy requests without view retain their original bodies and success responses.",
+        "description": "Existing prompt lifecycle API. view=workspace opts into bounded metadata (GET) or a reviewed manual stage change (POST). Global admin:read/write authorization is unchanged. No model deployment or routing changes. Workspace reads combine registered stages and observed versions in one read snapshot. Statistics count requests once and evaluation failure records separately. Stage changes require a keyed revision and a safe non-empty reason, reject concurrent changes with 409, and commit an audit with the stage. No automatic mutation retries. Unsafe identities are hidden and cannot be changed through this view. Legacy requests without view retain their original bodies and success responses. view=promotion-review provides a GET-only full candidate review over a fixed interval (at most 1000 observed versions), with a five-minute actor-bound keyed revision. POST rechecks observations, criteria and stages in the write transaction, then atomically applies all eligible one-step changes and their audit. Any unsafe eligible identity blocks the whole review. No partial application, retry or model deployment.",
         "operationId": "post__admin_prompts_promotions",
         "parameters": [
           {
@@ -23886,7 +24057,8 @@
             "name": "view",
             "schema": {
               "enum": [
-                "workspace"
+                "workspace",
+                "promotion-review"
               ],
               "type": "string"
             }
@@ -23902,6 +24074,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/PromptStageLegacyChange"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PromptStageBulkApply"
                   }
                 ]
               }
@@ -23920,12 +24095,15 @@
                     },
                     {
                       "$ref": "#/components/schemas/PromptStageChangeReceipt"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PromptStageBulkReceipt"
                     }
                   ]
                 }
               }
             },
-            "description": "Legacy result or committed workspace receipt"
+            "description": "Legacy result or committed manual/bulk workspace receipt"
           },
           "400": {
             "content": {

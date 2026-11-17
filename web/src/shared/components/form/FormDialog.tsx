@@ -27,6 +27,8 @@ interface FormDialogProps<Input extends FieldValues, Output> {
   scrollHint?: string;
   /** Keep actions visible while long form content scrolls. */
   scrollBody?: boolean;
+  /** Use available desktop width for a reviewed multi-item change. */
+  wide?: boolean;
   title: string;
 }
 
@@ -74,6 +76,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   submitDisabled = false,
   scrollHint,
   scrollBody = false,
+  wide = false,
   title,
 }: FormDialogProps<Input, Output>): React.JSX.Element {
   const coordinator = useUnsavedChanges();
@@ -180,6 +183,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
 
   return (
     <Dialog
+      wide={wide}
       scrollBody={scrollBody}
       open={open}
       onOpenChange={(next) => {

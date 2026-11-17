@@ -15,6 +15,8 @@ import { formatDateTime, formatNumber } from "@/shared/utils/format";
 import { readPromptStages } from "./stage-api";
 import { stageMessages as text } from "./stage-messages";
 import { PromptStageDialog } from "./PromptStageDialog";
+import { PromptStageBulkDialog } from "./PromptStageBulkDialog";
+import { stageBulkMessages } from "./stage-bulk-messages";
 import { useLibraryAccess, useLibraryBusy } from "./use-library-mutation";
 import { useLibraryQuery } from "./use-library-query";
 import { PanelFailure } from "./prompt-parts";
@@ -121,6 +123,7 @@ export function PromptStagesTab() {
   return <PromptStagesContent />;
 }
 function PromptStagesContent() {
+  const { backendVersion } = useAuth();
   const [params, update] = useSearchState();
   const access = useLibraryAccess();
   const busy = useLibraryBusy();
@@ -137,6 +140,7 @@ function PromptStagesContent() {
       readPromptStages({ view: "workspace", window, stage, limit: size, offset }, prefixes, signal),
   });
   const [editing, setEditing] = useState<PromptStageWorkspaceItem>();
+  const [bulkOpen, setBulkOpen] = useState(false);
   const trigger = useRef<HTMLElement | null>(null);
   const data = query.data;
   return (
@@ -144,7 +148,23 @@ function PromptStagesContent() {
       <InlineNotice tone="info" title={text.tab}>
         {text.scope}
       </InlineNotice>
-      <SectionCard title={text.tab} description={text.help}>
+      <SectionCard
+        title={text.tab}
+        description={text.help}
+        actions={
+          versionAtLeast(backendVersion, "v0.86.133") ? (
+            <Button
+              disabled={busy || query.isError}
+              onClick={(event) => {
+                trigger.current = event.currentTarget;
+                setBulkOpen(true);
+              }}
+            >
+              {stageBulkMessages.open}
+            </Button>
+          ) : undefined
+        }
+      >
         <div className="toolbar">
           <label className="toolbar">
             <span>{text.period}</span>
@@ -255,6 +275,9 @@ function PromptStagesContent() {
       </SectionCard>
       {editing ? (
         <PromptStageDialog row={editing} onClose={() => setEditing(undefined)} returnFocusRef={trigger} />
+      ) : null}
+      {bulkOpen ? (
+        <PromptStageBulkDialog window={window} onClose={() => setBulkOpen(false)} returnFocusRef={trigger} />
       ) : null}
     </div>
   );

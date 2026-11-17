@@ -2244,6 +2244,46 @@ export type PromptProductMetadataPage = {
     total: number;
 };
 
+export type PromptStageBulkApply = {
+    reason: string;
+    revision: string;
+    since: string;
+    until: string;
+    window: '1h' | '24h' | '7d' | '30d';
+};
+
+export type PromptStageBulkReceipt = {
+    count: number;
+    review_revision: string;
+    updated_at: string;
+};
+
+export type PromptStageBulkReview = {
+    blocked_count: number;
+    criteria: [
+        {
+            maximum_error_rate: number;
+            maximum_evaluation_failures_per_call: number;
+            minimum_calls: number;
+            stage: 'validation' | 'production';
+        },
+        {
+            maximum_error_rate: number;
+            maximum_evaluation_failures_per_call: number;
+            minimum_calls: number;
+            stage: 'validation' | 'production';
+        }
+    ];
+    expires_at: string;
+    ignored_count: number;
+    items: Array<PromptStageWorkspaceItem>;
+    observed_count: number;
+    revision: string;
+    since: string;
+    until: string;
+    window: '1h' | '24h' | '7d' | '30d';
+};
+
 export type PromptStageChange = {
     name: string;
     reason: string;
@@ -9913,7 +9953,7 @@ export type GetAdminPromptsPromotionsData = {
         limit?: number;
         offset?: number;
         stage?: 'all' | 'experiment' | 'validation' | 'production';
-        view?: 'workspace';
+        view?: 'workspace' | 'promotion-review';
         window?: '1h' | '24h' | '7d' | '30d';
     };
     url: '/admin/prompts/promotions';
@@ -9954,18 +9994,18 @@ export type GetAdminPromptsPromotionsError = GetAdminPromptsPromotionsErrors[key
 
 export type GetAdminPromptsPromotionsResponses = {
     /**
-     * Legacy view or workspace page
+     * Legacy view, workspace page or complete bulk review
      */
-    200: PromptStageLegacyView | PromptStageWorkspacePage;
+    200: PromptStageLegacyView | PromptStageWorkspacePage | PromptStageBulkReview;
 };
 
 export type GetAdminPromptsPromotionsResponse = GetAdminPromptsPromotionsResponses[keyof GetAdminPromptsPromotionsResponses];
 
 export type PostAdminPromptsPromotionsData = {
-    body: PromptStageChange | PromptStageLegacyChange;
+    body: PromptStageChange | PromptStageLegacyChange | PromptStageBulkApply;
     path?: never;
     query?: {
-        view?: 'workspace';
+        view?: 'workspace' | 'promotion-review';
     };
     url: '/admin/prompts/promotions';
 };
@@ -10005,9 +10045,9 @@ export type PostAdminPromptsPromotionsError = PostAdminPromptsPromotionsErrors[k
 
 export type PostAdminPromptsPromotionsResponses = {
     /**
-     * Legacy result or committed workspace receipt
+     * Legacy result or committed manual/bulk workspace receipt
      */
-    200: PromptStageLegacyResult | PromptStageChangeReceipt;
+    200: PromptStageLegacyResult | PromptStageChangeReceipt | PromptStageBulkReceipt;
 };
 
 export type PostAdminPromptsPromotionsResponse = PostAdminPromptsPromotionsResponses[keyof PostAdminPromptsPromotionsResponses];
