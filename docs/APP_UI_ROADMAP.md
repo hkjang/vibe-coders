@@ -2203,3 +2203,7 @@ bash scripts/container-smoke.sh vibe-coders:appui dev-appui
 ```
 
 컨테이너 smoke test는 `/admin` 회귀, `/app` 308, deep link, hashed asset 캐시, 누락 asset 404, 잘못된 method 405, nonroot 실행, Backend/UI version 일치를 함께 확인한다.
+
+### v0.86.134 직접 주소 리뷰 보완
+
+리뷰에서 민감한 직접 주소가 전체 조회로 넓어지는 문제를 현재·구버전 서버 조건 4건으로 재현한 뒤, 값 없는 거부 표시를 보존하고 명시 초기화 전 조회를 차단했다. 새로고침 후 표시 유지도 검증했다. Zod 4.6.6의 코드 포인트 길이 지적은 재현되지 않았으며 9개 경계와 실제 브라우저의 200개 이모지 요청 원문 보존을 추가 검증했다. 수정 후 관련 React 1,368개(72개 파일), 내장 브라우저 125개, 실제 인증 60개, 실제 Keycloak 5개·DB 검증과 보고서 29개를 통과했다. 시각 기준 8장은 변경하지 않았고 초기 압축 번들은 264,686바이트다. 운영 Stable와 전체 Phase 0–6 인수는 별도다.

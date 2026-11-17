@@ -196,3 +196,50 @@ describe("공용 참고자료 검색과 정렬", () => {
     );
   });
 });
+
+describe("검색 조건 거부와 유니코드 계약", () => {
+  for (const version of ["v0.86.130", "v0.86.134"]) {
+    it.each(["contexts_q", "contexts_sort"])(
+      `${version} rejects stripped sensitive %s before reading`,
+      async (key) => {
+        runtime.version = version;
+        const v = setup(
+          `/prompts/library?tab=contexts&${key}=${encodeURIComponent("token=private-search-value")}`,
+        );
+        await screen.findByText(/검색·정렬 조건이 올바르지/);
+        expect(v.api.calls).toEqual([]);
+        expect(screen.getByLabelText("현재 조회 주소")).not.toHaveTextContent("private-search-value");
+        await v.user.click(screen.getByRole("button", { name: "조회 조건 초기화" }));
+        await screen.findByText("검색 결과 자료");
+        expect(v.api.calls.at(-1)?.options.query).toEqual({
+          view: "metadata",
+          state: "all",
+          limit: 25,
+          offset: 0,
+        });
+      },
+    );
+  }
+  it.each([
+    ["😀".repeat(101), true],
+    ["😀".repeat(200), true],
+    ["😀".repeat(201), false],
+    ["가".repeat(200), true],
+    ["가".repeat(201), false],
+    ["e\u0301".repeat(100), true],
+    ["e\u0301".repeat(100) + "e", false],
+    ["👩‍💻".repeat(66) + "ab", true],
+    ["👩‍💻".repeat(67), false],
+  ])("query adapter preserves code-point contract %#", (q, accepted) => {
+    const result = contextMetadataQuerySchema.safeParse({
+      view: "metadata",
+      state: "all",
+      limit: 25,
+      offset: 0,
+      q,
+    });
+    expect(result.success).toBe(accepted);
+    expect(validContextSearch(q, [])).toBe(accepted);
+    if (result.success) expect(result.data.q).toBe(q);
+  });
+});

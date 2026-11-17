@@ -1,4 +1,6 @@
 import { ContextSearchControls } from "./ContextSearchControls";
+import { useLocation } from "react-router";
+import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 import { readContextSearch, contextSortColumns, contextSortValue } from "./context-search";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
@@ -76,14 +78,18 @@ export function ContextRegistryTab() {
 
 function ContextRegistrySearchBoundary() {
   const { backendVersion, credentialPrefixes } = useAuth();
+  const location = useLocation();
   const [params, update] = useSearchState();
   const search = readContextSearch(params, credentialPrefixes);
+  // Route sanitization removes the value but preserves this value-free marker.
+  // Treat it as invalid until explicit reset, never as an unfiltered request.
+  const rejected = ["contexts_q", "contexts_sort"].some((key) => rejectedSensitiveQuery(location.state, key));
   const supported = versionAtLeast(backendVersion, "v0.86.134");
   const requested = params.has("contexts_q") || params.has("contexts_sort");
-  if (!search.valid || (!supported && requested))
+  if (rejected || !search.valid || (!supported && requested))
     return (
       <InlineNotice tone="warning" title={text.tab}>
-        <p>{!search.valid ? text.invalidRoute : text.searchSupport}</p>
+        <p>{rejected || !search.valid ? text.invalidRoute : text.searchSupport}</p>
         <Button
           onClick={() =>
             update(

@@ -103,3 +103,42 @@ for (const theme of ["light", "dark"] as const)
       await expect(trigger).toBeFocused();
       fixture.check();
     });
+
+for (const version of ["v0.86.130", "v0.86.134"]) {
+  for (const key of ["contexts_q", "contexts_sort"]) {
+    test(`${version} 민감한 ${key} 직접 주소는 초기화 전까지 조회하지 않는다`, async ({ page }) => {
+      const fixture = await installContextSearch(page);
+      fixture.bootstrap.backend_version = version;
+      await page.goto(
+        `prompts/library?tab=contexts&${key}=${encodeURIComponent("token=private-search-value")}`,
+      );
+      await expect(page.getByText(/검색·정렬 조건이 올바르지/)).toBeVisible();
+      expect(fixture.reads).toEqual([]);
+      expect(page.url()).not.toContain("private-search-value");
+      expect(await page.evaluate(() => JSON.stringify(history.state))).not.toContain("private-search-value");
+      await page.reload();
+      await expect(page.getByText(/검색·정렬 조건이 올바르지/)).toBeVisible();
+      expect(fixture.reads).toEqual([]);
+      await page.getByRole("button", { name: "조회 조건 초기화" }).click();
+      await expect(page.getByRole("table")).toBeVisible();
+      expect(fixture.reads.length).toBeGreaterThan(0);
+      expect(fixture.reads.every((q) => !q.has("q") && !q.has("sort"))).toBe(true);
+      fixture.check();
+    });
+  }
+}
+test("200개 유니코드 코드 포인트 검색을 변경 없이 서버에 전달한다", async ({ page }) => {
+  const fixture = await installContextSearch(page);
+  const q = "😀".repeat(200);
+  const first = fixture.rows[0];
+  if (!first) throw new Error("Missing fixture row");
+  first.name = q;
+  await page.goto("prompts/library?tab=contexts");
+  const input = page.getByRole("textbox", { name: "참고자료 검색" });
+  await input.fill(q);
+  await input.press("Enter");
+  await expect.poll(() => fixture.reads.at(-1)?.get("q")).toBe(q);
+  await expect(page.getByRole("table").getByRole("row")).toHaveCount(2);
+  expect(new URL(page.url()).searchParams.get("contexts_q")).toBe(q);
+  fixture.check();
+});

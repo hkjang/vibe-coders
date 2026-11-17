@@ -389,6 +389,18 @@ describe("app route query security", () => {
     expect(JSON.stringify(state)).not.toContain("private-value");
   });
 
+  it("retains only context condition names after sanitizing a sensitive deep link", () => {
+    const result = sanitizeAppRouteSearch(
+      "/prompts/library",
+      "?tab=contexts&contexts_q=token%3Dprivate-search-value&contexts_sort=key%3Dprivate-sort-value",
+    );
+    expect(result.search).toBe("?tab=contexts");
+    const state = locationStateWithSensitiveRejections({ raw: "private-search-value" }, result.sensitiveKeys);
+    expect(state).toEqual({ appSensitiveQueryKeys: ["contexts_q", "contexts_sort"] });
+    expect(locationStateWithSensitiveRejections(state, [])).toEqual(state);
+    expect(JSON.stringify(state)).not.toContain("private-");
+  });
+
   it("preserves only the boolean policy tab focus instruction", () => {
     expect(locationStateWithSensitiveRejections({ policyTabFocus: true, raw: "private-value" }, [])).toEqual({
       policyTabFocus: true,
