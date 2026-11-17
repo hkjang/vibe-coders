@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { executionReviewFixture } from "./reviewed-execution-fixture";
 import { replayReviewFixture, replayOutcomeFixture } from "./reviewed-replay-fixture";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -275,17 +276,103 @@ const emptyHandlers = {
   "GET /admin/redteam/schedules": () => ({ schedules: [], count: 0, note: "" }),
 } satisfies Record<string, ApiHandler>;
 
-const renderPage = (route = "/redteam") =>
-  renderScreen(
-    <FeatureAccessContext.Provider
-      value={{ featureId: "security.redteam", permitted: true, readOnly: false }}
-    >
-      <RedTeamPage />
-    </FeatureAccessContext.Provider>,
-    { route, path: "/redteam" },
-  );
+const renderPage = (route = "/redteam", readOnly = false) => {
+  let updateReadOnly: (value: boolean) => void = () => {
+    throw Error("page not mounted");
+  };
+  function Harness() {
+    const [current, setCurrent] = useState(readOnly);
+    updateReadOnly = setCurrent;
+    return (
+      <FeatureAccessContext.Provider
+        value={{ featureId: "security.redteam", permitted: true, readOnly: current }}
+      >
+        <RedTeamPage />
+      </FeatureAccessContext.Provider>
+    );
+  }
+  const view = renderScreen(<Harness />, { route, path: "/redteam" });
+  return { ...view, setReadOnly: (value: boolean) => act(() => updateReadOnly(value)) };
+};
 
 describe("RedTeamPage", () => {
+  it("읽기 전용 미리보기는 쓰기 권한이 있어도 캠페인 변경 버튼을 비활성화한다", async () => {
+    mockApi(listHandlers());
+    renderPage("/redteam?tab=campaigns", true);
+    expect(await screen.findByRole("button", { name: "캠페인 만들기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /빠른 시작/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "주간 레드팀 수정" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "주간 레드팀 승인" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "주간 레드팀 삭제" })).toBeDisabled();
+  });
+
+  it("읽기 전용 일정 폼을 직접 제출해도 변경 API를 호출하지 않는다", async () => {
+    const api = mockApi(listHandlers());
+    renderPage("/redteam?tab=schedules", true);
+    const button = await screen.findByRole("button", { name: "일정 추가" });
+    const form = button.closest("form");
+    expect(form).not.toBeNull();
+    if (!form) throw Error("schedule form missing");
+    fireEvent.submit(form);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(api.bodies("POST /admin/redteam/schedules")).toHaveLength(0);
+  });
+
+  it("읽기 전용에서도 검사 묶음은 조회하지만 프롬프트 추가와 가져오기는 막는다", async () => {
+    const user = userEvent.setup();
+    mockApi(listHandlers());
+    renderPage("/redteam?tab=targets", true);
+    expect(await screen.findByRole("button", { name: "프롬프트 추가" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "CSV 가져오기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "CSV 내보내기(엑셀)" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "OWASP LLM Top10 검사 보기" }));
+    expect(await screen.findByRole("button", { name: "prompt_injection_basic 편집" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "prompt_injection_basic 편집" })).toHaveAttribute(
+      "title",
+      expect.stringContaining("읽기 전용"),
+    );
+  });
+
+  it("읽기 전용으로 바뀌면 열린 캠페인 폼과 실행 키를 폐기한다", async () => {
+    const user = userEvent.setup();
+    const api = mockApi(listHandlers());
+    const view = renderPage("/redteam?tab=campaigns");
+    await user.type(await screen.findByLabelText("레드팀 실행 키"), "public-synthetic-key");
+    await user.click(screen.getByRole("button", { name: "주간 레드팀 수정" }));
+    expect(await screen.findByRole("dialog", { name: "캠페인 수정" })).toBeVisible();
+    view.setReadOnly(true);
+    expect(screen.queryByRole("dialog", { name: "캠페인 수정" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("레드팀 실행 키")).toHaveValue("");
+    expect(screen.getByLabelText("레드팀 실행 키")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "주간 레드팀 수정" })).toHaveAttribute(
+      "title",
+      expect.stringContaining("읽기 전용"),
+    );
+    view.setReadOnly(false);
+    expect(screen.getByLabelText("레드팀 실행 키")).toHaveValue("");
+    expect(screen.queryByRole("dialog", { name: "캠페인 수정" })).not.toBeInTheDocument();
+    expect(api.calls.filter((call) => !call.key.startsWith("GET "))).toHaveLength(0);
+  });
+
+  it("빠른 시작 응답 전에 읽기 전용으로 바뀌면 후속 점검을 보내지 않는다", async () => {
+    let finish!: (value: { campaign: typeof campaign }) => void;
+    const pending = new Promise<{ campaign: typeof campaign }>((resolve) => {
+      finish = resolve;
+    });
+    const api = mockApi(listHandlers({ "POST /admin/redteam/campaigns": () => pending }));
+    const user = userEvent.setup();
+    const view = renderPage();
+    await user.click(await screen.findByRole("button", { name: /빠른 시작/ }));
+    await waitFor(() => expect(api.bodies("POST /admin/redteam/campaigns")).toHaveLength(1));
+    view.setReadOnly(true);
+    await act(async () => {
+      finish({ campaign });
+      await pending;
+    });
+    expect(api.calls.filter((call) => call.key.endsWith("/dry-run"))).toHaveLength(0);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("구버전 서버의 새 이력 주소는 배경에서 최근 전체 이력도 조회하지 않는다", async () => {
     authRuntime.backendVersion = "v0.86.144";
     const api = mockApi(listHandlers());
