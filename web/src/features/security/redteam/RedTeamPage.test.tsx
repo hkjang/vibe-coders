@@ -1,3 +1,4 @@
+import { executionReviewFixture } from "./reviewed-execution-fixture";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
@@ -482,7 +483,25 @@ describe("RedTeamPage", () => {
     let finishRun: ((value: unknown) => void) | undefined;
     const api = mockApi(
       listHandlers({
-        "POST /admin/redteam/campaigns/rtc_weekly/run": () =>
+        "POST /admin/redteam/campaigns/rtc_weekly/run-review": () =>
+          executionReviewFixture({
+            campaign_id: "rtc_weekly",
+            campaign_name: "주간 레드팀",
+            kind: "simulation",
+            planned_live_calls: 0,
+            requested_output_tokens: 0,
+            targets: [
+              {
+                id: "t",
+                target_ref: "시뮬레이션",
+                provider: "",
+                models: [],
+                live_calls: 0,
+                case_executions: 1,
+              },
+            ],
+          }),
+        "POST /admin/redteam/campaigns/rtc_weekly/run-reviewed": () =>
           new Promise((resolve) => {
             finishRun = resolve;
           }),
@@ -492,8 +511,14 @@ describe("RedTeamPage", () => {
     const view = renderPage("/redteam?tab=campaigns");
 
     await user.click(await screen.findByRole("button", { name: "주간 레드팀 시뮬레이션 실행" }));
-    await user.click(await screen.findByRole("button", { name: "실행" }));
-    await waitFor(() => expect(api.calls.some((call) => call.key.endsWith("/rtc_weekly/run"))).toBe(true));
+    await user.type(screen.getByLabelText("실행 사유", { exact: false }), "공개 실행 점검");
+    await user.click(screen.getByRole("button", { name: "실행 조건 검토" }));
+    await screen.findByRole("dialog", { name: "실행 조건 최종 확인" });
+    await user.type(screen.getByLabelText("캠페인 이름 확인", { exact: false }), "주간 레드팀");
+    await user.click(screen.getByRole("button", { name: "검토한 조건으로 한 번 실행" }));
+    await waitFor(() =>
+      expect(api.calls.some((call) => call.key.endsWith("/rtc_weekly/run-reviewed"))).toBe(true),
+    );
 
     const before = api.calls.filter((call) => call.key === "GET /admin/redteam/runs").length;
     await vi.advanceTimersByTimeAsync(3_200);

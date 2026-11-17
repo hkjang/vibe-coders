@@ -21,6 +21,7 @@ export const campaignFormSchema = z.object({
   qps_limit: numberField("QPS 한도"),
   destructive_tool_policy: z.string(),
   retain_raw_evidence: z.boolean(),
+  external_provider_allowed: z.boolean(),
   probe_pack_ids: z.array(z.string()).min(1, "프로브 팩을 1개 이상 선택하세요."),
 });
 
@@ -57,6 +58,7 @@ export function campaignToDraft(
       qps_limit: String(campaign.qps_limit),
       destructive_tool_policy: campaign.destructive_tool_policy || "dry-run",
       retain_raw_evidence: campaign.retain_raw_evidence,
+      external_provider_allowed: campaign.external_provider_allowed,
       probe_pack_ids: campaign.probe_pack_ids.length > 0 ? [...campaign.probe_pack_ids] : [...allPackIds],
     },
   };
@@ -75,6 +77,7 @@ export function emptyDraft(allPackIds: readonly string[]): CampaignDraft {
       qps_limit: "1",
       destructive_tool_policy: "dry-run",
       retain_raw_evidence: false,
+      external_provider_allowed: false,
       probe_pack_ids: [...allPackIds],
     },
   };

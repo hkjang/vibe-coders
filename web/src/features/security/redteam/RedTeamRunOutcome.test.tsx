@@ -73,4 +73,16 @@ describe("레드팀 중단 결과", () => {
     expect(screen.getByText("완료", { exact: true })).toBeVisible();
     expect(screen.queryByText("실행이 중단되었습니다.")).toBeNull();
   });
+  it("미완료 검토 응답을 완료 상태로 표시하지 않는다", () => {
+    render(
+      <RedTeamRunOutcomeSheet
+        outcome={redTeamRunOutcomeSchema.parse({ status: "completed", complete: false })}
+        onClose={vi.fn()}
+        onOpenRun={vi.fn()}
+        returnFocusRef={createRef<HTMLElement>()}
+      />,
+    );
+    expect(screen.getByText("부분 완료", { exact: true })).toBeVisible();
+    expect(screen.getByText("검토한 실행을 모두 마치지 못했습니다.")).toBeVisible();
+  });
 });

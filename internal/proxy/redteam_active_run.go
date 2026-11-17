@@ -249,6 +249,9 @@ type redTeamActiveCall struct {
 // and returns the assistant text, request id, HTTP status, measured latency, real cost, and success.
 // It sets the redteam cost-center/marker headers so the request is attributed and egress-tagged (§6).
 func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider, prompt, sessionID string, maxTokens int) redTeamActiveCall {
+	if redTeamReviewedOutput(r.Context()) > 0 {
+		r = r.WithContext(context.WithValue(r.Context(), redTeamReviewedModelKey{}, model))
+	}
 	if maxTokens <= 0 || maxTokens > 16384 {
 		maxTokens = 8192
 	}
@@ -406,11 +409,17 @@ func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t s
 
 // The campaign runner rechecks admission after potentially slow model discovery.
 func (s *Server) evaluateRedTeamCaseActiveGuarded(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache, forcedModel string, admit func() bool) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
+	return s.evaluateRedTeamCaseActivePlanned(r, proxyKey, t, pack, cs, c, cache, forcedModel, admit, nil)
+}
+
+func (s *Server) evaluateRedTeamCaseActivePlanned(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache, forcedModel string, admit func() bool, review *redTeamRunPlan) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
 	var model, provider string
 	var ok bool
 	// A forced model (from the campaign's model selection) is used directly for provider/model
 	// targets; otherwise the model is auto-resolved from the upstream /v1/models.
-	if forcedModel != "" && (t.TargetType == "provider" || t.TargetType == "model") {
+	if review != nil {
+		model, provider, ok = forcedModel, t.Provider, forcedModel != ""
+	} else if forcedModel != "" && (t.TargetType == "provider" || t.TargetType == "model") {
 		if strings.Contains(forcedModel, "*") {
 			var resolved bool
 			model, provider, resolved = s.resolvePatternToConcreteModel(r, proxyKey, t, forcedModel, cache)
@@ -433,6 +442,12 @@ func (s *Server) evaluateRedTeamCaseActiveGuarded(r *http.Request, proxyKey stri
 			maxTokens = int(mt)
 		}
 	}
+	if review != nil && (maxTokens <= 0 || maxTokens > review.Limits.MaxOutputTokens) {
+		maxTokens = review.Limits.MaxOutputTokens
+	}
+	if review != nil {
+		r = r.WithContext(context.WithValue(r.Context(), redTeamReviewedOutputKey{}, maxTokens))
+	}
 	sessionID := "redteam:" + c.ID
 	call := s.redTeamActiveInvoke(r, proxyKey, model, provider, prompt, sessionID, maxTokens)
 	if !call.OK {
@@ -442,10 +457,11 @@ func (s *Server) evaluateRedTeamCaseActiveGuarded(r *http.Request, proxyKey stri
 	expected := redTeamExpectedDecision(cs.ExpectedPolicy)
 	var findings []string
 	var decision, policy string
-	if call.Code >= 400 {
+	if call.Code >= 400 || (review != nil && call.Code != http.StatusOK) {
 		// The probe could not be delivered/answered (upstream error). Record it as an explicit
 		// error outcome — NOT a pass/fail of the model's safety — so the operator can fix routing
 		// (e.g. a 404 usually means the resolved model does not exist at the target provider).
+		// Reviewed probes also refuse redirects instead of evaluating their response body.
 		decision, policy = "error", "upstream_error_"+itoaProxy(call.Code)
 	} else {
 		findings = redteamLeakFindings(call.RespText)

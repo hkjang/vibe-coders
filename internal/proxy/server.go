@@ -33,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.138"
+var AppVersion = "v0.86.139"
 
 type Server struct {
 	cfg      config.Config
@@ -48,6 +48,7 @@ type Server struct {
 	instanceID      string
 	secrets         atomic.Pointer[secret.Cipher]
 	secretsMu       sync.Mutex // guards concurrent rotation
+	redTeamReviews  redTeamExecutionReviews
 	retention       *store.RetentionWorker
 	killState       atomicKillState
 	loggedRequests  sync.Map
@@ -1877,7 +1878,15 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		}
 		lastUpstreamHeaders = upstreamReq.Header.Clone()
 
-		resp, doErr := s.client.Do(upstreamReq)
+		client := s.client
+		if redTeamReviewedOutput(reqCtx) > 0 {
+			// A redirect is another, unreviewed destination and may replay a POST.
+			// Keep the shared client's normal redirect policy unchanged.
+			bounded := *client
+			bounded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			client = &bounded
+		}
+		resp, doErr := client.Do(upstreamReq)
 		if doErr == nil {
 			if breakerEnabled {
 				if breakerCountsAsFailure(resp.StatusCode) {
@@ -1902,7 +1911,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
 				slog.Warn("failover budget exhausted", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "trace_id", traceID)
 			}
-			if resp.StatusCode == http.StatusBadRequest && !usedLongContext {
+			if resp.StatusCode == http.StatusBadRequest && !usedLongContext && redTeamReviewedOutput(reqCtx) == 0 {
 				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 				_ = resp.Body.Close()
 				if cancel != nil {

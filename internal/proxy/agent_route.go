@@ -46,6 +46,9 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 	if !ok || !route.Enabled {
 		return true // not an agent route → continue the normal pipeline
 	}
+	if rc.rejectReviewedVirtualModel() {
+		return false
+	}
 	// RBAC: honor per-key model allow/deny on the virtual model name.
 	if !rc.authorizeAgentRouteModel(model) {
 		return false

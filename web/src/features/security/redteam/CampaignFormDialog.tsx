@@ -66,7 +66,7 @@ export function CampaignFormDialog({
 
   return (
     <FormDialog
-      description="테스트할 대상 범위와 프로브 팩, 실행 모드와 안전 한도를 정합니다. 실제 upstream 호출은 실행 모드가 '실제 실행(통제)'일 때만 일어납니다."
+      description="테스트할 대상 범위와 프로브 팩, 실행 모드와 안전 한도를 정합니다. 실제 제공자 호출은 실행 모드가 '실제 실행(통제)'일 때만 일어납니다."
       form={form}
       onOpenChange={onOpenChange}
       onSubmit={(values) => onSubmit(values, draft.id)}
@@ -118,8 +118,8 @@ export function CampaignFormDialog({
       <fieldset className="rt-fieldset">
         <legend>모델(다중 선택 가능)</legend>
         <p className="rt-muted">
-          여러 개를 고르면 실제 실행 시 모델마다 각각 호출합니다. 비우면 실행 시 /v1/models에서 자동
-          선택합니다.
+          여러 개를 고르면 실제 실행 시 모델마다 각각 호출합니다. 신규 화면의 실행 검토에서는 정확한 모델
+          이름이 필요하며 자동 검색하지 않습니다.
         </p>
         {modelTargets.length === 0 ? (
           <p className="rt-muted">등록된 모델 대상이 없습니다.</p>
@@ -159,6 +159,14 @@ export function CampaignFormDialog({
           </Select>
         )}
       </FormField>
+
+      <label className="checkbox">
+        <input type="checkbox" {...form.register("external_provider_allowed")} />
+        <span className="checkbox-copy">
+          <span>외부 제공자 호출 허용</span>
+          <small>등록된 외부 제공자와 대체 제공자로 테스트 입력을 전송할 수 있도록 허용합니다.</small>
+        </span>
+      </label>
 
       <label className="checkbox">
         <input type="checkbox" {...form.register("retain_raw_evidence")} />

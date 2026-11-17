@@ -1,10 +1,14 @@
+import {
+  executionReviewFixture,
+  executionOutcomeFixture,
+} from "../../src/features/security/redteam/reviewed-execution-fixture";
 import { expect, test, type Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import { installPromptLibrary } from "../fixtures/prompt-library-browser";
 
 async function fixture(page: Page, stopped = "budget_exceeded", status = 200) {
   const base = await installPromptLibrary(page);
-  base.bootstrap.backend_version = "v0.86.138";
+  base.bootstrap.backend_version = "v0.86.139";
   base.bootstrap.allowed_features = ["security.redteam"];
   const feature = base.bootstrap.migration_registry[0];
   if (!feature) throw Error("missing fixture feature");
@@ -49,20 +53,24 @@ async function fixture(page: Page, stopped = "budget_exceeded", status = 200) {
       return route.fulfill({ json: path.endsWith("kill-switch") ? { enabled: false } : {} });
     }
     writes.push(`${request.method()} ${path}`);
-    expect(path).toBe("/admin/redteam/campaigns/public-campaign/run");
+    if (path.endsWith("/run-review")) return route.fulfill({ json: executionReviewFixture() });
+    expect(path).toBe("/admin/redteam/campaigns/public-campaign/run-reviewed");
     expect(request.method()).toBe("POST");
-    expect(request.postDataJSON()).toEqual({ proxy_key: "public-synthetic-key" });
+    expect(request.postDataJSON()).toEqual({
+      review_token: "r".repeat(43),
+      proxy_key: "public-synthetic-key",
+    });
     return route.fulfill({
       status,
       json:
         status === 200
           ? {
-              campaign_id: "public-campaign",
+              ...executionOutcomeFixture(),
               status: "stopped",
               stopped,
-              runs: [run],
-              summary: { runs: 1, results: 1, live_calls: 1, live_cost_krw: 20 },
-              note: "공개 테스트 데이터입니다. 실행 기록을 확인하세요.",
+              complete: false,
+              runs: [{ ...executionOutcomeFixture().runs[0], ...run }],
+              summary: { ...executionOutcomeFixture().summary, live_cost_krw: 20 },
             }
           : { error: { code: "synthetic_unauthorized" } },
     });
@@ -74,7 +82,10 @@ async function open(page: Page) {
   await page.goto("redteam?tab=campaigns");
   await page.getByLabel(/실행 키/).fill("public-synthetic-key");
   await page.getByRole("button", { name: "공개 실행 실제 실행", exact: true }).click();
-  await page.getByRole("button", { name: "실행", exact: true }).click();
+  await page.getByLabel("실행 사유", { exact: false }).fill("공개 실행 점검");
+  await page.getByRole("button", { name: "실행 조건 검토", exact: true }).click();
+  await page.getByLabel("캠페인 이름 확인", { exact: false }).fill("공개 실행");
+  await page.getByRole("button", { name: "검토한 조건으로 한 번 실행" }).click();
   const panel = page.getByRole("dialog", { name: "캠페인 실행 결과", exact: true });
   await expect(panel).toBeVisible();
   return panel;
@@ -99,7 +110,10 @@ for (const [reason, label] of [
     await expect(
       page.getByRole("table", { name: "레드팀 캠페인 실행 이력" }).getByText("중단", { exact: true }),
     ).toBeVisible();
-    expect(api.writes).toEqual(["POST /admin/redteam/campaigns/public-campaign/run"]);
+    expect(api.writes).toEqual([
+      "POST /admin/redteam/campaigns/public-campaign/run-review",
+      "POST /admin/redteam/campaigns/public-campaign/run-reviewed",
+    ]);
     api.check();
   });
 
@@ -108,10 +122,13 @@ test("실행 요청의 401을 인증 갱신 후 자동으로 재전송하지 않
   await page.goto("redteam?tab=campaigns");
   await page.getByLabel(/실행 키/).fill("public-synthetic-key");
   await page.getByRole("button", { name: "공개 실행 실제 실행", exact: true }).click();
-  await page.getByRole("button", { name: "실행", exact: true }).click();
-  await expect.poll(() => api.writes.length).toBe(1);
+  await page.getByLabel("실행 사유", { exact: false }).fill("공개 실행 점검");
+  await page.getByRole("button", { name: "실행 조건 검토", exact: true }).click();
+  await page.getByLabel("캠페인 이름 확인", { exact: false }).fill("공개 실행");
+  await page.getByRole("button", { name: "검토한 조건으로 한 번 실행" }).click();
+  await expect.poll(() => api.writes.length).toBe(2);
   await expect(page.getByRole("dialog", { name: "캠페인 실행 결과", exact: true })).toHaveCount(0);
-  expect(api.writes).toHaveLength(1);
+  expect(api.writes).toHaveLength(2);
   api.check();
 });
 
@@ -154,6 +171,6 @@ for (const theme of ["light", "dark"] as const)
       await page.keyboard.press("Escape");
       await expect(panel).not.toBeVisible();
       await expect(page.getByRole("button", { name: "공개 실행 실제 실행", exact: true })).toBeFocused();
-      expect(api.writes).toHaveLength(1);
+      expect(api.writes).toHaveLength(2);
       api.check();
     });

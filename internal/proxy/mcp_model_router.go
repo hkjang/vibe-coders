@@ -100,6 +100,9 @@ func (rc *requestPipeline) stepMCPDiscovery() bool {
 	if !isMCPDiscoveryModel(policyModel) {
 		return true
 	}
+	if rc.rejectReviewedVirtualModel() {
+		return false
+	}
 	_, _, prompts, _ := extractAudit(rc.body, r.URL.Path, false)
 	if rc.authCtx != nil && !hasScope(rc.authCtx.Scopes, "mcp:use") {
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "scope_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "mcp:use", CreatedAt: time.Now().UTC()})
