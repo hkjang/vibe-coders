@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { RedTeamEmergencyPanel } from "./RedTeamEmergencyPanel";
+import { readPreflight } from "./read-preflight";
 import { DryRunSheet } from "@/features/security/redteam/DryRunSheet";
 import { RedTeamCampaignsTab } from "@/features/security/redteam/RedTeamCampaignsTab";
 import { RedTeamOverviewTab } from "@/features/security/redteam/RedTeamOverviewTab";
@@ -14,7 +15,7 @@ import { writeDeniedReason } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, useRedTeamData } from "@/features/security/redteam/use-redteam-data";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
-import { withPathParams, type RedTeamDryRun } from "@/shared/api/domains/redteam";
+import { type RedTeamDryRun } from "@/shared/api/domains/redteam";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { PageHeader } from "@/shared/components/page/PageHeader";
@@ -78,9 +79,7 @@ export function RedTeamPage(): React.JSX.Element {
         },
         routeId,
       });
-      return apiClient.request(withPathParams(redteam.campaigns.dryRun, { id: created.campaign.id }), {
-        routeId,
-      });
+      return readPreflight(created.campaign.id);
     },
     invalidates: [redteamKeys.campaigns],
     errorMessage: "빠른 시작을 실행하지 못했습니다.",

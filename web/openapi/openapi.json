@@ -9311,6 +9311,111 @@
         ],
         "type": "object"
       },
+      "RedTeamPreflightResponse": {
+        "properties": {
+          "active_eligible_targets": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "approved": {
+            "type": "boolean"
+          },
+          "campaign_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "can_run": {
+            "type": "boolean"
+          },
+          "case_executions": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "destructive_tool_targets": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_cost_krw": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "external_targets": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limits": {
+            "properties": {
+              "budget_limit_krw": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "concurrency": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "qps_limit": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "timeout_ms": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "budget_limit_krw",
+              "qps_limit",
+              "concurrency",
+              "timeout_ms"
+            ],
+            "type": "object"
+          },
+          "models_selected": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          },
+          "probe_packs": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requires_approval": {
+            "type": "boolean"
+          },
+          "targets": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "note",
+          "estimated_cost_krw",
+          "limits",
+          "targets",
+          "probe_packs",
+          "case_executions",
+          "external_targets",
+          "destructive_tool_targets",
+          "active_eligible_targets",
+          "models_selected",
+          "requires_approval",
+          "approved",
+          "can_run"
+        ],
+        "type": "object"
+      },
       "RegisteredTeam": {
         "additionalProperties": false,
         "properties": {
@@ -13983,7 +14088,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.136"
+    "version": "v0.86.137"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -24941,6 +25046,7 @@
     },
     "/admin/redteam/campaigns/{id}/dry-run": {
       "post": {
+        "description": "Synchronizes the registered target catalog and estimates campaign scope without upstream model calls. can_run only describes approval gating (including the dry-run mode exception), not overall execution readiness: budget, emergency state, credentials and connectivity are checked separately at execution. Concurrency and timeout values are stored configuration, not a promise of enforcement.",
         "operationId": "post__admin_redteam_campaigns_id_dry_run",
         "parameters": [
           {
@@ -24954,7 +25060,24 @@
         ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedTeamPreflightResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

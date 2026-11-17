@@ -799,6 +799,9 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichKillSwitchOpenAPIOperation(method, op, responses)
 	case "get /admin/redteam/kill-switch", "post /admin/redteam/kill-switch":
 		enrichRedTeamEmergencyOpenAPI(method, op, responses)
+	case "post /admin/redteam/campaigns/{id}/dry-run":
+		responses["200"] = successResponse("RedTeamPreflightResponse")
+		op["description"] = "Synchronizes the registered target catalog and estimates campaign scope without upstream model calls. can_run only describes approval gating (including the dry-run mode exception), not overall execution readiness: budget, emergency state, credentials and connectivity are checked separately at execution. Concurrency and timeout values are stored configuration, not a promise of enforcement."
 	case "get /admin/text2sql/kill-switch", "post /admin/text2sql/kill-switch":
 		enrichText2SQLEmergencyOpenAPI(method, op, responses)
 	case "get /admin/requests/{id}/note", "post /admin/requests/{id}/note", "put /admin/requests/{id}/note", "patch /admin/requests/{id}/note", "delete /admin/requests/{id}/note":
@@ -1188,6 +1191,7 @@ func appUIOpenAPISchemas() map[string]any {
 	for name, schema := range killSwitchOpenAPISchemas() {
 		schemas[name] = schema
 	}
+	schemas["RedTeamPreflightResponse"] = redTeamPreflightOpenAPISchema()
 	for name, schema := range redTeamEmergencyOpenAPISchemas() {
 		schemas[name] = schema
 	}
