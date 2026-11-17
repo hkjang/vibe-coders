@@ -1,3 +1,8 @@
+import type {
+  AlertActivityResponse,
+  AuditActivityResponse,
+  IncidentActivityResponse,
+} from "../../src/shared/api/generated";
 import { expect } from "@playwright/test";
 import { admin, login, reader, test } from "./live-fixture";
 
@@ -54,6 +59,11 @@ for (const [id, role, account] of [
     const textResponse = page.waitForResponse(
       (value) => new URL(value.url()).pathname === "/admin/text2sql/summary" && value.status() === 200,
     );
+    const activities = ["incidents", "alerts", "audit-logs"].map((name) =>
+      page.waitForResponse(
+        (value) => new URL(value.url()).pathname === `/admin/${name}/summary` && value.status() === 200,
+      ),
+    );
     await page.goto("/app/overview?range=1h");
     const mcp: { recent_call_count: number; recent_error_count: number } = await (await mcpResponse).json();
     const sql: { window: string; stats: { total: number; valid_rate: number } } = await (
@@ -85,5 +95,42 @@ for (const [id, role, account] of [
       .poll(async () => (await sqlCard.locator(".metric-value strong").textContent()) === expectedRate)
       .toBe(true);
     expect(await services.getByRole("link").count()).toBe(2);
+    const [incident, alerts, audit] = (await Promise.all(
+      activities.map(async (response) => (await response).json()),
+    )) as [IncidentActivityResponse, AlertActivityResponse, AuditActivityResponse];
+    const activityRegion = page.getByRole("region", { name: "주의 신호와 최근 작업", exact: true });
+    expect([incident, alerts, audit].every((value) => value.window === "1h")).toBe(true);
+    expect(
+      Object.keys(incident).sort().join() ===
+        "current_hour,generated_at,min_events,signals,since,total,window",
+    ).toBe(true);
+    expect(Object.keys(alerts).sort().join() === "events,generated_at,has_more,since,window").toBe(true);
+    expect(Object.keys(audit).sort().join() === "changes,generated_at,has_more,since,window").toBe(true);
+    expect(
+      alerts.events.every(
+        (event) =>
+          Object.keys(event).sort().join() === "created_at,delivered,delivery_failed,metric,threshold,value",
+      ),
+    ).toBe(true);
+    expect(
+      audit.changes.every((entry) => Object.keys(entry).sort().join() === "category,created_at,operation"),
+    ).toBe(true);
+    const incidentCard = activityRegion
+      .locator("article")
+      .filter({ has: page.getByRole("heading", { name: "장애 신호", exact: true }) });
+    const expectedSignals = `${new Intl.NumberFormat("ko-KR").format(incident.total)}개`;
+    await expect
+      .poll(
+        async () =>
+          (await incidentCard.locator(".overview-activity-count strong").textContent()) === expectedSignals,
+      )
+      .toBe(true);
+    await expect(
+      activityRegion.getByRole("list", { name: "최근 알림 목록" }).getByRole("listitem"),
+    ).toHaveCount(alerts.events.length);
+    await expect(
+      activityRegion.getByRole("list", { name: "최근 관리 작업 목록" }).getByRole("listitem"),
+    ).toHaveCount(audit.changes.length);
+    expect(await activityRegion.getByRole("link").count()).toBe(3);
   });
 }

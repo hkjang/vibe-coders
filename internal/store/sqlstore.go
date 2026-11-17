@@ -1611,6 +1611,7 @@ func migrationStatements() []string {
 			after_value TEXT,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created_at ON admin_audit_logs(created_at)`,
 		`CREATE TABLE IF NOT EXISTS quotas (
 			id TEXT PRIMARY KEY,
 			scope TEXT NOT NULL,

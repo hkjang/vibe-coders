@@ -119,6 +119,9 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/waterfall", []string{"get"}, "admin", "Request waterfall", false},
 	{"/admin/anomalies", []string{"get"}, "admin", "Request anomalies", false},
 	{"/admin/incidents", []string{"get"}, "admin", "Incidents", false},
+	{"/admin/incidents/summary", []string{"get"}, "admin", "Metadata-only hourly incident signals", false},
+	{"/admin/alerts/summary", []string{"get"}, "admin", "Metadata-only recent alert events", false},
+	{"/admin/audit-logs/summary", []string{"get"}, "admin", "Metadata-only recent administrative activity", false},
 	{"/admin/incidents/candidates", []string{"get"}, "admin", "Incident candidates (Incident Copilot)", false},
 	{"/admin/sandbox/preview", []string{"post"}, "admin", "Sensitive-workflow sandbox preview (safety gates, no execution)", false},
 	{"/admin/remediation/playbooks", []string{"get"}, "admin", "Auto-remediation action candidates (dry-run/impact)", false},
@@ -657,6 +660,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			map[string]any{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "default": 50}, "description": "Nonpositive or greater than 200 uses the existing default of 50."},
 		}
 		responses["200"] = successResponse("WorkflowRunList")
+	case "get /admin/incidents/summary", "get /admin/alerts/summary", "get /admin/audit-logs/summary":
+		enrichActivitySummaryOpenAPI(route, op, responses)
 	case "get /admin/text2sql/summary", "get /admin/mcp/overview":
 		enrichServiceSummaryOpenAPI(route, op, responses)
 	case "get /admin/text2sql/healthcheck":
@@ -1230,6 +1235,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range routingDomainDecisionsOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range activitySummaryOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range serviceSummaryOpenAPISchemas() {

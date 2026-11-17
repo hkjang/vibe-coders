@@ -1,3 +1,4 @@
+import { OverviewActivitySummary } from "./OverviewActivitySummary";
 import { useContext, useState } from "react";
 import { OverviewRefreshContext } from "./overview-refresh-context";
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
@@ -268,6 +269,7 @@ function OverviewContent(): React.JSX.Element {
             operationsNeedAttention={operationsNeedAttention}
           />
         ) : null}
+        {tab === "status" ? <OverviewActivitySummary range={range} interval={interval} /> : null}
       </TabPanel>
     </div>
   );

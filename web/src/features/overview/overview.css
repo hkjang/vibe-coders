@@ -247,3 +247,63 @@
 .overview-trend-table-heading h3 {
   margin: 0;
 }
+
+.overview-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+.overview-activity-grid > * {
+  min-width: 0;
+}
+.overview-activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.overview-activity-list li {
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.overview-activity-list li:first-child {
+  padding-top: 0;
+}
+.overview-activity-list p {
+  margin-block: var(--space-2);
+}
+.overview-activity-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.overview-activity-row time {
+  color: var(--color-muted);
+}
+.overview-activity :is(p, strong, time) {
+  overflow-wrap: anywhere;
+}
+.overview-activity-count {
+  margin-top: 0;
+}
+@media (max-width: 79.9375rem) {
+  .overview-activity-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.overview-activity .health-widget-body > :is(p, details) {
+  margin-block: var(--space-3);
+}
+.overview-activity .health-widget-body > .overview-activity-count {
+  margin-top: 0;
+}
+.overview-activity-help summary {
+  cursor: pointer;
+  color: var(--color-primary);
+}
+.overview-activity-help[open] p {
+  margin-top: var(--space-2);
+}

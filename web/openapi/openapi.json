@@ -963,6 +963,95 @@
         ],
         "type": "object"
       },
+      "AlertActivityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "delivered": {
+                  "type": "boolean"
+                },
+                "delivery_failed": {
+                  "type": "boolean"
+                },
+                "metric": {
+                  "enum": [
+                    "anomaly_zmax",
+                    "budget_burn_ratio",
+                    "errors",
+                    "failover_rate",
+                    "failovers",
+                    "first_chunk_p95_ms",
+                    "krw",
+                    "latency_p95_ms",
+                    "llm_eval_failure_rate",
+                    "llm_eval_failures",
+                    "mcp_new_tools",
+                    "other",
+                    "requests",
+                    "tokens",
+                    "tool_error_rate",
+                    "tool_errors",
+                    "tool_loop"
+                  ],
+                  "type": "string"
+                },
+                "threshold": {
+                  "type": "number"
+                },
+                "value": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "created_at",
+                "delivered",
+                "delivery_failed",
+                "metric",
+                "threshold",
+                "value"
+              ],
+              "type": "object"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "events",
+          "generated_at",
+          "has_more",
+          "since",
+          "window"
+        ],
+        "type": "object"
+      },
       "AppError": {
         "properties": {
           "error": {
@@ -1363,6 +1452,92 @@
           "requests",
           "limit",
           "generated_at"
+        ],
+        "type": "object"
+      },
+      "AuditActivityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "category": {
+                  "enum": [
+                    "provider",
+                    "model",
+                    "routing",
+                    "policy",
+                    "alert",
+                    "access",
+                    "mcp",
+                    "text2sql",
+                    "settings",
+                    "cost",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "operation": {
+                  "enum": [
+                    "create",
+                    "update",
+                    "delete",
+                    "enable",
+                    "disable",
+                    "revoke",
+                    "rotate",
+                    "approve",
+                    "reject",
+                    "import",
+                    "rollback",
+                    "test",
+                    "other"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "category",
+                "created_at",
+                "operation"
+              ],
+              "type": "object"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "changes",
+          "generated_at",
+          "has_more",
+          "since",
+          "window"
         ],
         "type": "object"
       },
@@ -3077,6 +3252,97 @@
           "last_seen",
           "requests",
           "tokens"
+        ],
+        "type": "object"
+      },
+      "IncidentActivityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "current_hour": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "min_events": {
+            "enum": [
+              5
+            ],
+            "type": "integer"
+          },
+          "signals": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "current_hour": {
+                  "type": "boolean"
+                },
+                "ended_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "errors_5xx": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "failovers": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "requests": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "started_at": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "current_hour",
+                "ended_at",
+                "errors_5xx",
+                "failovers",
+                "provider",
+                "requests",
+                "started_at"
+              ],
+              "type": "object"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_hour",
+          "generated_at",
+          "min_events",
+          "signals",
+          "since",
+          "total",
+          "window"
         ],
         "type": "object"
       },
@@ -12811,7 +13077,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.128"
+    "version": "v0.86.129"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -13138,6 +13404,109 @@
           }
         ],
         "summary": "Alert rules",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/alerts/summary": {
+      "get": {
+        "description": "Global admin:read metadata projection of existing operational records. GET only; no-store. Strict window defaults to 24h; interval [since, generated_at). Alerts and audit return at most five latest rows, with has_more determined by a sixth row; these are not total counts. Audit labels use a finite vocabulary; actor, before/after, rule names, webhook and delivery error text are never selected or returned. Incident summary reuses existing hourly failover/5xx clustering at minimum five events; current_hour means the latest qualifying UTC bucket touches the observation hour, not confirmed ongoing incident status. Returns five signals prioritising current hour, then start time. Counts cover all qualifying groups in the interval; actor counts are omitted. Failover and 5xx counts may overlap. Bucket boundaries may extend beyond the selected interval. No mutation or probe is performed.",
+        "operationId": "get__admin_alerts_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertActivityResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Metadata-only recent alert events",
         "tags": [
           "admin"
         ]
@@ -14349,6 +14718,109 @@
           }
         ],
         "summary": "Admin audit logs (CSV)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/audit-logs/summary": {
+      "get": {
+        "description": "Global admin:read metadata projection of existing operational records. GET only; no-store. Strict window defaults to 24h; interval [since, generated_at). Alerts and audit return at most five latest rows, with has_more determined by a sixth row; these are not total counts. Audit labels use a finite vocabulary; actor, before/after, rule names, webhook and delivery error text are never selected or returned. Incident summary reuses existing hourly failover/5xx clustering at minimum five events; current_hour means the latest qualifying UTC bucket touches the observation hour, not confirmed ongoing incident status. Returns five signals prioritising current hour, then start time. Counts cover all qualifying groups in the interval; actor counts are omitted. Failover and 5xx counts may overlap. Bucket boundaries may extend beyond the selected interval. No mutation or probe is performed.",
+        "operationId": "get__admin_audit_logs_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditActivityResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Metadata-only recent administrative activity",
         "tags": [
           "admin"
         ]
@@ -17667,6 +18139,109 @@
           }
         ],
         "summary": "Incident candidates (Incident Copilot)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/incidents/summary": {
+      "get": {
+        "description": "Global admin:read metadata projection of existing operational records. GET only; no-store. Strict window defaults to 24h; interval [since, generated_at). Alerts and audit return at most five latest rows, with has_more determined by a sixth row; these are not total counts. Audit labels use a finite vocabulary; actor, before/after, rule names, webhook and delivery error text are never selected or returned. Incident summary reuses existing hourly failover/5xx clustering at minimum five events; current_hour means the latest qualifying UTC bucket touches the observation hour, not confirmed ongoing incident status. Returns five signals prioritising current hour, then start time. Counts cover all qualifying groups in the interval; actor counts are omitted. Failover and 5xx counts may overlap. Bucket boundaries may extend beyond the selected interval. No mutation or probe is performed.",
+        "operationId": "get__admin_incidents_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentActivityResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Summary unavailable; no storage details echoed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Metadata-only hourly incident signals",
         "tags": [
           "admin"
         ]
