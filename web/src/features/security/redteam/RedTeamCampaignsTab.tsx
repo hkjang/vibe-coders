@@ -1,5 +1,11 @@
+import { campaignColumns } from "./campaign-columns";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { tokenStore } from "@/shared/auth/token-store";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
+import { RedTeamReviewedExecution } from "./RedTeamReviewedExecution";
 import { Plus } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useContext, useEffect, useState, useSyncExternalStore } from "react";
 
 import { CampaignFormDialog } from "@/features/security/redteam/CampaignFormDialog";
 import {
@@ -12,7 +18,7 @@ import { usePreflightReturnFocus } from "./use-preflight-return-focus";
 import { readPreflight } from "./read-preflight";
 import { DryRunSheet } from "@/features/security/redteam/DryRunSheet";
 import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
-import { statusLabel, statusTone, writeDeniedReason } from "@/features/security/redteam/redteam-ui";
+import { writeDeniedReason } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, type RedTeamData } from "@/features/security/redteam/use-redteam-data";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
@@ -23,16 +29,14 @@ import {
   type RedTeamRunOutcome,
 } from "@/shared/api/domains/redteam";
 import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { RedTeamRunOutcomeSheet } from "./RedTeamRunOutcomeSheet";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
-import { formatKRW, formatNumber } from "@/shared/utils/format";
+import { formatNumber } from "@/shared/utils/format";
 
 const redteam = endpoints.domains.redteam;
 const pollIntervalMs = 1_500;
@@ -51,12 +55,27 @@ interface CampaignsTabProps {
   proxyKey: string;
 }
 
-export function RedTeamCampaignsTab({
-  canWrite,
-  data,
-  onOpenRunResults,
-  proxyKey,
-}: CampaignsTabProps): React.JSX.Element {
+export function RedTeamCampaignsTab(props: CampaignsTabProps): React.JSX.Element {
+  const auth = useAuth();
+  const context = useContext(FeatureAccessContext);
+  const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
+  const owner = JSON.stringify([
+    epoch,
+    auth.mode,
+    auth.user?.id,
+    auth.user?.role,
+    auth.user?.roles,
+    auth.user?.team_id,
+    auth.user?.scopes,
+    props.canWrite,
+    context?.featureId,
+    context?.permitted,
+    context?.readOnly,
+  ]);
+  return <CampaignsTab key={owner} {...props} />;
+}
+function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsTabProps): React.JSX.Element {
+  const client = useQueryClient();
   const { campaigns, probePacks, runs, targets } = data;
   const packs = probePacks.data?.probe_packs ?? [];
   const packIds = packs.map((pack) => pack.id);
@@ -72,7 +91,6 @@ export function RedTeamCampaignsTab({
   const [outcome, setOutcome] = useState<RedTeamRunOutcome | undefined>();
   const [pendingDelete, setPendingDelete] = useState<RedTeamCampaign | undefined>();
   const [pendingRun, setPendingRun] = useState<RedTeamCampaign | undefined>();
-  const [pendingApproval, setPendingApproval] = useState<RedTeamCampaign | undefined>();
   const [pollingCampaignId, setPollingCampaignId] = useState("");
 
   // Live progress: poll the run list while a campaign run is in flight, and stop
@@ -81,7 +99,7 @@ export function RedTeamCampaignsTab({
   useEffect(() => {
     if (pollingCampaignId === "") return undefined;
     const timer = window.setInterval(() => {
-      void refetchRuns();
+      if (!document.hidden) void refetchRuns();
     }, pollIntervalMs);
     return () => window.clearInterval(timer);
   }, [pollingCampaignId, refetchRuns]);
@@ -101,6 +119,7 @@ export function RedTeamCampaignsTab({
           qps_limit: values.qps_limit,
           destructive_tool_policy: values.destructive_tool_policy,
           retain_raw_evidence: values.retain_raw_evidence,
+          external_provider_allowed: values.external_provider_allowed,
           probe_pack_ids: values.probe_pack_ids,
           target_filter: targetFilter,
         },
@@ -134,53 +153,6 @@ export function RedTeamCampaignsTab({
     successMessage: "캠페인을 승인했습니다.",
     errorMessage: "캠페인을 승인하지 못했습니다.",
   });
-
-  const runCampaignRequest = useCallback(
-    async (campaign: RedTeamCampaign): Promise<RedTeamRunOutcome> => {
-      const live = campaign.execution_mode === "active-controlled" && proxyKey.trim() !== "";
-      setPollingCampaignId(campaign.id);
-      try {
-        return await apiClient.request(withPathParams(redteam.campaigns.run, { id: campaign.id }), {
-          body: live ? { proxy_key: proxyKey.trim() } : {},
-          routeId,
-          timeoutMs: 120_000,
-          retryUnauthorized: false,
-        });
-      } finally {
-        setPollingCampaignId("");
-      }
-    },
-    [proxyKey],
-  );
-
-  const runCampaign = useMutationFeedback({
-    mutate: runCampaignRequest,
-    invalidates: invalidatesAfterRun,
-    errorMessage: "캠페인을 실행하지 못했습니다.",
-    onSuccess: (result) => setOutcome(result),
-  });
-
-  const approveThenRun = useMutationFeedback({
-    mutate: async (campaign: RedTeamCampaign) => {
-      await apiClient.request(withPathParams(redteam.campaigns.approve, { id: campaign.id }), {
-        routeId,
-      });
-      return runCampaignRequest(campaign);
-    },
-    invalidates: invalidatesAfterRun,
-    errorMessage: "승인 후 실행하지 못했습니다.",
-    onSuccess: (result) => setOutcome(result),
-  });
-
-  const startRun = async (campaign: RedTeamCampaign): Promise<void> => {
-    try {
-      await runCampaign.mutateAsync(campaign);
-    } catch (error) {
-      const message = isAppError(error) ? error.message : "";
-      if (message.includes("requires approval")) setPendingApproval(campaign);
-      throw error;
-    }
-  };
 
   const liveRuns = runs.data?.runs.filter((run) => run.campaign_id === pollingCampaignId) ?? [];
   const columns = campaignColumns({
@@ -302,39 +274,25 @@ export function RedTeamCampaignsTab({
         onConfirm={() => (pendingDelete ? deleteCampaign.mutateAsync(pendingDelete) : undefined)}
       />
 
-      <ConfirmDialog
-        open={pendingRun !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setPendingRun(undefined);
-        }}
-        title={pendingRun?.execution_mode === "active-controlled" ? "실제 실행(통제)" : "시뮬레이션 실행"}
-        description={
-          pendingRun?.execution_mode === "active-controlled"
-            ? proxyKey.trim() === ""
-              ? "실행 키가 없어 실제 호출 없이 시뮬레이션으로 실행합니다. 실제 호출은 상단에서 레드팀 Proxy API Key를 입력한 뒤 다시 실행하세요."
-              : "입력한 레드팀 Proxy API Key로 대상 provider·model을 실제 호출합니다. 예산·QPS 한도와 킬 스위치가 적용됩니다."
-            : "실제 upstream 호출 없이 시뮬레이션으로 실행합니다."
-        }
-        confirmLabel="실행"
-        tone={
-          pendingRun?.execution_mode === "active-controlled" && proxyKey.trim() !== "" ? "danger" : "primary"
-        }
-        returnFocusRef={returnFocusRef}
-        onConfirm={() => (pendingRun ? startRun(pendingRun) : undefined)}
-      />
-
-      <ConfirmDialog
-        open={pendingApproval !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setPendingApproval(undefined);
-        }}
-        title="승인 후 실행"
-        description="이 캠페인은 고위험 프로브 팩을 포함해 승인이 필요합니다. 지금 승인하고 실행할까요?"
-        confirmLabel="승인 후 실행"
-        tone="danger"
-        returnFocusRef={returnFocusRef}
-        onConfirm={() => (pendingApproval ? approveThenRun.mutateAsync(pendingApproval) : undefined)}
-      />
+      {pendingRun ? (
+        <RedTeamReviewedExecution
+          campaign={pendingRun}
+          proxyKey={proxyKey}
+          canWrite={canWrite}
+          onClose={() => {
+            setPendingRun(undefined);
+            setPollingCampaignId("");
+          }}
+          onPending={(pending) => setPollingCampaignId(pending ? pendingRun.id : "")}
+          onResult={(result) => {
+            setPendingRun(undefined);
+            setPollingCampaignId("");
+            setOutcome(result);
+            for (const key of invalidatesAfterRun) void client.invalidateQueries({ queryKey: key });
+          }}
+          returnFocusRef={runFocus.returnFocusRef}
+        />
+      ) : null}
 
       <DryRunSheet
         onOpenChange={(open) => {
@@ -352,139 +310,4 @@ export function RedTeamCampaignsTab({
       />
     </div>
   );
-}
-
-interface CampaignActionHandlers {
-  canWrite: boolean;
-  checking: boolean;
-  preflightTriggerRef: (id: string, node: HTMLButtonElement | null) => void;
-  runTriggerRef: (id: string, node: HTMLButtonElement | null) => void;
-  onApprove: (campaign: RedTeamCampaign) => void;
-  onClone: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
-  onDelete: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
-  onDryRun: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
-  onEdit: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
-  onRun: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
-}
-
-function campaignColumns(handlers: CampaignActionHandlers): ReadonlyArray<DataTableColumn<RedTeamCampaign>> {
-  const column = createDataTableColumnHelper<RedTeamCampaign>();
-  const writeTitle = handlers.canWrite ? undefined : writeDeniedReason;
-  return column.columns([
-    column.accessor((row) => row.name, {
-      id: "name",
-      header: "이름",
-      cell: ({ row }) => (
-        <div className="rt-stacked-cell">
-          <strong>{row.original.name}</strong>
-          <code className="mono">{row.original.id}</code>
-        </div>
-      ),
-    }),
-    column.accessor((row) => row.trigger_source, {
-      id: "trigger",
-      header: "생성 경로",
-      cell: ({ row }) =>
-        row.original.trigger_source === "post-change" ? (
-          <div className="rt-stacked-cell">
-            <Badge tone="info">변경 후 자동</Badge>
-            <span title={row.original.trigger_reason || undefined}>{row.original.trigger_action || "—"}</span>
-          </div>
-        ) : (
-          <span className="rt-muted">수동</span>
-        ),
-    }),
-    column.accessor((row) => row.scope, { id: "scope", header: "범위" }),
-    column.accessor((row) => row.status, {
-      id: "status",
-      header: "상태",
-      cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{statusLabel(getValue())}</Badge>,
-    }),
-    column.accessor((row) => row.execution_mode, { id: "mode", header: "모드" }),
-    column.accessor((row) => row.budget_limit_krw, {
-      id: "budget",
-      header: "예산",
-      cell: ({ getValue }) => <span className="cell-number">{formatKRW(getValue())}</span>,
-    }),
-    column.accessor((row) => row.retain_raw_evidence, {
-      id: "evidence",
-      header: "증적",
-      cell: ({ getValue }) =>
-        getValue() ? <Badge tone="warning">원문보관</Badge> : <span className="rt-muted">마스킹</span>,
-    }),
-    column.display({
-      id: "actions",
-      header: "작업",
-      cell: ({ row }) => {
-        const campaign = row.original;
-        const automatic = campaign.trigger_source === "post-change";
-        return (
-          <div className="table-actions">
-            <Button
-              size="small"
-              disabled={!handlers.canWrite || handlers.checking}
-              title={writeTitle}
-              aria-label={`${campaign.name} 사전 점검`}
-              ref={(node) => handlers.preflightTriggerRef(campaign.id, node)}
-              onClick={(event) => handlers.onDryRun(campaign, event)}
-            >
-              {handlers.checking ? "점검 중" : "사전 점검"}
-            </Button>
-            {automatic ? null : (
-              <Button
-                size="small"
-                disabled={!handlers.canWrite}
-                title={writeTitle}
-                aria-label={`${campaign.name} 승인`}
-                onClick={() => handlers.onApprove(campaign)}
-              >
-                승인
-              </Button>
-            )}
-            <Button
-              size="small"
-              variant="primary"
-              disabled={!handlers.canWrite}
-              title={writeTitle}
-              aria-label={`${campaign.name} ${campaign.execution_mode === "active-controlled" ? "실제 실행" : "시뮬레이션 실행"}`}
-              ref={(node) => handlers.runTriggerRef(campaign.id, node)}
-              onClick={(event) => handlers.onRun(campaign, event)}
-            >
-              {campaign.execution_mode === "active-controlled" ? "실제 실행" : "시뮬레이션 실행"}
-            </Button>
-            {automatic ? null : (
-              <Button
-                size="small"
-                disabled={!handlers.canWrite}
-                title={writeTitle}
-                aria-label={`${campaign.name} 수정`}
-                onClick={(event) => handlers.onEdit(campaign, event)}
-              >
-                수정
-              </Button>
-            )}
-            <Button
-              size="small"
-              disabled={!handlers.canWrite}
-              title={writeTitle}
-              aria-label={`${campaign.name} 복제`}
-              onClick={(event) => handlers.onClone(campaign, event)}
-            >
-              복제
-            </Button>
-            <Button
-              size="small"
-              variant="danger"
-              disabled={!handlers.canWrite}
-              title={writeTitle}
-              aria-label={`${campaign.name} 삭제`}
-              onClick={(event) => handlers.onDelete(campaign, event)}
-            >
-              삭제
-            </Button>
-          </div>
-        );
-      },
-    }),
-  ]);
 }

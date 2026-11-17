@@ -257,6 +257,10 @@ func (s *Server) handleRedTeamCampaignByID(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		writeJSON(w, http.StatusOK, preview)
+	case action == "run-review" && len(parts) == 2 && r.Method == http.MethodPost:
+		s.handleRedTeamRunReview(w, r, c)
+	case action == "run-reviewed" && len(parts) == 2 && r.Method == http.MethodPost:
+		s.handleRedTeamReviewedExecution(w, r, c)
 	case action == "approve" && r.Method == http.MethodPost:
 		if err := s.db.UpdateRedTeamCampaignStatus(r.Context(), c.ID, "approved", adminID(r)); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_approve_failed")
@@ -612,6 +616,15 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 }
 
 func (s *Server) runRedTeamSelection(r *http.Request, c store.RedTeamCampaign, proxyKey string, targets []store.RedTeamTarget, packs []store.RedTeamProbePack, cases []store.RedTeamProbeCase) (map[string]any, error) {
+	return s.runRedTeamSelectionReviewed(r, c, proxyKey, targets, packs, cases, nil)
+}
+
+func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCampaign, proxyKey string, targets []store.RedTeamTarget, packs []store.RedTeamProbePack, cases []store.RedTeamProbeCase, review *redTeamRunPlan) (map[string]any, error) {
+	maxCalls := redteamActiveMaxCalls
+	if review != nil {
+		maxCalls = review.Limits.MaxCalls
+	}
+
 	packByCase := map[string]store.RedTeamProbePack{}
 	for _, p := range packs {
 		for _, cs := range cases {
@@ -632,12 +645,18 @@ func (s *Server) runRedTeamSelection(r *http.Request, c store.RedTeamCampaign, p
 			stopped = "context_cancelled"
 		case redteamKillSwitch.Load():
 			stopped = "kill_switch"
-		case liveCalls >= redteamActiveMaxCalls:
+		case liveCalls >= maxCalls:
 			stopped = "call_limit"
 		case math.IsNaN(liveCost) || math.IsInf(liveCost, 0):
 			stopped = "cost_unavailable"
 		case c.BudgetLimitKRW > 0 && liveCost >= c.BudgetLimitKRW:
 			stopped = "budget_exceeded"
+		}
+		if stopped == "" && review != nil {
+			revision, err := s.redTeamRuntimeRevision(r)
+			if err != nil || revision != review.RuntimeRevision {
+				stopped = "configuration_changed"
+			}
 		}
 		return stopped == ""
 	}
@@ -695,9 +714,12 @@ func (s *Server) runRedTeamSelection(r *http.Request, c store.RedTeamCampaign, p
 			// Active Controlled Run: invoke live only for eligible LLM/Text2SQL targets within the
 			// live-call cap. When the campaign pins multiple models, each is invoked separately;
 			// otherwise a single (auto-resolved) model is used. Everything else is simulated.
-			if redTeamActiveEligible(t, c, proxyKey) {
+			if redTeamActiveEligible(t, c, proxyKey) && (review == nil || len(review.Models[t.ID]) > 0) {
 				invokedAny := false
 				models := redTeamCampaignModels(c)
+				if review != nil {
+					models = review.Models[t.ID]
+				}
 				if len(models) == 0 {
 					models = []string{""} // "" → auto-resolve one model
 				}
@@ -713,12 +735,15 @@ func (s *Server) runRedTeamSelection(r *http.Request, c store.RedTeamCampaign, p
 					if !admitLive() {
 						break
 					}
-					if ar, aev, arem, invoked := s.evaluateRedTeamCaseActiveGuarded(r, proxyKey, t, pack, cs, c, modelCache, m, admitLive); invoked {
+					if ar, aev, arem, invoked := s.evaluateRedTeamCaseActivePlanned(r, proxyKey, t, pack, cs, c, modelCache, m, admitLive, review); invoked {
 						liveCalls++
 						liveCost += ar.CostKRW
 						record(cs, ar, aev, arem)
 						invokedAny = true
 					}
+				}
+				if review != nil && !invokedAny && stopped == "" {
+					stopped = "model_unavailable"
 				}
 				if !invokedAny && stopped == "" {
 					sr, sev, srem := evaluateRedTeamCase(t, pack, cs, c)
@@ -804,6 +829,10 @@ func (s *Server) redTeamSelection(r *http.Request, c store.RedTeamCampaign) ([]s
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	return s.redTeamSelectionFromTargets(r, c, targets)
+}
+
+func (s *Server) redTeamSelectionFromTargets(r *http.Request, c store.RedTeamCampaign, targets []store.RedTeamTarget) ([]store.RedTeamTarget, []store.RedTeamProbePack, []store.RedTeamProbeCase, error) {
 	filtered := []store.RedTeamTarget{}
 	for _, t := range targets {
 		if redTeamTargetMatchesCampaign(t, c) {

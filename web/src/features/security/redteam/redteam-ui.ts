@@ -66,6 +66,8 @@ export function statusLabel(value: string | undefined): string {
 
 export function stopReasonLabel(value: string): string {
   const reasons: Readonly<Record<string, string>> = {
+    configuration_changed: "제공자 또는 실행 설정이 바뀌었습니다",
+    model_unavailable: "검토한 모델을 호출할 수 없습니다",
     budget_exceeded: "비용 중단 기준에 도달했습니다",
     kill_switch: "긴급 중지가 적용되었습니다",
     call_limit: "실제 호출 횟수 한도에 도달했습니다",

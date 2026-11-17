@@ -2,6 +2,7 @@
 // here with `operation()` from "@/shared/api/endpoint-factory" and a zod schema
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
+import { redTeamReviewedEndpoints } from "./redteam-reviewed";
 
 import type {
   RedTeamPreflightResponse,
@@ -424,6 +425,7 @@ export interface RedTeamCampaignInput {
   readonly qps_limit: number;
   readonly destructive_tool_policy: string;
   readonly retain_raw_evidence: boolean;
+  readonly external_provider_allowed?: boolean;
   readonly probe_pack_ids: readonly string[];
   readonly target_filter: Readonly<Record<string, unknown>>;
 }
@@ -477,6 +479,7 @@ export const redteamEndpoints = {
     ),
   },
   campaigns: {
+    ...redTeamReviewedEndpoints,
     list: operation<GetAdminRedteamCampaignsData, unknown>()(
       "GET",
       "/admin/redteam/campaigns",

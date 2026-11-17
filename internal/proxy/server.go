@@ -33,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.138"
+var AppVersion = "v0.86.139"
 
 type Server struct {
 	cfg      config.Config
@@ -48,6 +48,7 @@ type Server struct {
 	instanceID      string
 	secrets         atomic.Pointer[secret.Cipher]
 	secretsMu       sync.Mutex // guards concurrent rotation
+	redTeamReviews  redTeamExecutionReviews
 	retention       *store.RetentionWorker
 	killState       atomicKillState
 	loggedRequests  sync.Map

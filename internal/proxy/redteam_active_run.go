@@ -406,11 +406,17 @@ func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t s
 
 // The campaign runner rechecks admission after potentially slow model discovery.
 func (s *Server) evaluateRedTeamCaseActiveGuarded(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache, forcedModel string, admit func() bool) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
+	return s.evaluateRedTeamCaseActivePlanned(r, proxyKey, t, pack, cs, c, cache, forcedModel, admit, nil)
+}
+
+func (s *Server) evaluateRedTeamCaseActivePlanned(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache, forcedModel string, admit func() bool, review *redTeamRunPlan) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
 	var model, provider string
 	var ok bool
 	// A forced model (from the campaign's model selection) is used directly for provider/model
 	// targets; otherwise the model is auto-resolved from the upstream /v1/models.
-	if forcedModel != "" && (t.TargetType == "provider" || t.TargetType == "model") {
+	if review != nil {
+		model, provider, ok = forcedModel, t.Provider, forcedModel != ""
+	} else if forcedModel != "" && (t.TargetType == "provider" || t.TargetType == "model") {
 		if strings.Contains(forcedModel, "*") {
 			var resolved bool
 			model, provider, resolved = s.resolvePatternToConcreteModel(r, proxyKey, t, forcedModel, cache)
@@ -432,6 +438,9 @@ func (s *Server) evaluateRedTeamCaseActiveGuarded(r *http.Request, proxyKey stri
 		if mt, mok := cs.Parameters["max_tokens"].(float64); mok {
 			maxTokens = int(mt)
 		}
+	}
+	if review != nil && (maxTokens <= 0 || maxTokens > review.Limits.MaxOutputTokens) {
+		maxTokens = review.Limits.MaxOutputTokens
 	}
 	sessionID := "redteam:" + c.ID
 	call := s.redTeamActiveInvoke(r, proxyKey, model, provider, prompt, sessionID, maxTokens)

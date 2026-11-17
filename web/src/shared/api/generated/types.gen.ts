@@ -2625,6 +2625,91 @@ export type RedTeamPreflightResponse = {
     targets: number;
 };
 
+export type RedTeamReviewedExecutionRequest = {
+    proxy_key?: string;
+    review_token: string;
+};
+
+export type RedTeamReviewedExecutionResponse = {
+    campaign_id: string;
+    complete: boolean;
+    execution_kind: 'live' | 'simulation';
+    limits: RedTeamRunLimits;
+    note: string;
+    planned_case_executions: number;
+    planned_live_calls: number;
+    review_id: string;
+    runs: Array<{
+        campaign_id: string;
+        cost_krw: number;
+        created_at: string;
+        ended_at: string;
+        failed_cases: number;
+        id: string;
+        mode: string;
+        risk_score: number;
+        started_at: string;
+        status: string;
+        target_id: string;
+        total_cases: number;
+    }>;
+    status: 'completed' | 'stopped';
+    stopped: string;
+    summary: {
+        critical: number;
+        failures: number;
+        live_calls: number;
+        live_cost_krw: number;
+        mode: string;
+        results: number;
+        runs: number;
+        warnings: number;
+    };
+};
+
+export type RedTeamReviewedTarget = {
+    case_executions: number;
+    id: string;
+    live_calls: number;
+    models: Array<string>;
+    provider: string;
+    target_ref: string;
+};
+
+export type RedTeamRunLimits = {
+    budget_limit_krw: number;
+    max_calls: number;
+    max_output_tokens: number;
+};
+
+export type RedTeamRunReviewRequest = {
+    kind: 'live' | 'simulation';
+    limits: RedTeamRunLimits;
+    models: Array<string>;
+    reason: string;
+};
+
+export type RedTeamRunReviewResponse = {
+    campaign_id: string;
+    campaign_name: string;
+    case_executions: number;
+    estimated_cost_krw: number;
+    expires_at: string;
+    kind: 'live' | 'simulation';
+    limits: RedTeamRunLimits;
+    planned_live_calls: number;
+    probe_pack_ids: Array<string>;
+    reason: string;
+    registered_input_bytes: number;
+    requested_output_tokens: number;
+    retain_raw_evidence: boolean;
+    review_id: string;
+    review_token: string;
+    scope: 'responding_server';
+    targets: Array<RedTeamReviewedTarget>;
+    timeout_ms: number;
+};
+
 export type RegisteredTeam = {
     created_at: string;
     id: string;
@@ -10533,6 +10618,116 @@ export type PostAdminRedteamCampaignsIdRunResponses = {
      */
     200: unknown;
 };
+
+export type PostAdminRedteamCampaignsIdRunReviewData = {
+    body: RedTeamRunReviewRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/redteam/campaigns/{id}/run-review';
+};
+
+export type PostAdminRedteamCampaignsIdRunReviewErrors = {
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    400: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    401: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    403: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    404: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    409: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    500: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRedteamCampaignsIdRunReviewError = PostAdminRedteamCampaignsIdRunReviewErrors[keyof PostAdminRedteamCampaignsIdRunReviewErrors];
+
+export type PostAdminRedteamCampaignsIdRunReviewResponses = {
+    /**
+     * OK
+     */
+    200: RedTeamRunReviewResponse;
+};
+
+export type PostAdminRedteamCampaignsIdRunReviewResponse = PostAdminRedteamCampaignsIdRunReviewResponses[keyof PostAdminRedteamCampaignsIdRunReviewResponses];
+
+export type PostAdminRedteamCampaignsIdRunReviewedData = {
+    body: RedTeamReviewedExecutionRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/redteam/campaigns/{id}/run-reviewed';
+};
+
+export type PostAdminRedteamCampaignsIdRunReviewedErrors = {
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    400: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    401: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    403: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    404: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    409: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    500: AppError;
+    /**
+     * Review rejected or outcome unknown; read current history before a new review
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRedteamCampaignsIdRunReviewedError = PostAdminRedteamCampaignsIdRunReviewedErrors[keyof PostAdminRedteamCampaignsIdRunReviewedErrors];
+
+export type PostAdminRedteamCampaignsIdRunReviewedResponses = {
+    /**
+     * OK
+     */
+    200: RedTeamReviewedExecutionResponse;
+};
+
+export type PostAdminRedteamCampaignsIdRunReviewedResponse = PostAdminRedteamCampaignsIdRunReviewedResponses[keyof PostAdminRedteamCampaignsIdRunReviewedResponses];
 
 export type GetAdminRedteamDashboardData = {
     body?: never;

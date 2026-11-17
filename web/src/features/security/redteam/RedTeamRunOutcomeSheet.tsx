@@ -19,6 +19,7 @@ export function RedTeamRunOutcomeSheet({
   onOpenRun: (id: string) => void;
   returnFocusRef: RefObject<HTMLElement | null>;
 }): React.JSX.Element {
+  const incomplete = outcome?.complete === false;
   const stopped = outcome?.status === "stopped" || Boolean(outcome?.stopped);
   return (
     <Sheet
@@ -34,6 +35,11 @@ export function RedTeamRunOutcomeSheet({
     >
       {outcome ? (
         <div className="rt-stack">
+          {incomplete && !stopped ? (
+            <InlineNotice tone="warning" title="검토한 실행을 모두 마치지 못했습니다.">
+              실행 이력과 반환된 결과를 확인하세요. 미실행 검사는 통과한 것으로 처리하지 않습니다.
+            </InlineNotice>
+          ) : null}
           {stopped ? (
             <InlineNotice tone="warning" title="실행이 중단되었습니다.">
               {stopReasonLabel(outcome.stopped)}. 아직 수행하지 않은 검사는 통과한 것으로 처리하지 않습니다.
@@ -46,7 +52,11 @@ export function RedTeamRunOutcomeSheet({
             items={[
               {
                 label: "상태",
-                value: <Badge tone={statusTone(outcome.status)}>{statusLabel(outcome.status)}</Badge>,
+                value: (
+                  <Badge tone={incomplete && !stopped ? "warning" : statusTone(outcome.status)}>
+                    {incomplete && !stopped ? "부분 완료" : statusLabel(outcome.status)}
+                  </Badge>
+                ),
               },
               { label: "대상별 실행", value: formatNumber(outcome.summary.runs) },
               { label: "기록된 검사 결과", value: formatNumber(outcome.summary.results) },

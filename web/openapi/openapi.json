@@ -9416,6 +9416,401 @@
         ],
         "type": "object"
       },
+      "RedTeamReviewedExecutionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "proxy_key": {
+            "maxLength": 8192,
+            "type": "string"
+          },
+          "review_token": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_token"
+        ],
+        "type": "object"
+      },
+      "RedTeamReviewedExecutionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "type": "string"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "execution_kind": {
+            "enum": [
+              "live",
+              "simulation"
+            ],
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/RedTeamRunLimits"
+          },
+          "note": {
+            "type": "string"
+          },
+          "planned_case_executions": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "planned_live_calls": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "review_id": {
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "campaign_id": {
+                  "type": "string"
+                },
+                "cost_krw": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "ended_at": {
+                  "type": "string"
+                },
+                "failed_cases": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "risk_score": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "started_at": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "target_id": {
+                  "type": "string"
+                },
+                "total_cases": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "campaign_id",
+                "cost_krw",
+                "created_at",
+                "ended_at",
+                "failed_cases",
+                "id",
+                "mode",
+                "risk_score",
+                "started_at",
+                "status",
+                "target_id",
+                "total_cases"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "stopped"
+            ],
+            "type": "string"
+          },
+          "stopped": {
+            "type": "string"
+          },
+          "summary": {
+            "additionalProperties": false,
+            "properties": {
+              "critical": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "failures": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "live_calls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "live_cost_krw": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "results": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "runs": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "warnings": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "critical",
+              "failures",
+              "live_calls",
+              "live_cost_krw",
+              "mode",
+              "results",
+              "runs",
+              "warnings"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "complete",
+          "execution_kind",
+          "limits",
+          "note",
+          "planned_case_executions",
+          "planned_live_calls",
+          "review_id",
+          "runs",
+          "status",
+          "stopped",
+          "summary"
+        ],
+        "type": "object"
+      },
+      "RedTeamReviewedTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "case_executions": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "live_calls": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "models": {
+            "items": {
+              "description": "Exact trimmed concrete model name; glob and newline characters are rejected",
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "provider": {
+            "type": "string"
+          },
+          "target_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "case_executions",
+          "id",
+          "live_calls",
+          "models",
+          "provider",
+          "target_ref"
+        ],
+        "type": "object"
+      },
+      "RedTeamRunLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "budget_limit_krw": {
+            "exclusiveMinimum": true,
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_calls": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "budget_limit_krw",
+          "max_calls",
+          "max_output_tokens"
+        ],
+        "type": "object"
+      },
+      "RedTeamRunReviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "live",
+              "simulation"
+            ],
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/RedTeamRunLimits"
+          },
+          "models": {
+            "items": {
+              "description": "Exact trimmed concrete model name; glob and newline characters are rejected",
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "limits",
+          "models",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "RedTeamRunReviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "type": "string"
+          },
+          "campaign_name": {
+            "type": "string"
+          },
+          "case_executions": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_cost_krw": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "live",
+              "simulation"
+            ],
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/RedTeamRunLimits"
+          },
+          "planned_live_calls": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "probe_pack_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "registered_input_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requested_output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retain_raw_evidence": {
+            "type": "boolean"
+          },
+          "review_id": {
+            "type": "string"
+          },
+          "review_token": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "responding_server"
+            ],
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/RedTeamReviewedTarget"
+            },
+            "type": "array"
+          },
+          "timeout_ms": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "campaign_name",
+          "case_executions",
+          "estimated_cost_krw",
+          "expires_at",
+          "kind",
+          "limits",
+          "planned_live_calls",
+          "probe_pack_ids",
+          "reason",
+          "registered_input_bytes",
+          "requested_output_tokens",
+          "retain_raw_evidence",
+          "review_id",
+          "review_token",
+          "scope",
+          "targets",
+          "timeout_ms"
+        ],
+        "type": "object"
+      },
       "RegisteredTeam": {
         "additionalProperties": false,
         "properties": {
@@ -14088,7 +14483,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.138"
+    "version": "v0.86.139"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -25115,6 +25510,260 @@
           }
         ],
         "summary": "Run a controlled Red Team campaign",
+        "tags": [
+          "redteam"
+        ]
+      }
+    },
+    "/admin/redteam/campaigns/{id}/run-review": {
+      "post": {
+        "description": "Existing admin:write campaign runner, explicit live or simulation selection. A server-local, actor-bound review expires after five minutes and is consumed before admission audit or execution. Registered definitions and provider/runtime configuration are revalidated. Live model discovery is disabled. Maximum 200 model probes, requested output tokens per call 1..4096, sequential execution, at most 120 seconds. A positive KRW limit stops subsequent calls after measured/estimated cost reaches it; the last call can exceed it. Gateway internal retries and expanded input are not covered by probe/output-request counts. Current routing and security policies still apply; concurrent external configuration writes are not locked. Only reviewed runs of the same campaign on this Server are serialized; legacy/scheduled/other-server executions are not. Result persistence is best effort. Never automatically replay or fall back to the legacy run endpoint after an uncertain response.",
+        "operationId": "post__admin_redteam_campaigns_id_run_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedTeamRunReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedTeamRunReviewResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Review bounded Red Team execution without model calls",
+        "tags": [
+          "redteam"
+        ]
+      }
+    },
+    "/admin/redteam/campaigns/{id}/run-reviewed": {
+      "post": {
+        "description": "Existing admin:write campaign runner, explicit live or simulation selection. A server-local, actor-bound review expires after five minutes and is consumed before admission audit or execution. Registered definitions and provider/runtime configuration are revalidated. Live model discovery is disabled. Maximum 200 model probes, requested output tokens per call 1..4096, sequential execution, at most 120 seconds. A positive KRW limit stops subsequent calls after measured/estimated cost reaches it; the last call can exceed it. Gateway internal retries and expanded input are not covered by probe/output-request counts. Current routing and security policies still apply; concurrent external configuration writes are not locked. Only reviewed runs of the same campaign on this Server are serialized; legacy/scheduled/other-server executions are not. Result persistence is best effort. Never automatically replay or fall back to the legacy run endpoint after an uncertain response.",
+        "operationId": "post__admin_redteam_campaigns_id_run_reviewed",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedTeamReviewedExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedTeamReviewedExecutionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review rejected or outcome unknown; read current history before a new review"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Consume reviewed Red Team execution once",
         "tags": [
           "redteam"
         ]
