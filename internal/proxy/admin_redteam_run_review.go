@@ -101,7 +101,12 @@ func (s *Server) handleRedTeamRunReview(w http.ResponseWriter, r *http.Request, 
 		writeOpenAIError(w, http.StatusServiceUnavailable, "review capacity unavailable", "server_error", "redteam_run_review_unavailable")
 		return
 	}
-	response := redTeamRunReviewResponse{ReviewToken: token, ReviewID: review.ID, ExpiresAt: review.ExpiresAt.UTC().Format(time.RFC3339Nano), Scope: "responding_server", CampaignID: campaign.ID, CampaignName: campaign.Name, Kind: body.Kind, Reason: body.Reason, Limits: body.Limits, Targets: []redTeamReviewedTarget{}, PackIDs: []string{}, LiveCalls: plan.LiveCalls, CaseExecutions: plan.CaseExecutions, EstimatedCost: plan.EstimatedCost, RequestedOutputTokens: plan.LiveCalls * body.Limits.MaxOutputTokens, InputBytes: plan.InputBytes, TimeoutMS: int(redTeamReviewedTimeout(campaign).Milliseconds()), RetainRawEvidence: campaign.RetainRawEvidence}
+	writeJSON(w, http.StatusOK, redTeamPlanReviewResponse(plan, review, token))
+}
+
+func redTeamPlanReviewResponse(plan *redTeamRunPlan, review redTeamExecutionReview, token string) redTeamRunReviewResponse {
+	campaign := plan.Campaign
+	response := redTeamRunReviewResponse{ReviewToken: token, ReviewID: review.ID, ExpiresAt: review.ExpiresAt.UTC().Format(time.RFC3339Nano), Scope: "responding_server", CampaignID: campaign.ID, CampaignName: campaign.Name, Kind: review.Kind, Reason: review.Reason, Limits: review.Limits, Targets: []redTeamReviewedTarget{}, PackIDs: []string{}, LiveCalls: plan.LiveCalls, CaseExecutions: plan.CaseExecutions, EstimatedCost: plan.EstimatedCost, RequestedOutputTokens: plan.LiveCalls * review.Limits.MaxOutputTokens, InputBytes: plan.InputBytes, TimeoutMS: int(redTeamReviewedTimeout(campaign).Milliseconds()), RetainRawEvidence: campaign.RetainRawEvidence}
 	for _, pack := range plan.Packs {
 		response.PackIDs = append(response.PackIDs, pack.ID)
 	}
@@ -123,7 +128,7 @@ func (s *Server) handleRedTeamRunReview(w http.ResponseWriter, r *http.Request, 
 		}
 		response.Targets = append(response.Targets, row)
 	}
-	writeJSON(w, http.StatusOK, response)
+	return response
 }
 
 func (s *Server) handleRedTeamReviewedExecution(w http.ResponseWriter, r *http.Request, campaign store.RedTeamCampaign) {

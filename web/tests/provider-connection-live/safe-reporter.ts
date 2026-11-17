@@ -51,7 +51,7 @@ export default class SafeProviderReporter implements Reporter {
     await writeFile(
       target,
       JSON.stringify({
-        passed: this.passed && result.status === "passed" && this.testCount === (this.redteam ? 6 : 1),
+        passed: this.passed && result.status === "passed" && this.testCount === (this.redteam ? 8 : 1),
         test_count: this.testCount,
         source_line: this.firstFailureLine ?? this.sourceLine,
       }),

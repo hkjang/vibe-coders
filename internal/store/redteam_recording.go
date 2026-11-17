@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 )
 
 type redTeamExecer interface {
@@ -105,4 +106,23 @@ func redTeamExactlyOneRow(result sql.Result) error {
 		return errors.New("redteam recording row unavailable")
 	}
 	return nil
+}
+
+// A single-case replay acknowledges only its new run. It must never advance the
+// source campaign or pack baseline, including when that one case passes.
+func (s *SQLStore) FinalizeRedTeamReplay(ctx context.Context, run RedTeamRun) error {
+	if run.ID == "" || run.CampaignID == "" || run.SourceResultID == "" || run.ReviewID == "" ||
+		(run.Status != "passed" && run.Status != "failed" && run.Status != "warning" && run.Status != "stopped") || run.TotalCases < 0 || run.TotalCases > 1 {
+		return errors.New("invalid redteam replay finalization")
+	}
+	if run.EndedAt == "" {
+		run.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	result, err := s.db.ExecContext(ctx, s.bind(`UPDATE redteam_runs SET ended_at = ?, status = ?, total_cases = ?, failed_cases = ?, risk_score = ?, cost_krw = ?
+		WHERE id = ? AND campaign_id = ? AND source_result_id = ? AND review_id = ? AND status = 'running'`),
+		run.EndedAt, run.Status, run.TotalCases, run.FailedCases, run.RiskScore, run.CostKRW, run.ID, run.CampaignID, run.SourceResultID, run.ReviewID)
+	if err != nil {
+		return err
+	}
+	return redTeamExactlyOneRow(result)
 }

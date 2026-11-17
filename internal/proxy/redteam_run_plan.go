@@ -34,6 +34,9 @@ func (limits redTeamRunLimits) valid() bool {
 // A reviewed runner executes these already loaded definitions. It does not
 // reselect targets or silently resolve a different model after confirmation.
 type redTeamRunPlan struct {
+	ReplaySource    *redTeamReplaySource `json:",omitempty"`
+	ExecutionID     string               `json:"-"` // allocated only after review revalidation, recorded in the admission audit
+	ReviewID        string               `json:"-"`
 	Campaign        store.RedTeamCampaign
 	Targets         []store.RedTeamTarget
 	Packs           []store.RedTeamProbePack
@@ -87,6 +90,19 @@ func (s *Server) prepareRedTeamRunPlan(r *http.Request, c store.RedTeamCampaign,
 	if len(wanted) > 0 && len(wanted) != len(packs) {
 		return nil, errRedTeamRunSelection
 	}
+	return s.prepareRedTeamSelectionPlan(r, c, kind, limits, requestedModels, targets, packs, cases)
+}
+
+// Shared planning and physical-call protections for a campaign or one selected
+// case. Callers select and authorize the definitions before entering this path.
+func (s *Server) prepareRedTeamSelectionPlan(r *http.Request, c store.RedTeamCampaign, kind string, limits redTeamRunLimits, requestedModels []string, targets []store.RedTeamTarget, packs []store.RedTeamProbePack, cases []store.RedTeamProbeCase) (*redTeamRunPlan, error) {
+	if !limits.valid() || (kind != "live" && kind != "simulation") ||
+		(kind == "live" && normalizeRedTeamMode(c.ExecutionMode) != "active-controlled") ||
+		len(requestedModels) > limits.MaxCalls || !redTeamConcreteModels(requestedModels) ||
+		len(targets) == 0 || len(packs) == 0 || len(cases) == 0 || len(cases) > redTeamReviewedMaxCases {
+		return nil, errRedTeamRunSelection
+	}
+	var err error
 	sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
 	sort.Slice(packs, func(i, j int) bool { return packs[i].ID < packs[j].ID })
 	sort.Slice(cases, func(i, j int) bool { return cases[i].ID < cases[j].ID })

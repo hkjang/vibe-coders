@@ -1,8 +1,9 @@
-import { riskLabel, expectedPolicyLabel } from "./redteam-labels";
+import { RedTeamEvidenceSheet } from "./RedTeamEvidenceSheet";
+import { riskLabel } from "./redteam-labels";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { MaskedText, PanelFailure } from "@/features/security/redteam/RedTeamParts";
+import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
 import {
   decisionLabel,
   decisionTone,
@@ -31,8 +32,6 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { JsonBlock } from "@/shared/components/ui/JsonBlock";
-import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
@@ -177,7 +176,8 @@ export function RedTeamRunsTab({
         writeTitle={writeTitle}
       />
 
-      <EvidenceSheet
+      <RedTeamEvidenceSheet
+        onOpenRun={onOpenRun}
         canWrite={canWrite}
         onClose={() => setOpenResultId("")}
         onCreateRemediation={(resultId) => createRemediation.mutate(resultId)}
@@ -251,7 +251,7 @@ function RunResultsSheet({
       {mode !== "" && mode !== "active-controlled" ? (
         <InlineNotice tone="info" title={`이 실행은 ${executionModeLabel(mode)}(시뮬레이션)입니다.`}>
           실제 모델을 호출하지 않아 대상 응답은 시뮬레이션 표식입니다. 실제 요청/응답을 보려면 각 결과의
-          증적에서 &lsquo;원문 보관으로 실제 재실행&rsquo;을 사용하세요.
+          증적에서 &lsquo;조건 검토 후 한 건 재실행&rsquo;을 사용하세요.
         </InlineNotice>
       ) : null}
       {results.isError ? (
@@ -280,170 +280,6 @@ function RunResultsSheet({
   );
 }
 
-function EvidenceSheet({
-  canWrite,
-  onClose,
-  onCreateRemediation,
-  proxyKey,
-  resultId,
-  returnFocusRef,
-  writeTitle,
-}: {
-  canWrite: boolean;
-  onClose: () => void;
-  onCreateRemediation: (resultId: string) => void;
-  proxyKey: string;
-  resultId: string;
-  returnFocusRef: React.RefObject<HTMLElement | null>;
-  writeTitle: string | undefined;
-}): React.JSX.Element {
-  const [pendingRerun, setPendingRerun] = useState(false);
-  const evidence = useQuery({
-    queryKey: redteamKeys.evidence(resultId),
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(redteam.results.evidence, { id: resultId }), {
-        signal,
-        routeId,
-      }),
-    enabled: resultId !== "",
-  });
-
-  const rerun = useMutationFeedback({
-    mutate: () =>
-      apiClient.request(withPathParams(redteam.results.rerun, { id: resultId }), {
-        body: { proxy_key: proxyKey.trim() },
-        routeId,
-        timeoutMs: 60_000,
-      }),
-    invalidates: [redteamKeys.evidence(resultId), redteamKeys.runs, redteamKeys.dashboard],
-    successMessage: (result) => `재실행 판정: ${decisionLabel(result.decision)}`,
-    errorMessage: "실제 재실행에 실패했습니다.",
-  });
-
-  const record = evidence.data?.evidence;
-  const headers = record?.headers_summary ?? {};
-  const headerText = (key: string): string => {
-    const value = headers[key];
-    return value === undefined || value === null ? "" : String(value);
-  };
-  const findings = Array.isArray(headers.leak_findings) ? headers.leak_findings : [];
-  const hasRaw = (record?.raw_prompt ?? "") !== "" || (record?.raw_response ?? "") !== "";
-
-  return (
-    <>
-      <Sheet
-        open={resultId !== ""}
-        onOpenChange={(open) => {
-          if (!open) onClose();
-        }}
-        title="증적 상세"
-        description="어느 제공자·모델에 무엇을 보내 어떤 응답을 받았는지입니다. 기본은 마스킹본입니다."
-        returnFocusRef={returnFocusRef}
-        size="wide"
-      >
-        {evidence.isError ? (
-          <PanelFailure
-            error={evidence.error}
-            hasData={Boolean(evidence.data)}
-            label="증적"
-            onRetry={() => void evidence.refetch()}
-          />
-        ) : null}
-        {record ? (
-          <div className="rt-stack">
-            <KeyValueList
-              items={[
-                { label: "대상", value: headerText("target") },
-                { label: "제공자", value: headerText("provider") },
-                { label: "모델", value: headerText("model") },
-                { label: "HTTP 상태", value: headerText("http_status") },
-                { label: "기대 정책", value: expectedPolicyLabel(headerText("expected")) },
-                { label: "지연(ms)", value: headerText("latency_ms") },
-                { label: "비용(KRW)", value: headerText("cost_krw") },
-                {
-                  label: "유출 탐지",
-                  value:
-                    findings.length > 0 ? (
-                      <span className="badge-list">
-                        {findings.map((finding, index) => (
-                          <Badge key={index} tone="danger">
-                            {String(finding)}
-                          </Badge>
-                        ))}
-                      </span>
-                    ) : (
-                      "없음"
-                    ),
-                },
-              ]}
-            />
-            <div className="rt-button-row">
-              <Button
-                variant="primary"
-                disabled={!canWrite}
-                title={writeTitle}
-                onClick={() => setPendingRerun(true)}
-              >
-                원문 보관으로 실제 재실행
-              </Button>
-              <Button disabled={!canWrite} title={writeTitle} onClick={() => onCreateRemediation(resultId)}>
-                이 결과에 조치 생성
-              </Button>
-            </div>
-            {headerText("seed_template") !== "" ? (
-              <MaskedText label="요청 시드 (원문 프롬프트)" value={headerText("seed_template")} />
-            ) : null}
-            <MaskedText label="요청 프롬프트 (실제 전송 형태 · 마스킹)" value={record.masked_prompt} />
-            <MaskedText label="대상 응답 (마스킹)" value={record.masked_response} />
-            {hasRaw ? (
-              <div className="rt-raw-evidence">
-                <InlineNotice tone="danger" title="원문 증적 (관리자 전용 · 마스킹 안 됨)">
-                  이 캠페인은 원문 보관이 켜져 있어 마스킹하지 않은 요청/응답을 표시합니다.
-                </InlineNotice>
-                <MaskedText label="실제 요청 프롬프트 (원문)" value={record.raw_prompt} />
-                <MaskedText label="실제 모델 응답 (원문)" value={record.raw_response} />
-              </div>
-            ) : (
-              <p className="rt-muted">
-                원문 증적 보관이 꺼져 있어 마스킹본만 표시됩니다. &lsquo;원문 보관으로 실제 재실행&rsquo;으로
-                실제 요청/응답을 확인하세요.
-              </p>
-            )}
-            {record.tool_calls.length > 0 ? (
-              <JsonBlock label="도구 호출" value={record.tool_calls} />
-            ) : (
-              <p className="rt-muted">도구 호출 없음</p>
-            )}
-            <JsonBlock label="헤더 · 메타 요약" value={headers} />
-            {record.export_hash !== "" ? (
-              <p className="rt-muted">
-                증적 해시: <code className="mono">{record.export_hash}</code>
-              </p>
-            ) : null}
-          </div>
-        ) : evidence.isPending && resultId !== "" ? (
-          <p role="status">증적을 불러오는 중입니다.</p>
-        ) : null}
-      </Sheet>
-
-      <ConfirmDialog
-        open={pendingRerun}
-        onOpenChange={setPendingRerun}
-        title="원문 보관으로 실제 재실행"
-        description={
-          proxyKey.trim() === ""
-            ? "실제 재실행에는 전용 레드팀 Proxy API Key가 필요합니다. 상단 '실행 키'에 키를 입력한 뒤 다시 시도하세요."
-            : "대상 제공자·모델을 1회 실제 호출하고, 이 결과의 증적을 실제 요청/응답으로 갱신합니다."
-        }
-        confirmLabel="실제 재실행"
-        tone="danger"
-        returnFocusRef={returnFocusRef}
-        onConfirm={() => rerun.mutateAsync(undefined)}
-      />
-    </>
-  );
-}
-
 function runColumns(
   onOpen: (run: RedTeamRun, event: { currentTarget: HTMLElement }) => void,
 ): ReadonlyArray<DataTableColumn<RedTeamRun>> {
@@ -455,6 +291,11 @@ function runColumns(
       cell: ({ row }) => (
         <div className="rt-stacked-cell">
           <code className="mono">{row.original.id}</code>
+          {row.original.source_result_id ? (
+            <span>
+              한 건 재실행 · 원본 <code>{row.original.source_result_id}</code>
+            </span>
+          ) : null}
           <span title={row.original.created_at || undefined}>
             {formatRelative(row.original.created_at || null)}
           </span>

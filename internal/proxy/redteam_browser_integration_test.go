@@ -43,7 +43,7 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	}); err != nil {
 		t.Fatal("isolated execution key could not be prepared")
 	}
-	var live, recording, redirect, other, unsafe atomic.Int64
+	var live, recording, redirect, replay, replayRecording, other, unsafe atomic.Int64
 	otherServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		other.Add(1)
 		redTeamAdmissionReply(w)
@@ -68,6 +68,10 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 			live.Add(1)
 		case "recording":
 			recording.Add(1)
+		case "replay":
+			replay.Add(1)
+		case "replay-recording":
+			replayRecording.Add(1)
 		case "redirect":
 			redirect.Add(1)
 			http.Redirect(w, r, otherServer.URL+"/v1/chat/completions", http.StatusTemporaryRedirect)
@@ -81,6 +85,7 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	seedRedTeamBrowserCampaigns(t, h, upstream.URL)
+	verifyReplay := seedRedTeamBrowserReplay(t, h)
 	// Fault only the intended campaign. The production SQL and handler are unchanged.
 	raw, err := sql.Open("sqlite", filepath.Join(filepath.Dir(h.childScratch), "auth.db"))
 	if err != nil {
@@ -88,7 +93,7 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	}
 	defer raw.Close()
 	if _, err := raw.ExecContext(t.Context(), `CREATE TRIGGER browser_redteam_recording_failure BEFORE INSERT ON redteam_case_results
-		WHEN EXISTS (SELECT 1 FROM redteam_runs WHERE id = NEW.run_id AND campaign_id = 'browser-redteam-recording')
+		WHEN EXISTS (SELECT 1 FROM redteam_runs WHERE id = NEW.run_id AND campaign_id IN ('browser-redteam-recording', 'browser-redteam-replay-recording'))
 		BEGIN SELECT RAISE(ABORT, 'private-browser-recording-fault'); END`); err != nil {
 		t.Fatal("isolated recording fault could not be prepared")
 	}
@@ -130,14 +135,15 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	if decoder.Decode(&summary) != nil || summary.SourceLine < 0 || summary.SourceLine > 10000 {
 		t.Fatal("redteam browser safe summary invalid; raw output suppressed")
 	}
-	if err != nil || !summary.Passed || summary.TestCount != 6 {
+	if err != nil || !summary.Passed || summary.TestCount != 8 {
 		t.Fatalf("redteam browser failed at source line %d; raw output suppressed", summary.SourceLine)
 	}
-	if live.Load() != 1 || recording.Load() != 1 || redirect.Load() != 1 || other.Load() != 0 || unsafe.Load() != 0 {
+	if live.Load() != 1 || recording.Load() != 1 || redirect.Load() != 1 || replay.Load() != 1 || replayRecording.Load() != 1 || other.Load() != 0 || unsafe.Load() != 0 {
 		t.Fatal("review, retry, redirect or output request boundaries failed")
 	}
 	verifyRedTeamBrowserStorage(t, h)
-	t.Log("Red Team browser: 6/6; actual provider, recording and audit assertions passed")
+	verifyReplay()
+	t.Log("Red Team browser: 8/8; actual provider, recording and audit assertions passed")
 }
 
 func seedRedTeamBrowserCampaigns(t *testing.T, h *browserAuthHarness, baseURL string) {
@@ -154,6 +160,7 @@ func seedRedTeamBrowserCampaigns(t *testing.T, h *browserAuthHarness, baseURL st
 	for _, item := range []struct{ id, name string }{
 		{"simulation", "시뮬레이션 확인"}, {"live", "실제 호출 확인"}, {"recording", "저장 실패 확인"},
 		{"redirect", "주소 변경 차단"}, {"stale", "검토 변경 확인"},
+		{"replay", "한 건 재실행 확인"}, {"replay-recording", "한 건 저장 실패 확인"},
 	} {
 		p := provider
 		p.Name, p.BaseURL, p.ModelPatterns = "browser-redteam-"+item.id, baseURL+"/"+item.id, "test-model"
@@ -170,10 +177,13 @@ func seedRedTeamBrowserCampaigns(t *testing.T, h *browserAuthHarness, baseURL st
 func verifyRedTeamBrowserStorage(t *testing.T, h *browserAuthHarness) {
 	t.Helper()
 	runs, err := h.db.ListRedTeamRuns(t.Context(), 100)
-	if err != nil || len(runs) != 4 {
+	if err != nil || len(runs) != 8 {
 		t.Fatal("unexpected persisted execution count")
 	}
 	for _, run := range runs {
+		if strings.HasPrefix(run.CampaignID, "browser-redteam-replay") {
+			continue
+		}
 		results, err := h.db.ListRedTeamCaseResults(t.Context(), run.ID)
 		if err != nil {
 			t.Fatal("persisted case query failed")

@@ -350,7 +350,7 @@ func (s *Server) handleRedTeamRunByID(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRedTeamResultByID(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
-		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		s.writeRedTeamCampaignAccessDenied(w, r)
 		return
 	}
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/redteam/results/"), "/"), "/")
@@ -360,6 +360,20 @@ func (s *Server) handleRedTeamResultByID(w http.ResponseWriter, r *http.Request)
 	}
 	resultID, action := parts[0], parts[1]
 	switch action {
+	case "rerun-review", "rerun-reviewed":
+		if len(parts) != 2 {
+			writeOpenAIError(w, http.StatusNotFound, "unknown result action", "invalid_request_error", "not_found")
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+			return
+		}
+		if action == "rerun-review" {
+			s.handleRedTeamReplayReview(w, r, resultID)
+		} else {
+			s.handleRedTeamReviewedReplay(w, r, resultID)
+		}
 	case "evidence":
 		if r.Method != http.MethodGet {
 			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -620,6 +634,9 @@ func (s *Server) runRedTeamSelection(r *http.Request, c store.RedTeamCampaign, p
 }
 
 func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCampaign, proxyKey string, targets []store.RedTeamTarget, packs []store.RedTeamProbePack, cases []store.RedTeamProbeCase, review *redTeamRunPlan) (map[string]any, error) {
+	if review != nil && review.ReplaySource != nil && (len(targets) != 1 || len(cases) != 1 || len(packs) != 1 || review.ExecutionID == "" || review.ReviewID == "") {
+		return nil, errRedTeamRunSelection
+	}
 	maxCalls := redteamActiveMaxCalls
 	if review != nil {
 		maxCalls = review.Limits.MaxCalls
@@ -667,6 +684,9 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			break
 		}
 		run := store.RedTeamRun{ID: newID("rtrun"), CampaignID: c.ID, TargetID: t.ID, Status: "running", Mode: c.ExecutionMode}
+		if review != nil && review.ReplaySource != nil {
+			run.ID, run.SourceResultID, run.ReviewID = review.ExecutionID, review.ReplaySource.Result.ID, review.ReviewID
+		}
 		if err := s.db.InsertRedTeamRun(r.Context(), run); err != nil && review != nil {
 			recording.fail("run_start", &stopped)
 			break
@@ -799,6 +819,9 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 		}
 		runs = append(runs, run)
 		for _, p := range packs {
+			if review != nil && review.ReplaySource != nil {
+				continue
+			}
 			if run.Status == "passed" {
 				if review != nil {
 					applicable := false
@@ -834,7 +857,17 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 		if !recording.Confirmed || finalStatus != "completed" {
 			baselines = nil
 		}
-		if err := s.db.FinalizeRedTeamExecution(finishCtx, c.ID, finalStatus, c.ApprovedBy, runs, baselines); err != nil {
+		var finalErr error
+		if review.ReplaySource != nil {
+			if len(runs) == 1 {
+				finalErr = s.db.FinalizeRedTeamReplay(finishCtx, runs[0])
+			} else if recording.Confirmed {
+				finalErr = errRedTeamRunSelection
+			}
+		} else {
+			finalErr = s.db.FinalizeRedTeamExecution(finishCtx, c.ID, finalStatus, c.ApprovedBy, runs, baselines)
+		}
+		if finalErr != nil {
 			recording.fail("finalize", &stopped)
 			finalStatus = "stopped"
 		}
@@ -847,7 +880,11 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 		// is not configured). Owner action is the remediation already persisted per critical result.
 		s.notifyMattermost(r.Context(), "redteam", "레드팀 실행 '"+c.Name+"'에서 critical "+itoaProxy(criticals)+"건 발견 — remediation 확인 필요")
 	}
-	s.auditAdmin(r, "redteam.campaign.run", "", auditJSON(map[string]any{"id": c.ID, "runs": len(runs), "results": totalResults, "critical": criticals, "live_calls": liveCalls, "stopped": stopped}))
+	action := "redteam.campaign.run"
+	if review != nil && review.ReplaySource != nil {
+		action = "redteam.result.replay.outcome"
+	}
+	s.auditAdmin(r, action, "", auditJSON(map[string]any{"id": c.ID, "runs": len(runs), "results": totalResults, "critical": criticals, "live_calls": liveCalls, "stopped": stopped}))
 	mode := "controlled simulation"
 	if liveCalls > 0 {
 		mode = "active-controlled (live) + simulation"
