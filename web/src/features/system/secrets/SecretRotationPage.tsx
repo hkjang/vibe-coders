@@ -18,6 +18,7 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { formatNumber } from "@/shared/utils/format";
 import "./secret-rotation.css";
+import { SecretBackupGuide } from "./SecretBackupGuide";
 
 import {
   confirmationPhrase,
@@ -156,6 +157,7 @@ export function SecretRotationPage(): React.JSX.Element {
             <li>공급자 호출, MCP, Text2SQL, SSO 로그인이 되는지 확인한 뒤 일반 요청을 다시 받습니다.</li>
           </ol>
         </SectionCard>
+        <SecretBackupGuide />
         <div>
           <Button onClick={() => setOutcome(undefined)}>처음 화면으로</Button>
         </div>
@@ -185,6 +187,7 @@ export function SecretRotationPage(): React.JSX.Element {
             <li>복구가 필요하면 교체 전 DB와 환경 파일을 함께 복원합니다.</li>
           </ol>
         </SectionCard>
+        <SecretBackupGuide expanded />
         <div>
           <Button onClick={() => setOutcome(undefined)}>확인했습니다</Button>
         </div>
@@ -209,6 +212,7 @@ export function SecretRotationPage(): React.JSX.Element {
         </InlineNotice>
       )}
 
+      <SecretBackupGuide />
       <SectionCard title="1. 사전 점검" description="네 가지를 모두 마친 뒤에만 실행할 수 있습니다.">
         <div className="secret-checklist" role="group" aria-labelledby={groupId}>
           <span id={groupId} className="sr-only">

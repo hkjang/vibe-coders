@@ -604,4 +604,40 @@ test("비밀키 교체 결과가 불확실하면 다시 실행하지 말라고 �
   await expect(page.getByText("교체 결과를 확인할 수 없습니다. 다시 실행하지 마세요.")).toBeVisible();
   await expect(page.getByRole("button", { name: "비밀키 교체 실행" })).toHaveCount(0);
   expect(gateway.rotations).toHaveLength(1);
+  await expect(page.locator("details.secret-backup-guide")).toHaveAttribute("open");
+  await expect(page.getByText("불일치 · mismatch · 종료 코드 1", { exact: true })).toBeVisible();
 });
+
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`비밀키 백업 안내 ${theme} ${width}px 키보드·시각·접근성`, async ({ page }) => {
+      const gateway = await install(page);
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme: theme });
+      await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+      await page.goto("/app/system/secrets");
+      const guide = page.locator("details.secret-backup-guide");
+      const toggle = guide.locator("summary");
+      await expect(guide).not.toHaveAttribute("open");
+      await toggle.focus();
+      await page.keyboard.press("Enter");
+      await expect(guide).toHaveAttribute("open");
+      await expect(guide.getByText("판정 불가 · 종료 코드 3", { exact: true })).toBeVisible();
+      const command = guide.getByLabel("SQLite 백업 검사 명령", { exact: true });
+      await command.focus();
+      await expect(command).toBeFocused();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await axeViolations(page)).toEqual([]);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await expect(page).toHaveScreenshot(`secret-backup-${theme}-${width}.png`, {
+        animations: "disabled",
+        fullPage: true,
+      });
+      await toggle.focus();
+      await page.keyboard.press("Space");
+      await expect(guide).not.toHaveAttribute("open");
+      await expect(toggle).toBeFocused();
+      expect(gateway.rotations).toEqual([]);
+    });
+  }
+}

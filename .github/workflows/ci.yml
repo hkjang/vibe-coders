@@ -316,6 +316,8 @@ jobs:
         run: go test -p 1 -race ./internal/store ./internal/proxy -run 'TestRuntimeFlagBatch|TestMattermost|TestKeycloak(Admin|Persisted|Config)' -count=1 -timeout=7m
       - name: Verify PostgreSQL gateway secret rotation and rollback
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^Test(SecretRotation|SecretsRotate|RotationInvalidatesProviderCache)' -count=1 -timeout=3m
+      - name: Verify read-only backup inspection on PostgreSQL and SQLite
+        run: go test -race ./internal/secretbackup ./cmd/gateway -run '^Test(SecretBackup|VerifySecretBackup)' -count=1 -timeout=3m
       - name: Verify PostgreSQL gateway and Text2SQL emergency review contracts
         run: go test -p 2 -race ./internal/store ./internal/proxy -run '^Test(RuntimeFlag|KillState|KillSwitch|ProxyInflight|ReadonlyAdminToken|Text2SQLEmergency)' -count=1 -timeout=5m
       - name: Verify PostgreSQL bounded provider impact and permission projections
@@ -386,7 +388,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.134
+      SOURCE_SBOM_VERSION: v0.86.135
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0
