@@ -110,3 +110,13 @@
 .prompt-library-detail .kv-list[data-columns="2"] {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
 }
+
+.prompt-stage-dirty {
+  border-color: var(--color-primary);
+}
+
+.prompt-stage-entry {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}

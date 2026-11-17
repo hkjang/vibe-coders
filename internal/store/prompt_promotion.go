@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -67,20 +68,8 @@ func (s *SQLStore) SetPromptStage(ctx context.Context, p PromptPromotion) error 
 // PromptVersionStatsSince returns per-(name,version) performance over [since, now]
 // for prompt versions that carry an explicit name+version.
 func (s *SQLStore) PromptVersionStatsSince(ctx context.Context, since time.Time) ([]PromptVersionStat, error) {
-	rows, err := s.db.QueryContext(ctx, s.bind(`
-		SELECT r.prompt_name, r.prompt_version,
-			COUNT(r.id),
-			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(ef.failures), 0),
-			COALESCE(SUM(t.estimated_cost), 0)
-		FROM request_logs r
-		LEFT JOIN token_usage t ON t.request_id = r.id
-		LEFT JOIN (
-			SELECT request_id, SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END) AS failures
-			FROM llm_evaluations GROUP BY request_id
-		) ef ON ef.request_id = r.id
-		WHERE r.created_at >= ? AND COALESCE(r.prompt_name, '') <> '' AND COALESCE(r.prompt_version, '') <> ''
-		GROUP BY r.prompt_name, r.prompt_version`), since.UTC().Format(time.RFC3339Nano))
+	where, args := metadataTimestampWindowSQL("r.created_at", since, time.Now().UTC())
+	rows, err := s.db.QueryContext(ctx, s.bind(promptVersionStatsSQL(where)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,4 +87,16 @@ func (s *SQLStore) PromptVersionStatsSince(ctx context.Context, since time.Time)
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+// Aggregate children within each request: several usage/evaluation records must
+// not multiply the request count or each other's totals. Both console and legacy
+// eligibility use this query. Evaluation failures count records, not requests.
+func promptVersionStatsSQL(where string) string {
+	return fmt.Sprintf(`SELECT r.prompt_name, r.prompt_version, COUNT(r.id),
+ COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0),
+ COALESCE(SUM((SELECT SUM(CASE WHEN e.passed = 0 THEN 1 ELSE 0 END) FROM llm_evaluations e WHERE e.request_id = r.id)), 0),
+ COALESCE(SUM((SELECT SUM(t.estimated_cost) FROM token_usage t WHERE t.request_id = r.id)), 0)
+ FROM request_logs r WHERE %s AND COALESCE(r.prompt_name, '') <> '' AND COALESCE(r.prompt_version, '') <> ''
+ GROUP BY r.prompt_name, r.prompt_version`, where)
 }

@@ -36,6 +36,7 @@ export default defineConfig({
     "request-bulk-live.spec.ts",
     "context-registry-live.spec.ts",
     "product-registry-live.spec.ts",
+    "prompt-stage-live.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,
