@@ -218,7 +218,7 @@ func (s *Server) handleRedTeamCampaigns(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleRedTeamCampaignByID(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
-		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		s.writeRedTeamCampaignAccessDenied(w, r)
 		return
 	}
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/redteam/campaigns/"), "/"), "/")

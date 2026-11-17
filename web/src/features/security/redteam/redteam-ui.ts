@@ -9,6 +9,7 @@ export const decisionLabels: Readonly<Record<string, string>> = {
   pass: "통과",
   warning: "경고",
   fail: "실패",
+  error: "호출 오류",
   critical: "치명",
   inconclusive: "판정 불가",
 };
@@ -21,6 +22,7 @@ export function decisionTone(value: string | undefined): Tone {
   switch (lower(value)) {
     case "critical":
     case "fail":
+    case "error":
       return "danger";
     case "warning":
       return "warning";
@@ -119,7 +121,7 @@ export function isRemediationClosed(value: string | undefined): boolean {
 
 export const campaignScopes = [
   { value: "all", label: "전체" },
-  { value: "provider", label: "프로바이더/모델" },
+  { value: "provider", label: "제공자·모델" },
   { value: "mcp", label: "MCP" },
   { value: "text2sql", label: "Text2SQL" },
   { value: "ai_app", label: "AI 앱" },
@@ -127,12 +129,20 @@ export const campaignScopes = [
 ] as const;
 
 export const executionModes = [
-  { value: "dry-run", label: "드라이런(호출 없음)" },
-  { value: "shadow", label: "섀도우" },
-  { value: "active-controlled", label: "실제 실행(통제)" },
-  { value: "pre-release", label: "릴리즈 전" },
-  { value: "post-change", label: "변경 후" },
+  { value: "dry-run", label: "사전 점검(호출 없음)" },
+  { value: "shadow", label: "그림자 검증" },
+  { value: "active-controlled", label: "제한된 실제 실행" },
+  { value: "pre-release", label: "배포 전 검증" },
+  { value: "post-change", label: "변경 후 검증" },
 ] as const;
+
+export function campaignScopeLabel(value: string | undefined): string {
+  return campaignScopes.find((option) => option.value === lower(value))?.label ?? (value || "—");
+}
+
+export function executionModeLabel(value: string | undefined): string {
+  return executionModes.find((option) => option.value === lower(value))?.label ?? (value || "—");
+}
 
 export const destructivePolicies = [
   { value: "dry-run", label: "드라이런" },

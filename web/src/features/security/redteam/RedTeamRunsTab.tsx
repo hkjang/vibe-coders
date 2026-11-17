@@ -5,6 +5,7 @@ import { MaskedText, PanelFailure } from "@/features/security/redteam/RedTeamPar
 import {
   decisionLabel,
   decisionTone,
+  executionModeLabel,
   isRemediationClosed,
   remediationLabel,
   remediationTone,
@@ -247,7 +248,7 @@ function RunResultsSheet({
         </InlineNotice>
       ) : null}
       {mode !== "" && mode !== "active-controlled" ? (
-        <InlineNotice tone="info" title={`이 실행은 ${mode}(시뮬레이션)입니다.`}>
+        <InlineNotice tone="info" title={`이 실행은 ${executionModeLabel(mode)}(시뮬레이션)입니다.`}>
           실제 모델을 호출하지 않아 대상 응답은 시뮬레이션 표식입니다. 실제 요청/응답을 보려면 각 결과의
           증적에서 &lsquo;원문 보관으로 실제 재실행&rsquo;을 사용하세요.
         </InlineNotice>
@@ -335,7 +336,7 @@ function EvidenceSheet({
           if (!open) onClose();
         }}
         title="증적 상세"
-        description="어느 provider·model에 무엇을 보내 어떤 응답을 받았는지입니다. 기본은 마스킹본입니다."
+        description="어느 제공자·모델에 무엇을 보내 어떤 응답을 받았는지입니다. 기본은 마스킹본입니다."
         returnFocusRef={returnFocusRef}
         size="wide"
       >
@@ -352,8 +353,8 @@ function EvidenceSheet({
             <KeyValueList
               items={[
                 { label: "대상", value: headerText("target") },
-                { label: "provider", value: headerText("provider") },
-                { label: "model", value: headerText("model") },
+                { label: "제공자", value: headerText("provider") },
+                { label: "모델", value: headerText("model") },
                 { label: "HTTP 상태", value: headerText("http_status") },
                 { label: "기대 정책", value: headerText("expected") },
                 { label: "지연(ms)", value: headerText("latency_ms") },
@@ -431,7 +432,7 @@ function EvidenceSheet({
         description={
           proxyKey.trim() === ""
             ? "실제 재실행에는 전용 레드팀 Proxy API Key가 필요합니다. 상단 '실행 키'에 키를 입력한 뒤 다시 시도하세요."
-            : "대상 provider·model을 1회 실제 호출하고, 이 결과의 증적을 실제 요청/응답으로 갱신합니다."
+            : "대상 제공자·모델을 1회 실제 호출하고, 이 결과의 증적을 실제 요청/응답으로 갱신합니다."
         }
         confirmLabel="실제 재실행"
         tone="danger"

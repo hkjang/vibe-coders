@@ -30,6 +30,7 @@
     "tests/keycloak-live",
     "tests/auth-live",
     "tests/provider-connection-live",
+    "tests/redteam-live",
     "tests/e2e/code-editor.spec.ts",
     "tests/e2e/code-editor-app.spec.ts",
     "tests/e2e/code-editor-workflow.spec.ts",
