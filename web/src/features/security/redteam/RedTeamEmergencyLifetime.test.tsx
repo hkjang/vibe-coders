@@ -1,5 +1,5 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -128,6 +128,21 @@ afterEach(() => {
 });
 
 describe("레드팀 emergency consent and response lifetime", () => {
+  it("실제 ApiClient가 보충 문자 1,000자의 변경 확인을 성공으로 처리한다", async () => {
+    const gateway = mount();
+    const unicodeReason = "😀".repeat(1000);
+    gateway.reply(() => Response.json({ ...ack, reason: unicodeReason }));
+    const { user } = await review();
+    fireEvent.change(screen.getByRole("textbox", { name: "변경 사유" }), {
+      target: { value: unicodeReason },
+    });
+    await user.click(screen.getByRole("button", { name: "중지" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(gateway.posts()).toHaveLength(1);
+    expect(notifications.success).toHaveBeenCalledOnce();
+    expect(screen.queryByText("처리 결과 확인이 필요합니다.")).not.toBeInTheDocument();
+  });
+
   it.each([
     "denied",
     "malformed",

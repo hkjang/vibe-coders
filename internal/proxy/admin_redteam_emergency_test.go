@@ -263,3 +263,27 @@ func TestRedTeamEmergencyJWTReadWritePermissions(t *testing.T) {
 		t.Fatal("unauthorized request applied or audited")
 	}
 }
+
+func TestRedTeamEmergencyUnicodeReasonBoundary(t *testing.T) {
+	resetRedTeamEmergencyTest(t)
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{db: db}
+	for _, unit := range []string{"가", "😀", "𠀀"} {
+		before := readRedTeamEmergency(t, s)
+		reason := strings.Repeat(unit, 1000)
+		w := redTeamEmergencyRequest(s, http.MethodPost, reviewedRedTeamBody(true, before.ReviewToken, reason), t.Context())
+		var ack redTeamEmergencyState
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &ack) != nil || ack.Reason != reason || !ack.Enabled {
+			t.Fatal("Unicode boundary changed or was rejected")
+		}
+		w = redTeamEmergencyRequest(s, http.MethodPost, reviewedRedTeamBody(false, ack.ReviewToken, reason+unit), t.Context())
+		if w.Code != 400 || !redteamKillSwitch.Load() || readRedTeamEmergency(t, s).ReviewToken != ack.ReviewToken {
+			t.Fatal("overlong Unicode reason changed state or review")
+		}
+	}
+	audits, err := db.ListAdminAudit(t.Context(), 10)
+	if err != nil || len(audits) != 3 {
+		t.Fatal("Unicode boundary audit count changed")
+	}
+}
