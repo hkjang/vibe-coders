@@ -48,6 +48,31 @@ test("보기 전환은 조건과 주소 기록을 보존하고 목록을 중복 
   expect(gateway.calls).toHaveLength(0);
   expect(gateway.unexpected).toEqual([]);
 });
+test("필터 적용·초기화·새로고침 후 추적별 보기와 주소 기록을 유지한다", async ({ page, gateway }) => {
+  gateway.rows(rows);
+  await login(page, "tz=UTC&limit=25");
+  const grouped = page.getByRole("button", { name: "추적별 보기", exact: true });
+  await grouped.click();
+  await page.getByRole("button", { name: "흐름 조회", exact: true }).click();
+  await expect(page).toHaveURL(/timeline_view=trace/);
+  await expect(grouped).toHaveAttribute("aria-pressed", "true");
+  expect(gateway.listReads()).toBe(1);
+  await page.getByRole("combobox", { name: "상태", exact: true }).selectOption("error");
+  await page.getByRole("button", { name: "흐름 조회", exact: true }).click();
+  await expect(page).toHaveURL(/status=error/);
+  await expect(grouped).toHaveAttribute("aria-pressed", "true");
+  await page.reload();
+  await expect(grouped).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "필터 초기화", exact: true }).click();
+  await expect(page).toHaveURL(/traces\?timeline_view=trace$/);
+  await expect(page.getByRole("combobox", { name: "상태", exact: true })).toHaveValue("");
+  await expect(timeline(page).locator("details")).toHaveCount(3);
+  await page.goBack();
+  await expect(page).toHaveURL(/status=error/);
+  await expect(grouped).toHaveAttribute("aria-pressed", "true");
+  expect(gateway.calls).toHaveLength(0);
+  expect(gateway.unexpected).toEqual([]);
+});
 test("공유 선택과 접힌 묶음의 상세 닫기가 원래 요청 초점을 복원한다", async ({ page, gateway }) => {
   gateway.rows(rows);
   await login(page, "timeline_view=trace&selected_request=request-b&tz=UTC");

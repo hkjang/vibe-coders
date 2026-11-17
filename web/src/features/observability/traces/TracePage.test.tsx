@@ -847,6 +847,28 @@ describe("TracePage", () => {
     expect(screen.getByRole("button", { name: "시간순 보기" })).toHaveAttribute("aria-pressed", "true");
     expect(request).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    ["trace", "추적별 보기"],
+    ["time", "시간순 보기"],
+  ])("%s 보기를 필터 재조회·변경·초기화 후에도 유지한다", async (view, label) => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response);
+    const user = userEvent.setup();
+    renderPage(`/observability/traces?timeline_view=${view}&status=5xx&tz=UTC`);
+    await screen.findByRole("heading", { name: "요청 처리 흐름" });
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    expect(screen.getByTestId("location")).toHaveTextContent(`timeline_view=${view}`);
+    expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
+    await user.selectOptions(screen.getByRole("combobox", { name: "상태" }), "error");
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("status=error");
+    expect(screen.getByTestId("location")).toHaveTextContent(`timeline_view=${view}`);
+    expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "필터 초기화" }));
+    expect(screen.getByTestId("location")).toHaveTextContent(`/observability/traces?timeline_view=${view}`);
+    expect(screen.getByTestId("location")).not.toHaveTextContent("status=");
+    expect(screen.getByRole("combobox", { name: "상태" })).toHaveValue("");
+    expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
+  });
   it("선택한 묶음을 접어도 상세를 닫으면 원래 요청을 펼쳐 초점을 돌린다", async () => {
     vi.spyOn(apiClient, "request").mockResolvedValue(response);
     const user = userEvent.setup();
