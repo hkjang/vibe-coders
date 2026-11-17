@@ -1,3 +1,5 @@
+import { usePreflightReturnFocus } from "./use-preflight-return-focus";
+import { riskLabel, expectedPolicyLabel, targetTypeLabel, probeCategoryLabel } from "./redteam-labels";
 import { useQuery } from "@tanstack/react-query";
 import { Download, Plus, Upload } from "lucide-react";
 import { useRef, useState } from "react";
@@ -53,7 +55,7 @@ function targetLabel(target: RedTeamTarget): string {
 function targetColumns(): ReadonlyArray<DataTableColumn<RedTeamTarget>> {
   const column = createDataTableColumnHelper<RedTeamTarget>();
   return column.columns([
-    column.accessor((row) => row.target_type, {
+    column.accessor((row) => targetTypeLabel(row.target_type), {
       id: "target_type",
       header: "유형",
       cell: ({ getValue }) => <Badge tone="info">{getValue() || "—"}</Badge>,
@@ -68,10 +70,12 @@ function targetColumns(): ReadonlyArray<DataTableColumn<RedTeamTarget>> {
         </div>
       ),
     }),
-    column.accessor((row) => row.risk_level, {
+    column.accessor((row) => riskLabel(row.risk_level), {
       id: "risk_level",
       header: "위험",
-      cell: ({ getValue }) => <Badge tone={riskTone(getValue())}>{getValue() || "low"}</Badge>,
+      cell: ({ row }) => (
+        <Badge tone={riskTone(row.original.risk_level)}>{riskLabel(row.original.risk_level)}</Badge>
+      ),
     }),
     column.accessor((row) => row.enabled, {
       id: "enabled",
@@ -82,7 +86,7 @@ function targetColumns(): ReadonlyArray<DataTableColumn<RedTeamTarget>> {
     }),
     column.accessor((row) => row.provider || row.mcp_upstream, {
       id: "provider",
-      header: "프로바이더/업스트림",
+      header: "제공자·MCP 연결",
       cell: ({ getValue }) => getValue() || "—",
     }),
   ]);
@@ -105,6 +109,8 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
   );
 
   const { remember, returnFocusRef } = useReturnFocus();
+  const { remember: rememberCase, returnFocusRef: caseReturnFocusRef } = useReturnFocus();
+  const caseFocus = usePreflightReturnFocus(caseReturnFocusRef);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedTargetId, setSelectedTargetId] = useState("");
   const [openPack, setOpenPack] = useState<RedTeamProbePack | undefined>();
@@ -166,7 +172,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
     mutate: (csv: string) => importProbePrompts(csv),
     invalidates: [redteamKeys.probePacks],
     successMessage: (result) =>
-      `프롬프트 ${formatNumber(result.imported_cases)}건, 팩 ${formatNumber(result.packs_touched)}건을 반영했습니다.`,
+      `프롬프트 ${formatNumber(result.imported_cases)}건, 묶음 ${formatNumber(result.packs_touched)}건을 반영했습니다.`,
     errorMessage: "프롬프트 CSV를 가져오지 못했습니다.",
     onSuccess: (result) => {
       if (result.skipped.length > 0) {
@@ -207,7 +213,8 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
           disabled={!canWrite}
           title={writeTitle}
           onClick={(event) => {
-            remember(event);
+            rememberCase(event);
+            caseFocus.remember("new");
             setCaseDefaults(probeCaseDefaults(""));
           }}
         >
@@ -275,7 +282,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
               id="rt-target-search"
               name="q"
               defaultValue={query}
-              placeholder="대상 참조, 프로바이더, 모델, 담당 팀"
+              placeholder="대상 참조, 제공자, 모델, 담당 팀"
               aria-invalid={searchError ? "true" : undefined}
               aria-describedby={searchError ? "rt-target-search-error" : undefined}
             />
@@ -296,7 +303,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
           data={visibleTargets}
           emptyMessage={
             allTargets.length === 0
-              ? "등록된 대상이 없습니다. 프로바이더·MCP 업스트림·Text2SQL 프로필을 등록하면 자동 수집됩니다."
+              ? "등록된 대상이 없습니다. 제공자·MCP 연결·Text2SQL 프로필을 등록하면 자동 수집됩니다."
               : "검색 조건에 맞는 대상이 없습니다."
           }
           error={targets.isError && !targets.data ? "대상을 불러오지 못했습니다." : undefined}
@@ -309,20 +316,20 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
       </SectionCard>
 
       <SectionCard
-        title={`프로브 팩 (${formatNumber(packs.length)})`}
-        description="OWASP LLM Top10 기반 프로브와 사용자 정의 프롬프트입니다. 고위험 팩은 승인 없이는 실제 실행되지 않습니다."
+        title={`검사 묶음 (${formatNumber(packs.length)})`}
+        description="OWASP LLM Top10 기반 검사와 사용자 정의 프롬프트입니다. 고위험 묶음은 승인 없이는 실제 실행되지 않습니다."
       >
         {probePacks.isError && !probePacks.data ? (
           <PanelFailure
             error={probePacks.error}
             hasData={false}
-            label="프로브 팩"
+            label="검사 묶음"
             onRetry={() => void probePacks.refetch()}
           />
         ) : packs.length === 0 ? (
           <EmptyState
-            title="프로브 팩이 없습니다."
-            description="프롬프트를 추가하거나 CSV를 가져오면 사용자 정의 팩이 만들어집니다."
+            title="검사 묶음이 없습니다."
+            description="프롬프트를 추가하거나 CSV를 가져오면 사용자 정의 묶음이 만들어집니다."
           />
         ) : (
           <ul className="rt-pack-list">
@@ -330,22 +337,24 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
               <li key={pack.id}>
                 <div className="rt-stacked-cell">
                   <span>
-                    <strong>{pack.name}</strong> <Badge tone={riskTone(pack.severity)}>{pack.severity}</Badge>
+                    <strong>{pack.name}</strong>{" "}
+                    <Badge tone={riskTone(pack.severity)}>{riskLabel(pack.severity)}</Badge>
                     {pack.requires_approval ? <Badge tone="warning">승인필요</Badge> : null}
                   </span>
                   <span>
-                    {pack.category} · {pack.version} · 케이스 {formatNumber(pack.cases.length)}
+                    {probeCategoryLabel(pack.category)} · {pack.version} · 검사{" "}
+                    {formatNumber(pack.cases.length)}
                   </span>
                 </div>
                 <Button
                   size="small"
-                  aria-label={`${pack.name} 케이스 보기`}
+                  aria-label={`${pack.name} 검사 보기`}
                   onClick={(event) => {
                     remember(event);
                     setOpenPack(pack);
                   }}
                 >
-                  케이스 보기
+                  검사 보기
                 </Button>
               </li>
             ))}
@@ -368,18 +377,18 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
               columns={1}
               items={[
                 { label: "대상 ID", value: selectedTarget.id, mono: true },
-                { label: "유형", value: selectedTarget.target_type },
+                { label: "유형", value: targetTypeLabel(selectedTarget.target_type) },
                 { label: "대상 참조", value: selectedTarget.target_ref, mono: true },
-                { label: "프로바이더", value: selectedTarget.provider },
+                { label: "제공자", value: selectedTarget.provider },
                 { label: "모델", value: selectedTarget.model },
-                { label: "MCP 업스트림", value: selectedTarget.mcp_upstream },
+                { label: "MCP 연결", value: selectedTarget.mcp_upstream },
                 { label: "도구", value: selectedTarget.tool_name },
                 { label: "담당 팀", value: selectedTarget.owner_team },
                 {
                   label: "위험도",
                   value: (
                     <Badge tone={riskTone(selectedTarget.risk_level)}>
-                      {selectedTarget.risk_level || "low"}
+                      {riskLabel(selectedTarget.risk_level)}
                     </Badge>
                   ),
                 },
@@ -407,8 +416,8 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
         onOpenChange={(open) => {
           if (!open) setOpenPack(undefined);
         }}
-        title={openPack ? `${openPack.name} — 프롬프트(케이스)` : "프롬프트(케이스)"}
-        description="각 케이스가 대상에 그대로 전송하는 요청 프롬프트와 기대 정책입니다."
+        title={openPack ? `${openPack.name} — 프롬프트(검사)` : "프롬프트(검사)"}
+        description="각 검사가 대상에 그대로 전송하는 요청 프롬프트와 기대 정책입니다."
         returnFocusRef={returnFocusRef}
         size="wide"
       >
@@ -417,19 +426,32 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
             <Button
               disabled={!canWrite}
               title={writeTitle}
-              onClick={() => setCaseDefaults(probeCaseDefaults(openPack.id))}
+              onClick={(event) => {
+                rememberCase(event);
+                caseFocus.remember("new-in-pack");
+                setCaseDefaults(probeCaseDefaults(openPack.id));
+              }}
             >
-              <Plus aria-hidden="true" /> 이 팩에 프롬프트 추가
+              <Plus aria-hidden="true" /> 이 묶음에 프롬프트 추가
             </Button>
             <DataTable
-              caption={`${openPack.name} 팩의 프롬프트 케이스`}
+              caption={`${openPack.name} 묶음의 프롬프트 검사`}
               columns={caseColumns({
                 canWrite,
-                onDelete: (probeCase) => setPendingCaseDelete(probeCase),
-                onEdit: (probeCase) => setCaseDefaults(probeCaseDefaults(openPack.id, probeCase)),
+                register: caseFocus.register,
+                onDelete: (probeCase, event) => {
+                  rememberCase(event);
+                  caseFocus.remember(`${probeCase.id}:delete`);
+                  setPendingCaseDelete(probeCase);
+                },
+                onEdit: (probeCase, event) => {
+                  rememberCase(event);
+                  caseFocus.remember(`${probeCase.id}:edit`);
+                  setCaseDefaults(probeCaseDefaults(openPack.id, probeCase));
+                },
               })}
               data={openPack.cases}
-              emptyMessage="이 팩에는 케이스가 없습니다."
+              emptyMessage="이 묶음에는 검사가 없습니다."
             />
           </div>
         ) : null}
@@ -444,7 +466,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
           onSubmit={(values) => saveCase.mutateAsync(values)}
           open
           packs={packs}
-          returnFocusRef={returnFocusRef}
+          returnFocusRef={caseFocus.returnFocusRef}
         />
       ) : null}
 
@@ -454,10 +476,10 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
           if (!open) setPendingCaseDelete(undefined);
         }}
         title="프롬프트 삭제"
-        description={`케이스 "${pendingCaseDelete?.case_key ?? ""}"를 삭제합니다. 되돌릴 수 없습니다.`}
+        description={`검사 "${pendingCaseDelete?.case_key ?? ""}"를 삭제합니다. 되돌릴 수 없습니다.`}
         confirmLabel="삭제"
         tone="danger"
-        returnFocusRef={returnFocusRef}
+        returnFocusRef={caseFocus.returnFocusRef}
         onConfirm={() => (pendingCaseDelete ? deleteCase.mutateAsync(pendingCaseDelete) : undefined)}
       />
     </div>
@@ -466,28 +488,35 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
 
 function caseColumns({
   canWrite,
+  register,
   onDelete,
   onEdit,
 }: {
   canWrite: boolean;
-  onDelete: (probeCase: RedTeamProbeCase) => void;
-  onEdit: (probeCase: RedTeamProbeCase) => void;
+  register: (id: string, node: HTMLButtonElement | null) => void;
+  onDelete: (probeCase: RedTeamProbeCase, event: { currentTarget: HTMLElement }) => void;
+  onEdit: (probeCase: RedTeamProbeCase, event: { currentTarget: HTMLElement }) => void;
 }): ReadonlyArray<DataTableColumn<RedTeamProbeCase>> {
   const column = createDataTableColumnHelper<RedTeamProbeCase>();
   const writeTitle = canWrite ? undefined : writeDeniedReason;
   return column.columns([
     column.accessor((row) => row.case_key, {
       id: "case_key",
-      header: "케이스",
+      header: "검사",
       cell: ({ getValue }) => <code className="mono">{getValue()}</code>,
     }),
-    column.accessor((row) => row.severity, {
+    column.accessor((row) => riskLabel(row.severity), {
       id: "severity",
       header: "심각도",
-      cell: ({ getValue }) => <Badge tone={riskTone(getValue())}>{getValue() || "—"}</Badge>,
+      cell: ({ row }) => (
+        <Badge tone={riskTone(row.original.severity)}>{riskLabel(row.original.severity)}</Badge>
+      ),
     }),
-    column.accessor((row) => row.expected_policy, { id: "expected_policy", header: "기대 정책" }),
-    column.accessor((row) => row.target_types.join(", "), {
+    column.accessor((row) => expectedPolicyLabel(row.expected_policy), {
+      id: "expected_policy",
+      header: "기대 정책",
+    }),
+    column.accessor((row) => row.target_types.map(targetTypeLabel).join(", "), {
       id: "target_types",
       header: "대상 유형",
       cell: ({ getValue }) => getValue() || "전체",
@@ -507,7 +536,8 @@ function caseColumns({
             disabled={!canWrite}
             title={writeTitle}
             aria-label={`${row.original.case_key} 편집`}
-            onClick={() => onEdit(row.original)}
+            ref={(node) => register(`${row.original.id}:edit`, node)}
+            onClick={(event) => onEdit(row.original, event)}
           >
             편집
           </Button>
@@ -517,7 +547,8 @@ function caseColumns({
             disabled={!canWrite}
             title={writeTitle}
             aria-label={`${row.original.case_key} 삭제`}
-            onClick={() => onDelete(row.original)}
+            ref={(node) => register(`${row.original.id}:delete`, node)}
+            onClick={(event) => onDelete(row.original, event)}
           >
             삭제
           </Button>

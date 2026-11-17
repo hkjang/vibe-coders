@@ -36,7 +36,7 @@ type RedTeamTabId = (typeof tabIds)[number];
 const tabItems: ReadonlyArray<TabItem<RedTeamTabId>> = [
   { id: "overview", label: "개요·지표" },
   { id: "campaigns", label: "캠페인" },
-  { id: "targets", label: "대상·프로브 팩" },
+  { id: "targets", label: "대상·검사 묶음" },
   { id: "runs", label: "실행·조치" },
   { id: "schedules", label: "일정" },
 ];
@@ -63,7 +63,7 @@ export function RedTeamPage(): React.JSX.Element {
     mutate: async () => {
       const packs = (data.probePacks.data?.probe_packs ?? []).filter((pack) => !pack.requires_approval);
       if (packs.length === 0) {
-        throw new Error("승인 불필요한 안전 프로브 팩이 없습니다. 캠페인 빌더에서 직접 구성하세요.");
+        throw new Error("승인 불필요한 안전 검사 묶음이 없습니다. 캠페인 빌더에서 직접 구성하세요.");
       }
       const created = await apiClient.request(redteam.campaigns.upsert, {
         body: {
@@ -104,7 +104,7 @@ export function RedTeamPage(): React.JSX.Element {
           title="레드팀 자동화"
           status="preview"
           legacyHref="/admin#/redteam"
-          description="게이트웨이에 등록된 업스트림만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다."
+          description="게이트웨이에 등록된 연결만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다."
         />
         <RedTeamEmergencyPanel canWrite={canWrite} />
         <LoadingState label="레드팀 데이터를 불러오는 중입니다." />
@@ -137,7 +137,7 @@ export function RedTeamPage(): React.JSX.Element {
         title="레드팀 자동화"
         status="preview"
         legacyHref="/admin#/redteam"
-        description="게이트웨이에 등록된 업스트림만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 드라이런이며, 고위험 팩은 승인 없이 실제 실행되지 않습니다."
+        description="게이트웨이에 등록된 연결만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 드라이런이며, 고위험 묶음은 승인 없이 실제 실행되지 않습니다."
         actions={
           <>
             <Button
@@ -148,7 +148,7 @@ export function RedTeamPage(): React.JSX.Element {
                 runQuickStart.mutate(undefined);
               }}
             >
-              <Zap aria-hidden="true" /> 빠른 시작(안전 팩 드라이런)
+              <Zap aria-hidden="true" /> 빠른 시작(안전 묶음 드라이런)
             </Button>
             <Button variant="primary" onClick={refreshAll} disabled={refreshing}>
               <RefreshCw aria-hidden="true" /> {refreshing ? "갱신 중" : "새로고침"}
