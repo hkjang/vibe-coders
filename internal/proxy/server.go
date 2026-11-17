@@ -1903,7 +1903,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
 				slog.Warn("failover budget exhausted", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "trace_id", traceID)
 			}
-			if resp.StatusCode == http.StatusBadRequest && !usedLongContext {
+			if resp.StatusCode == http.StatusBadRequest && !usedLongContext && redTeamReviewedOutput(reqCtx) == 0 {
 				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 				_ = resp.Body.Close()
 				if cancel != nil {

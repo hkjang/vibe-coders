@@ -249,6 +249,9 @@ type redTeamActiveCall struct {
 // and returns the assistant text, request id, HTTP status, measured latency, real cost, and success.
 // It sets the redteam cost-center/marker headers so the request is attributed and egress-tagged (§6).
 func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider, prompt, sessionID string, maxTokens int) redTeamActiveCall {
+	if redTeamReviewedOutput(r.Context()) > 0 {
+		r = r.WithContext(context.WithValue(r.Context(), redTeamReviewedModelKey{}, model))
+	}
 	if maxTokens <= 0 || maxTokens > 16384 {
 		maxTokens = 8192
 	}

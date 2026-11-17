@@ -11,6 +11,7 @@ import (
 // Private request context, never an externally supplied header. A reviewed
 // physical probe cannot enter an executor with unreviewed nested model/tool calls.
 type redTeamReviewedOutputKey struct{}
+type redTeamReviewedModelKey struct{}
 
 func redTeamReviewedOutput(ctx context.Context) int {
 	limit, _ := ctx.Value(redTeamReviewedOutputKey{}).(int)
@@ -44,6 +45,11 @@ func (rc *requestPipeline) reviewedPhysicalBody(body []byte) ([]byte, bool) {
 	var payload map[string]any
 	if json.Unmarshal(body, &payload) != nil || payload == nil {
 		writeOpenAIError(rc.w, http.StatusBadRequest, "reviewed request body unavailable", "invalid_request_error", "redteam_review_body_invalid")
+		return nil, false
+	}
+	expected, _ := rc.r.Context().Value(redTeamReviewedModelKey{}).(string)
+	if expected == "" || payload["model"] != expected {
+		writeOpenAIError(rc.w, http.StatusBadRequest, "reviewed model changed before dispatch", "invalid_request_error", "redteam_review_model_changed")
 		return nil, false
 	}
 	if _, ok := payload["max_completion_tokens"]; ok {

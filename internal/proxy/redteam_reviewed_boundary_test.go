@@ -111,6 +111,7 @@ func TestRedTeamReviewedPhysicalUpstreamPayload(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer synthetic-key")
 			r.Header.Set("X-Proxy-Provider", "test")
 			r = r.WithContext(context.WithValue(r.Context(), redTeamReviewedOutputKey{}, 77))
+			r = r.WithContext(context.WithValue(r.Context(), redTeamReviewedModelKey{}, "test-model"))
 			w := httptest.NewRecorder()
 			s.handleOpenAI(w, r)
 			if w.Code != 200 || actual[field] != float64(77) || actual["n"] != float64(1) || actual["stream"] != false {
@@ -137,5 +138,66 @@ func TestRedTeamReviewedBoundaryIsNotAnExternalHeader(t *testing.T) {
 	rc.r = r.WithContext(context.WithValue(r.Context(), redTeamReviewedOutputKey{}, 77))
 	if _, ok := rc.reviewedPhysicalBody([]byte(`null`)); ok || w.Code != 400 || !strings.Contains(w.Body.String(), "redteam_review_body_invalid") {
 		t.Fatal("invalid reviewed body accepted")
+	}
+}
+
+func TestRedTeamReviewedPhysicalModelSurvivesNoSubstitutions(t *testing.T) {
+	for _, scenario := range []string{"deprecation", "context_overflow"} {
+		t.Run(scenario, func(t *testing.T) {
+			models := make(chan string, 8)
+			var calls atomic.Int32
+			s, db, campaign := reviewedFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				var payload struct {
+					Model string `json:"model"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+				}
+				models <- payload.Model
+				calls.Add(1)
+				if scenario == "context_overflow" && payload.Model == "test-model" {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"error":{"code":"context_length_exceeded","message":"maximum context length exceeded"}}`))
+					return
+				}
+				redTeamAdmissionReply(w)
+			})
+			if scenario == "deprecation" {
+				if _, err := db.UpsertModelDeprecation(t.Context(), store.ModelDeprecation{ModelGlob: "test-model", Replacement: "replacement-model", SunsetDate: "2000-01-01"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			review := issueReviewed(t, s, campaign, reviewedBody())
+			w := reviewedRequest(s, campaign, executionBody(review), "operator", true)
+			wantCalls := int32(0)
+			if scenario == "context_overflow" {
+				wantCalls = 1
+			}
+			if w.Code != 200 || calls.Load() != wantCalls {
+				t.Fatalf("reviewed substitution escaped: %d / %d", w.Code, calls.Load())
+			}
+			if wantCalls == 1 && <-models != "test-model" {
+				t.Fatal("reviewed physical model changed")
+			}
+			results, err := db.ListRedTeamCaseResults(t.Context(), "")
+			if err != nil || len(results) != 1 || results[0].Decision != "error" {
+				t.Fatal("undelivered probe reported as a model verdict")
+			}
+			// A normal legacy invocation still gets the existing replacement behavior.
+			legacy := s.redTeamActiveInvoke(httptest.NewRequest(http.MethodPost, "/", nil), "synthetic-key", "test-model", "test", "Public synthetic", "legacy", 77)
+			if legacy.Code != 200 {
+				t.Fatalf("legacy replacement changed: %d", legacy.Code)
+			}
+			if scenario == "deprecation" {
+				if calls.Load() != 1 || <-models != "replacement-model" {
+					t.Fatal("legacy deprecation changed")
+				}
+			} else {
+				if calls.Load() != 3 || <-models != "test-model" || <-models != defaultAutoModel("reasoning") {
+					t.Fatal("legacy context replacement changed")
+				}
+			}
+		})
 	}
 }
