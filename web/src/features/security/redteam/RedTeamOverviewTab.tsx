@@ -1,3 +1,4 @@
+import { targetTypeLabel, probeCategoryLabel } from "./redteam-labels";
 import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
 import { decisionTone, scoreTone, riskTone } from "@/features/security/redteam/redteam-ui";
 import type { RedTeamData } from "@/features/security/redteam/use-redteam-data";
@@ -23,12 +24,15 @@ function matrixColumns(): ReadonlyArray<DataTableColumn<RedTeamMatrixCell>> {
         ),
     });
   return column.columns([
-    column.accessor((row) => row.target_type, {
+    column.accessor((row) => targetTypeLabel(row.target_type), {
       id: "target_type",
       header: "대상 유형",
       cell: ({ getValue }) => <Badge tone="info">{getValue() || "—"}</Badge>,
     }),
-    column.accessor((row) => row.pack_category, { id: "pack_category", header: "팩 분류" }),
+    column.accessor((row) => probeCategoryLabel(row.pack_category), {
+      id: "pack_category",
+      header: "검사 분류",
+    }),
     counter("pass", "통과", "muted"),
     counter("warning", "경고", "warning"),
     counter("fail", "실패", "danger"),
@@ -51,7 +55,7 @@ function failingColumns(): ReadonlyArray<DataTableColumn<RedTeamFailingTarget>> 
         <div className="rt-stacked-cell">
           <code className="mono">{row.original.target_ref || row.original.target_id}</code>
           <span>
-            {row.original.target_type || "—"} · {row.original.owner_team || "담당 팀 미지정"}
+            {targetTypeLabel(row.original.target_type)} · {row.original.owner_team || "담당 팀 미지정"}
           </span>
         </div>
       ),
@@ -92,7 +96,7 @@ function driftColumns(): ReadonlyArray<DataTableColumn<RedTeamDrift>> {
     }),
     column.accessor((row) => row.pack_id, {
       id: "pack_id",
-      header: "팩",
+      header: "묶음",
       cell: ({ getValue }) => <code className="mono">{getValue()}</code>,
     }),
     column.accessor((row) => row.current_score, {
@@ -147,7 +151,7 @@ export function RedTeamOverviewTab({ data }: { data: RedTeamData }): React.JSX.E
           tone={highRiskTargets > 0 ? "warning" : "default"}
           value={dash(highRiskTargets, targets.isPending)}
         />
-        <StatCard label="프로브 팩" value={dash(packRows.length, probePacks.isPending)} />
+        <StatCard label="검사 묶음" value={dash(packRows.length, probePacks.isPending)} />
         <StatCard label="자동 회귀 점검" value={dash(autoCampaigns, campaigns.isPending)} />
         <StatCard
           label="최근 실행 위험"
@@ -189,11 +193,11 @@ export function RedTeamOverviewTab({ data }: { data: RedTeamData }): React.JSX.E
 
       <div className="rt-grid-2">
         <SectionCard
-          title="결과 매트릭스 (대상 × 프로브 팩)"
-          description="대상 유형과 프로브 팩 분류별 판정 건수입니다. 프롬프트·응답 원문은 포함하지 않습니다."
+          title="결과 매트릭스 (대상 × 검사 묶음)"
+          description="대상 유형과 검사 묶음 분류별 판정 건수입니다. 프롬프트·응답 원문은 포함하지 않습니다."
         >
           <DataTable
-            caption="대상 유형과 프로브 팩 분류별 판정 건수"
+            caption="대상 유형과 검사 묶음 분류별 판정 건수"
             columns={matrixColumns()}
             data={dashboard.data?.matrix ?? []}
             emptyMessage="결과 매트릭스 데이터가 없습니다. 캠페인을 실행하면 채워집니다."

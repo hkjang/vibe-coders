@@ -145,8 +145,8 @@ export function executionModeLabel(value: string | undefined): string {
 }
 
 export const destructivePolicies = [
-  { value: "dry-run", label: "드라이런" },
-  { value: "mock", label: "모의(mock)" },
+  { value: "dry-run", label: "사전 점검" },
+  { value: "mock", label: "모의 실행" },
   { value: "approval", label: "승인 필요" },
   { value: "block", label: "차단" },
 ] as const;

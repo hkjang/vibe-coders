@@ -1,3 +1,4 @@
+import { riskLabel, expectedPolicyLabel } from "./redteam-labels";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -130,7 +131,7 @@ export function RedTeamRunsTab({
       <div className="rt-grid-2">
         <SectionCard
           title="기준선 앵커"
-          description="통과한 실행이 대상×팩별 기준 점수로 저장되어 회귀(드리프트)를 감지합니다."
+          description="통과한 실행이 대상×묶음별 기준 점수로 저장되어 회귀(드리프트)를 감지합니다."
         >
           <DataTable
             caption="대상별 기준선 앵커"
@@ -262,7 +263,7 @@ function RunResultsSheet({
         />
       ) : null}
       <DataTable
-        caption="실행의 케이스별 판정 결과"
+        caption="실행의 검사별 판정 결과"
         columns={resultColumns({
           canWrite,
           onCreateRemediation,
@@ -356,7 +357,7 @@ function EvidenceSheet({
                 { label: "제공자", value: headerText("provider") },
                 { label: "모델", value: headerText("model") },
                 { label: "HTTP 상태", value: headerText("http_status") },
-                { label: "기대 정책", value: headerText("expected") },
+                { label: "기대 정책", value: expectedPolicyLabel(headerText("expected")) },
                 { label: "지연(ms)", value: headerText("latency_ms") },
                 { label: "비용(KRW)", value: headerText("cost_krw") },
                 {
@@ -524,7 +525,7 @@ function resultColumns({
   return column.columns([
     column.accessor((row) => row.case_id, {
       id: "case_id",
-      header: "케이스",
+      header: "검사",
       cell: ({ getValue }) => <code className="mono">{getValue()}</code>,
     }),
     column.accessor((row) => prompts[row.id] ?? "", {
@@ -544,10 +545,12 @@ function resultColumns({
       header: "판정",
       cell: ({ getValue }) => <Badge tone={decisionTone(getValue())}>{decisionLabel(getValue())}</Badge>,
     }),
-    column.accessor((row) => row.severity, {
+    column.accessor((row) => riskLabel(row.severity), {
       id: "severity",
       header: "심각도",
-      cell: ({ getValue }) => <Badge tone={riskTone(getValue())}>{statusLabel(getValue())}</Badge>,
+      cell: ({ row }) => (
+        <Badge tone={riskTone(row.original.severity)}>{riskLabel(row.original.severity)}</Badge>
+      ),
     }),
     column.accessor((row) => row.policy_decision, { id: "policy", header: "정책" }),
     column.display({
@@ -594,7 +597,7 @@ function baselineColumns(): ReadonlyArray<DataTableColumn<RedTeamBaseline>> {
     }),
     column.accessor((row) => row.pack_id, {
       id: "pack_id",
-      header: "팩",
+      header: "묶음",
       cell: ({ getValue }) => <code className="mono">{getValue()}</code>,
     }),
     column.accessor((row) => row.baseline_score, {

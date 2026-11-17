@@ -6,6 +6,8 @@ import {
   type ProbeCaseFormValues,
 } from "@/features/security/redteam/probe-case-form";
 import { evaluatorTypes, expectedPolicies, severityLevels } from "@/features/security/redteam/redteam-ui";
+import { expectedPolicyLabel, evaluatorTypeLabel, riskLabel } from "./redteam-labels";
+import { ProbeTargetTypes } from "./ProbeTargetTypes";
 import type { RedTeamProbePack } from "@/shared/api/domains/redteam";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
@@ -40,6 +42,7 @@ export function ProbeCaseDialog({
 
   return (
     <FormDialog
+      scrollBody
       description="여기에 입력한 문장이 대상에 그대로 전송됩니다. 보통 모델이 거부해야 하는 공격형 프롬프트를 넣습니다."
       form={form}
       onOpenChange={onOpenChange}
@@ -49,7 +52,7 @@ export function ProbeCaseDialog({
       submitLabel="저장"
       title={defaults.case_id === "" ? "프롬프트 추가" : "프롬프트 편집"}
     >
-      <FormField label="프로브 팩" description="기존 팩에 추가하거나 새 사용자 정의 팩을 만듭니다.">
+      <FormField label="검사 묶음" description="기존 묶음에 추가하거나 새 사용자 정의 묶음을 만듭니다.">
         {(control) => (
           <Select {...control} {...form.register("pack")}>
             {packs.map((pack) => (
@@ -57,16 +60,16 @@ export function ProbeCaseDialog({
                 {pack.name}
               </option>
             ))}
-            <option value={newPackOption}>(새 사용자 정의 팩)</option>
+            <option value={newPackOption}>(새 사용자 정의 묶음)</option>
           </Select>
         )}
       </FormField>
-      <FormField label="새 팩 이름(선택)" description="'(새 사용자 정의 팩)'을 고른 경우에만 사용됩니다.">
+      <FormField label="새 묶음 이름(선택)" description="'(새 사용자 정의 묶음)'을 고른 경우에만 사용됩니다.">
         {(control) => (
           <Input {...control} {...form.register("pack_name")} placeholder="예: 사내 특화 프롬프트" />
         )}
       </FormField>
-      <FormField label="케이스 키" required error={errors.case_key?.message}>
+      <FormField label="검사 식별자" required error={errors.case_key?.message}>
         {(control) => (
           <Input {...control} {...form.register("case_key")} placeholder="예: my_custom_probe_1" />
         )}
@@ -74,20 +77,26 @@ export function ProbeCaseDialog({
       <FormField label="기대 정책">
         {(control) => (
           <Select {...control} {...form.register("expected_policy")}>
+            {!expectedPolicies.some((item) => item === defaults.expected_policy) ? (
+              <option value={defaults.expected_policy}>등록된 값: {defaults.expected_policy}</option>
+            ) : null}
             {expectedPolicies.map((policy) => (
               <option key={policy} value={policy}>
-                {policy}
+                {expectedPolicyLabel(policy)}
               </option>
             ))}
           </Select>
         )}
       </FormField>
-      <FormField label="평가기">
+      <FormField label="평가 방식">
         {(control) => (
           <Select {...control} {...form.register("evaluator_type")}>
+            {!evaluatorTypes.some((item) => item === defaults.evaluator_type) ? (
+              <option value={defaults.evaluator_type}>등록된 값: {defaults.evaluator_type}</option>
+            ) : null}
             {evaluatorTypes.map((evaluator) => (
               <option key={evaluator} value={evaluator}>
-                {evaluator}
+                {evaluatorTypeLabel(evaluator)}
               </option>
             ))}
           </Select>
@@ -96,23 +105,23 @@ export function ProbeCaseDialog({
       <FormField label="심각도">
         {(control) => (
           <Select {...control} {...form.register("severity")}>
+            {!severityLevels.some((item) => item === defaults.severity) ? (
+              <option value={defaults.severity}>등록된 값: {defaults.severity}</option>
+            ) : null}
             {severityLevels.map((severity) => (
               <option key={severity} value={severity}>
-                {severity}
+                {riskLabel(severity)}
               </option>
             ))}
           </Select>
         )}
       </FormField>
-      <FormField label="대상 유형(쉼표 구분)" description="비우면 모든 대상 유형에 적용됩니다.">
-        {(control) => (
-          <Input
-            {...control}
-            {...form.register("target_types")}
-            placeholder="provider,model,ai_app,mcp_tool,text2sql,workflow"
-          />
-        )}
-      </FormField>
+      <ProbeTargetTypes
+        value={form.watch("target_types")}
+        onChange={(value) =>
+          form.setValue("target_types", value, { shouldDirty: true, shouldValidate: true })
+        }
+      />
       <FormField label="요청 프롬프트(원문 시드)" required error={errors.input_template?.message}>
         {(control) => (
           <Textarea

@@ -1,3 +1,4 @@
+import { riskLabel, probeCategoryLabel } from "./redteam-labels";
 import { useEffect, useMemo, type RefObject } from "react";
 
 import {
@@ -66,7 +67,7 @@ export function CampaignFormDialog({
 
   return (
     <FormDialog
-      description="테스트할 대상 범위와 프로브 팩, 실행 모드와 안전 한도를 정합니다. 실제 제공자 호출은 실행 모드가 '실제 실행(통제)'일 때만 일어납니다."
+      description="테스트할 대상 범위와 검사 묶음, 실행 방식과 안전 한도를 정합니다. 실제 제공자 호출은 실행 방식이 '제한된 실제 실행'일 때만 일어납니다."
       form={form}
       onOpenChange={onOpenChange}
       onSubmit={(values) => onSubmit(values, draft.id)}
@@ -77,10 +78,10 @@ export function CampaignFormDialog({
     >
       <FormField label="캠페인 이름" required error={errors.name?.message}>
         {(control) => (
-          <Input {...control} {...form.register("name")} placeholder="예: 주간-프로바이더-mcp-레드팀" />
+          <Input {...control} {...form.register("name")} placeholder="예: 주간-제공자-mcp-레드팀" />
         )}
       </FormField>
-      <FormField label="범위(scope)" description="테스트할 대상 유형">
+      <FormField label="대상 범위" description="테스트할 대상 유형">
         {(control) => (
           <Select {...control} {...form.register("scope")}>
             {campaignScopes.map((scope) => (
@@ -91,7 +92,7 @@ export function CampaignFormDialog({
           </Select>
         )}
       </FormField>
-      <FormField label="실행 모드" description="실제 호출은 '실제 실행(통제)'에서만 수행됩니다.">
+      <FormField label="실행 방식" description="실제 호출은 '제한된 실제 실행'에서만 수행됩니다.">
         {(control) => (
           <Select {...control} {...form.register("execution_mode")}>
             {executionModes.map((mode) => (
@@ -102,10 +103,10 @@ export function CampaignFormDialog({
           </Select>
         )}
       </FormField>
-      <FormField label="프로바이더(선택)" description="특정 업스트림만 대상으로 제한합니다.">
+      <FormField label="제공자(선택)" description="특정 제공자만 대상으로 제한합니다.">
         {(control) => (
           <Select {...control} {...form.register("provider")}>
-            <option value="">(전체 프로바이더)</option>
+            <option value="">(전체 제공자)</option>
             {providers.map((provider) => (
               <option key={provider} value={provider}>
                 {provider}
@@ -177,14 +178,14 @@ export function CampaignFormDialog({
       </label>
 
       <fieldset className="rt-fieldset">
-        <legend>프로브 팩</legend>
+        <legend>검사 묶음</legend>
         {errors.probe_pack_ids?.message ? (
           <p className="field-error" role="alert">
             {errors.probe_pack_ids.message}
           </p>
         ) : null}
         {packs.length === 0 ? (
-          <p className="rt-muted">프로브 팩이 없습니다.</p>
+          <p className="rt-muted">검사 묶음이 없습니다.</p>
         ) : (
           <div className="rt-checklist">
             {packs.map((pack) => (
@@ -192,11 +193,11 @@ export function CampaignFormDialog({
                 <input type="checkbox" value={pack.id} {...form.register("probe_pack_ids")} />
                 <span className="checkbox-copy">
                   <span>
-                    {pack.name} <Badge tone="muted">{pack.severity}</Badge>
+                    {pack.name} <Badge tone="muted">{riskLabel(pack.severity)}</Badge>
                     {pack.requires_approval ? <Badge tone="warning">승인필요</Badge> : null}
                   </span>
                   <small>
-                    {pack.category} · 케이스 {pack.cases.length}
+                    {probeCategoryLabel(pack.category)} · 검사 {pack.cases.length}
                   </small>
                 </span>
               </label>

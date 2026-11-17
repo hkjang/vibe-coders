@@ -9,7 +9,7 @@ export const probeCaseFormSchema = z.object({
   case_id: z.string(),
   pack: z.string(),
   pack_name: z.string().trim(),
-  case_key: z.string().trim().min(1, "케이스 키를 입력하세요."),
+  case_key: z.string().trim().min(1, "검사 식별자를 입력하세요."),
   expected_policy: z.string(),
   evaluator_type: z.string(),
   severity: z.string(),

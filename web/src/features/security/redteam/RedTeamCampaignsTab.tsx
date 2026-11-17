@@ -215,7 +215,7 @@ function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsT
                 !canWrite
                   ? writeDeniedReason
                   : packs.length === 0
-                    ? "프로브 팩이 없어 캠페인을 만들 수 없습니다."
+                    ? "검사 묶음이 없어 캠페인을 만들 수 없습니다."
                     : undefined
               }
               onClick={(event) => {
@@ -244,7 +244,7 @@ function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsT
           caption="등록된 레드팀 캠페인"
           columns={columns}
           data={campaignRows}
-          emptyMessage="아직 캠페인이 없습니다. '캠페인 만들기'로 범위와 프로브 팩을 골라 시작하세요."
+          emptyMessage="아직 캠페인이 없습니다. '캠페인 만들기'로 범위와 검사 묶음을 골라 시작하세요."
           error={campaigns.isError && !campaigns.data ? "캠페인 목록을 불러오지 못했습니다." : undefined}
           loading={campaigns.isPending}
           onRetry={() => void campaigns.refetch()}
