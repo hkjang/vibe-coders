@@ -215,3 +215,24 @@ test("160코드포인트의 한글·이모지 미리보기도 목록과 전체 �
   expect(state.reads).toHaveLength(1);
   expect(state.unexpected).toEqual([]);
 });
+
+test("URL 필터 없는 세션 초안·검증 오류는 초기화 버튼으로 제거된다", async ({ page }) => {
+  const api = await install(page);
+  await page.goto("observability/sessions");
+  await expect(page.getByText("session-1", { exact: true })).toBeVisible();
+  const reads = api.reads.length;
+  await page.getByLabel("조회 기간(일)").fill("30");
+  await page.getByLabel("세션 ID 검색").fill("x".repeat(257));
+  await page.getByRole("button", { name: "조회", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("256바이트");
+  const reset = page.getByRole("button", { name: "초기화", exact: true });
+  await reset.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("세션 ID 검색")).toHaveValue("");
+  await expect(page.getByLabel("조회 기간(일)")).toHaveValue("7");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(reset).toBeFocused();
+  expect(new URL(page.url()).search).toBe("");
+  expect(api.reads.length).toBe(reads);
+  expect(api.unexpected).toEqual([]);
+});

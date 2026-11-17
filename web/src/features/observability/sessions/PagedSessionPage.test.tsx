@@ -151,6 +151,34 @@ describe("기간 전체 세션 탐색", () => {
     );
     expect(screen.getByText(/메시지 내용은 검색하지 않습니다/)).toBeInTheDocument();
   });
+  it.each([false, true])(
+    "URL 필터가 없어도 미제출 초안과 오류를 초기화한다 (검증 오류: %s)",
+    async (invalid) => {
+      const request = mockRequest();
+      setup();
+      const user = userEvent.setup();
+      await screen.findByText("session-0");
+      const days = screen.getByLabelText("조회 기간(일)");
+      const search = screen.getByLabelText("세션 ID 검색");
+      await user.clear(days);
+      await user.type(days, "30");
+      await user.type(search, invalid ? "x".repeat(257) : "미제출");
+      if (invalid) {
+        await user.click(screen.getByRole("button", { name: "조회" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("256바이트");
+      }
+      expect(screen.getByLabelText("현재 주소")).toBeEmptyDOMElement();
+      const calls = request.mock.calls.length;
+      const reset = screen.getByRole("button", { name: "초기화" });
+      await user.click(reset);
+      expect(search).toHaveValue("");
+      expect(days).toHaveValue(7);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(reset).toHaveFocus();
+      expect(screen.getByLabelText("현재 주소")).toBeEmptyDOMElement();
+      expect(request).toHaveBeenCalledTimes(calls);
+    },
+  );
   it("빈 뒷페이지에서도 전체 합계와 처음 이동을 유지한다", async () => {
     mockRequest();
     setup("/observability/sessions?offset=250");
