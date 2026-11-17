@@ -14125,6 +14125,128 @@
         ],
         "type": "object"
       },
+      "TraceRelatedRun": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_krw": {
+            "maximum": 1000000000000000,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "created_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 2048,
+            "nullable": true,
+            "type": "string"
+          },
+          "latency_ms": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "receipt_available": {
+            "type": "boolean"
+          },
+          "resource_id": {
+            "maxLength": 2048,
+            "nullable": true,
+            "type": "string"
+          },
+          "resource_name": {
+            "maxLength": 2048,
+            "nullable": true,
+            "type": "string"
+          },
+          "row_key": {
+            "pattern": "^run_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error",
+              "planned",
+              "pending_approval",
+              "condition_failed",
+              "passed",
+              "stopped",
+              "skipped",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "cost_krw",
+          "created_at",
+          "id",
+          "latency_ms",
+          "receipt_available",
+          "resource_id",
+          "resource_name",
+          "row_key",
+          "status"
+        ],
+        "type": "object"
+      },
+      "TraceRelatedRunPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TraceRelatedRun"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "workflow",
+              "app"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "enum": [
+              25,
+              50,
+              100
+            ],
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "related_runs_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "total": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "kind",
+          "limit",
+          "offset",
+          "related_runs_version",
+          "total"
+        ],
+        "type": "object"
+      },
       "TrackingAllowRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15263,7 +15385,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.151"
+    "version": "v0.86.152"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -34504,6 +34626,138 @@
         "summary": "All requests + workflow/app runs sharing a trace_id",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/admin/traces/{trace_id}/runs": {
+      "get": {
+        "description": "Returns a metadata-only, server-paged workflow or app execution list for the exact trace. Existing admin read and team scope are applied before counting/paging; rows and count share one SQL statement snapshot. Ordering is recorded UTC created_at at nanosecond precision then ID descending. Pages are live reads, not a cross-page snapshot. No prompt, output, error class, hash, team/user identity or step definition is returned, including to raw-view administrators. Unsafe identifiers/names and invalid metrics are null. Receipt availability only identifies the authenticated owner; destination permissions and receipt authorization still apply. This read-only projection has no-store and a three-second query deadline.",
+        "operationId": "get__admin_traces_trace_id_runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "workflow",
+                "app"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "enum": [
+                25,
+                50,
+                100
+              ],
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceRelatedRunPage"
+                }
+              }
+            },
+            "description": "Related execution page; existing trace export is separate and unchanged."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid kind, duplicate/unknown parameter, bounds or sensitive trace ID"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing administrator read authentication required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "GET required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Trace query failed; no partial page or count returned"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Team-scoped related workflow and app execution metadata page",
+        "tags": [
+          "observability"
         ]
       }
     },

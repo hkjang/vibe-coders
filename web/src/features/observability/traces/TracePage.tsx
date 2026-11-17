@@ -6,6 +6,7 @@ import { Link, useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featureByPath } from "@/config/migration-registry";
+import { TraceRelatedRuns } from "./TraceRelatedRuns";
 import { TraceFilters } from "@/features/observability/traces/TraceFilters";
 import { TraceRequestDetails } from "@/features/observability/traces/TraceRequestDetails";
 import { useTraceSafeFlowAccess, type TraceSafeFlowAccess } from "./trace-safe-flow-access";
@@ -243,6 +244,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
           showLegacy={showLegacyAdmin}
           legacyHref={legacyPath}
         />
+        <TraceRelatedRuns key="related-runs" />
       </div>
     );
   }
@@ -251,6 +253,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
       <div className="page-stack trace-page">
         {criteriaPanel}
         <LoadingState label="추적 요청 흐름을 불러오는 중입니다." />
+        <TraceRelatedRuns key="related-runs" />
       </div>
     );
   }
@@ -399,6 +402,8 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
           </p>
         </section>
       )}
+
+      <TraceRelatedRuns key="related-runs" />
 
       <TraceRequestDetails
         flowReady={list.ready && requestIdentityAvailable}

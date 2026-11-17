@@ -1,3 +1,4 @@
+import { traceRelatedQueryKeys } from "@/shared/utils/trace-related-query";
 import { defineFeatureModules } from "@/features/feature-module";
 
 // Screens owned by the observability domain. Register each implemented feature here.
@@ -31,6 +32,7 @@ export const observabilityFeatureModules = defineFeatureModules([
       "limit",
       "model",
       "selected_ref",
+      ...traceRelatedQueryKeys,
       "flow_kind",
       "flow_status",
       "selected_request",

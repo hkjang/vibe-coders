@@ -300,22 +300,29 @@ func (s *SQLStore) ensurePostgresAppRequestPlannerStats(ctx context.Context) err
 // name but indisvalid=false. PostgreSQL's IF NOT EXISTS treats that shell as existing, so
 // every later startup would otherwise skip the build forever. The advisory migration lock
 // makes it safe for the next pod to remove the invalid shell and retry the declared index.
+// Also rebuild the two trace metadata indexes from an earlier candidate if their
+// predicate parsed text as BYTEA. Other valid indexes are left untouched.
 func (s *SQLStore) dropInvalidPostgresIndex(ctx context.Context, statement string) error {
 	index, ok := parseCreateIndex(statement)
 	if !ok {
 		return fmt.Errorf("parse concurrent PostgreSQL index statement: %s", statement)
 	}
 	var valid bool
-	err := s.db.QueryRowContext(ctx, `SELECT i.indisvalid
+	var predicate string
+	err := s.db.QueryRowContext(ctx, `SELECT i.indisvalid, COALESCE(pg_get_expr(i.indpred, i.indrelid), '')
 		FROM pg_index i
 		JOIN pg_class c ON c.oid = i.indexrelid
 		JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE n.nspname = current_schema() AND c.relname = $1`, index.Name).Scan(&valid)
-	if err == sql.ErrNoRows || valid {
+		WHERE n.nspname = current_schema() AND c.relname = $1`, index.Name).Scan(&valid, &predicate)
+	if err == sql.ErrNoRows {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("inspect PostgreSQL index %s: %w", index.Name, err)
+	}
+	legacyTraceBytes := (index.Name == "idx_workflow_runs_trace_metadata" || index.Name == "idx_ai_app_runs_trace_metadata") && strings.Contains(predicate, "::bytea")
+	if valid && !legacyTraceBytes {
+		return nil
 	}
 	quoted := `"` + strings.ReplaceAll(index.Name, `"`, `""`) + `"`
 	if _, err := s.db.ExecContext(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+quoted); err != nil {
@@ -386,6 +393,12 @@ func renderForDialect(statement, dialect string) string {
 	if dialect != "postgres" {
 		return statement
 	}
+	// These two new trace indexes measure the stored text, not BYTEA escapes.
+	// Restrict this rewrite to their fixed declarations; binary table columns keep
+	// their normal BYTEA conversion below.
+	if strings.Contains(statement, "idx_workflow_runs_trace_metadata") || strings.Contains(statement, "idx_ai_app_runs_trace_metadata") {
+		statement = strings.ReplaceAll(statement, traceRunIndexPredicate(), traceRunIndexPredicateForDialect(dialect))
+	}
 	// PostgreSQL does not support BLOB; it uses BYTEA instead.
 	// Using regex guarantees that any variation of case or spacing is handled properly.
 	out := blobRegex.ReplaceAllString(statement, "BYTEA")
@@ -393,7 +406,7 @@ func renderForDialect(statement, dialect string) string {
 	// These indexes are introduced on high-write observability tables. PostgreSQL's
 	// ordinary CREATE INDEX blocks writers for the duration of the build; each migration
 	// statement runs outside an explicit transaction, so the concurrent form is safe here.
-	if strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
+	if strings.Contains(out, "idx_workflow_runs_trace_metadata") || strings.Contains(out, "idx_ai_app_runs_trace_metadata") || strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
 		out = strings.Replace(out, "CREATE INDEX IF NOT EXISTS", "CREATE INDEX CONCURRENTLY IF NOT EXISTS", 1)
 	}
 	return out
@@ -1998,6 +2011,7 @@ func migrationStatements() []string {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_workflow_runs_user ON workflow_runs(user_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_workflow_runs_trace_metadata ON workflow_runs(trace_id) WHERE ` + traceRunIndexPredicate(),
 		`CREATE TABLE IF NOT EXISTS ai_app_runs (
 			id TEXT PRIMARY KEY,
 			app_id TEXT NOT NULL,
@@ -2013,6 +2027,7 @@ func migrationStatements() []string {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_app_runs_user ON ai_app_runs(user_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_app_runs_trace_metadata ON ai_app_runs(trace_id) WHERE ` + traceRunIndexPredicate(),
 		`CREATE TABLE IF NOT EXISTS model_contracts (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL DEFAULT '',
