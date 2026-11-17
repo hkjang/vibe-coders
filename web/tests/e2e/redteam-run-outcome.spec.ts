@@ -8,7 +8,7 @@ import { installPromptLibrary } from "../fixtures/prompt-library-browser";
 
 async function fixture(page: Page, stopped = "budget_exceeded", status = 200, recordingFailure = false) {
   const base = await installPromptLibrary(page);
-  base.bootstrap.backend_version = "v0.86.140";
+  base.bootstrap.backend_version = "v0.86.146";
   base.bootstrap.allowed_features = ["security.redteam"];
   const feature = base.bootstrap.migration_registry[0];
   if (!feature) throw Error("missing fixture feature");
@@ -21,6 +21,7 @@ async function fixture(page: Page, stopped = "budget_exceeded", status = 200, re
     risk_level: "critical",
   });
   const run = {
+    ...executionOutcomeFixture().runs[0],
     id: "public-run",
     target_id: "공개 테스트 모델",
     campaign_id: "public-campaign",
@@ -47,9 +48,20 @@ async function fixture(page: Page, stopped = "budget_exceeded", status = 200, re
             ],
           },
         });
-      if (path === "/admin/redteam/runs") return route.fulfill({ json: { runs: [run] } });
+      if (path === "/admin/redteam/runs") {
+        const q = new URL(request.url()).searchParams;
+        return route.fulfill({
+          json: {
+            runs: [run],
+            total: 1,
+            limit: Number(q.get("limit")),
+            offset: Number(q.get("offset")),
+            generated_at: "2026-11-17T00:00:00Z",
+          },
+        });
+      }
       if (path === "/admin/redteam/runs/public-run/results")
-        return route.fulfill({ json: { run, results: [] } });
+        return route.fulfill({ json: { run, results: [], prompts: {}, count: 0, masked: true } });
       return route.fulfill({ json: path.endsWith("kill-switch") ? { enabled: false } : {} });
     }
     writes.push(`${request.method()} ${path}`);
@@ -112,6 +124,8 @@ for (const [reason, label] of [
     const results = page.getByRole("dialog", { name: "레드팀 결과", exact: true });
     await expect(results.getByText("중단된 실행의 일부 결과입니다.")).toBeVisible();
     await page.reload();
+    await expect(results.getByText("중단된 실행의 일부 결과입니다.")).toBeVisible();
+    await results.getByRole("button", { name: "패널 닫기", exact: true }).click();
     await expect(
       page.getByRole("table", { name: "레드팀 캠페인 실행 이력" }).getByText("중단", { exact: true }),
     ).toBeVisible();

@@ -5,7 +5,7 @@ import { installPromptLibrary } from "../fixtures/prompt-library-browser";
 async function fixture(page: Page) {
   await page.clock.setFixedTime(new Date("2026-11-17T00:00:00Z"));
   const base = await installPromptLibrary(page, true);
-  base.bootstrap.backend_version = "v0.86.145";
+  base.bootstrap.backend_version = "v0.86.146";
   base.bootstrap.allowed_features = ["security.redteam"];
   Object.assign(base.bootstrap.migration_registry[0] ?? {}, {
     feature_id: "security.redteam",
@@ -61,7 +61,9 @@ async function fixture(page: Page) {
     }
     if (url.pathname.endsWith("/results")) {
       const id = url.pathname.split("/").at(-2);
-      return route.fulfill({ json: { run: runs.find((run) => run.id === id), results: [], prompts: {} } });
+      return route.fulfill({
+        json: { run: runs.find((run) => run.id === id), results: [], prompts: {}, count: 0, masked: true },
+      });
     }
     return route.fulfill({ json: {} });
   });

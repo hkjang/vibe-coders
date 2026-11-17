@@ -362,22 +362,22 @@ export default { ...liveConfig, testDir: ${JSON.stringify(fixture)}, reporter: [
   },
 );
 
-test("redteam workflow shares the numeric-only reporter and requires nine first-attempt passes", async () => {
-  const nine = Array.from({ length: 9 }, () => row("passed", 0, [step(45, "/private/redteam.spec.ts")]));
-  assert.deepEqual(await report(nine, "passed", "valid", "redteam"), {
+test("redteam workflow shares the numeric-only reporter and requires eleven first-attempt passes", async () => {
+  const eleven = Array.from({ length: 11 }, () => row("passed", 0, [step(45, "/private/redteam.spec.ts")]));
+  assert.deepEqual(await report(eleven, "passed", "valid", "redteam"), {
     passed: true,
-    test_count: 9,
+    test_count: 11,
     source_line: 45,
   });
-  assert.deepEqual(await report(nine.slice(0, 8), "passed", "valid", "redteam"), {
+  assert.deepEqual(await report(eleven.slice(0, 8), "passed", "valid", "redteam"), {
     passed: false,
     test_count: 8,
     source_line: 45,
   });
-  nine[3] = row("failed", 0, [step(72, "/private/redteam.spec.ts")]);
-  assert.deepEqual(await report(nine, "failed", "valid", "redteam"), {
+  eleven[3] = row("failed", 0, [step(72, "/private/redteam.spec.ts")]);
+  assert.deepEqual(await report(eleven, "failed", "valid", "redteam"), {
     passed: false,
-    test_count: 9,
+    test_count: 11,
     source_line: 72,
   });
 });

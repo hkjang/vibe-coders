@@ -27,7 +27,7 @@ func seedRedTeamBrowserReplay(t *testing.T, h *browserAuthHarness) func() {
 	for i, id := range []string{"replay", "replay-recording"} {
 		run := store.RedTeamRun{ID: "browser-source-" + id, CampaignID: "browser-redteam-" + id, TargetID: targets[i].ID, Mode: "dry-run", Status: "passed", TotalCases: 1}
 		result := store.RedTeamCaseResult{ID: "browser-result-" + id, RunID: run.ID, CaseID: "browser-redteam-case", Decision: "pass", Severity: "low", EvidenceHash: "original-public-hash"}
-		evidence := store.RedTeamEvidence{ID: "browser-evidence-" + id, ResultID: result.ID, MaskedPrompt: "원본 공개 검사", MaskedResponse: "원본 공개 응답", ExportHash: result.EvidenceHash, HeadersSummary: map[string]any{"provider": run.CampaignID, "model": "test-model"}}
+		evidence := store.RedTeamEvidence{ID: "browser-evidence-" + id, ResultID: result.ID, MaskedPrompt: "원본 공개 검사", MaskedResponse: "원본 공개 응답", RawPrompt: "원본 공개 검사", RawResponse: "비공개 브라우저 응답", ExportHash: result.EvidenceHash, HeadersSummary: map[string]any{"provider": run.CampaignID, "model": "test-model"}}
 		if err := h.db.InsertRedTeamRun(t.Context(), run); err != nil {
 			t.Fatal("source run unavailable")
 		}
@@ -115,14 +115,23 @@ func seedRedTeamBrowserReplay(t *testing.T, h *browserAuthHarness) func() {
 		if err != nil {
 			t.Fatal("replay audit unavailable")
 		}
-		admissions := 0
+		admissions, rawViews := 0, 0
 		for _, audit := range audits {
+			if audit.Action == "redteam.evidence.raw_view" {
+				rawViews++
+				if audit.AdminID == "" || !strings.Contains(audit.AfterValue, "browser-result-replay") || strings.Contains(audit.AfterValue, "비공개 브라우저 응답") {
+					t.Fatal("raw read audit missing identity or leaked body")
+				}
+			}
 			if audit.Action == "redteam.result.replay.reviewed" {
 				admissions++
 				if !strings.Contains(audit.AfterValue, "browser-result-replay") || !strings.Contains(audit.AfterValue, "review_id") || !strings.Contains(audit.AfterValue, "run_id") {
 					t.Fatal("replay admission provenance missing")
 				}
 			}
+		}
+		if rawViews != 1 {
+			t.Fatal("explicit raw read audit count mismatch")
 		}
 		if admissions != 2 {
 			t.Fatal("replay admission audit count mismatch")

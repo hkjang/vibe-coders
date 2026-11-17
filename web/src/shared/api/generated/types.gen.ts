@@ -2603,6 +2603,35 @@ export type RedTeamEmergencyState = {
     scope: 'responding_process';
 };
 
+export type RedTeamEvidenceLegacyRead = {
+    evidence: RedTeamEvidenceReadRecord;
+};
+
+export type RedTeamEvidenceRead = {
+    evidence: RedTeamEvidenceReadRecord;
+    masked: boolean;
+    raw_allowed: boolean;
+    raw_available: boolean;
+    tool_call_count: number;
+};
+
+export type RedTeamEvidenceReadRecord = {
+    created_at: string;
+    export_hash: string;
+    headers_summary: {
+        [key: string]: unknown;
+    } | null;
+    id: string;
+    masked_prompt: string;
+    masked_response: string;
+    raw_prompt?: string;
+    raw_response?: string;
+    result_id: string;
+    tool_calls: Array<{
+        [key: string]: unknown;
+    }> | null;
+};
+
 export type RedTeamPreflightResponse = {
     active_eligible_targets: number;
     approved: boolean;
@@ -2718,6 +2747,39 @@ export type RedTeamReplayReviewResponse = {
     };
     targets: Array<RedTeamReviewedTarget>;
     timeout_ms: number;
+};
+
+export type RedTeamResultReadMetadata = {
+    case_id: string;
+    cost_krw: number;
+    created_at: string;
+    decision: string;
+    evidence_hash: string;
+    id: string;
+    latency_ms: number;
+    policy_decision: string;
+    request_id: string;
+    run_id: string;
+    severity: string;
+};
+
+export type RedTeamResultsLegacyRead = {
+    count: number;
+    prompts: {
+        [key: string]: string;
+    };
+    results: Array<RedTeamResultReadMetadata>;
+    run: RedTeamRunMetadata;
+};
+
+export type RedTeamResultsRead = {
+    count: number;
+    masked: true;
+    prompts: {
+        [key: string]: string;
+    };
+    results: Array<RedTeamResultReadMetadata>;
+    run: RedTeamRunMetadata;
 };
 
 export type RedTeamReviewedExecutionRequest = {
@@ -11104,16 +11166,58 @@ export type GetAdminRedteamResultsIdEvidenceData = {
     path: {
         id: string;
     };
-    query?: never;
+    query?: {
+        view?: 'app';
+        reveal?: 'raw';
+    };
     url: '/admin/redteam/results/{id}/evidence';
 };
 
+export type GetAdminRedteamResultsIdEvidenceErrors = {
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    400: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    401: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    403: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    404: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    405: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    500: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRedteamResultsIdEvidenceError = GetAdminRedteamResultsIdEvidenceErrors[keyof GetAdminRedteamResultsIdEvidenceErrors];
+
 export type GetAdminRedteamResultsIdEvidenceResponses = {
     /**
-     * OK
+     * Legacy evidence or explicit app projection
      */
-    200: unknown;
+    200: RedTeamEvidenceLegacyRead | RedTeamEvidenceRead;
 };
+
+export type GetAdminRedteamResultsIdEvidenceResponse = GetAdminRedteamResultsIdEvidenceResponses[keyof GetAdminRedteamResultsIdEvidenceResponses];
 
 export type PostAdminRedteamResultsIdRemediationData = {
     body?: never;
@@ -11337,16 +11441,57 @@ export type GetAdminRedteamRunsIdResultsData = {
     path: {
         id: string;
     };
-    query?: never;
+    query?: {
+        view?: 'app';
+    };
     url: '/admin/redteam/runs/{id}/results';
 };
 
+export type GetAdminRedteamRunsIdResultsErrors = {
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    400: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    401: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    403: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    404: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    405: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    500: AppError;
+    /**
+     * Read, permission or confirmed-audit failure
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRedteamRunsIdResultsError = GetAdminRedteamRunsIdResultsErrors[keyof GetAdminRedteamRunsIdResultsErrors];
+
 export type GetAdminRedteamRunsIdResultsResponses = {
     /**
-     * OK
+     * Legacy results or explicit app projection
      */
-    200: unknown;
+    200: RedTeamResultsLegacyRead | RedTeamResultsRead;
 };
+
+export type GetAdminRedteamRunsIdResultsResponse = GetAdminRedteamRunsIdResultsResponses[keyof GetAdminRedteamRunsIdResultsResponses];
 
 export type GetAdminRedteamSchedulesData = {
     body?: never;

@@ -41,6 +41,11 @@ const operationalMessages = {
   auth_disabled: "인증 기능이 비활성화되어 있습니다.",
   dev_secret: "개발용 기본 비밀정보를 사용 중입니다.",
   pricing_missing: "모델 가격표가 없어 비용을 추적할 수 없습니다.",
+  redteam_evidence_audit_unavailable:
+    "조회 감사 기록을 저장하지 못해 원문을 열지 않았습니다. 다시 시도하세요.",
+  redteam_evidence_raw_denied: "원문 증적 조회 권한이 없습니다. 마스킹본으로 확인하세요.",
+  redteam_evidence_read_invalid: "증적 조회 조건을 확인하세요.",
+  redteam_results_read_invalid: "실행 결과 조회 조건을 확인하세요.",
   raw_prompts: "프롬프트 원문 저장이 활성화되어 있습니다.",
   raw_bodies: "요청과 응답 원문 저장이 활성화되어 있습니다.",
   log_drops: "일부 감사 로그가 기록되지 않았습니다.",

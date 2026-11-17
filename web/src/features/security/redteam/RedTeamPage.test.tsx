@@ -443,9 +443,14 @@ describe("RedTeamPage", () => {
           run,
           results: [caseResult],
           prompts: { rtr_1: "마스킹된 프롬프트" },
+          masked: true,
           count: 1,
         }),
         "GET /admin/redteam/results/rtr_1/evidence": () => ({
+          masked: true,
+          raw_allowed: true,
+          raw_available: false,
+          tool_call_count: 0,
           evidence: {
             id: "rtev_1",
             result_id: "rtr_1",
