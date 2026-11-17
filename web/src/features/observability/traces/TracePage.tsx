@@ -32,6 +32,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
+import { validTraceTimelineView } from "@/shared/utils/trace-timeline-query";
 import "@/features/observability/traces/trace-page.css";
 
 export function TracePage(): React.JSX.Element {
@@ -212,6 +213,14 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
       </div>
     );
   }
+  const applyFilters = (next: URLSearchParams): void => {
+    const currentRoute = routeRef.current;
+    const views = currentRoute.searchParams.getAll("timeline_view");
+    const [view] = views;
+    if (view && validTraceTimelineView(views)) next.set("timeline_view", view);
+    forgetSelectionTrigger();
+    currentRoute.setSearchParams(next, { replace: false });
+  };
   const criteriaPanel = (
     <TraceListCriteria
       requested={query}
@@ -305,14 +314,8 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
         key={filterFormKey}
         query={query}
         credentialPrefixes={auth.credentialPrefixes}
-        onApply={(next) => {
-          forgetSelectionTrigger();
-          setSearchParams(next, { replace: false });
-        }}
-        onReset={() => {
-          forgetSelectionTrigger();
-          setSearchParams({}, { replace: false });
-        }}
+        onApply={applyFilters}
+        onReset={() => applyFilters(new URLSearchParams())}
       />
 
       {criteriaPanel}
