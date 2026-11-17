@@ -44,6 +44,37 @@ export function riskTone(value: string | undefined): Tone {
   }
 }
 
+const statusLabels: Readonly<Record<string, string>> = {
+  draft: "초안",
+  pending: "대기",
+  approved: "승인됨",
+  running: "실행 중",
+  passed: "통과",
+  completed: "완료",
+  stopped: "중단",
+  failed: "실패",
+  warning: "경고",
+  critical: "치명",
+  rejected: "거절됨",
+  blocked: "차단됨",
+  error: "오류",
+};
+
+export function statusLabel(value: string | undefined): string {
+  return statusLabels[lower(value)] ?? (value || "확인 필요");
+}
+
+export function stopReasonLabel(value: string): string {
+  const reasons: Readonly<Record<string, string>> = {
+    budget_exceeded: "비용 중단 기준에 도달했습니다",
+    kill_switch: "긴급 중지가 적용되었습니다",
+    call_limit: "실제 호출 횟수 한도에 도달했습니다",
+    context_cancelled: "요청 연결 또는 실행 대기가 취소되었습니다",
+    cost_unavailable: "호출 비용을 확인할 수 없습니다",
+  };
+  return reasons[lower(value)] ?? "서버가 실행 중단을 보고했습니다";
+}
+
 /** Campaign and run lifecycle status. */
 export function statusTone(value: string | undefined): Tone {
   const normalized = lower(value);

@@ -11,8 +11,8 @@ import {
 import { usePreflightReturnFocus } from "./use-preflight-return-focus";
 import { readPreflight } from "./read-preflight";
 import { DryRunSheet } from "@/features/security/redteam/DryRunSheet";
-import { FieldRow, PanelFailure } from "@/features/security/redteam/RedTeamParts";
-import { scoreTone, statusTone, writeDeniedReason } from "@/features/security/redteam/redteam-ui";
+import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
+import { statusLabel, statusTone, writeDeniedReason } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, type RedTeamData } from "@/features/security/redteam/use-redteam-data";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
@@ -27,9 +27,8 @@ import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
-import { KeyValueList } from "@/shared/components/ui/KeyValueList";
+import { RedTeamRunOutcomeSheet } from "./RedTeamRunOutcomeSheet";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Sheet } from "@/shared/components/ui/Sheet";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
@@ -66,6 +65,7 @@ export function RedTeamCampaignsTab({
 
   const { remember, returnFocusRef } = useReturnFocus();
   const preflightFocus = usePreflightReturnFocus(returnFocusRef);
+  const runFocus = usePreflightReturnFocus(returnFocusRef);
   const [draft, setDraft] = useState<CampaignDraft>(() => emptyDraft([]));
   const [formOpen, setFormOpen] = useState(false);
   const [dryRun, setDryRun] = useState<RedTeamDryRun | undefined>();
@@ -144,6 +144,7 @@ export function RedTeamCampaignsTab({
           body: live ? { proxy_key: proxyKey.trim() } : {},
           routeId,
           timeoutMs: 120_000,
+          retryUnauthorized: false,
         });
       } finally {
         setPollingCampaignId("");
@@ -155,7 +156,6 @@ export function RedTeamCampaignsTab({
   const runCampaign = useMutationFeedback({
     mutate: runCampaignRequest,
     invalidates: invalidatesAfterRun,
-    successMessage: "캠페인 실행이 끝났습니다.",
     errorMessage: "캠페인을 실행하지 못했습니다.",
     onSuccess: (result) => setOutcome(result),
   });
@@ -168,7 +168,6 @@ export function RedTeamCampaignsTab({
       return runCampaignRequest(campaign);
     },
     invalidates: invalidatesAfterRun,
-    successMessage: "승인 후 캠페인을 실행했습니다.",
     errorMessage: "승인 후 실행하지 못했습니다.",
     onSuccess: (result) => setOutcome(result),
   });
@@ -188,6 +187,7 @@ export function RedTeamCampaignsTab({
     canWrite,
     checking: runDryRun.isPending,
     preflightTriggerRef: preflightFocus.register,
+    runTriggerRef: runFocus.register,
     onClone: (campaign, event) => {
       remember(event);
       setDraft(campaignToDraft(campaign, "clone", packIds));
@@ -209,6 +209,7 @@ export function RedTeamCampaignsTab({
       setFormOpen(true);
     },
     onRun: (campaign, event) => {
+      runFocus.remember(campaign.id);
       remember(event);
       setPendingRun(campaign);
     },
@@ -343,73 +344,12 @@ export function RedTeamCampaignsTab({
         returnFocusRef={preflightFocus.returnFocusRef}
       />
 
-      <Sheet
-        open={outcome !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setOutcome(undefined);
-        }}
-        title="캠페인 실행 결과"
-        description="각 케이스의 요청/응답은 결과 목록의 증적에서 확인하세요."
-        returnFocusRef={returnFocusRef}
-        size="wide"
-      >
-        {outcome ? (
-          <div className="rt-stack">
-            <KeyValueList
-              items={[
-                { label: "실행 수", value: formatNumber(outcome.summary.runs) },
-                { label: "케이스 결과", value: formatNumber(outcome.summary.results) },
-                { label: "치명", value: formatNumber(outcome.summary.critical) },
-                { label: "실패", value: formatNumber(outcome.summary.failures) },
-                { label: "경고", value: formatNumber(outcome.summary.warnings) },
-                {
-                  label: "실제 upstream 호출",
-                  value:
-                    outcome.summary.live_calls > 0 ? (
-                      <Badge tone="danger">
-                        예 — {formatNumber(outcome.summary.live_calls)}건 실제 호출됨
-                      </Badge>
-                    ) : (
-                      <Badge tone="success">아니오 — 시뮬레이션</Badge>
-                    ),
-                },
-                { label: "실행 모드", value: outcome.summary.mode },
-                {
-                  label: "상태",
-                  value: (
-                    <span>
-                      <Badge tone={statusTone(outcome.status)}>{outcome.status}</Badge>
-                      {outcome.stopped !== "" ? (
-                        <Badge tone="warning">{outcome.stopped} 사유로 중단</Badge>
-                      ) : null}
-                    </span>
-                  ),
-                },
-              ]}
-            />
-            <p className="rt-note">{outcome.note}</p>
-            {outcome.runs.length > 0 ? (
-              <FieldRow label="실행별 결과 바로 보기">
-                <div className="rt-button-row">
-                  {outcome.runs.map((run) => (
-                    <Button
-                      key={run.id}
-                      size="small"
-                      onClick={() => {
-                        setOutcome(undefined);
-                        onOpenRunResults(run.id);
-                      }}
-                    >
-                      {run.target_id || run.id}{" "}
-                      <Badge tone={scoreTone(run.risk_score)}>{formatNumber(run.risk_score)}</Badge>
-                    </Button>
-                  ))}
-                </div>
-              </FieldRow>
-            ) : null}
-          </div>
-        ) : null}
-      </Sheet>
+      <RedTeamRunOutcomeSheet
+        outcome={outcome}
+        onClose={() => setOutcome(undefined)}
+        onOpenRun={onOpenRunResults}
+        returnFocusRef={runFocus.returnFocusRef}
+      />
     </div>
   );
 }
@@ -418,6 +358,7 @@ interface CampaignActionHandlers {
   canWrite: boolean;
   checking: boolean;
   preflightTriggerRef: (id: string, node: HTMLButtonElement | null) => void;
+  runTriggerRef: (id: string, node: HTMLButtonElement | null) => void;
   onApprove: (campaign: RedTeamCampaign) => void;
   onClone: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
   onDelete: (campaign: RedTeamCampaign, event: { currentTarget: HTMLElement }) => void;
@@ -457,7 +398,7 @@ function campaignColumns(handlers: CampaignActionHandlers): ReadonlyArray<DataTa
     column.accessor((row) => row.status, {
       id: "status",
       header: "상태",
-      cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{getValue() || "—"}</Badge>,
+      cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{statusLabel(getValue())}</Badge>,
     }),
     column.accessor((row) => row.execution_mode, { id: "mode", header: "모드" }),
     column.accessor((row) => row.budget_limit_krw, {
@@ -506,6 +447,7 @@ function campaignColumns(handlers: CampaignActionHandlers): ReadonlyArray<DataTa
               disabled={!handlers.canWrite}
               title={writeTitle}
               aria-label={`${campaign.name} ${campaign.execution_mode === "active-controlled" ? "실제 실행" : "시뮬레이션 실행"}`}
+              ref={(node) => handlers.runTriggerRef(campaign.id, node)}
               onClick={(event) => handlers.onRun(campaign, event)}
             >
               {campaign.execution_mode === "active-controlled" ? "실제 실행" : "시뮬레이션 실행"}

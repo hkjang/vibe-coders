@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -607,6 +608,10 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 	if err != nil {
 		return nil, err
 	}
+	return s.runRedTeamSelection(r, c, proxyKey, targets, packs, cases)
+}
+
+func (s *Server) runRedTeamSelection(r *http.Request, c store.RedTeamCampaign, proxyKey string, targets []store.RedTeamTarget, packs []store.RedTeamProbePack, cases []store.RedTeamProbeCase) (map[string]any, error) {
 	packByCase := map[string]store.RedTeamProbePack{}
 	for _, p := range packs {
 		for _, cs := range cases {
@@ -621,6 +626,21 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 	modelCache := &redTeamModelCache{} // one /v1/models auto-discovery per run, reused across targets
 	var lastLiveCall time.Time         // for QPS throttling of live invocations
 	stopped := ""                      // set to a reason if budget/kill-switch aborts the run mid-flight
+	admitLive := func() bool {
+		switch {
+		case r.Context().Err() != nil:
+			stopped = "context_cancelled"
+		case redteamKillSwitch.Load():
+			stopped = "kill_switch"
+		case liveCalls >= redteamActiveMaxCalls:
+			stopped = "call_limit"
+		case math.IsNaN(liveCost) || math.IsInf(liveCost, 0):
+			stopped = "cost_unavailable"
+		case c.BudgetLimitKRW > 0 && liveCost >= c.BudgetLimitKRW:
+			stopped = "budget_exceeded"
+		}
+		return stopped == ""
+	}
 	for _, t := range targets {
 		if stopped != "" {
 			break
@@ -634,11 +654,13 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 			result.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			ev.ID, ev.ResultID = newID("rtev"), result.ID
 			result.EvidenceHash = ev.ExportHash
-			_ = s.db.InsertRedTeamCaseResult(r.Context(), result)
-			_ = s.db.InsertRedTeamEvidence(r.Context(), ev)
+			recordCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+			defer cancelRecord()
+			_ = s.db.InsertRedTeamCaseResult(recordCtx, result)
+			_ = s.db.InsertRedTeamEvidence(recordCtx, ev)
 			if rem.ActionType != "" {
 				rem.ID, rem.ResultID = newID("rtrm"), result.ID
-				_ = s.db.InsertRedTeamRemediation(r.Context(), rem)
+				_ = s.db.InsertRedTeamRemediation(recordCtx, rem)
 			}
 			total++
 			totalResults++
@@ -650,7 +672,7 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 			case "critical":
 				criticals++
 				failed++
-			case "fail":
+			case "fail", "error", "inconclusive":
 				failures++
 				failed++
 			case "warning":
@@ -661,6 +683,10 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 			if !redTeamCaseApplies(t, cs) {
 				continue
 			}
+			if r.Context().Err() != nil {
+				stopped = "context_cancelled"
+				break
+			}
 			if redteamKillSwitch.Load() {
 				stopped = "kill_switch"
 				break
@@ -669,14 +695,14 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 			// Active Controlled Run: invoke live only for eligible LLM/Text2SQL targets within the
 			// live-call cap. When the campaign pins multiple models, each is invoked separately;
 			// otherwise a single (auto-resolved) model is used. Everything else is simulated.
-			if redTeamActiveEligible(t, c, proxyKey) && liveCalls < redteamActiveMaxCalls {
+			if redTeamActiveEligible(t, c, proxyKey) {
 				invokedAny := false
 				models := redTeamCampaignModels(c)
 				if len(models) == 0 {
 					models = []string{""} // "" → auto-resolve one model
 				}
 				for _, m := range models {
-					if liveCalls >= redteamActiveMaxCalls {
+					if !admitLive() {
 						break
 					}
 					// QPS guard (§8/§22): space out live upstream calls to the campaign's rate limit.
@@ -684,7 +710,10 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 						stopped = "context_cancelled"
 						break
 					}
-					if ar, aev, arem, invoked := s.evaluateRedTeamCaseActive(r, proxyKey, t, pack, cs, c, modelCache, m); invoked {
+					if !admitLive() {
+						break
+					}
+					if ar, aev, arem, invoked := s.evaluateRedTeamCaseActiveGuarded(r, proxyKey, t, pack, cs, c, modelCache, m, admitLive); invoked {
 						liveCalls++
 						liveCost += ar.CostKRW
 						record(cs, ar, aev, arem)
@@ -702,8 +731,12 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 			if stopped != "" {
 				break
 			}
-			// Live budget guard (§12/§22): stop as soon as accrued live cost exceeds the limit.
-			if c.BudgetLimitKRW > 0 && liveCost > c.BudgetLimitKRW {
+			// Costs are measured after each call; this is a stop threshold, not a billing cap.
+			if r.Context().Err() != nil {
+				stopped = "context_cancelled"
+				break
+			}
+			if c.BudgetLimitKRW > 0 && liveCost >= c.BudgetLimitKRW {
 				stopped = "budget_exceeded"
 				break
 			}
@@ -715,8 +748,13 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 		} else if maxRisk >= 25 {
 			run.Status = "warning"
 		}
+		if stopped != "" {
+			run.Status = "stopped"
+		}
 		run.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = s.db.UpdateRedTeamRun(r.Context(), run)
+		finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		_ = s.db.UpdateRedTeamRun(finishCtx, run)
+		cancelFinish()
 		runs = append(runs, run)
 		for _, p := range packs {
 			if run.Status == "passed" {
@@ -731,7 +769,9 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 	if stopped != "" {
 		finalStatus = "stopped"
 	}
-	_ = s.db.UpdateRedTeamCampaignStatus(r.Context(), c.ID, finalStatus, c.ApprovedBy)
+	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancelFinish()
+	_ = s.db.UpdateRedTeamCampaignStatus(finishCtx, c.ID, finalStatus, c.ApprovedBy)
 	if criticals > 0 {
 		s.auditAdmin(r, "redteam.critical", "", auditJSON(map[string]any{"campaign_id": c.ID, "critical": criticals}))
 		// §27.8: critical → alert. Fires for both manual and scheduled runs (no-op if Mattermost

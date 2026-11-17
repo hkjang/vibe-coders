@@ -11,6 +11,7 @@ import {
   riskTone,
   scoreTone,
   statusTone,
+  statusLabel,
   writeDeniedReason,
 } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, type RedTeamData } from "@/features/security/redteam/use-redteam-data";
@@ -109,7 +110,7 @@ export function RedTeamRunsTab({
 
       <SectionCard
         title="실행 이력"
-        description="각 실행(run)의 상태와 위험 점수입니다. 결과에서 케이스별 판정과 증적을 확인하세요."
+        description="실행 상태와 위험 점수입니다. 중단된 실행은 일부 검사 결과만 포함할 수 있습니다."
       >
         <DataTable
           caption="레드팀 캠페인 실행 이력"
@@ -239,6 +240,12 @@ function RunResultsSheet({
       returnFocusRef={returnFocusRef}
       size="wide"
     >
+      {results.data?.run.status === "stopped" ? (
+        <InlineNotice tone="warning" title="중단된 실행의 일부 결과입니다.">
+          아직 수행하지 않은 검사는 통과한 것으로 처리하지 않습니다. 이 실행은 통과 기준선을 갱신하지
+          않습니다. 기록된 결과를 확인한 뒤 캠페인의 조건을 다시 검토하세요.
+        </InlineNotice>
+      ) : null}
       {mode !== "" && mode !== "active-controlled" ? (
         <InlineNotice tone="info" title={`이 실행은 ${mode}(시뮬레이션)입니다.`}>
           실제 모델을 호출하지 않아 대상 응답은 시뮬레이션 표식입니다. 실제 요청/응답을 보려면 각 결과의
@@ -465,7 +472,7 @@ function runColumns(
     column.accessor((row) => row.status, {
       id: "status",
       header: "상태",
-      cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{getValue() || "—"}</Badge>,
+      cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{statusLabel(getValue())}</Badge>,
     }),
     column.accessor((row) => row.failed_cases, {
       id: "cases",
@@ -539,7 +546,7 @@ function resultColumns({
     column.accessor((row) => row.severity, {
       id: "severity",
       header: "심각도",
-      cell: ({ getValue }) => <Badge tone={riskTone(getValue())}>{getValue() || "—"}</Badge>,
+      cell: ({ getValue }) => <Badge tone={riskTone(getValue())}>{statusLabel(getValue())}</Badge>,
     }),
     column.accessor((row) => row.policy_decision, { id: "policy", header: "정책" }),
     column.display({
