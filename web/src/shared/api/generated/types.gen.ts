@@ -2772,10 +2772,40 @@ export type RedTeamReviewedTarget = {
     target_ref: string;
 };
 
+export type RedTeamRunLegacyList = {
+    count: number;
+    runs: Array<RedTeamRunMetadata>;
+};
+
 export type RedTeamRunLimits = {
     budget_limit_krw: number;
     max_calls: number;
     max_output_tokens: number;
+};
+
+export type RedTeamRunMetadata = {
+    campaign_id: string;
+    cost_krw: number;
+    created_at: string;
+    ended_at: string;
+    failed_cases: number;
+    id: string;
+    mode: string;
+    review_id?: string;
+    risk_score: number;
+    source_result_id?: string;
+    started_at: string;
+    status: string;
+    target_id: string;
+    total_cases: number;
+};
+
+export type RedTeamRunPage = {
+    generated_at: string;
+    limit: number;
+    offset: number;
+    runs: Array<RedTeamRunMetadata>;
+    total: number;
 };
 
 export type RedTeamRunReviewRequest = {
@@ -11230,16 +11260,61 @@ export type PostAdminRedteamResultsIdRerunReviewedResponse = PostAdminRedteamRes
 export type GetAdminRedteamRunsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: 'page';
+        limit?: number;
+        offset?: number;
+        status?: 'running' | 'passed' | 'failed' | 'warning' | 'stopped';
+        mode?: 'dry-run' | 'active-controlled';
+        kind?: 'campaign' | 'replay';
+        sort?: string;
+        run_id?: string;
+        campaign_id?: string;
+        source_result_id?: string;
+        review_id?: string;
+        from?: string;
+        to?: string;
+    };
     url: '/admin/redteam/runs';
 };
 
+export type GetAdminRedteamRunsErrors = {
+    /**
+     * Query, authorization or storage error
+     */
+    400: AppError;
+    /**
+     * Query, authorization or storage error
+     */
+    401: AppError;
+    /**
+     * Query, authorization or storage error
+     */
+    403: AppError;
+    /**
+     * Query, authorization or storage error
+     */
+    405: AppError;
+    /**
+     * Query, authorization or storage error
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRedteamRunsError = GetAdminRedteamRunsErrors[keyof GetAdminRedteamRunsErrors];
+
 export type GetAdminRedteamRunsResponses = {
     /**
-     * OK
+     * Legacy run list or explicit page
      */
-    200: unknown;
+    200: RedTeamRunLegacyList | RedTeamRunPage;
 };
+
+export type GetAdminRedteamRunsResponse = GetAdminRedteamRunsResponses[keyof GetAdminRedteamRunsResponses];
 
 export type GetAdminRedteamRunsIdData = {
     body?: never;

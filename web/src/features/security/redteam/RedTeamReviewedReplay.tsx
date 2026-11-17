@@ -36,6 +36,7 @@ export function RedTeamReviewedReplay({
   onClose,
   onResult,
   onOpenRun,
+  onOpenHistory,
   returnFocusRef,
 }: {
   resultId: string;
@@ -45,6 +46,7 @@ export function RedTeamReviewedReplay({
   onClose: () => void;
   onResult: (result: RedTeamReplayOutcome) => void;
   onOpenRun: (id: string) => void;
+  onOpenHistory?: (id: string) => void;
   returnFocusRef: RefObject<HTMLElement | null>;
 }): React.JSX.Element {
   const access = useFeatureMutationAccess(["security.redteam"], canWrite);
@@ -210,6 +212,20 @@ export function RedTeamReviewedReplay({
         footer={
           <>
             <Button onClick={close}>닫기</Button>
+            {consumed && !pending && onOpenHistory ? (
+              <Button
+                onClick={() => {
+                  try {
+                    assertCurrent();
+                    onOpenHistory(resultId);
+                  } catch {
+                    close();
+                  }
+                }}
+              >
+                원본 관련 재실행 이력
+              </Button>
+            ) : null}
             {nextRun ? (
               <Button
                 onClick={() => {

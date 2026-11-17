@@ -1,3 +1,5 @@
+import { useRunHistoryOwner } from "./run-history-context";
+import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { apiClient } from "@/shared/api/client";
@@ -20,6 +22,7 @@ export function RedTeamEvidenceSheet({
   onClose,
   onCreateRemediation,
   onOpenRun,
+  onOpenHistory,
   proxyKey,
   resultId,
   returnFocusRef,
@@ -29,6 +32,7 @@ export function RedTeamEvidenceSheet({
   onClose: () => void;
   onCreateRemediation: (resultId: string) => void;
   onOpenRun: (runId: string) => void;
+  onOpenHistory?: (resultId: string) => void;
   proxyKey: string;
   resultId: string;
   returnFocusRef: React.RefObject<HTMLElement | null>;
@@ -37,13 +41,21 @@ export function RedTeamEvidenceSheet({
   const [pendingRerun, setPendingRerun] = useState(false);
   const queryClient = useQueryClient();
   const replayTrigger = useRef<HTMLButtonElement>(null);
+  const owner = useRunHistoryOwner();
   const evidence = useQuery({
-    queryKey: redteamKeys.evidence(resultId),
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(redteam.results.evidence, { id: resultId }), {
+    queryKey: owner ? featureOwnedKey(redteamKeys.evidence(resultId), owner) : redteamKeys.evidence(resultId),
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      if (owner) assertFeatureRead(owner, signal);
+      const result = await apiClient.request(withPathParams(redteam.results.evidence, { id: resultId }), {
         signal,
         routeId,
-      }),
+        cache: "no-store",
+      });
+      if (owner) assertFeatureRead(owner, signal);
+      return result;
+    },
     enabled: resultId !== "",
   });
 
@@ -167,6 +179,15 @@ export function RedTeamEvidenceSheet({
             for (const queryKey of [redteamKeys.runs, redteamKeys.dashboard, redteamKeys.remediations])
               void queryClient.invalidateQueries({ queryKey });
           }}
+          onOpenHistory={
+            onOpenHistory
+              ? (id) => {
+                  setPendingRerun(false);
+                  onClose();
+                  onOpenHistory(id);
+                }
+              : undefined
+          }
           onOpenRun={(id) => {
             setPendingRerun(false);
             onClose();

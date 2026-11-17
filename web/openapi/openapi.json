@@ -10081,6 +10081,26 @@
         ],
         "type": "object"
       },
+      "RedTeamRunLegacyList": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RedTeamRunMetadata"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "runs"
+        ],
+        "type": "object"
+      },
       "RedTeamRunLimits": {
         "additionalProperties": false,
         "properties": {
@@ -10105,6 +10125,109 @@
           "budget_limit_krw",
           "max_calls",
           "max_output_tokens"
+        ],
+        "type": "object"
+      },
+      "RedTeamRunMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "type": "string"
+          },
+          "cost_krw": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "ended_at": {
+            "type": "string"
+          },
+          "failed_cases": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "review_id": {
+            "type": "string"
+          },
+          "risk_score": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_result_id": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "total_cases": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cost_krw",
+          "created_at",
+          "ended_at",
+          "failed_cases",
+          "id",
+          "mode",
+          "risk_score",
+          "started_at",
+          "status",
+          "target_id",
+          "total_cases"
+        ],
+        "type": "object"
+      },
+      "RedTeamRunPage": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RedTeamRunMetadata"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "limit",
+          "offset",
+          "runs",
+          "total"
         ],
         "type": "object"
       },
@@ -14919,7 +15042,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.144"
+    "version": "v0.86.145"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -26934,10 +27057,209 @@
     },
     "/admin/redteam/runs": {
       "get": {
+        "description": "Existing admin:read run history. Without view, returns the unchanged latest-100 runs/count response. Opt-in view=page returns count and bounded rows from one database snapshot, with exact identifier, status, mode, kind and half-open RFC3339 from/to filters applied before pagination. Both time bounds are required together. Sort accepts at most three unique field:asc|desc pairs from created_at,id,status,total_cases,failed_cases,risk_score,cost_krw; default created_at:desc, id:desc breaks ties. UTC timestamps sort at nanosecond precision. kind=replay selects source_result_id present, kind=campaign selects absent. Page responses never include result, prompt or evidence bodies. Unknown/duplicate/malformed parameters and credential-shaped identifiers are rejected without echo. Responses are no-store. Separate page requests may reflect new or updated runs.",
         "operationId": "get__admin_redteam_runs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "page"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "running",
+                "passed",
+                "failed",
+                "warning",
+                "stopped"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "schema": {
+              "enum": [
+                "dry-run",
+                "active-controlled"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "enum": [
+                "campaign",
+                "replay"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "campaign_id",
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_result_id",
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "review_id",
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RedTeamRunLegacyList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RedTeamRunPage"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Legacy run list or explicit page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, authorization or storage error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, authorization or storage error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, authorization or storage error"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, authorization or storage error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query, authorization or storage error"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

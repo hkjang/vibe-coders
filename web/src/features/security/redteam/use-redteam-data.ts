@@ -27,7 +27,7 @@ const redteam = endpoints.domains.redteam;
  * Every list the Red Team screen renders. Each query stands alone so one failing
  * panel degrades to a warning instead of blanking the page.
  */
-export function useRedTeamData() {
+export function useRedTeamData(loadRunSummary = true) {
   const refetchInterval = useRefreshInterval();
   const shared = { refetchInterval, refetchIntervalInBackground: false } as const;
 
@@ -48,6 +48,7 @@ export function useRedTeamData() {
   });
   const runs = useQuery({
     queryKey: redteamKeys.runs,
+    enabled: loadRunSummary,
     queryFn: ({ signal }) => apiClient.request(redteam.runs.list, { signal, routeId }),
     ...shared,
   });

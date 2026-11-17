@@ -2196,6 +2196,9 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_redteam_runs_campaign ON redteam_runs(campaign_id, created_at)`,
 		`ALTER TABLE redteam_runs ADD COLUMN source_result_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE redteam_runs ADD COLUMN review_id TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_redteam_runs_source_page ON redteam_runs(source_result_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_redteam_runs_review ON redteam_runs(review_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_redteam_runs_page ON redteam_runs (` + metadataTimestampOrderSQL("created_at") + ` DESC, id DESC)`,
 		`CREATE TABLE IF NOT EXISTS redteam_case_results (
 			id TEXT PRIMARY KEY,
 			run_id TEXT NOT NULL,

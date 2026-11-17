@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -86,6 +87,11 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	t.Cleanup(upstream.Close)
 	seedRedTeamBrowserCampaigns(t, h, upstream.URL)
 	verifyReplay := seedRedTeamBrowserReplay(t, h)
+	for i := 0; i < 127; i++ {
+		if err := h.db.InsertRedTeamRun(t.Context(), store.RedTeamRun{ID: fmt.Sprintf("browser-history-%03d", i), CampaignID: "browser-history", TargetID: "browser-history-target", Mode: "dry-run", Status: "passed", CreatedAt: "2020-01-01T00:00:00Z"}); err != nil {
+			t.Fatal("history fixture unavailable")
+		}
+	}
 	// Fault only the intended campaign. The production SQL and handler are unchanged.
 	raw, err := sql.Open("sqlite", filepath.Join(filepath.Dir(h.childScratch), "auth.db"))
 	if err != nil {
@@ -135,7 +141,7 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	if decoder.Decode(&summary) != nil || summary.SourceLine < 0 || summary.SourceLine > 10000 {
 		t.Fatal("redteam browser safe summary invalid; raw output suppressed")
 	}
-	if err != nil || !summary.Passed || summary.TestCount != 8 {
+	if err != nil || !summary.Passed || summary.TestCount != 9 {
 		t.Fatalf("redteam browser failed at source line %d; raw output suppressed", summary.SourceLine)
 	}
 	if live.Load() != 1 || recording.Load() != 1 || redirect.Load() != 1 || replay.Load() != 1 || replayRecording.Load() != 1 || other.Load() != 0 || unsafe.Load() != 0 {
@@ -143,7 +149,7 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	}
 	verifyRedTeamBrowserStorage(t, h)
 	verifyReplay()
-	t.Log("Red Team browser: 8/8; actual provider, recording and audit assertions passed")
+	t.Log("Red Team browser: 9/9; actual provider, recording and audit assertions passed")
 }
 
 func seedRedTeamBrowserCampaigns(t *testing.T, h *browserAuthHarness, baseURL string) {
@@ -176,12 +182,18 @@ func seedRedTeamBrowserCampaigns(t *testing.T, h *browserAuthHarness, baseURL st
 
 func verifyRedTeamBrowserStorage(t *testing.T, h *browserAuthHarness) {
 	t.Helper()
-	runs, err := h.db.ListRedTeamRuns(t.Context(), 100)
-	if err != nil || len(runs) != 8 {
+	runs, err := h.db.ListRedTeamRuns(t.Context(), 500)
+	history := 0
+	for _, run := range runs {
+		if run.CampaignID == "browser-history" {
+			history++
+		}
+	}
+	if err != nil || len(runs) != 135 || history != 127 {
 		t.Fatal("unexpected persisted execution count")
 	}
 	for _, run := range runs {
-		if strings.HasPrefix(run.CampaignID, "browser-redteam-replay") {
+		if run.CampaignID == "browser-history" || strings.HasPrefix(run.CampaignID, "browser-redteam-replay") {
 			continue
 		}
 		results, err := h.db.ListRedTeamCaseResults(t.Context(), run.ID)

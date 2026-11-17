@@ -1,3 +1,4 @@
+import { runPageEndpoint } from "./redteam-run-page";
 import { redTeamRecordingSchema } from "./redteam-recording";
 // redteam domain endpoints. Declare every server call this domain's screens make
 // here with `operation()` from "@/shared/api/endpoint-factory" and a zod schema
@@ -517,6 +518,7 @@ export const redteamEndpoints = {
     ),
   },
   runs: {
+    page: runPageEndpoint,
     list: operation<GetAdminRedteamRunsData, unknown>()("GET", "/admin/redteam/runs", runListSchema),
     results: operation<GetAdminRedteamRunsIdResultsData, unknown>()(
       "GET",

@@ -2,6 +2,9 @@ import type { BadgeProps } from "@/shared/components/ui/Badge";
 
 type Tone = NonNullable<BadgeProps["tone"]>;
 
+const label = (labels: Readonly<Record<string, string>>, key: string, fallback: string): string =>
+  Object.hasOwn(labels, key) ? (labels[key] ?? fallback) : fallback;
+
 const lower = (value: string | undefined): string => (value ?? "").trim().toLowerCase();
 
 /** Case decision (`pass` … `critical`) as the legacy screen labelled it. */
@@ -15,7 +18,7 @@ export const decisionLabels: Readonly<Record<string, string>> = {
 };
 
 export function decisionLabel(value: string | undefined): string {
-  return decisionLabels[lower(value)] ?? (value || "—");
+  return label(decisionLabels, lower(value), value || "—");
 }
 
 export function decisionTone(value: string | undefined): Tone {
@@ -63,7 +66,7 @@ const statusLabels: Readonly<Record<string, string>> = {
 };
 
 export function statusLabel(value: string | undefined): string {
-  return statusLabels[lower(value)] ?? (value || "확인 필요");
+  return label(statusLabels, lower(value), value || "확인 필요");
 }
 
 export function stopReasonLabel(value: string): string {
@@ -77,7 +80,7 @@ export function stopReasonLabel(value: string): string {
     context_cancelled: "요청 연결 또는 실행 대기가 취소되었습니다",
     cost_unavailable: "호출 비용을 확인할 수 없습니다",
   };
-  return reasons[lower(value)] ?? "서버가 실행 중단을 보고했습니다";
+  return label(reasons, lower(value), "서버가 실행 중단을 보고했습니다");
 }
 
 /** Campaign and run lifecycle status. */
@@ -106,7 +109,7 @@ export const remediationStatusLabels: Readonly<Record<string, string>> = {
 };
 
 export function remediationLabel(value: string | undefined): string {
-  return remediationStatusLabels[lower(value) || "open"] ?? (value || "—");
+  return label(remediationStatusLabels, lower(value) || "open", value || "—");
 }
 
 export function remediationTone(value: string | undefined): Tone {
@@ -182,5 +185,5 @@ export function recordingStageLabel(stage: string | undefined): string {
     case_result: "검사 결과·증적·조치 저장",
     finalize: "실행·캠페인 상태와 기준선 갱신",
   };
-  return labels[stage ?? ""] ?? "저장 확인";
+  return label(labels, stage ?? "", "저장 확인");
 }

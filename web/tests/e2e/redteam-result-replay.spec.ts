@@ -6,9 +6,10 @@ import {
   replayOutcomeFixture,
 } from "../../src/features/security/redteam/reviewed-replay-fixture";
 
-async function fixture(page: Page, { status = 200, recording = true } = {}) {
+async function fixture(page: Page, { status = 200, recording = true, history = false } = {}) {
   await page.clock.setFixedTime(new Date("2026-11-17T00:00:00Z"));
   const base = await installPromptLibrary(page);
+  if (history) base.bootstrap.backend_version = "v0.86.145";
   base.bootstrap.allowed_features = ["security.redteam"];
   Object.assign(base.bootstrap.migration_registry[0] ?? {}, {
     feature_id: "security.redteam",
@@ -33,8 +34,24 @@ async function fixture(page: Page, { status = 200, recording = true } = {}) {
       path = new URL(request.url()).pathname;
     if (request.method() === "GET") {
       if (path.endsWith("/kill-switch")) return route.fulfill({ json: { enabled: false } });
-      if (path === "/admin/redteam/runs")
-        return route.fulfill({ json: { runs: [...(newRun ? [newRun] : []), originalRun] } });
+      if (path === "/admin/redteam/runs") {
+        const query = new URL(request.url()).searchParams;
+        const runs = [...(newRun ? [newRun] : []), originalRun].filter(
+          (run) => !query.get("source_result_id") || run.source_result_id === query.get("source_result_id"),
+        );
+        return route.fulfill({
+          json:
+            query.get("view") === "page"
+              ? {
+                  runs,
+                  total: runs.length,
+                  limit: Number(query.get("limit")),
+                  offset: Number(query.get("offset")),
+                  generated_at: "2026-11-17T00:00:00Z",
+                }
+              : { runs },
+        });
+      }
       if (path === "/admin/redteam/runs/public-source-run/results")
         return route.fulfill({ json: { run: originalRun, results: [review.source_result], prompts: {} } });
       if (path === "/admin/redteam/runs/public-run/results")
@@ -82,6 +99,7 @@ async function fixture(page: Page, { status = 200, recording = true } = {}) {
       review_token: review.review_token,
       proxy_key: "public-fixture-key",
     });
+    if (status !== 200 && history) newRun = { ...originalRun, ...replayOutcomeFixture(review).runs[0] };
     if (status !== 200)
       return route.fulfill({
         status,
@@ -212,3 +230,20 @@ for (const theme of ["light", "dark"] as const)
       expect(api.writes).toHaveLength(1);
       api.base.check();
     });
+
+test("응답 미확정 후 원본 관련 이력에서 저장된 재실행을 찾는다", async ({ page }) => {
+  const api = await fixture(page, { status: 500, history: true });
+  await openReplay(page);
+  const panel = await reviewReplay(page);
+  await panel.getByLabel("원본 결과 ID 확인", { exact: false }).fill("public-source-result");
+  await panel.getByRole("button", { name: "검토한 한 건만 실제 재실행" }).click();
+  await expect(panel.getByText(/재실행 결과를 확정할 수 없습니다/)).toBeVisible();
+  await panel.getByRole("button", { name: "원본 관련 재실행 이력" }).click();
+  await expect(panel).toBeHidden();
+  await expect(page).toHaveURL(/runs_source_result_id=public-source-result/);
+  await expect(page.getByText("조건에 맞는 실행 1건")).toBeVisible();
+  await page.getByRole("button", { name: "public-run 결과 보기" }).click();
+  await expect(page.getByRole("dialog", { name: "레드팀 결과" })).toBeVisible();
+  expect(api.writes).toHaveLength(2);
+  api.base.check();
+});

@@ -297,6 +297,15 @@ func (s *Server) handleRedTeamRuns(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	query, parseErr := url.ParseQuery(r.URL.RawQuery)
+	if parseErr != nil {
+		writeOpenAIError(w, 400, "실행 이력 조회 조건을 확인하세요.", "invalid_request_error", "redteam_run_page_invalid")
+		return
+	}
+	if query.Has("view") {
+		s.writeRedTeamRunPage(w, r, query)
+		return
+	}
 	runs, err := s.db.ListRedTeamRuns(r.Context(), 100)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_runs_failed")

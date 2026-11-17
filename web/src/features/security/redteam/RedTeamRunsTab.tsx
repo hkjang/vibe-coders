@@ -1,39 +1,29 @@
+import { useAuth } from "@/app/auth/AuthProvider";
+import { versionAtLeast } from "@/config/migration-registry";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { runFilterKeys } from "@/shared/utils/redteam-run-query";
+import { RedTeamRunExplorer } from "./RedTeamRunExplorer";
+import { RunResultsSheet } from "./RunResultsSheet";
+import { runColumns } from "./run-columns";
 import { RedTeamEvidenceSheet } from "./RedTeamEvidenceSheet";
-import { riskLabel } from "./redteam-labels";
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
 import {
-  decisionLabel,
-  decisionTone,
-  executionModeLabel,
   isRemediationClosed,
   remediationLabel,
   remediationTone,
-  riskTone,
-  scoreTone,
-  statusTone,
-  statusLabel,
   writeDeniedReason,
 } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, type RedTeamData } from "@/features/security/redteam/use-redteam-data";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
-import {
-  withPathParams,
-  type RedTeamBaseline,
-  type RedTeamCaseResult,
-  type RedTeamRemediation,
-  type RedTeamRun,
-} from "@/shared/api/domains/redteam";
+import { withPathParams, type RedTeamBaseline, type RedTeamRemediation } from "@/shared/api/domains/redteam";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
-import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Sheet } from "@/shared/components/ui/Sheet";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
@@ -57,6 +47,9 @@ export function RedTeamRunsTab({
   proxyKey,
 }: RunsTabProps): React.JSX.Element {
   const { baselines, remediations, runs } = data;
+  const { backendVersion } = useAuth();
+  const [, updateSearch] = useSearchState();
+  const paged = versionAtLeast(backendVersion, "v0.86.145");
   const { remember, returnFocusRef } = useReturnFocus();
   const [openResultId, setOpenResultId] = useState("");
   const [pendingApply, setPendingApply] = useState<RedTeamRemediation | undefined>();
@@ -100,7 +93,7 @@ export function RedTeamRunsTab({
 
   return (
     <div className="rt-stack">
-      {runs.isError ? (
+      {!paged && runs.isError ? (
         <PanelFailure
           error={runs.error}
           hasData={Boolean(runs.data)}
@@ -109,23 +102,32 @@ export function RedTeamRunsTab({
         />
       ) : null}
 
-      <SectionCard
-        title="실행 이력"
-        description="실행 상태와 위험 점수입니다. 중단된 실행은 일부 검사 결과만 포함할 수 있습니다."
-      >
-        <DataTable
-          caption="레드팀 캠페인 실행 이력"
-          columns={runColumns((run, event) => {
+      {paged ? (
+        <RedTeamRunExplorer
+          onOpen={(id, event) => {
             remember(event);
-            onOpenRun(run.id);
-          })}
-          data={runs.data?.runs ?? []}
-          emptyMessage="실행 이력이 없습니다. 캠페인 탭에서 캠페인을 실행하면 채워집니다."
-          error={runs.isError && !runs.data ? "실행 이력을 불러오지 못했습니다." : undefined}
-          loading={runs.isPending}
-          onRetry={() => void runs.refetch()}
+            onOpenRun(id);
+          }}
         />
-      </SectionCard>
+      ) : (
+        <SectionCard
+          title="실행 이력"
+          description="실행 상태와 위험 점수입니다. 중단된 실행은 일부 검사 결과만 포함할 수 있습니다."
+        >
+          <DataTable
+            caption="레드팀 캠페인 실행 이력"
+            columns={runColumns((run, event) => {
+              remember(event);
+              onOpenRun(run.id);
+            })}
+            data={runs.data?.runs ?? []}
+            emptyMessage="실행 이력이 없습니다. 캠페인 탭에서 캠페인을 실행하면 채워집니다."
+            error={runs.isError && !runs.data ? "실행 이력을 불러오지 못했습니다." : undefined}
+            loading={runs.isPending}
+            onRetry={() => void runs.refetch()}
+          />
+        </SectionCard>
+      )}
 
       <div className="rt-grid-2">
         <SectionCard
@@ -177,6 +179,23 @@ export function RedTeamRunsTab({
       />
 
       <RedTeamEvidenceSheet
+        onOpenHistory={
+          paged
+            ? (resultId) => {
+                setOpenResultId("");
+                updateSearch(
+                  {
+                    ...Object.fromEntries(runFilterKeys.map((key) => [key, null])),
+                    tab: "runs",
+                    run: null,
+                    runs_source_result_id: resultId,
+                    runs_kind: "replay",
+                  },
+                  { replace: false },
+                );
+              }
+            : undefined
+        }
         onOpenRun={onOpenRun}
         canWrite={canWrite}
         onClose={() => setOpenResultId("")}
@@ -201,231 +220,6 @@ export function RedTeamRunsTab({
       />
     </div>
   );
-}
-
-function RunResultsSheet({
-  canWrite,
-  onClose,
-  onCreateRemediation,
-  onOpenEvidence,
-  remediationByResult,
-  returnFocusRef,
-  runId,
-  writeTitle,
-}: {
-  canWrite: boolean;
-  onClose: () => void;
-  onCreateRemediation: (resultId: string) => void;
-  onOpenEvidence: (resultId: string, event: { currentTarget: HTMLElement }) => void;
-  remediationByResult: ReadonlyMap<string, RedTeamRemediation>;
-  returnFocusRef: React.RefObject<HTMLElement | null>;
-  runId: string;
-  writeTitle: string | undefined;
-}): React.JSX.Element {
-  const results = useQuery({
-    queryKey: redteamKeys.runResults(runId),
-    queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(redteam.runs.results, { id: runId }), { signal, routeId }),
-    enabled: runId !== "",
-  });
-  const mode = results.data?.run.mode ?? "";
-  const prompts = results.data?.prompts ?? {};
-
-  return (
-    <Sheet
-      open={runId !== ""}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      title="레드팀 결과"
-      description="증적에서 요청/응답을 확인하고, 위험하면 조치를 생성하세요."
-      returnFocusRef={returnFocusRef}
-      size="wide"
-    >
-      {results.data?.run.status === "stopped" ? (
-        <InlineNotice tone="warning" title="중단된 실행의 일부 결과입니다.">
-          아직 수행하지 않은 검사는 통과한 것으로 처리하지 않습니다. 이 실행은 통과 기준선을 갱신하지
-          않습니다. 기록된 결과를 확인한 뒤 캠페인의 조건을 다시 검토하세요.
-        </InlineNotice>
-      ) : null}
-      {mode !== "" && mode !== "active-controlled" ? (
-        <InlineNotice tone="info" title={`이 실행은 ${executionModeLabel(mode)}(시뮬레이션)입니다.`}>
-          실제 모델을 호출하지 않아 대상 응답은 시뮬레이션 표식입니다. 실제 요청/응답을 보려면 각 결과의
-          증적에서 &lsquo;조건 검토 후 한 건 재실행&rsquo;을 사용하세요.
-        </InlineNotice>
-      ) : null}
-      {results.isError ? (
-        <PanelFailure
-          error={results.error}
-          hasData={Boolean(results.data)}
-          label="실행 결과"
-          onRetry={() => void results.refetch()}
-        />
-      ) : null}
-      <DataTable
-        caption="실행의 검사별 판정 결과"
-        columns={resultColumns({
-          canWrite,
-          onCreateRemediation,
-          onOpenEvidence,
-          prompts,
-          remediationByResult,
-          writeTitle,
-        })}
-        data={results.data?.results ?? []}
-        emptyMessage="결과가 없습니다."
-        loading={runId !== "" && results.isPending}
-      />
-    </Sheet>
-  );
-}
-
-function runColumns(
-  onOpen: (run: RedTeamRun, event: { currentTarget: HTMLElement }) => void,
-): ReadonlyArray<DataTableColumn<RedTeamRun>> {
-  const column = createDataTableColumnHelper<RedTeamRun>();
-  return column.columns([
-    column.accessor((row) => row.id, {
-      id: "id",
-      header: "실행",
-      cell: ({ row }) => (
-        <div className="rt-stacked-cell">
-          <code className="mono">{row.original.id}</code>
-          {row.original.source_result_id ? (
-            <span>
-              한 건 재실행 · 원본 <code>{row.original.source_result_id}</code>
-            </span>
-          ) : null}
-          <span title={row.original.created_at || undefined}>
-            {formatRelative(row.original.created_at || null)}
-          </span>
-        </div>
-      ),
-    }),
-    column.accessor((row) => row.campaign_id, {
-      id: "campaign_id",
-      header: "캠페인",
-      cell: ({ getValue }) => <code className="mono">{getValue()}</code>,
-    }),
-    column.accessor((row) => row.target_id, {
-      id: "target_id",
-      header: "대상",
-      cell: ({ getValue }) => <code className="mono">{getValue()}</code>,
-    }),
-    column.accessor((row) => row.status, {
-      id: "status",
-      header: "상태",
-      cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{statusLabel(getValue())}</Badge>,
-    }),
-    column.accessor((row) => row.failed_cases, {
-      id: "cases",
-      header: "실패/전체",
-      cell: ({ row }) => (
-        <span className="cell-number">
-          {formatNumber(row.original.failed_cases)} / {formatNumber(row.original.total_cases)}
-        </span>
-      ),
-    }),
-    column.accessor((row) => row.risk_score, {
-      id: "risk_score",
-      header: "위험",
-      cell: ({ getValue }) => <Badge tone={scoreTone(getValue())}>{formatNumber(getValue())}</Badge>,
-    }),
-    column.display({
-      id: "actions",
-      header: "작업",
-      cell: ({ row }) => (
-        <Button
-          size="small"
-          aria-label={`${row.original.id} 결과 보기`}
-          onClick={(event) => onOpen(row.original, event)}
-        >
-          결과
-        </Button>
-      ),
-    }),
-  ]);
-}
-
-function resultColumns({
-  canWrite,
-  onCreateRemediation,
-  onOpenEvidence,
-  prompts,
-  remediationByResult,
-  writeTitle,
-}: {
-  canWrite: boolean;
-  onCreateRemediation: (resultId: string) => void;
-  onOpenEvidence: (resultId: string, event: { currentTarget: HTMLElement }) => void;
-  prompts: Readonly<Record<string, string>>;
-  remediationByResult: ReadonlyMap<string, RedTeamRemediation>;
-  writeTitle: string | undefined;
-}): ReadonlyArray<DataTableColumn<RedTeamCaseResult>> {
-  const column = createDataTableColumnHelper<RedTeamCaseResult>();
-  return column.columns([
-    column.accessor((row) => row.case_id, {
-      id: "case_id",
-      header: "검사",
-      cell: ({ getValue }) => <code className="mono">{getValue()}</code>,
-    }),
-    column.accessor((row) => prompts[row.id] ?? "", {
-      id: "prompt",
-      header: "요청 프롬프트",
-      cell: ({ getValue }) =>
-        getValue() === "" ? (
-          <span className="rt-muted">—</span>
-        ) : (
-          <span className="rt-template" title={getValue()}>
-            {getValue()}
-          </span>
-        ),
-    }),
-    column.accessor((row) => row.decision, {
-      id: "decision",
-      header: "판정",
-      cell: ({ getValue }) => <Badge tone={decisionTone(getValue())}>{decisionLabel(getValue())}</Badge>,
-    }),
-    column.accessor((row) => riskLabel(row.severity), {
-      id: "severity",
-      header: "심각도",
-      cell: ({ row }) => (
-        <Badge tone={riskTone(row.original.severity)}>{riskLabel(row.original.severity)}</Badge>
-      ),
-    }),
-    column.accessor((row) => row.policy_decision, { id: "policy", header: "정책" }),
-    column.display({
-      id: "actions",
-      header: "작업",
-      cell: ({ row }) => {
-        const remediation = remediationByResult.get(row.original.id);
-        return (
-          <div className="table-actions">
-            <Button
-              size="small"
-              aria-label={`${row.original.case_id} 증적 보기`}
-              onClick={(event) => onOpenEvidence(row.original.id, event)}
-            >
-              증적
-            </Button>
-            {remediation ? (
-              <Badge tone={remediationTone(remediation.status)}>{remediationLabel(remediation.status)}</Badge>
-            ) : (
-              <Button
-                size="small"
-                disabled={!canWrite}
-                title={writeTitle}
-                aria-label={`${row.original.case_id} 조치 생성`}
-                onClick={() => onCreateRemediation(row.original.id)}
-              >
-                조치
-              </Button>
-            )}
-          </div>
-        );
-      },
-    }),
-  ]);
 }
 
 function baselineColumns(): ReadonlyArray<DataTableColumn<RedTeamBaseline>> {
