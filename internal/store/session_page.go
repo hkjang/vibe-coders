@@ -64,6 +64,12 @@ func (s *SQLStore) sessionPageSQL(q SessionPageQuery) (string, []any, error) {
 	if s.dialect == "postgres" {
 		orderID = `session_id COLLATE "C"`
 	}
+	// Only fixed SQL column expressions are passed here. PostgreSQL BYTEA casts
+	// parse escape sequences; OCTET_LENGTH counts the original UTF-8 text bytes.
+	byteLength := func(column string) string { return "length(CAST(" + column + " AS BLOB))" }
+	if s.dialect == "postgres" {
+		byteLength = func(column string) string { return "octet_length(" + column + ")" }
+	}
 	// Aggregate usage separately: multiple usage records may contribute tokens and
 	// cost, but must never multiply request/error/model counts.
 	statement := `WITH scoped AS (
@@ -79,9 +85,9 @@ func (s *SQLStore) sessionPageSQL(q SessionPageQuery) (string, []any, error) {
  FROM scoped r LEFT JOIN usage u ON u.request_id=r.id GROUP BY r.session_id
  ), page AS (SELECT * FROM grouped ORDER BY last_seen DESC,` + orderID + ` DESC LIMIT ? OFFSET ?)
  SELECT c.sessions,c.requests,c.errors,c.tokens,c.cost,
- CASE WHEN length(CAST(p.session_id AS BLOB))<=4096 THEN p.session_id ELSE '' END,
+ CASE WHEN ` + byteLength("p.session_id") + `<=4096 THEN p.session_id ELSE '' END,
  p.requests,p.first_seen,p.last_seen,p.models,p.api_keys,p.errors,p.tokens,p.cost,
- COALESCE((SELECT CASE WHEN length(CAST(pl.redacted_text AS BLOB))<=8192 THEN pl.redacted_text ELSE '' END
+ COALESCE((SELECT CASE WHEN ` + byteLength("pl.redacted_text") + `<=8192 THEN pl.redacted_text ELSE '' END
  FROM prompt_logs pl JOIN scoped pr ON pr.id=pl.request_id
  WHERE pr.session_id=p.session_id AND LOWER(pl.role)='user'
  ORDER BY ` + metadataTimestampOrderSQL("pl.created_at") + ` DESC,pl.id DESC LIMIT 1),'')

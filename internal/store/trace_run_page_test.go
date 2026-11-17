@@ -119,6 +119,12 @@ func TestTraceRunPageOversizedLegacyUpgrade(t *testing.T) {
 	if err := db.RecordAIAppRun(t.Context(), AIAppRun{ID: "huge", AppID: "none", TraceID: huge}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.RecordWorkflowRun(t.Context(), WorkflowRun{ID: "escaped", WorkflowID: "none", TraceID: `C:\legacy\trace`}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordAIAppRun(t.Context(), AIAppRun{ID: "escaped", AppID: "none", TraceID: `C:\legacy\trace`}); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Migrate(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +177,7 @@ func TestTraceRunPageNaturalPlannerAtScale(t *testing.T) {
 	}
 	for _, kind := range []string{"workflow", "app"} {
 		q := TraceRunQuery{TraceID: "selected-trace", Kind: kind, Limit: 25, Teams: []string{"team-a"}, TeamScoped: true}
-		statement, args, err := traceRunPageQuery(q)
+		statement, args, err := traceRunPageQuery(q, db.dialect)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -194,6 +200,74 @@ func TestTraceRunPageNaturalPlannerAtScale(t *testing.T) {
 		rows, total, err := db.TraceRunPage(t.Context(), q)
 		if err != nil || len(rows) != 25 || total != 100 {
 			t.Fatal("paged plan result", len(rows), total, err)
+		}
+	}
+}
+
+func TestTraceRunPageLiteralTextBytes(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	// These ordinary strings must not be parsed as BYTEA escape input, either by
+	// the partial index during inserts or by the bounded metadata projection.
+	for i, trace := range []string{`trace\n`, `C:\traces\new`, `\x4142`} {
+		id := fmt.Sprintf("run-%d", i)
+		name := `C:\work\new\flow`
+		if err := db.UpsertWorkflow(t.Context(), Workflow{ID: id, Name: name, Steps: []WorkflowStep{}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.RecordWorkflowRun(t.Context(), WorkflowRun{ID: id, WorkflowID: id, TraceID: trace, UserID: `owner\name`, Status: "ok"}); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := db.CreateWorkApp(t.Context(), WorkApp{ID: id, Title: name, Components: []AppComponent{}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.RecordAIAppRun(t.Context(), AIAppRun{ID: id, AppID: id, TraceID: trace, UserID: `owner\name`, Status: "ok"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, kind := range []string{"workflow", "app"} {
+			rows, total, err := db.TraceRunPage(t.Context(), TraceRunQuery{Kind: kind, TraceID: trace, Limit: 25})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if total != 1 || len(rows) != 1 || rows[0].ResourceName != name || rows[0].OwnerID != `owner\name` {
+				t.Fatal("literal metadata changed")
+			}
+		}
+	}
+}
+
+func TestTraceRunPageLegacyByteaIndexUpgrade(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	if db.dialect != "postgres" {
+		t.Skip("PostgreSQL BYTEA index upgrade")
+	}
+	for _, table := range []string{"workflow_runs", "ai_app_runs"} {
+		index := "idx_" + table + "_trace_metadata"
+		if _, err := db.db.ExecContext(t.Context(), "DROP INDEX "+index); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.db.ExecContext(t.Context(), "CREATE INDEX "+index+" ON "+table+"(trace_id) WHERE length(CAST(trace_id AS BYTEA)) BETWEEN 1 AND 1024"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		if err := db.Migrate(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	trace := `C:\legacy\trace`
+	if err := db.RecordWorkflowRun(t.Context(), WorkflowRun{ID: "legacy", WorkflowID: "none", TraceID: trace}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordAIAppRun(t.Context(), AIAppRun{ID: "legacy", AppID: "none", TraceID: trace}); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"workflow", "app"} {
+		rows, total, err := db.TraceRunPage(t.Context(), TraceRunQuery{TraceID: trace, Kind: kind, Limit: 25})
+		if err != nil || total != 1 || len(rows) != 1 {
+			t.Fatal("legacy candidate index was not replaced", err)
 		}
 	}
 }
