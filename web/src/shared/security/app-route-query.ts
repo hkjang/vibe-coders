@@ -1,3 +1,4 @@
+import { validContextSort } from "@/shared/utils/context-registry-query";
 import {
   containsConfiguredCredential,
   containsPotentialSecret,
@@ -38,7 +39,7 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 
 export const sensitiveQueryRejectionStateKey = "appSensitiveQueryKeys";
-const preservedRejectionKeys = new Set(["q", "team"]);
+const preservedRejectionKeys = new Set(["q", "team", "contexts_q", "contexts_sort"]);
 const preservedBooleanStateKeys = [
   "providerDetailRejected",
   "providerSearchRejected",
@@ -67,6 +68,9 @@ function sensitiveParameter(
   // generic credential heuristics so a prefix such as `req_`, or an incidental
   // `sk-` substring, cannot break safe request-detail navigation.
   if (key === "selected_ref" && values.every(isAppRequestRef)) return false;
+  // This bounded enum grammar contains only column ids and directions. The
+  // registry column named key is not an assigned credential.
+  if (key === "contexts_sort" && values.length === 1 && validContextSort(values[0] ?? "")) return false;
   if (values.some((value) => containsConfiguredCredential(value, credentialPrefixes))) return true;
   if (key === "provider_ref" && values.every(isProviderRef)) return false;
   if (key === "cursor" && values.every(isOpaqueAppRequestCursor)) return false;

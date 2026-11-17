@@ -5836,6 +5836,8 @@ export type GetAdminContextsData = {
     body?: never;
     path?: never;
     query?: {
+        q?: string;
+        sort?: string;
         view?: 'metadata';
         state?: 'all' | 'enabled' | 'disabled';
         limit?: number;

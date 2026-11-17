@@ -1,3 +1,7 @@
+import { ContextSearchControls } from "./ContextSearchControls";
+import { useLocation } from "react-router";
+import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
+import { readContextSearch, contextSortColumns, contextSortValue } from "./context-search";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
 import type { ContextRegistryMetadataItem } from "@/shared/api/generated";
@@ -53,6 +57,14 @@ const columns: readonly DataTableColumn<ContextRegistryMetadataItem>[] = [
   },
 ];
 
+// Sort controls need room for the full Korean label, units and icons.
+// Preserve the original layout for older backends.
+const searchableColumns: readonly DataTableColumn<ContextRegistryMetadataItem>[] = columns.map((column) => {
+  const width =
+    column.id === "enabled" ? 144 : column.id === "tokens" ? 144 : column.id === "count" ? 176 : 0;
+  return width ? { ...column, size: width, minSize: width } : column;
+});
+
 export function ContextRegistryTab() {
   const { backendVersion } = useAuth();
   if (!versionAtLeast(backendVersion, "v0.86.130"))
@@ -61,10 +73,45 @@ export function ContextRegistryTab() {
         {text.support}
       </InlineNotice>
     );
-  return <ContextRegistryContent />;
+  return <ContextRegistrySearchBoundary />;
 }
 
-function ContextRegistryContent() {
+function ContextRegistrySearchBoundary() {
+  const { backendVersion, credentialPrefixes } = useAuth();
+  const location = useLocation();
+  const [params, update] = useSearchState();
+  const search = readContextSearch(params, credentialPrefixes);
+  // Route sanitization removes the value but preserves this value-free marker.
+  // Treat it as invalid until explicit reset, never as an unfiltered request.
+  const rejected = ["contexts_q", "contexts_sort"].some((key) => rejectedSensitiveQuery(location.state, key));
+  const supported = versionAtLeast(backendVersion, "v0.86.134");
+  const requested = params.has("contexts_q") || params.has("contexts_sort");
+  if (rejected || !search.valid || (!supported && requested))
+    return (
+      <InlineNotice tone="warning" title={text.tab}>
+        <p>{rejected || !search.valid ? text.invalidRoute : text.searchSupport}</p>
+        <Button
+          onClick={() =>
+            update(
+              { contexts_q: null, contexts_sort: null, contexts_state: null, contexts_page: null },
+              { replace: true },
+            )
+          }
+        >
+          {text.reset}
+        </Button>
+      </InlineNotice>
+    );
+  return <ContextRegistryContent search={search} searchable={supported} />;
+}
+
+function ContextRegistryContent({
+  search,
+  searchable,
+}: {
+  search: ReturnType<typeof readContextSearch>;
+  searchable: boolean;
+}) {
   const [params, update] = useSearchState();
   const state = contextStates.find((value) => value === params.get("contexts_state")) ?? "all";
   const size = [25, 50, 100].includes(Number(params.get("contexts_size")))
@@ -73,9 +120,20 @@ function ContextRegistryContent() {
   const page = Math.min(pageFromParam(params.get("contexts_page")), Math.floor(1_000_000 / size) + 1);
   const offset = (page - 1) * size;
   const query = useLibraryQuery({
-    key: ["prompts", "contexts", state, size, offset],
+    key: ["prompts", "contexts", state, size, offset, search.q, search.sort],
     read: (prefixes, signal) =>
-      readContextMetadata({ view: "metadata", state, limit: size, offset }, prefixes, signal),
+      readContextMetadata(
+        {
+          view: "metadata",
+          state,
+          limit: size,
+          offset,
+          ...(search.q ? { q: search.q } : {}),
+          ...(search.sort ? { sort: search.sort } : {}),
+        },
+        prefixes,
+        signal,
+      ),
   });
   const data = query.data;
   const pageCount = Math.min(Math.ceil((data?.total ?? 0) / size), Math.floor(1_000_000 / size) + 1);
@@ -86,7 +144,7 @@ function ContextRegistryContent() {
       </InlineNotice>
       <SectionCard
         title={text.tab}
-        description={text.scope}
+        description={searchable ? text.searchScope : text.scope}
         actions={
           <label className="toolbar">
             <span>{text.state}</span>
@@ -106,6 +164,9 @@ function ContextRegistryContent() {
           </label>
         }
       >
+        {searchable ? (
+          <ContextSearchControls state={search} update={(values) => update(values, { replace: false })} />
+        ) : null}
         {query.isError ? (
           <PanelFailure
             label={text.tab}
@@ -124,7 +185,20 @@ function ContextRegistryContent() {
           tableId="prompt-contexts"
           lockedColumnIds={["name", "key"]}
           caption={text.caption}
-          columns={columns}
+          columns={searchable ? searchableColumns : columns}
+          sorting={
+            searchable
+              ? {
+                  columns: contextSortColumns,
+                  value: search.sorts[0] ?? { columnId: "key", direction: "asc" },
+                  onChange: (sort) =>
+                    update(
+                      { contexts_sort: contextSortValue([sort]), contexts_page: null },
+                      { replace: false },
+                    ),
+                }
+              : undefined
+          }
           data={data?.items ?? []}
           loading={query.isPending}
           error={query.isError && !data ? text.failed : undefined}
