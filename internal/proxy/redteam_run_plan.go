@@ -117,23 +117,19 @@ func (s *Server) prepareRedTeamRunPlan(r *http.Request, c store.RedTeamCampaign,
 		// execution content. Explicit campaign/pack/case revisions stay bound.
 		target.CreatedAt, target.UpdatedAt = "", ""
 		live := kind == "live" && redTeamActiveEligible(target, c, "review-placeholder")
-		// The aggregate Text2SQL wildcard has no callable model; the legacy
-		// evaluator simulates it. Concrete registered profiles remain callable.
+		// Text2SQL is a multi-stage executor. Until generation/review/summary and
+		// background calls share one reviewed budget, it is simulation-only here.
 		if target.TargetType == "text2sql" {
-			if _, ok := pickRedTeamModel(target); !ok {
-				live = false
-			}
+			live = false
 		}
 		models := []string{}
 		if live {
 			if err := s.redTeamReviewProvider(r, target, c.ExternalProviderAllowed); err != nil {
 				return nil, err
 			}
-			if target.TargetType != "text2sql" {
-				models = requestedModels
-				if len(models) == 0 {
-					models = redTeamCampaignModels(c)
-				}
+			models = requestedModels
+			if len(models) == 0 {
+				models = redTeamCampaignModels(c)
 			}
 			if len(models) == 0 {
 				if model, ok := pickRedTeamModel(target); ok {
@@ -145,6 +141,15 @@ func (s *Server) prepareRedTeamRunPlan(r *http.Request, c store.RedTeamCampaign,
 			}
 			if !redTeamConcreteModels(models) {
 				return nil, errRedTeamRunSelection
+			}
+			for _, model := range models {
+				virtual, err := s.redTeamVirtualModel(r, model)
+				if err != nil {
+					return nil, err
+				}
+				if virtual {
+					return nil, errRedTeamRunSelection
+				}
 			}
 			plan.Models[target.ID] = models
 		}

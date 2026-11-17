@@ -442,6 +442,9 @@ func (s *Server) evaluateRedTeamCaseActivePlanned(r *http.Request, proxyKey stri
 	if review != nil && (maxTokens <= 0 || maxTokens > review.Limits.MaxOutputTokens) {
 		maxTokens = review.Limits.MaxOutputTokens
 	}
+	if review != nil {
+		r = r.WithContext(context.WithValue(r.Context(), redTeamReviewedOutputKey{}, maxTokens))
+	}
 	sessionID := "redteam:" + c.ID
 	call := s.redTeamActiveInvoke(r, proxyKey, model, provider, prompt, sessionID, maxTokens)
 	if !call.OK {

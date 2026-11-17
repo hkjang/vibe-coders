@@ -478,6 +478,9 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// Text2SQL pipeline (generate read-only SQL via a real upstream model, validate,
 	// optionally execute) and writes a normal Chat Completion response here.
 	if s.t2sConf().Enabled && r.Method == http.MethodPost && text2sql.IsModel(meta.Request.Model) {
+		if rc.rejectReviewedVirtualModel() {
+			return false
+		}
 		// Kill switch: an operator can disable Text2SQL at runtime (incident/cost/
 		// security) without a redeploy. The virtual model then returns a clear, safe
 		// message instead of generating or executing any SQL.
@@ -626,6 +629,12 @@ func (rc *requestPipeline) stepUpstream() bool {
 			rc.writeModelsFallbackError(&meta, http.StatusGatewayTimeout, "models_fallback_deadline_exceeded", start)
 			return false
 		}
+	}
+	if bounded, ok := rc.reviewedPhysicalBody(body); ok {
+		body = bounded
+	} else {
+		releaseModelsSlot()
+		return false
 	}
 	resp, resolvedName, failoverFrom, failoverReason, failoverPath, finalBody, finalModel, upstreamHeaders, err := s.dialUpstream(r.Context(), r, body, provider, traceID, failoverCandidates)
 	if finalBody != nil {

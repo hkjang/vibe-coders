@@ -59,6 +59,7 @@ export function RedTeamExecutionReviewDetails({ review }: { review: ReviewedRedT
         <p className="rt-note">증적은 마스킹해 보관합니다.</p>
       )}
       <p className="rt-note">
+        Text2SQL·MCP·앱·워크플로 대상은 시뮬레이션만 수행합니다. 다단계 가상 모델은 실제 호출에서 제외합니다.
         비용은 호출 후 확인하므로 마지막 호출로 중단 기준을 넘을 수 있습니다. 출력 토큰은 제공자에 보내는 요청
         상한이며 실제 과금 한도를 보장하지 않습니다. 게이트웨이 내부 재시도와 확장된 입력은 위 호출·입력
         합계에 포함되지 않습니다.

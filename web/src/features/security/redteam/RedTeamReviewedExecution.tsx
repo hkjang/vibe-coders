@@ -287,7 +287,10 @@ export function RedTeamReviewedExecution({
       scrollBody
       wide
     >
-      <FormField label="이번 실행 방식" description="실제 호출은 전용 실행 키가 필요합니다.">
+      <FormField
+        label="이번 실행 방식"
+        description="실제 호출은 전용 실행 키가 필요합니다. Text2SQL·MCP·앱·워크플로 대상은 시뮬레이션으로 처리합니다."
+      >
         {(control) => (
           <Select {...control} {...form.register("kind")}>
             <option value="simulation">시뮬레이션만 실행</option>
@@ -308,7 +311,7 @@ export function RedTeamReviewedExecution({
       </FormField>
       <FormField
         label="정확한 모델 이름"
-        description="필요하면 한 줄에 하나씩 입력합니다. 비우면 캠페인의 저장된 모델 또는 대상의 구체적인 모델을 사용합니다. 별표 패턴과 자동 검색은 허용하지 않습니다."
+        description="필요하면 한 줄에 하나씩 입력합니다. 비우면 캠페인의 저장된 모델 또는 대상의 구체적인 모델을 사용합니다. 별표 패턴, 자동 검색과 다단계 가상 모델(Text2SQL·MCP·에이전트)은 실제 호출 대상으로 허용하지 않습니다."
         error={errors.models?.message}
       >
         {(control) => <Textarea {...control} {...form.register("models")} />}

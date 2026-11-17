@@ -5,7 +5,7 @@
   "name": "vibe-coders-v0.86.139-integrated-source-sbom",
   "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.139",
   "creationInfo": {
-    "created": "2026-11-17T04:51:28Z",
+    "created": "2026-11-17T05:25:02Z",
     "creators": [
       "Tool: Syft-1.51.0",
       "Tool: scripts/merge-source-sbom.mjs",

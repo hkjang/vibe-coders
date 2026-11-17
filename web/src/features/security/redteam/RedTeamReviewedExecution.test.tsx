@@ -51,7 +51,9 @@ describe("검토한 레드팀 실행", () => {
     const record = executionReviewFixture(),
       api = mockApi({ [prepare]: () => record, [execute]: () => executionOutcomeFixture(record) }),
       view = mount();
+    expect(screen.getByText(/Text2SQL·MCP·앱·워크플로 대상은 시뮬레이션으로/)).toBeVisible();
     const panel = await review();
+    expect(within(panel).getByText(/다단계 가상 모델은 실제 호출에서 제외/)).toBeVisible();
     expect(api.bodies(execute)).toEqual([]);
     expect(within(panel).getByText("호출당 출력 토큰 요청 상한")).toBeVisible();
     expect(within(panel).getByText("public-model")).toBeVisible();
