@@ -63,6 +63,10 @@ func (s *Server) handlePromptPromotions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if _, present := query["view"]; present {
+		if query.Get("view") == "promotion-review" {
+			s.handlePromptStageBulk(w, r, query)
+			return
+		}
 		if query.Get("view") != "workspace" {
 			writePromptStageInvalid(w)
 			return

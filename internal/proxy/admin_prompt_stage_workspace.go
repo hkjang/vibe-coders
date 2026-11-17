@@ -113,7 +113,7 @@ func (s *Server) handlePromptStageWorkspace(w http.ResponseWriter, r *http.Reque
 			valid = false
 		}
 	}
-	duration, ok := map[string]time.Duration{"1h": time.Hour, "24h": 24 * time.Hour, "7d": 7 * 24 * time.Hour, "30d": 30 * 24 * time.Hour}[window]
+	duration, ok := promptStageDuration(window)
 	if !valid || !ok || limit < 1 || limit > 100 || offset < 0 || offset > 1000000 || (stage != "all" && !promptStageKnown(stage)) {
 		writePromptStageInvalid(w)
 		return
@@ -130,12 +130,8 @@ func (s *Server) handlePromptStageWorkspace(w http.ResponseWriter, r *http.Reque
 	for _, row := range rows {
 		items = append(items, s.projectPromptStage(cipher, row))
 	}
-	crit := defaultPromotionCriteria()
 	writeJSON(w, 200, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset, "stage": stage, "window": window, "since": since, "until": until,
-		"criteria": []map[string]any{
-			{"stage": "validation", "minimum_calls": crit.toValidationMinCalls, "maximum_error_rate": crit.toValidationMaxError, "maximum_evaluation_failures_per_call": crit.toValidationMaxEval},
-			{"stage": "production", "minimum_calls": crit.toProductionMinCalls, "maximum_error_rate": crit.toProductionMaxError, "maximum_evaluation_failures_per_call": crit.toProductionMaxEval},
-		}})
+		"criteria": promptStageCriteriaView()})
 }
 func writePromptStageInvalid(w http.ResponseWriter) {
 	writeOpenAIError(w, 400, "invalid prompt stage request", "invalid_request_error", "invalid_prompt_stage")

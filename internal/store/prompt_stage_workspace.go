@@ -107,27 +107,32 @@ func (s *SQLStore) CompareAndSetPromptStage(ctx context.Context, expected Prompt
 	p := expected.Promotion
 	next := PromptPromotion{PromptName: p.PromptName, PromptVersion: p.PromptVersion, Stage: stage, Note: reason, PromotedBy: audit.AdminID, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	err := s.withAdminAuditTransaction(ctx, audit, func(tx *sql.Tx) error {
-		var result sql.Result
-		var err error
-		if expected.Registered {
-			result, err = tx.ExecContext(ctx, s.bind(`UPDATE prompt_promotions SET stage=?, note=?, promoted_by=?, updated_at=? WHERE prompt_name=? AND prompt_version=? AND stage=? AND COALESCE(note,'')=? AND COALESCE(promoted_by,'')=? AND updated_at=?`), next.Stage, next.Note, next.PromotedBy, next.UpdatedAt, p.PromptName, p.PromptVersion, p.Stage, p.Note, p.PromotedBy, p.UpdatedAt)
-		} else {
-			result, err = tx.ExecContext(ctx, s.bind(`INSERT INTO prompt_promotions(prompt_name,prompt_version,stage,note,promoted_by,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(prompt_name,prompt_version) DO NOTHING`), next.PromptName, next.PromptVersion, next.Stage, next.Note, next.PromotedBy, next.UpdatedAt)
-		}
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return ErrPromptStageConflict
-		}
-		return nil
+		return s.compareAndSetPromptStageTx(ctx, tx, expected, next)
 	})
 	if err != nil {
 		return PromptPromotion{}, err
 	}
 	return next, nil
+}
+
+func (s *SQLStore) compareAndSetPromptStageTx(ctx context.Context, tx *sql.Tx, expected PromptStageSnapshot, next PromptPromotion) error {
+	p := expected.Promotion
+	var result sql.Result
+	var err error
+	if expected.Registered {
+		result, err = tx.ExecContext(ctx, s.bind(`UPDATE prompt_promotions SET stage=?, note=?, promoted_by=?, updated_at=? WHERE prompt_name=? AND prompt_version=? AND stage=? AND COALESCE(note,'')=? AND COALESCE(promoted_by,'')=? AND updated_at=?`), next.Stage, next.Note, next.PromotedBy, next.UpdatedAt, p.PromptName, p.PromptVersion, p.Stage, p.Note, p.PromotedBy, p.UpdatedAt)
+	} else {
+		result, err = tx.ExecContext(ctx, s.bind(`INSERT INTO prompt_promotions(prompt_name,prompt_version,stage,note,promoted_by,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(prompt_name,prompt_version) DO NOTHING`), next.PromptName, next.PromptVersion, next.Stage, next.Note, next.PromotedBy, next.UpdatedAt)
+	}
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrPromptStageConflict
+	}
+	return nil
 }

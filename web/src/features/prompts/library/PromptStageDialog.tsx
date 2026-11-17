@@ -14,7 +14,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { containsPotentialSecret } from "@/shared/security/secrets";
+import { stageReasonSchema } from "./stage-form";
 import { LibraryWriteNotice } from "./LibraryWriteNotice";
 import { useLibraryAccess, useLibraryBusy, useLibraryMutation } from "./use-library-mutation";
 import { libraryError, libraryRouteId } from "./library-model";
@@ -36,19 +36,7 @@ export function PromptStageDialog({
   const [conflict, setConflict] = useState(false);
   const schema = z.object({
     stage: z.enum(promptStages).refine((value) => value !== row.stage, text.different),
-    reason: z
-      .string()
-      .trim()
-      .min(1, text.reasonRequired)
-      .refine(
-        (value) =>
-          [...value].length <= 500 &&
-          !Array.from(value).some(
-            (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
-          ) &&
-          !containsPotentialSecret(value, credentialPrefixes),
-        text.reasonUnsafe,
-      ),
+    reason: stageReasonSchema(credentialPrefixes),
     confirmed: z.boolean().refine(Boolean, text.confirmRequired),
   });
   const form = useForm<Draft>({
