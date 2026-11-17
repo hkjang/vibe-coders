@@ -13,6 +13,8 @@ export const promptsFeatureModules = defineFeatureModules([
       import("@/features/prompts/library/PromptLibraryPage").then((module) => module.PromptLibraryPage),
     queryKeys: [
       "api_key_id",
+      "contexts_q",
+      "contexts_sort",
       "contexts_page",
       "contexts_size",
       "contexts_state",

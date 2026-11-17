@@ -1,3 +1,4 @@
+import { validContextSort } from "@/shared/utils/context-registry-query";
 import { z } from "zod";
 import type { ContextRegistryMetadataPage, GetAdminContextsData } from "@/shared/api/generated";
 import { operation, type WithQuery } from "@/shared/api/endpoint-factory";
@@ -6,6 +7,8 @@ export const contextStates = ["all", "enabled", "disabled"] as const;
 export const contextMetadataQuerySchema = z.strictObject({
   view: z.literal("metadata"),
   state: z.enum(contextStates),
+  q: z.string().max(200).optional(),
+  sort: z.string().max(100).refine(validContextSort).optional(),
   limit: z.number().int().min(1).max(100),
   offset: z.number().int().min(0).max(1_000_000),
 });

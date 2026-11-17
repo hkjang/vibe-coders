@@ -15,6 +15,16 @@ export const contextMessages = {
   noHistory: "기록 없음",
   failed: "참고자료 목록을 불러오지 못했습니다.",
   caption: "공용 참고자료 목록",
+  searchLabel: "참고자료 검색",
+  searchHelp: "이름 또는 등록 키의 일부를 입력하세요. 본문은 검색하지 않습니다.",
+  searchAction: "검색 적용",
+  reset: "조회 조건 초기화",
+  invalidSearch: "검색은 200자 이내로 입력하세요. 비밀값과 제어 문자는 사용할 수 없습니다.",
+  invalidRoute: "검색·정렬 조건이 올바르지 않습니다. 조건을 초기화한 뒤 다시 조회하세요.",
+  searchSupport: "참고자료 검색과 정렬은 백엔드 v0.86.134 이상에서 제공됩니다.",
+  searchScope:
+    "이름·등록 키 검색과 최대 세 가지 정렬은 전체 등록 목록에 적용됩니다. 같은 값은 등록 키 순서로 정렬하며 미확인 수치는 마지막에 표시합니다.",
+  sortHelp: "정렬은 이름·등록 키·사용 상태·예상 토큰·누적 활용을 지원합니다.",
   summary: "공용 참고자료 조회 요약",
   columns: {
     name: "이름",

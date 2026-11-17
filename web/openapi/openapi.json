@@ -13925,7 +13925,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.133"
+    "version": "v0.86.134"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -16849,9 +16849,26 @@
     },
     "/admin/contexts": {
       "get": {
-        "description": "Existing global admin:read registry. Without view, legacy GET returns contexts with content unchanged. Opt-in view=metadata returns a bounded, read-only page ordered by stored key ascending. Content and mutation IDs are never selected. Unsafe names/keys are replaced with [숨김], including for privileged callers. Count and page share a read snapshot; separate pages may change as the registry changes. use_count counts context expansion touches, not unique requests or successful model calls; token_estimate is a stored estimate. Invalid historic counts/timestamps are null. The metadata view rejects extra/duplicate/malformed parameters and is no-store.",
+        "description": "Existing global admin:read registry. Without view, legacy GET returns contexts with content unchanged. Opt-in view=metadata returns a bounded, read-only page ordered by stored key ascending by default. From v0.86.134, q searches literal name/key substrings (case-insensitive, at most 200 Unicode code points); credential-shaped/PII search text is rejected without echo. sort accepts up to three unique comma-separated field:asc|desc pairs for key, name, enabled, token_estimate, use_count. Unknown historic counts sort last in either direction; key ascending breaks remaining ties. Search and sort apply before count/pagination and never inspect content. Existing response shape and parameter-free metadata requests are unchanged. Content and mutation IDs are never selected. Unsafe names/keys are replaced with [숨김], including for privileged callers. Count and page share a read snapshot; separate pages may change as the registry changes. use_count counts context expansion touches, not unique requests or successful model calls; token_estimate is a stored estimate. Invalid historic counts/timestamps are null. The metadata view rejects extra/duplicate/malformed parameters and is no-store.",
         "operationId": "get__admin_contexts",
         "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "example": "use_count:desc,name:asc",
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
           {
             "in": "query",
             "name": "view",

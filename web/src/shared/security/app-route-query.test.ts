@@ -15,6 +15,19 @@ function encoded(value: string, passes: number): string {
 }
 
 describe("app route query security", () => {
+  it("preserves only bounded context sort grammar without mistaking the key column for a credential", () => {
+    const sort = "key:asc,name:desc,use_count:desc";
+    expect(
+      new URLSearchParams(
+        sanitizeAppRouteSearch("/app/prompts/library", "?contexts_sort=" + encodeURIComponent(sort)).search,
+      ).get("contexts_sort"),
+    ).toBe(sort);
+    expect(
+      sanitizeAppRouteSearch("/app/prompts/library", "?contexts_sort=key:private-credential").search,
+    ).toBe("");
+    expect(sanitizeAppRouteSearch("/app/overview", "?contexts_sort=key:asc").search).toBe("");
+  });
+
   it("모델 다중 정렬의 순서는 보존하고 중복 열·중복 매개변수·다른 화면은 거절한다", () => {
     const query = "?sort=quality_desc%2Cinput_price_asc&page=2";
     expect(sanitizeAppRouteSearch("/app/gateway/models", query).search).toBe(query);

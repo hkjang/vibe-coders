@@ -66,6 +66,8 @@ const scenarios = new Set([
   "AUTH-LIVE-056",
   "AUTH-LIVE-057",
   "AUTH-LIVE-058",
+  "AUTH-LIVE-059",
+  "AUTH-LIVE-060",
 ]);
 const sourceFiles = new Set([
   "keycloak-product.spec.ts",
@@ -86,6 +88,7 @@ const sourceFiles = new Set([
   "overview-trend-live.spec.ts",
   "request-bulk-live.spec.ts",
   "context-registry-live.spec.ts",
+  "context-search-live.spec.ts",
   "product-registry-live.spec.ts",
   "prompt-stage-live.spec.ts",
   "prompt-stage-bulk-live.spec.ts",

@@ -1,10 +1,14 @@
 package proxy
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
+	"vibe-coders/internal/store"
 )
 
 type contextMetadataItem struct {
@@ -37,6 +41,7 @@ func contextMetadataTime(value string) *string {
 func (s *Server) writeContextMetadata(w http.ResponseWriter, r *http.Request, query url.Values) {
 	w.Header().Set("Cache-Control", "no-store")
 	limit, offset, state := 25, 0, "all"
+	search, sort := "", ""
 	valid := query.Get("view") == "metadata"
 	for key, values := range query {
 		if len(values) != 1 {
@@ -56,11 +61,18 @@ func (s *Server) writeContextMetadata(w http.ResponseWriter, r *http.Request, qu
 			}
 		case "state":
 			state = query.Get(key)
+		case "q":
+			if strings.IndexFunc(query.Get(key), unicode.IsControl) >= 0 {
+				valid = false
+			}
+			search = strings.TrimSpace(query.Get(key))
+		case "sort":
+			sort = query.Get(key)
 		default:
 			valid = false
 		}
 	}
-	if !valid || limit < 1 || limit > 100 || offset < 0 || offset > 1000000 || (state != "all" && state != "enabled" && state != "disabled") {
+	if (search != "" && !s.safeResourceSearchText(search)) || !valid || limit < 1 || limit > 100 || offset < 0 || offset > 1000000 || (state != "all" && state != "enabled" && state != "disabled") {
 		writeOpenAIError(w, 400, "invalid context metadata page", "invalid_request_error", "invalid_context_page")
 		return
 	}
@@ -69,7 +81,11 @@ func (s *Server) writeContextMetadata(w http.ResponseWriter, r *http.Request, qu
 		value := state == "enabled"
 		enabled = &value
 	}
-	rows, total, err := s.db.ContextMetadataPage(r.Context(), enabled, limit, offset)
+	rows, total, err := s.db.SearchContextMetadataPage(r.Context(), store.ContextMetadataQuery{Enabled: enabled, Search: search, Sort: sort, Limit: limit, Offset: offset})
+	if errors.Is(err, store.ErrInvalidContextMetadataQuery) {
+		writeOpenAIError(w, 400, "invalid context metadata page", "invalid_request_error", "invalid_context_page")
+		return
+	}
 	if err != nil {
 		writeOpenAIError(w, 500, "context metadata could not be loaded", "server_error", "context_metadata_failed")
 		return
