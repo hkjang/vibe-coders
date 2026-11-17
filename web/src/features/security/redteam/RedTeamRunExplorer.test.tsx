@@ -12,7 +12,7 @@ import { RedTeamRunExplorer } from "./RedTeamRunExplorer";
 import { RunResultsSheet } from "./RunResultsSheet";
 import type { RedTeamRunMetadata } from "@/shared/api/generated";
 
-const auth = vi.hoisted(() => ({ backendVersion: "v0.86.145", scopes: ["admin:read"] }));
+const auth = vi.hoisted(() => ({ backendVersion: "v0.86.146", scopes: ["admin:read"] }));
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
   return { useAuth: () => testAuth(auth) };
@@ -49,7 +49,13 @@ function handlers() {
         generated_at: "2026-11-17T00:00:00Z",
       };
     },
-    "GET /admin/redteam/runs/run-100/results": () => ({ run: runs[100], results: [], prompts: {} }),
+    "GET /admin/redteam/runs/run-100/results": () => ({
+      run: runs[100],
+      results: [],
+      prompts: {},
+      count: 0,
+      masked: true,
+    }),
   };
 }
 function Harness() {
@@ -78,7 +84,7 @@ function Harness() {
 }
 const mount = (route = "/redteam?tab=runs") => renderScreen(<Harness />, { route });
 beforeEach(() => {
-  auth.backendVersion = "v0.86.145";
+  auth.backendVersion = "v0.86.146";
   auth.scopes = ["admin:read"];
 });
 afterEach(() => vi.restoreAllMocks());

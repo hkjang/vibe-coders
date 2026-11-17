@@ -9,7 +9,7 @@ import {
 async function fixture(page: Page, { status = 200, recording = true, history = false } = {}) {
   await page.clock.setFixedTime(new Date("2026-11-17T00:00:00Z"));
   const base = await installPromptLibrary(page);
-  if (history) base.bootstrap.backend_version = "v0.86.145";
+  base.bootstrap.backend_version = "v0.86.146";
   base.bootstrap.allowed_features = ["security.redteam"];
   Object.assign(base.bootstrap.migration_registry[0] ?? {}, {
     feature_id: "security.redteam",
@@ -53,18 +53,26 @@ async function fixture(page: Page, { status = 200, recording = true, history = f
         });
       }
       if (path === "/admin/redteam/runs/public-source-run/results")
-        return route.fulfill({ json: { run: originalRun, results: [review.source_result], prompts: {} } });
+        return route.fulfill({
+          json: { run: originalRun, results: [review.source_result], prompts: {}, count: 1, masked: true },
+        });
       if (path === "/admin/redteam/runs/public-run/results")
         return route.fulfill({
           json: {
             run: newRun,
             results: [{ ...review.source_result, id: "public-new-result", run_id: "public-run" }],
             prompts: {},
+            count: 1,
+            masked: true,
           },
         });
       if (path === "/admin/redteam/results/public-source-result/evidence")
         return route.fulfill({
           json: {
+            masked: true,
+            raw_allowed: true,
+            raw_available: false,
+            tool_call_count: 0,
             evidence: {
               id: "original-evidence",
               result_id: "public-source-result",
@@ -72,6 +80,8 @@ async function fixture(page: Page, { status = 200, recording = true, history = f
               masked_response: "보존할 원본 마스킹 응답",
               headers_summary: { model: "public-model", provider: "public-provider" },
               tool_calls: [],
+              export_hash: "public-hash",
+              created_at: "2026-11-17T00:00:00Z",
             },
           },
         });

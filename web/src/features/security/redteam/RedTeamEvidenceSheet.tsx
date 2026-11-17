@@ -1,21 +1,21 @@
 import { useRunHistoryOwner } from "./run-history-context";
-import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
+import { featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { apiClient } from "@/shared/api/client";
-import { withPathParams } from "@/shared/api/domains/redteam";
-import { endpoints } from "@/shared/api/endpoints";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { versionAtLeast } from "@/config/migration-registry";
+import { readEvidence } from "./evidence-read-api";
+import { EvidenceVersionNotice } from "./EvidenceVersionNotice";
+import { RedTeamRawEvidence } from "./RedTeamRawEvidence";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { JsonBlock } from "@/shared/components/ui/JsonBlock";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { Sheet } from "@/shared/components/ui/Sheet";
-import { MaskedText, PanelFailure } from "./RedTeamParts";
+import { EvidenceText, PanelFailure } from "./RedTeamParts";
 import { expectedPolicyLabel } from "./redteam-labels";
-import { redteamKeys, routeId } from "./use-redteam-data";
+import { redteamKeys } from "./use-redteam-data";
 import { RedTeamReviewedReplay } from "./RedTeamReviewedReplay";
-const redteam = endpoints.domains.redteam;
 
 export function RedTeamEvidenceSheet({
   canWrite,
@@ -42,31 +42,27 @@ export function RedTeamEvidenceSheet({
   const queryClient = useQueryClient();
   const replayTrigger = useRef<HTMLButtonElement>(null);
   const owner = useRunHistoryOwner();
+  const auth = useAuth();
+  const supported = versionAtLeast(auth.backendVersion, "v0.86.146");
   const evidence = useQuery({
     queryKey: owner ? featureOwnedKey(redteamKeys.evidence(resultId), owner) : redteamKeys.evidence(resultId),
     gcTime: 0,
     retry: false,
-    queryFn: async ({ signal }) => {
-      if (owner) assertFeatureRead(owner, signal);
-      const result = await apiClient.request(withPathParams(redteam.results.evidence, { id: resultId }), {
-        signal,
-        routeId,
-        cache: "no-store",
-      });
-      if (owner) assertFeatureRead(owner, signal);
-      return result;
+    queryFn: ({ signal }) => {
+      if (!owner) throw new Error("증적 조회 권한을 확인하지 못했습니다.");
+      return readEvidence(resultId, false, owner, signal);
     },
-    enabled: resultId !== "",
+    enabled: resultId !== "" && supported && Boolean(owner?.readable && !owner.denied),
   });
 
-  const record = evidence.data?.evidence;
-  const headers = record?.headers_summary ?? {};
+  const response = supported && owner?.readable && !owner.denied ? evidence.data : undefined;
+  const record = response?.evidence;
+  const headers: Readonly<Record<string, unknown>> = record?.headers_summary ?? {};
   const headerText = (key: string): string => {
     const value = headers[key];
     return value === undefined || value === null ? "" : String(value);
   };
   const findings = Array.isArray(headers.leak_findings) ? headers.leak_findings : [];
-  const hasRaw = (record?.raw_prompt ?? "") !== "" || (record?.raw_response ?? "") !== "";
 
   return (
     <>
@@ -80,7 +76,8 @@ export function RedTeamEvidenceSheet({
         returnFocusRef={returnFocusRef}
         size="wide"
       >
-        {evidence.isError ? (
+        {!supported ? <EvidenceVersionNotice /> : null}
+        {supported && evidence.isError ? (
           <PanelFailure
             error={evidence.error}
             hasData={Boolean(evidence.data)}
@@ -130,30 +127,17 @@ export function RedTeamEvidenceSheet({
                 이 결과에 조치 생성
               </Button>
             </div>
-            {headerText("seed_template") !== "" ? (
-              <MaskedText label="요청 시드 (원문 프롬프트)" value={headerText("seed_template")} />
+            <Badge tone="muted">마스킹본</Badge>
+            <EvidenceText label="요청 프롬프트 (실제 전송 형태 · 마스킹)" value={record.masked_prompt} />
+            <EvidenceText label="대상 응답 (마스킹)" value={record.masked_response} />
+            <p className="rt-muted">
+              {response && response.tool_call_count > 0
+                ? `도구 호출 ${response.tool_call_count}건 · 인수는 원문 조회에서 확인할 수 있습니다.`
+                : "도구 호출 없음"}
+            </p>
+            {response && owner ? (
+              <RedTeamRawEvidence key={`${owner.id}:${resultId}`} response={response} owner={owner} />
             ) : null}
-            <MaskedText label="요청 프롬프트 (실제 전송 형태 · 마스킹)" value={record.masked_prompt} />
-            <MaskedText label="대상 응답 (마스킹)" value={record.masked_response} />
-            {hasRaw ? (
-              <div className="rt-raw-evidence">
-                <InlineNotice tone="danger" title="원문 증적 (관리자 전용 · 마스킹 안 됨)">
-                  이 캠페인은 원문 보관이 켜져 있어 마스킹하지 않은 요청/응답을 표시합니다.
-                </InlineNotice>
-                <MaskedText label="실제 요청 프롬프트 (원문)" value={record.raw_prompt} />
-                <MaskedText label="실제 모델 응답 (원문)" value={record.raw_response} />
-              </div>
-            ) : (
-              <p className="rt-muted">
-                원문 증적 보관이 꺼져 있어 마스킹본만 표시됩니다. &lsquo;조건 검토 후 한 건 재실행&rsquo;으로
-                실제 요청/응답을 확인하세요.
-              </p>
-            )}
-            {record.tool_calls.length > 0 ? (
-              <JsonBlock label="도구 호출" value={record.tool_calls} />
-            ) : (
-              <p className="rt-muted">도구 호출 없음</p>
-            )}
             <JsonBlock label="헤더 · 메타 요약" value={headers} />
             {record.export_hash !== "" ? (
               <p className="rt-muted">
@@ -161,7 +145,7 @@ export function RedTeamEvidenceSheet({
               </p>
             ) : null}
           </div>
-        ) : evidence.isPending && resultId !== "" ? (
+        ) : supported && evidence.isPending && resultId !== "" ? (
           <p role="status">증적을 불러오는 중입니다.</p>
         ) : null}
       </Sheet>

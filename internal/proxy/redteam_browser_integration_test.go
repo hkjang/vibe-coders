@@ -141,7 +141,7 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	if decoder.Decode(&summary) != nil || summary.SourceLine < 0 || summary.SourceLine > 10000 {
 		t.Fatal("redteam browser safe summary invalid; raw output suppressed")
 	}
-	if err != nil || !summary.Passed || summary.TestCount != 9 {
+	if err != nil || !summary.Passed || summary.TestCount != 11 {
 		t.Fatalf("redteam browser failed at source line %d; raw output suppressed", summary.SourceLine)
 	}
 	if live.Load() != 1 || recording.Load() != 1 || redirect.Load() != 1 || replay.Load() != 1 || replayRecording.Load() != 1 || other.Load() != 0 || unsafe.Load() != 0 {
@@ -149,7 +149,7 @@ func TestRedTeamBrowserIntegration(t *testing.T) {
 	}
 	verifyRedTeamBrowserStorage(t, h)
 	verifyReplay()
-	t.Log("Red Team browser: 9/9; actual provider, recording and audit assertions passed")
+	t.Log("Red Team browser: 11/11; actual provider, recording and audit assertions passed")
 }
 
 func seedRedTeamBrowserCampaigns(t *testing.T, h *browserAuthHarness, baseURL string) {

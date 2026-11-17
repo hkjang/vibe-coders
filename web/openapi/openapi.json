@@ -9311,6 +9311,100 @@
         ],
         "type": "object"
       },
+      "RedTeamEvidenceLegacyRead": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "$ref": "#/components/schemas/RedTeamEvidenceReadRecord"
+          }
+        },
+        "required": [
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "RedTeamEvidenceRead": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "$ref": "#/components/schemas/RedTeamEvidenceReadRecord"
+          },
+          "masked": {
+            "type": "boolean"
+          },
+          "raw_allowed": {
+            "type": "boolean"
+          },
+          "raw_available": {
+            "type": "boolean"
+          },
+          "tool_call_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "evidence",
+          "masked",
+          "raw_allowed",
+          "raw_available",
+          "tool_call_count"
+        ],
+        "type": "object"
+      },
+      "RedTeamEvidenceReadRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "export_hash": {
+            "type": "string"
+          },
+          "headers_summary": {
+            "additionalProperties": true,
+            "nullable": true,
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "masked_prompt": {
+            "type": "string"
+          },
+          "masked_response": {
+            "type": "string"
+          },
+          "raw_prompt": {
+            "type": "string"
+          },
+          "raw_response": {
+            "type": "string"
+          },
+          "result_id": {
+            "type": "string"
+          },
+          "tool_calls": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "created_at",
+          "export_hash",
+          "headers_summary",
+          "id",
+          "masked_prompt",
+          "masked_response",
+          "result_id",
+          "tool_calls"
+        ],
+        "type": "object"
+      },
       "RedTeamPreflightResponse": {
         "properties": {
           "active_eligible_targets": {
@@ -9845,6 +9939,129 @@
           "source_result",
           "targets",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "RedTeamResultReadMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "type": "string"
+          },
+          "cost_krw": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "evidence_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "policy_decision": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "case_id",
+          "cost_krw",
+          "created_at",
+          "decision",
+          "evidence_hash",
+          "id",
+          "latency_ms",
+          "policy_decision",
+          "request_id",
+          "run_id",
+          "severity"
+        ],
+        "type": "object"
+      },
+      "RedTeamResultsLegacyRead": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "prompts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/RedTeamResultReadMetadata"
+            },
+            "type": "array"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RedTeamRunMetadata"
+          }
+        },
+        "required": [
+          "count",
+          "prompts",
+          "results",
+          "run"
+        ],
+        "type": "object"
+      },
+      "RedTeamResultsRead": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "masked": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "prompts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/RedTeamResultReadMetadata"
+            },
+            "type": "array"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RedTeamRunMetadata"
+          }
+        },
+        "required": [
+          "count",
+          "masked",
+          "prompts",
+          "results",
+          "run"
         ],
         "type": "object"
       },
@@ -15042,7 +15259,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.145"
+    "version": "v0.86.146"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -26716,8 +26933,29 @@
     },
     "/admin/redteam/results/{id}/evidence": {
       "get": {
+        "description": "Existing admin:read evidence. Legacy full-admin response remains unchanged; all lower raw-view roles receive only stored masked text and allowlisted metadata, never original fallback, tool arguments, seed templates or arbitrary headers. Opt-in view=app is masked by default for every role, with raw_allowed from the existing canViewRawPrompts capability and raw_available describing retained originals/tool calls. view=app&reveal=raw requires that capability and a confirmed redteam.evidence.raw_view audit before returning originals. Audit contains only result/evidence ids and actor, not bodies. Missing masked captures stay empty. Structured metadata is allowlisted in app mode even for raw viewers; tool bodies are returned only by explicit raw reveal. All evidence responses are no-store. Unknown/duplicate/malformed app parameters are rejected; raw reveal without view=app is invalid. No model call or replay is performed.",
         "operationId": "get__admin_redteam_results_id_evidence",
         "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "app"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reveal",
+            "schema": {
+              "enum": [
+                "raw"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "id",
@@ -26729,7 +26967,101 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RedTeamEvidenceLegacyRead"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RedTeamEvidenceRead"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Legacy evidence or explicit app projection"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -27304,8 +27636,19 @@
     },
     "/admin/redteam/runs/{id}/results": {
       "get": {
+        "description": "Existing admin:read results, count and prompt previews. Legacy full-admin previews keep their original masked-then-raw fallback. Lower raw-view roles and opt-in view=app use only stored masked prompts, reapplying current credential projection; missing masked captures stay empty. App mode adds masked=true and rejects unknown/duplicate/malformed query parameters. It never bulk-reveals originals. Responses are no-store.",
         "operationId": "get__admin_redteam_runs_id_results",
         "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "app"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "id",
@@ -27317,7 +27660,101 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RedTeamResultsLegacyRead"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RedTeamResultsRead"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Legacy results or explicit app projection"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Read, permission or confirmed-audit failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

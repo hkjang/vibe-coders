@@ -259,3 +259,43 @@ for (const scenario of ["replay", "replay-recording"] as const)
     ).toHaveText("원본 공개 응답");
     expect(replays).toBe(1);
   });
+
+test("REDTEAM-LIVE-010 원문은 명시적으로 열고 감사 기록을 남긴다", async ({ page }) => {
+  let rawReads = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).searchParams.get("reveal") === "raw") rawReads++;
+  });
+  await login(page, undefined, "/app/redteam?tab=runs&run=browser-source-replay");
+  await page.getByRole("button", { name: "browser-redteam-case 증적 보기", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "증적 상세", exact: true });
+  await expect(panel.getByLabel("대상 응답 (마스킹)", { exact: true })).toHaveText("원본 공개 응답");
+  expect(rawReads).toBe(0);
+  await expect(panel.getByLabel("실제 모델 응답 (원문)")).toHaveCount(0);
+  await panel.getByRole("button", { name: "원문 보기", exact: true }).click();
+  await expect(panel.getByLabel("실제 모델 응답 (원문)")).toHaveText("비공개 브라우저 응답");
+  expect(rawReads).toBe(1);
+  await panel.getByRole("button", { name: "원문 닫기", exact: true }).click();
+  await expect(panel.getByLabel("실제 모델 응답 (원문)")).toHaveCount(0);
+  expect(executions + replays).toBe(0);
+});
+
+test("REDTEAM-LIVE-011 읽기 전용 계정은 저장된 원문을 내려받지 않는다", async ({ page }) => {
+  await login(page, reader, "/app/redteam?tab=runs&run=browser-source-replay");
+  const received = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith("/evidence"));
+  await page.getByRole("button", { name: "browser-redteam-case 증적 보기", exact: true }).click();
+  const response = await received;
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    masked: boolean;
+    raw_allowed: boolean;
+    evidence: { raw_prompt?: string; raw_response?: string };
+  };
+  expect(body.masked).toBe(true);
+  expect(body.raw_allowed).toBe(false);
+  expect(body.evidence.raw_prompt ?? "").toBe("");
+  expect(body.evidence.raw_response ?? "").toBe("");
+  const panel = page.getByRole("dialog", { name: "증적 상세", exact: true });
+  await expect(panel.getByLabel("대상 응답 (마스킹)", { exact: true })).toHaveText("원본 공개 응답");
+  await expect(panel.getByRole("button", { name: "원문 보기", exact: true })).toHaveCount(0);
+  expect(executions + replays).toBe(0);
+});

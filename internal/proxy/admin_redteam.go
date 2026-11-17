@@ -315,17 +315,35 @@ func (s *Server) handleRedTeamRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRedTeamRunByID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	appRead, _, queryErr := redTeamEvidenceReadMode(r, false)
+	if queryErr != nil {
+		writeOpenAIError(w, 400, "실행 결과 조회 조건을 확인하세요.", "invalid_request_error", "redteam_results_read_invalid")
+		return
+	}
+	if appRead && r.Method != http.MethodGet {
+		writeOpenAIError(w, 405, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/redteam/runs/"), "/"), "/")
+	if appRead && (len(parts) != 2 || parts[1] != "results") {
+		writeOpenAIError(w, 404, "실행 결과를 찾을 수 없습니다.", "invalid_request_error", "not_found")
+		return
+	}
 	if len(parts) == 0 || parts[0] == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "run id required", "invalid_request_error", "missing_run")
 		return
 	}
 	run, found, err := s.db.GetRedTeamRun(r.Context(), parts[0])
 	if err != nil {
+		if appRead {
+			writeOpenAIError(w, 503, "실행 결과를 확인하지 못했습니다.", "server_error", "redteam_results_read_unavailable")
+			return
+		}
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_run_failed")
 		return
 	}
@@ -336,6 +354,10 @@ func (s *Server) handleRedTeamRunByID(w http.ResponseWriter, r *http.Request) {
 	if len(parts) > 1 && parts[1] == "results" {
 		results, err := s.db.ListRedTeamCaseResults(r.Context(), run.ID)
 		if err != nil {
+			if appRead {
+				writeOpenAIError(w, 503, "실행 결과를 확인하지 못했습니다.", "server_error", "redteam_results_read_unavailable")
+				return
+			}
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_results_failed")
 			return
 		}
@@ -344,20 +366,21 @@ func (s *Server) handleRedTeamRunByID(w http.ResponseWriter, r *http.Request) {
 		prompts := map[string]string{}
 		for _, res := range results {
 			if ev, ok, evErr := s.db.RedTeamEvidenceByResult(r.Context(), res.ID); evErr == nil && ok {
-				p := strings.TrimSpace(ev.MaskedPrompt)
-				if p == "" {
-					p = strings.TrimSpace(ev.RawPrompt)
-				}
-				prompts[res.ID] = p
+				prompts[res.ID] = s.redTeamResultPrompt(ev, !appRead && s.canViewRawPrompts(r))
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"run": run, "results": results, "prompts": prompts, "count": len(results)})
+		response := map[string]any{"run": run, "results": results, "prompts": prompts, "count": len(results)}
+		if appRead {
+			response["masked"] = true
+		}
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"run": run})
 }
 
 func (s *Server) handleRedTeamResultByID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		s.writeRedTeamCampaignAccessDenied(w, r)
 		return
@@ -384,21 +407,15 @@ func (s *Server) handleRedTeamResultByID(w http.ResponseWriter, r *http.Request)
 			s.handleRedTeamReviewedReplay(w, r, resultID)
 		}
 	case "evidence":
+		if len(parts) != 2 {
+			writeOpenAIError(w, 404, "unknown result action", "invalid_request_error", "not_found")
+			return
+		}
 		if r.Method != http.MethodGet {
 			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 			return
 		}
-		ev, found, err := s.db.RedTeamEvidenceByResult(r.Context(), resultID)
-		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_evidence_failed")
-			return
-		}
-		if !found {
-			writeOpenAIError(w, http.StatusNotFound, "evidence not found", "invalid_request_error", "not_found")
-			return
-		}
-		s.auditAdmin(r, "redteam.evidence.view", "", auditJSON(map[string]any{"result_id": resultID, "evidence_id": ev.ID}))
-		writeJSON(w, http.StatusOK, map[string]any{"evidence": ev})
+		s.writeRedTeamEvidenceRead(w, r, resultID)
 	case "remediation":
 		if r.Method != http.MethodPost {
 			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")

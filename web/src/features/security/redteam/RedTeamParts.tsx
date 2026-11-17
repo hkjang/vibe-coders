@@ -32,8 +32,8 @@ export function PanelFailure({ error, hasData, label, onRetry }: PanelFailurePro
   );
 }
 
-/** Read-only preview of text the server already masked; never used for raw secrets. */
-export function MaskedText({ label, value }: { label: string; value: string }): React.JSX.Element {
+/** Plain text display; authorization and masking are enforced by the read API. */
+export function EvidenceText({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
     <div className="rt-masked">
       <div className="rt-masked-label">{label}</div>

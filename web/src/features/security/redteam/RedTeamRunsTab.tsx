@@ -52,6 +52,8 @@ export function RedTeamRunsTab({
   const paged = versionAtLeast(backendVersion, "v0.86.145");
   const { remember, returnFocusRef } = useReturnFocus();
   const [openResultId, setOpenResultId] = useState("");
+  const [evidenceFocusId, setEvidenceFocusId] = useState("");
+  const evidenceFocus = useReturnFocus();
   const [pendingApply, setPendingApply] = useState<RedTeamRemediation | undefined>();
   const writeTitle = canWrite ? undefined : writeDeniedReason;
 
@@ -169,8 +171,14 @@ export function RedTeamRunsTab({
         onClose={() => onOpenRun("")}
         onCreateRemediation={(resultId) => createRemediation.mutate(resultId)}
         onOpenEvidence={(resultId, event) => {
-          remember(event);
+          evidenceFocus.remember(event);
+          setEvidenceFocusId(resultId);
           setOpenResultId(resultId);
+        }}
+        onEvidenceTrigger={(id, element) => {
+          // Table cells may remount during query/overlay updates. Keep the
+          // connected trigger, including the render that closes the sheet.
+          if (element && id === evidenceFocusId) evidenceFocus.remember(element);
         }}
         remediationByResult={remediationByResult}
         returnFocusRef={returnFocusRef}
@@ -202,7 +210,7 @@ export function RedTeamRunsTab({
         onCreateRemediation={(resultId) => createRemediation.mutate(resultId)}
         proxyKey={proxyKey}
         resultId={openResultId}
-        returnFocusRef={returnFocusRef}
+        returnFocusRef={evidenceFocus.returnFocusRef}
         writeTitle={writeTitle}
       />
 
