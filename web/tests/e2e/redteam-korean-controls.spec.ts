@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import { installPromptLibrary } from "../fixtures/prompt-library-browser";
 
-async function fixture(page: Page, custom = false) {
+async function fixture(page: Page, custom: false | "vendor" | "prototype" = false) {
   const base = await installPromptLibrary(page);
   base.bootstrap.backend_version = "v0.86.142";
   base.bootstrap.allowed_features = ["security.redteam"];
@@ -21,10 +21,11 @@ async function fixture(page: Page, custom = false) {
     pack_id: "public-pack",
     case_key: "public_probe",
     input_template: "공개 합성 검사 입력",
-    expected_policy: custom ? "vendor_policy" : "refuse",
-    evaluator_type: custom ? "vendor_eval" : "rule",
-    severity: custom ? "vendor_risk" : "high",
-    target_types: custom ? ["vendor_type", "model"] : ["model"],
+    expected_policy: custom === "prototype" ? "__proto__" : custom ? "vendor_policy" : "refuse",
+    evaluator_type: custom === "prototype" ? "constructor" : custom ? "vendor_eval" : "rule",
+    severity: custom === "prototype" ? "__proto__" : custom ? "vendor_risk" : "high",
+    target_types:
+      custom === "prototype" ? ["__proto__", "model"] : custom ? ["vendor_type", "model"] : ["model"],
     parameters: {},
     risk_tags: [],
   };
@@ -111,25 +112,32 @@ test("한글 조건과 대상 선택은 기존 API 값으로 저장하고 새로
   api.check();
 });
 
-test("사용자 정의 값은 알려진 유형 선택 뒤에도 보존한다", async ({ page }) => {
-  const api = await fixture(page, true);
-  const panel = await open(page);
-  await expect(panel.getByLabel("기대 정책", { exact: true })).toHaveValue("vendor_policy");
-  await expect(panel.getByLabel("평가 방식", { exact: true })).toHaveValue("vendor_eval");
-  await expect(panel.getByLabel("심각도", { exact: true })).toHaveValue("vendor_risk");
-  await panel.getByRole("checkbox", { name: "제공자", exact: true }).check();
-  await panel.getByRole("button", { name: "저장", exact: true }).click();
-  await expect(panel).toBeHidden();
-  expect(api.writes).toEqual([
-    expect.objectContaining({
-      expected_policy: "vendor_policy",
-      evaluator_type: "vendor_eval",
-      severity: "vendor_risk",
-      target_types: ["vendor_type", "model", "provider"],
-    }),
-  ]);
-  api.check();
-});
+for (const custom of ["vendor", "prototype"] as const)
+  test(`${custom}: 사용자 정의 값은 알려진 유형 선택 뒤에도 보존한다`, async ({ page }) => {
+    const api = await fixture(page, custom);
+    const panel = await open(page);
+    await expect(panel.getByLabel("기대 정책", { exact: true })).toHaveValue(
+      custom === "prototype" ? "__proto__" : "vendor_policy",
+    );
+    await expect(panel.getByLabel("평가 방식", { exact: true })).toHaveValue(
+      custom === "prototype" ? "constructor" : "vendor_eval",
+    );
+    await expect(panel.getByLabel("심각도", { exact: true })).toHaveValue(
+      custom === "prototype" ? "__proto__" : "vendor_risk",
+    );
+    await panel.getByRole("checkbox", { name: "제공자", exact: true }).check();
+    await panel.getByRole("button", { name: "저장", exact: true }).click();
+    await expect(panel).toBeHidden();
+    expect(api.writes).toEqual([
+      expect.objectContaining({
+        expected_policy: custom === "prototype" ? "__proto__" : "vendor_policy",
+        evaluator_type: custom === "prototype" ? "constructor" : "vendor_eval",
+        severity: custom === "prototype" ? "__proto__" : "vendor_risk",
+        target_types: [custom === "prototype" ? "__proto__" : "vendor_type", "model", "provider"],
+      }),
+    ]);
+    api.check();
+  });
 
 for (const theme of ["light", "dark"] as const)
   for (const width of [1440, 390])

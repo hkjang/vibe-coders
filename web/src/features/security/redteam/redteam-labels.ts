@@ -1,5 +1,8 @@
-const label = (labels: Readonly<Record<string, string>>, value: string | undefined): string =>
-  labels[(value ?? "").trim().toLowerCase()] ?? (value || "—");
+const label = (labels: Readonly<Record<string, string>>, value: string | undefined): string => {
+  const key = (value ?? "").trim().toLowerCase();
+  const translated = Object.hasOwn(labels, key) ? labels[key] : undefined;
+  return translated ?? (value || "—");
+};
 
 const riskLabels = { low: "낮음", medium: "보통", high: "높음", critical: "치명" };
 const policyLabels = {
