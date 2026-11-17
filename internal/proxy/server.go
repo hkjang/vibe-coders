@@ -1878,7 +1878,15 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		}
 		lastUpstreamHeaders = upstreamReq.Header.Clone()
 
-		resp, doErr := s.client.Do(upstreamReq)
+		client := s.client
+		if redTeamReviewedOutput(reqCtx) > 0 {
+			// A redirect is another, unreviewed destination and may replay a POST.
+			// Keep the shared client's normal redirect policy unchanged.
+			bounded := *client
+			bounded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			client = &bounded
+		}
+		resp, doErr := client.Do(upstreamReq)
 		if doErr == nil {
 			if breakerEnabled {
 				if breakerCountsAsFailure(resp.StatusCode) {
