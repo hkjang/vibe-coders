@@ -372,14 +372,14 @@ func TestAppTraceCursorIndexRendersForBothDialects(t *testing.T) {
 	}
 	postgres := renderForDialect(declared, "postgres")
 	if !strings.Contains(postgres, "CREATE INDEX CONCURRENTLY IF NOT EXISTS") ||
-		!strings.Contains(postgres, "CAST(trace_id AS BYTEA)") {
+		!strings.Contains(postgres, "octet_length(trace_id)") {
 		t.Fatalf("unsafe PostgreSQL trace index rendering: %s", postgres)
 	}
 	for _, test := range []struct {
 		dialect string
 		sql     string
 	}{{dialect: "sqlite", sql: sqlite}, {dialect: "postgres", sql: postgres}} {
-		validRow := renderForDialect(appRequestValidRowPredicate("id", "created_at"), test.dialect)
+		validRow := appRequestValidRowPredicate("id", "created_at", test.dialect)
 		if !strings.Contains(test.sql, "ON request_logs(trace_id,") ||
 			!strings.Contains(test.sql, appRequestCreatedAtExpr("created_at")) ||
 			!strings.Contains(test.sql, validRow) {
@@ -565,7 +565,7 @@ func TestAppRecentRequestsPostgresNaturalPlannerAtScale(t *testing.T) {
 	// The initial test-store migration creates statistics against empty tables.
 	// Remove them so the second migration below represents the first upgrade of
 	// a populated pre-v0.82.1 installation.
-	for _, name := range []string{"app_request_guard_stats_v2", "app_request_key_guard_stats_v1"} {
+	for _, name := range []string{"app_request_guard_stats_v3", "app_request_key_guard_stats_v2"} {
 		if _, err := db.db.ExecContext(ctx, `DROP STATISTICS IF EXISTS `+name); err != nil {
 			t.Fatalf("drop empty planner statistics %s: %v", name, err)
 		}
@@ -615,7 +615,7 @@ func TestAppRecentRequestsPostgresNaturalPlannerAtScale(t *testing.T) {
 	var guardExpressions int
 	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stats_ext_exprs
 		WHERE schemaname = current_schema() AND statistics_schemaname = current_schema()
-			AND statistics_name = 'app_request_guard_stats_v2'
+			AND statistics_name = 'app_request_guard_stats_v3'
 			AND n_distinct IS NOT NULL`).Scan(&guardExpressions); err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +625,7 @@ func TestAppRecentRequestsPostgresNaturalPlannerAtScale(t *testing.T) {
 	var keyGuardExpressions int
 	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stats_ext_exprs
 		WHERE schemaname = current_schema() AND statistics_schemaname = current_schema()
-			AND statistics_name = 'app_request_key_guard_stats_v1'
+			AND statistics_name = 'app_request_key_guard_stats_v2'
 			AND n_distinct IS NOT NULL`).Scan(&keyGuardExpressions); err != nil {
 		t.Fatal(err)
 	}

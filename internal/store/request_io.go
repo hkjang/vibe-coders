@@ -71,8 +71,8 @@ func (s *SQLStore) RequestIOSamples(ctx context.Context, filter RequestIOSampleF
 	}
 	placeholders := strings.Repeat(",?", len(ids))[1:]
 
-	validRequestAPIKey := renderForDialect(appRequestBoundedTextPredicate("r.api_key_id"), s.dialect)
-	validTeamKey := renderForDialect(appRequestBoundedTextPredicate("k.id")+" AND "+appRequestBoundedTextPredicate("k.team"), s.dialect)
+	validRequestAPIKey := appRequestBoundedTextPredicate("r.api_key_id", s.dialect)
+	validTeamKey := appRequestBoundedTextPredicate("k.id", s.dialect) + " AND " + appRequestBoundedTextPredicate("k.team", s.dialect)
 	where := []string{"r.id IN (" + placeholders + ")"}
 	args := append([]any{}, ids...)
 	where, args = appendRequestTeamConditionWithPredicates(
