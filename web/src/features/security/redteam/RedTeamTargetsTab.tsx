@@ -1,8 +1,9 @@
 import { usePreflightReturnFocus } from "./use-preflight-return-focus";
 import { riskLabel, expectedPolicyLabel, targetTypeLabel, probeCategoryLabel } from "./redteam-labels";
+import { matchesTarget, targetLabel } from "./target-search";
 import { useQuery } from "@tanstack/react-query";
 import { Download, Plus, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ProbeCaseDialog } from "@/features/security/redteam/ProbeCaseDialog";
@@ -42,15 +43,6 @@ import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 const redteam = endpoints.domains.redteam;
-
-function targetLabel(target: RedTeamTarget): string {
-  const metadata = target.metadata;
-  for (const key of ["title", "name", "base_url"]) {
-    const value = metadata[key];
-    if (typeof value === "string" && value !== "") return value;
-  }
-  return target.model || target.tool_name || target.target_ref;
-}
 
 function targetColumns(): ReadonlyArray<DataTableColumn<RedTeamTarget>> {
   const column = createDataTableColumnHelper<RedTeamTarget>();
@@ -112,6 +104,14 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
   const { remember: rememberCase, returnFocusRef: caseReturnFocusRef } = useReturnFocus();
   const caseFocus = usePreflightReturnFocus(caseReturnFocusRef);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const focusAfterClear = useRef(false);
+  useLayoutEffect(() => {
+    if (focusAfterClear.current && query === "") {
+      focusAfterClear.current = false;
+      searchInputRef.current?.focus();
+    }
+  }, [query, searchError]);
   const [selectedTargetId, setSelectedTargetId] = useState("");
   const [openPack, setOpenPack] = useState<RedTeamProbePack | undefined>();
   const [caseDefaults, setCaseDefaults] = useState<ProbeCaseFormValues | undefined>();
@@ -184,24 +184,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
   });
 
   const allTargets = targets.data?.targets ?? [];
-  const needle = query.trim().toLowerCase();
-  const visibleTargets =
-    needle === ""
-      ? allTargets
-      : allTargets.filter((target) =>
-          [
-            target.target_ref,
-            target.target_type,
-            target.provider,
-            target.model,
-            target.mcp_upstream,
-            target.tool_name,
-            target.owner_team,
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(needle),
-        );
+  const visibleTargets = allTargets.filter((target) => matchesTarget(target, query));
   const selectedTarget =
     targetDetail.data?.target ?? allTargets.find((target) => target.id === selectedTargetId);
   const writeTitle = canWrite ? undefined : writeDeniedReason;
@@ -278,17 +261,32 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
           >
             <label htmlFor="rt-target-search">대상 검색</label>
             <Input
+              ref={searchInputRef}
               key={query}
               id="rt-target-search"
               name="q"
               defaultValue={query}
-              placeholder="대상 참조, 제공자, 모델, 담당 팀"
+              placeholder="이름, 유형, 위험도, 제공자, 담당 팀"
               aria-invalid={searchError ? "true" : undefined}
               aria-describedby={searchError ? "rt-target-search-error" : undefined}
             />
             <Button size="small" type="submit">
               검색
             </Button>
+            {query !== "" || searchError ? (
+              <Button
+                size="small"
+                type="button"
+                onClick={(event) => {
+                  focusAfterClear.current = true;
+                  event.currentTarget.form?.reset();
+                  setSearchError(undefined);
+                  updateParams({ q: undefined });
+                }}
+              >
+                검색 조건 지우기
+              </Button>
+            ) : null}
             {searchError ? (
               <p id="rt-target-search-error" className="field-error" role="alert">
                 {searchError}
@@ -297,6 +295,13 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
           </form>
         }
       >
+        {targets.data ? (
+          <p className="rt-muted" role="status">
+            {query !== ""
+              ? `검색 결과 ${formatNumber(visibleTargets.length)}개 / 전체 ${formatNumber(allTargets.length)}개 대상`
+              : `전체 ${formatNumber(allTargets.length)}개 대상`}
+          </p>
+        ) : null}
         <DataTable
           caption="레드팀이 대상으로 삼는 등록 자산 목록"
           columns={targetColumns()}
