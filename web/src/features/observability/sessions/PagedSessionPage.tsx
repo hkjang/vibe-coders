@@ -59,7 +59,13 @@ export function PagedSessionPage() {
     }
     setSearch(next);
   };
-  const reset = () => update({ days: undefined, q: undefined, offset: undefined, page_size: undefined });
+  const reset = () => {
+    if (!owner.isCurrent()) return;
+    // Clearing absent URL parameters does not change marker. Reset local edits
+    // and validation explicitly even when the applied filters are already empty.
+    setDraft({ marker, days: "7", q: "", error: "" });
+    update({ days: undefined, q: undefined, offset: undefined, page_size: undefined });
+  };
   const refresh = () => {
     if (owner.isCurrent() && valid && !result.isFetching) void result.refetch({ cancelRefetch: false });
   };
