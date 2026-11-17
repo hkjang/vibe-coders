@@ -2,6 +2,29 @@ import { expect, test } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import { installPromptStages } from "../fixtures/prompt-stage-browser";
 
+test("보충 문자가 포함된 이름·버전을 조회하고 원래 값으로 변경한다", async ({ page }) => {
+  const fixture = await installPromptStages(page);
+  const name = "😀".repeat(200),
+    version = "𠮷".repeat(256);
+  const first = fixture.rows[0];
+  if (!first) throw new Error("단계 검사 자료가 필요합니다.");
+  Object.assign(first, { name, version });
+  await page.goto("prompts/library?tab=promotions");
+  const row = page.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
+  await expect(row.getByText(version, { exact: true })).toBeVisible();
+  await expect(page.getByText("업무 프롬프트 2", { exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "단계 변경", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "프롬프트 단계 변경" });
+  await dialog.getByRole("combobox", { name: "변경할 단계" }).selectOption("validation");
+  await dialog.getByRole("textbox", { name: "변경 사유" }).fill("유니코드 이름과 버전 확인");
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "확인한 단계로 변경" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(fixture.changes).toHaveLength(1);
+  expect(fixture.changes[0]).toMatchObject({ name, version, stage: "validation" });
+  fixture.check();
+});
+
 test("단계 필터·기간·페이지를 주소와 새로고침으로 복원한다", async ({ page }) => {
   const fixture = await installPromptStages(page);
   await page.goto("prompts/library?tab=promotions");

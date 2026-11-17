@@ -62,6 +62,20 @@ async function draft(user: ReturnType<typeof userEvent.setup>) {
   return dialog;
 }
 describe("프롬프트 단계 관리", () => {
+  it("renders supplementary Unicode identities and preserves them in a reviewed change", async () => {
+    const name = "😀".repeat(200),
+      version = "𠮷".repeat(256);
+    const view = setup(() => stagePage([{ ...stageRow, name, version }]));
+    expect(await screen.findByText(name, { exact: true })).toBeVisible();
+    expect(screen.getByText(version, { exact: true })).toBeVisible();
+    const dialog = await draft(view.user);
+    await view.user.click(dialog.getByRole("checkbox"));
+    await view.user.click(dialog.getByRole("button", { name: "확인한 단계로 변경" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(view.api.bodies("POST /admin/prompts/promotions")).toEqual([
+      { name, version, revision: stageRow.revision, stage: "validation", reason: "검증 결과 확인" },
+    ]);
+  });
   it("requires review and commits once with the reviewed revision", async () => {
     const view = setup();
     const dialog = await draft(view.user);
