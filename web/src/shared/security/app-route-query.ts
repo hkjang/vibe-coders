@@ -1,3 +1,4 @@
+import { runQueryKeys, validRunSort } from "@/shared/utils/redteam-run-query";
 import { validContextSort } from "@/shared/utils/context-registry-query";
 import {
   containsConfiguredCredential,
@@ -39,7 +40,7 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 
 export const sensitiveQueryRejectionStateKey = "appSensitiveQueryKeys";
-const preservedRejectionKeys = new Set(["q", "team", "contexts_q", "contexts_sort"]);
+const preservedRejectionKeys = new Set(["q", "team", "contexts_q", "contexts_sort", ...runQueryKeys]);
 const preservedBooleanStateKeys = [
   "providerDetailRejected",
   "providerSearchRejected",
@@ -70,6 +71,7 @@ function sensitiveParameter(
   if (key === "selected_ref" && values.every(isAppRequestRef)) return false;
   // This bounded enum grammar contains only column ids and directions. The
   // registry column named key is not an assigned credential.
+  if (key === "runs_sort" && values.length === 1 && validRunSort(values[0] ?? "")) return false;
   if (key === "contexts_sort" && values.length === 1 && validContextSort(values[0] ?? "")) return false;
   if (values.some((value) => containsConfiguredCredential(value, credentialPrefixes))) return true;
   if (key === "provider_ref" && values.every(isProviderRef)) return false;

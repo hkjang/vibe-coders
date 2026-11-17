@@ -14,6 +14,27 @@ let executions = 0;
 let replayReviews = 0;
 let replays = 0;
 
+test("REDTEAM-LIVE-009 오래된 실행의 페이지·상세·새로고침", async ({ page }) => {
+  await login(
+    page,
+    reader,
+    "/app/redteam?tab=runs&runs_campaign_id=browser-history&runs_sort=id:asc&runs_page=6",
+  );
+  await expect(page.getByText("조건에 맞는 실행 127건")).toBeVisible();
+  await page.getByRole("link", { name: "browser-history-126 실행 상세" }).click();
+  const detail = page.getByRole("dialog", { name: "레드팀 결과" });
+  await expect(detail.getByText("browser-history-126", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/run=browser-history-126/);
+  await page.reload();
+  await expect(detail.getByText("browser-history-126", { exact: true })).toBeVisible();
+  await detail.getByRole("button", { name: "패널 닫기" }).click();
+  await expect(page).not.toHaveURL(/(?:[?&])run=/);
+  await expect(page.getByRole("button", { name: "browser-history-125 결과 보기" })).toBeVisible();
+  await page.goBack();
+  await expect(detail).toBeVisible();
+  expect(executions + replays).toBe(0);
+});
+
 test.beforeEach(async ({ context, baseURL }) => {
   reviews = 0;
   executions = 0;

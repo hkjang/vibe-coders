@@ -1,3 +1,9 @@
+import { useLocation } from "react-router";
+import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
+import { RedTeamHistoryBoundary } from "./RedTeamHistoryBoundary";
+import { versionAtLeast } from "@/config/migration-registry";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { readRunQuery, runQueryKeys } from "@/shared/utils/redteam-run-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Zap } from "lucide-react";
 import { useState } from "react";
@@ -45,13 +51,22 @@ export function RedTeamPage(): React.JSX.Element {
   const auth = useAuth();
   const client = useQueryClient();
   const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
-  const data = useRedTeamData();
   const [tab, setTab] = useTabParam<RedTeamTabId>([...tabIds]);
+  const pagedHistory = versionAtLeast(auth.backendVersion, "v0.86.145");
+  const [params, updateSearch] = useSearchState();
+  const search = readRunQuery(params, auth.credentialPrefixes);
+  const location = useLocation();
+  const historyRequested = runQueryKeys.some(
+    (key) => params.has(key) || rejectedSensitiveQuery(location.state, key),
+  );
+  const loadRunSummary = tab !== "runs" || (!pagedHistory && search.valid && !historyRequested);
+  const data = useRedTeamData(loadRunSummary);
   // The red-team Proxy API Key stays in memory for this session only: it is never
   // written to storage, the URL, logs or toasts.
   const [proxyKey, setProxyKey] = useState("");
   const [quickStart, setQuickStart] = useState<RedTeamDryRun | undefined>();
-  const [openRunId, setOpenRunId] = useState("");
+  const [legacyRunId, setLegacyRunId] = useState("");
+  const openRunId = pagedHistory ? (search.valid ? search.selected : "") : legacyRunId;
   const { remember, returnFocusRef } = useReturnFocus();
 
   const queries = Object.values(data);
@@ -88,13 +103,17 @@ export function RedTeamPage(): React.JSX.Element {
 
   const refreshAll = (): void => {
     void client.invalidateQueries({ queryKey: redteamKeys.killSwitch });
-    for (const query of queries) void query.refetch();
+    for (const query of queries) if (loadRunSummary || query !== data.runs) void query.refetch();
+    void client.invalidateQueries({ queryKey: redteamKeys.runs });
   };
   const refreshing = queries.some((query) => query.isFetching);
 
   const openRunResults = (runId: string): void => {
-    setOpenRunId(runId);
-    if (runId !== "") setTab("runs");
+    if (pagedHistory) updateSearch({ run: runId, ...(runId ? { tab: "runs" } : {}) }, { replace: false });
+    else {
+      setLegacyRunId(runId);
+      if (runId !== "") setTab("runs");
+    }
   };
 
   if (allPending) {
@@ -208,13 +227,15 @@ export function RedTeamPage(): React.JSX.Element {
       ) : null}
       {tab === "runs" ? (
         <TabPanel id="runs" panelIdPrefix="redteam">
-          <RedTeamRunsTab
-            canWrite={canWrite}
-            data={data}
-            onOpenRun={setOpenRunId}
-            openRunId={openRunId}
-            proxyKey={proxyKey}
-          />
+          <RedTeamHistoryBoundary>
+            <RedTeamRunsTab
+              canWrite={canWrite}
+              data={data}
+              onOpenRun={openRunResults}
+              openRunId={openRunId}
+              proxyKey={proxyKey}
+            />
+          </RedTeamHistoryBoundary>
         </TabPanel>
       ) : null}
       {tab === "schedules" ? (

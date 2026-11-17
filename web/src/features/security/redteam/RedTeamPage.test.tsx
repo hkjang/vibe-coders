@@ -10,11 +10,16 @@ import { RedTeamPage } from "@/features/security/redteam/RedTeamPage";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
-const authRuntime = vi.hoisted(() => ({ scopes: ["security:read", "admin:read", "admin:write"] }));
+const authRuntime = vi.hoisted(() => ({
+  backendVersion: "v9.9.9",
+  scopes: ["security:read", "admin:read", "admin:write"],
+}));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return {
+    useAuth: () => testAuth({ scopes: authRuntime.scopes, backendVersion: authRuntime.backendVersion }),
+  };
 });
 
 const target = {
@@ -225,7 +230,10 @@ function listHandlers(overrides: Readonly<Record<string, ApiHandler>> = {}) {
       count: 1,
       post_change: { enabled: true, cooldown: "10m", max_targets: 5, mode: "simulation-only" },
     }),
-    "GET /admin/redteam/runs": () => ({ runs: [run], count: 1 }),
+    "GET /admin/redteam/runs": ({ query }: { query?: object }) =>
+      query && "view" in query
+        ? { runs: [run], total: 1, limit: 25, offset: 0, generated_at: "2026-11-17T00:00:00Z" }
+        : { runs: [run], count: 1 },
     "GET /admin/redteam/baselines": () => ({ baselines: [baseline], count: 1 }),
     "GET /admin/redteam/remediations": () => ({ remediations: [remediation], count: 1 }),
     "GET /admin/redteam/dashboard": () => dashboard,
@@ -243,7 +251,10 @@ const emptyHandlers = {
     count: 0,
     post_change: { enabled: false, cooldown: "", max_targets: 0, mode: "" },
   }),
-  "GET /admin/redteam/runs": () => ({ runs: [], count: 0 }),
+  "GET /admin/redteam/runs": ({ query }: { query?: object }) =>
+    query && "view" in query
+      ? { runs: [], total: 0, limit: 25, offset: 0, generated_at: "2026-11-17T00:00:00Z" }
+      : { runs: [], count: 0 },
   "GET /admin/redteam/baselines": () => ({ baselines: [], count: 0 }),
   "GET /admin/redteam/remediations": () => ({ remediations: [], count: 0 }),
   "GET /admin/redteam/dashboard": () => ({
@@ -275,7 +286,15 @@ const renderPage = (route = "/redteam") =>
   );
 
 describe("RedTeamPage", () => {
+  it("구버전 서버의 새 이력 주소는 배경에서 최근 전체 이력도 조회하지 않는다", async () => {
+    authRuntime.backendVersion = "v0.86.144";
+    const api = mockApi(listHandlers());
+    renderPage("/redteam?tab=runs&runs_source_result_id=original");
+    expect(await screen.findByText(/서버 v0.86.145 이상/)).toBeVisible();
+    expect(api.calls.filter((call) => call.key === "GET /admin/redteam/runs")).toHaveLength(0);
+  });
   beforeEach(() => {
+    authRuntime.backendVersion = "v9.9.9";
     authRuntime.scopes = ["security:read", "admin:read", "admin:write"];
   });
 

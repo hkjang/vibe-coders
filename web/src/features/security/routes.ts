@@ -1,3 +1,4 @@
+import { runQueryKeys } from "@/shared/utils/redteam-run-query";
 import { defineFeatureModules } from "@/features/feature-module";
 import { securityOverviewQueryKeys } from "@/features/security/overview/security-overview";
 
@@ -14,7 +15,7 @@ export const securityFeatureModules = defineFeatureModules([
   {
     featureId: "security.redteam",
     load: () => import("@/features/security/redteam/RedTeamPage").then((module) => module.RedTeamPage),
-    queryKeys: ["tab", "q"],
+    queryKeys: ["tab", "q", ...runQueryKeys],
   },
   {
     featureId: "security.sandbox",

@@ -7,6 +7,11 @@ import (
 
 func TestRedTeamReplayMigrationPreservesExistingRuns(t *testing.T) {
 	db, run, _, _, _ := recordingStoreFixture(t)
+	for _, index := range []string{"idx_redteam_runs_source_page", "idx_redteam_runs_review"} {
+		if _, err := db.db.ExecContext(t.Context(), `DROP INDEX IF EXISTS `+index); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, column := range []string{"source_result_id", "review_id"} {
 		if _, err := db.db.ExecContext(t.Context(), `ALTER TABLE redteam_runs DROP COLUMN `+column); err != nil {
 			t.Fatal(err)
