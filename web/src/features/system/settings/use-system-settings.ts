@@ -82,12 +82,23 @@ export function useChangeSets(owner: string) {
   });
 }
 
-export function useSystemErrors() {
+export function useSystemErrors(owner: FeatureReadOwner) {
   const refetchInterval = useRefreshInterval();
   return useQuery({
-    queryKey: systemSettingsKeys.errors,
-    queryFn: ({ signal }) =>
-      apiClient.request(system.systemErrors.list, { query: { limit: 100 }, signal, routeId }),
+    queryKey: featureOwnedKey(systemSettingsKeys.errors, owner),
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(system.systemErrors.list, {
+        query: { limit: 100 },
+        signal,
+        routeId,
+        cache: "no-store",
+      });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
     refetchInterval,
     refetchIntervalInBackground: false,
   });
@@ -100,10 +111,17 @@ export function useKeycloakConfig() {
   });
 }
 
-export function useTrackingStatus() {
+export function useTrackingStatus(owner: FeatureReadOwner) {
   return useQuery({
-    queryKey: systemSettingsKeys.tracking,
-    queryFn: ({ signal }) => apiClient.request(system.tracking.status, { signal, routeId }),
+    queryKey: featureOwnedKey(systemSettingsKeys.tracking, owner),
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      const data = await apiClient.request(system.tracking.status, { signal, routeId, cache: "no-store" });
+      assertFeatureRead(owner, signal);
+      return data;
+    },
   });
 }
 

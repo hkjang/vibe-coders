@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, RefreshCw } from "lucide-react";
 
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AuditTab } from "@/features/system/settings/AuditTab";
 import { ChangeSetsTab } from "@/features/system/settings/ChangeSetsTab";
@@ -74,13 +75,14 @@ export function SystemSettingsPage(): React.JSX.Element {
   const [tab, setTab] = useTabParam<TabId>(tabIds);
   const hasAdminWrite = auth.user?.scopes.includes("admin:write") ?? false;
   const showLegacy = canOpenLegacyAdmin(auth);
+  const access = useFeatureMutationAccess(["system.settings"], hasAdminWrite);
 
   return (
     <div className="page-stack">
       <PageHeader
         title="시스템 설정"
         status="preview"
-        readOnly={tab !== "runtime" && tab !== "console" && !hasAdminWrite}
+        readOnly={tab !== "runtime" && tab !== "console" && !access.allowed}
         description="게이트웨이 런타임 설정, 신규 콘솔 전환 상태, 변경 이력과 운영 작업을 한 곳에서 관리합니다."
         legacyHref="/admin#/settings"
         actions={

@@ -10,6 +10,7 @@ import (
 // GET  /admin/system-errors?limit=   → list recent system errors
 // POST /admin/system-errors/clear    → clear all system errors
 func (s *Server) handleSystemErrors(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

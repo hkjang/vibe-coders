@@ -927,7 +927,7 @@ describe("SystemSettingsPage — 방문 추적", () => {
     ],
   };
 
-  it("lists blocked origins and allows one with a single click", async () => {
+  it("lists blocked origins and allows one after reviewing the change", async () => {
     const api = mockApi({
       "GET /admin/tracking/violations": () => trackingStatus,
       "POST /admin/tracking/violations/allow": () => ({
@@ -948,6 +948,8 @@ describe("SystemSettingsPage — 방문 추적", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "https://collect.tracker.example 허용" }));
+    expect(api.bodies("POST /admin/tracking/violations/allow")).toHaveLength(0);
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "출처 허용" }));
 
     await waitFor(() =>
       expect(api.bodies("POST /admin/tracking/violations/allow")).toEqual([
