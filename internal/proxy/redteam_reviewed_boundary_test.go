@@ -59,7 +59,7 @@ func TestRedTeamReviewedRejectsVirtualModelOverrides(t *testing.T) {
 	if err := db.UpsertAgentRoute(t.Context(), store.AgentRoute{ID: "agent", VirtualModel: "custom-agent", BackingModel: "test-model", Provider: "test", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	for _, model := range []string{"vibe/text2sql-preview", "VIBE/Text2SQL-exec", "vibe/grounded", "vibe/all_mcp", "custom-agent"} {
+	for _, model := range []string{"vibe/text2sql-preview", "VIBE/Text2SQL-exec", "vibe/grounded", "vibe/all_mcp", "custom-agent", "auto", "vibe/auto", "vibe-coders/auto", "VIBE/AUTO"} {
 		t.Run(model, func(t *testing.T) {
 			body := reviewedBody()
 			body.Models = []string{model}

@@ -20,7 +20,7 @@ func redTeamReviewedOutput(ctx context.Context) int {
 	return limit
 }
 func (s *Server) redTeamVirtualModel(r *http.Request, model string) (bool, error) {
-	if text2sql.IsModel(model) || isMCPDiscoveryModel(canonicalMCPDiscoveryModel(model)) {
+	if isAutoModelAlias(model) || text2sql.IsModel(model) || isMCPDiscoveryModel(canonicalMCPDiscoveryModel(model)) {
 		return true, nil
 	}
 	route, found, err := s.db.GetAgentRouteByModel(r.Context(), model)
