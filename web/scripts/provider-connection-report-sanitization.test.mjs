@@ -29,7 +29,7 @@ const runner = `
   const input = JSON.parse(readFileSync(0, "utf8"));
   try {
     const { default: SafeProviderReporter } = await import(process.argv[1]);
-    const reporter = new SafeProviderReporter();
+    const reporter = new SafeProviderReporter(input.options);
     if (reporter.printsToStdio() !== false) process.exit(2);
     reporter.onBegin?.(input.config, input.suite);
     for (const row of input.rows) {
@@ -96,7 +96,7 @@ function assertSafeSummary(raw) {
   return summary;
 }
 
-async function report(rows, status = "passed", outputCase = "valid") {
+async function report(rows, status = "passed", outputCase = "valid", workflow = "provider") {
   const directory = await mkdtemp(join(tmpdir(), "vibe-provider-report-"));
   const scratch = join(directory, "private");
   const outside = join(directory, "outside");
@@ -108,6 +108,7 @@ async function report(rows, status = "passed", outputCase = "valid") {
       ...process.env,
       TMPDIR: scratch,
       VIBE_PROVIDER_CONNECTION_SUMMARY: target,
+      VIBE_REDTEAM_BROWSER_SUMMARY: target,
     };
     switch (outputCase) {
       case "missing target":
@@ -133,6 +134,7 @@ async function report(rows, status = "passed", outputCase = "valid") {
       cwd: scratch,
       env: environment,
       input: JSON.stringify({
+        options: { workflow },
         sensitive,
         rows,
         config: { metadata: { secret: sensitive }, use: { extraHTTPHeaders: { Authorization: sensitive } } },
@@ -359,3 +361,23 @@ export default { ...liveConfig, testDir: ${JSON.stringify(fixture)}, reporter: [
     }
   },
 );
+
+test("redteam workflow shares the numeric-only reporter and requires six first-attempt passes", async () => {
+  const six = Array.from({ length: 6 }, () => row("passed", 0, [step(45, "/private/redteam.spec.ts")]));
+  assert.deepEqual(await report(six, "passed", "valid", "redteam"), {
+    passed: true,
+    test_count: 6,
+    source_line: 45,
+  });
+  assert.deepEqual(await report(six.slice(0, 5), "passed", "valid", "redteam"), {
+    passed: false,
+    test_count: 5,
+    source_line: 45,
+  });
+  six[3] = row("failed", 0, [step(72, "/private/redteam.spec.ts")]);
+  assert.deepEqual(await report(six, "failed", "valid", "redteam"), {
+    passed: false,
+    test_count: 6,
+    source_line: 72,
+  });
+});

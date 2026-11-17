@@ -3,7 +3,13 @@ import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { formatKRW } from "@/shared/utils/format";
-import { statusLabel, statusTone, writeDeniedReason } from "./redteam-ui";
+import {
+  campaignScopeLabel,
+  executionModeLabel,
+  statusLabel,
+  statusTone,
+  writeDeniedReason,
+} from "./redteam-ui";
 interface CampaignActionHandlers {
   canWrite: boolean;
   checking: boolean;
@@ -46,13 +52,13 @@ export function campaignColumns(
           <span className="rt-muted">수동</span>
         ),
     }),
-    column.accessor((row) => row.scope, { id: "scope", header: "범위" }),
+    column.accessor((row) => campaignScopeLabel(row.scope), { id: "scope", header: "범위" }),
     column.accessor((row) => row.status, {
       id: "status",
       header: "상태",
       cell: ({ getValue }) => <Badge tone={statusTone(getValue())}>{statusLabel(getValue())}</Badge>,
     }),
-    column.accessor((row) => row.execution_mode, { id: "mode", header: "모드" }),
+    column.accessor((row) => executionModeLabel(row.execution_mode), { id: "mode", header: "실행 방식" }),
     column.accessor((row) => row.budget_limit_krw, {
       id: "budget",
       header: "예산",
