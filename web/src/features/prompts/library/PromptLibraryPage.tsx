@@ -4,6 +4,8 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
 import { ContextRegistryTab } from "./ContextRegistryTab";
 import { contextMessages } from "./context-registry-messages";
+import { ProductRegistryTab } from "./ProductRegistryTab";
+import { productMessages } from "./product-registry-messages";
 
 import { LibraryBoundary } from "./LibraryBoundary";
 import { useLibraryOwner } from "./library-context";
@@ -18,7 +20,7 @@ import { TabPanel, Tabs } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import "@/features/prompts/prompts.css";
 
-const tabIds = ["search", "assets", "debt", "contexts"] as const;
+const tabIds = ["search", "assets", "debt", "contexts", "products"] as const;
 type TabId = (typeof tabIds)[number];
 
 const tabItems = [
@@ -42,23 +44,27 @@ function LibraryContent(): React.JSX.Element {
   const queryClient = useQueryClient();
   const [tab, setTab] = useTabParam<TabId>(tabIds);
   const canWrite = access.allowed;
-  const availableTabs =
-    versionAtLeast(backendVersion, "v0.86.130") || tab === "contexts"
-      ? [...tabItems, { id: "contexts" as const, label: contextMessages.tab }]
-      : tabItems;
+  const availableTabs: { id: TabId; label: string }[] = [...tabItems];
+  if (versionAtLeast(backendVersion, "v0.86.130") || tab === "contexts")
+    availableTabs.push({ id: "contexts", label: contextMessages.tab });
+  if (versionAtLeast(backendVersion, "v0.86.131") || tab === "products")
+    availableTabs.push({ id: "products", label: productMessages.tab });
+  const metadataOnly = tab === "contexts" || tab === "products";
 
   return (
     <div className="page-stack">
       <PageHeader
         title="프롬프트 라이브러리"
-        status={tab === "contexts" ? "preview_read_only" : "preview"}
-        readOnly={tab === "contexts"}
+        status={metadataOnly ? "preview_read_only" : "preview"}
+        readOnly={metadataOnly}
         description={
-          tab === "contexts"
-            ? contextMessages.description
-            : "프롬프트 검색과 지문, 재사용 자산, 프롬프트 부채를 한곳에서 관리합니다."
+          tab === "products"
+            ? productMessages.description
+            : tab === "contexts"
+              ? contextMessages.description
+              : "프롬프트 검색과 지문, 재사용 자산, 프롬프트 부채를 한곳에서 관리합니다."
         }
-        legacyHref={tab === "contexts" ? undefined : "/admin#/prompts"}
+        legacyHref={metadataOnly ? undefined : "/admin#/prompts"}
         actions={
           <Button
             variant="primary"
@@ -74,7 +80,7 @@ function LibraryContent(): React.JSX.Element {
         }
       />
 
-      {!canWrite && tab !== "contexts" ? (
+      {!canWrite && !metadataOnly ? (
         <InlineNotice tone="info" title="읽기 전용으로 열려 있습니다.">
           {access.reason} 초안은 유지되며 조회는 그대로 사용할 수 있습니다.
         </InlineNotice>
@@ -106,6 +112,11 @@ function LibraryContent(): React.JSX.Element {
       {tab === "contexts" ? (
         <TabPanel id="contexts" panelIdPrefix="prompts-library">
           <ContextRegistryTab />
+        </TabPanel>
+      ) : null}
+      {tab === "products" ? (
+        <TabPanel id="products" panelIdPrefix="prompts-library">
+          <ProductRegistryTab />
         </TabPanel>
       ) : null}
     </div>

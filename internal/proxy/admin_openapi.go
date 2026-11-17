@@ -644,6 +644,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	switch key {
 	case "get /admin/contexts":
 		enrichContextMetadataOpenAPI(op, responses)
+	case "get /admin/prompt-products":
+		enrichPromptProductMetadataOpenAPI(op, responses)
 	case "get /admin/apps":
 		enrichWorkAppPageOpenAPI(op, responses)
 	case "get /admin/workflows":
@@ -1243,6 +1245,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range contextMetadataOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range promptProductMetadataOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range serviceSummaryOpenAPISchemas() {
