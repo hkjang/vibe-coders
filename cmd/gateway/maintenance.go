@@ -33,6 +33,8 @@ func runMaintenanceCommand(args []string, stdout, stderr io.Writer) (int, bool) 
 		return runRepairDataDir(args[1:], stdout, stderr), true
 	case "set-user-role":
 		return runSetUserRole(args[1:], stdout, stderr), true
+	case "verify-secret-backup":
+		return runVerifySecretBackup(args[1:], stdout, stderr), true
 	case "help", "-h", "--help":
 		printMaintenanceUsage(stdout)
 		return 0, true
@@ -58,6 +60,9 @@ commands:
   set-user-role --email E --role R     assign role R to the local account E and revoke its
                                        sessions; recovers a console whose last administrator
                                        lost their role (uses the gateway's DB_DRIVER/DB_DSN)
+  verify-secret-backup (--sqlite FILE | --postgres) --key-file FILE
+                                       백업의 비밀값을 읽기 전용으로 검사하고 저장소별 건수만 출력
+                                       PostgreSQL: SECRET_BACKUP_POSTGRES_DSN의 격리 복원본
   version                              print the build version
 `, defaultDataDir, datadir.DefaultUID, datadir.DefaultGID)
 }
