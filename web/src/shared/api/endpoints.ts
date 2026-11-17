@@ -1,3 +1,4 @@
+import { stageEndpoints } from "./domains/prompt-stages";
 import { activitySummaryEndpoints } from "./domains/activity-summaries";
 import { contextRegistryEndpoint } from "./domains/context-registry";
 import { productRegistryEndpoint } from "./domains/prompt-products";
@@ -182,6 +183,7 @@ export const endpoints = {
     serviceSummaries: serviceSummaryEndpoints,
     activitySummaries: activitySummaryEndpoints,
     contextRegistry: contextRegistryEndpoint,
+    promptStages: stageEndpoints,
     productRegistry: productRegistryEndpoint,
     resourceSearch: resourceSearchEndpoint,
     stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),

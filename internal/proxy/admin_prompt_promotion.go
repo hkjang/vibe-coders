@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -55,10 +56,29 @@ func (s *Server) handlePromptPromotions(w http.ResponseWriter, r *http.Request) 
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
+	query, queryErr := url.ParseQuery(r.URL.RawQuery)
+	if queryErr != nil {
+		writePromptStageInvalid(w)
+		return
+	}
+	if _, present := query["view"]; present {
+		if query.Get("view") != "workspace" {
+			writePromptStageInvalid(w)
+			return
+		}
+		s.handlePromptStageWorkspace(w, r, query)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
-		writeJSON(w, http.StatusOK, s.promotionView(w, r, since))
+		view, err := s.promotionView(r, since)
+		if err != nil {
+			writePromptStageFailure(w)
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
 	case http.MethodPost:
 		var p struct {
 			Action        string `json:"action"`
@@ -99,9 +119,15 @@ func (s *Server) handlePromptPromotions(w http.ResponseWriter, r *http.Request) 
 }
 
 // promotionView assembles current stages + stats + eligibility for every prompt version.
-func (s *Server) promotionView(w http.ResponseWriter, r *http.Request, since time.Time) map[string]any {
-	stats, _ := s.db.PromptVersionStatsSince(r.Context(), since)
-	promos, _ := s.db.ListPromptPromotions(r.Context())
+func (s *Server) promotionView(r *http.Request, since time.Time) (map[string]any, error) {
+	stats, err := s.db.PromptVersionStatsSince(r.Context(), since)
+	if err != nil {
+		return nil, err
+	}
+	promos, err := s.db.ListPromptPromotions(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	stageByKey := map[string]string{}
 	for _, p := range promos {
 		stageByKey[p.PromptName+"\x00"+p.PromptVersion] = p.Stage
@@ -126,7 +152,7 @@ func (s *Server) promotionView(w http.ResponseWriter, r *http.Request, since tim
 		"promotions": promos,
 		"since":      since.UTC().Format(time.RFC3339),
 		"stages":     []string{store.PromptStageExperiment, store.PromptStageValidation, store.PromptStageProduction},
-	}
+	}, nil
 }
 
 // autoPromote advances every eligible version one stage and reports what changed.
@@ -137,7 +163,11 @@ func (s *Server) autoPromote(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "promotion_stats_failed")
 		return
 	}
-	promos, _ := s.db.ListPromptPromotions(r.Context())
+	promos, err := s.db.ListPromptPromotions(r.Context())
+	if err != nil {
+		writePromptStageFailure(w)
+		return
+	}
 	stageByKey := map[string]string{}
 	for _, p := range promos {
 		stageByKey[p.PromptName+"\x00"+p.PromptVersion] = p.Stage

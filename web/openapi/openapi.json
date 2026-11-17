@@ -7866,6 +7866,357 @@
         ],
         "type": "object"
       },
+      "PromptStageChange": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "revision": {
+            "maxLength": 43,
+            "minLength": 43,
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "experiment",
+              "validation",
+              "production"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "reason",
+          "revision",
+          "stage",
+          "version"
+        ],
+        "type": "object"
+      },
+      "PromptStageChangeReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "experiment",
+              "validation",
+              "production"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference",
+          "revision",
+          "stage",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "PromptStageLegacyChange": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "prompt_name": {
+            "type": "string"
+          },
+          "prompt_version": {
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "experiment",
+              "validation",
+              "production"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PromptStageLegacyResult": {
+        "oneOf": [
+          {
+            "properties": {
+              "promotion": {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            },
+            "required": [
+              "promotion"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "count": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "promoted": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "promoted",
+              "count"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "PromptStageLegacyView": {
+        "properties": {
+          "promotions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "stages": {
+            "items": {
+              "enum": [
+                "experiment",
+                "validation",
+                "production"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "versions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "versions",
+          "promotions",
+          "since",
+          "stages"
+        ],
+        "type": "object"
+      },
+      "PromptStageWorkspaceItem": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "can_change": {
+            "type": "boolean"
+          },
+          "eligible_stage": {
+            "enum": [
+              "",
+              "validation",
+              "production"
+            ],
+            "type": "string"
+          },
+          "errors": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "evaluation_failures": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "experiment",
+              "validation",
+              "production",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "calls",
+          "can_change",
+          "eligible_stage",
+          "errors",
+          "evaluation_failures",
+          "name",
+          "reference",
+          "registered",
+          "revision",
+          "stage",
+          "updated_at",
+          "version"
+        ],
+        "type": "object"
+      },
+      "PromptStageWorkspacePage": {
+        "additionalProperties": false,
+        "properties": {
+          "criteria": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "maximum_error_rate": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "maximum_evaluation_failures_per_call": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "minimum_calls": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "stage": {
+                  "enum": [
+                    "validation",
+                    "production"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "maximum_error_rate",
+                "maximum_evaluation_failures_per_call",
+                "minimum_calls",
+                "stage"
+              ],
+              "type": "object"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PromptStageWorkspaceItem"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "all",
+              "experiment",
+              "validation",
+              "production"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "criteria",
+          "items",
+          "limit",
+          "offset",
+          "since",
+          "stage",
+          "total",
+          "until",
+          "window"
+        ],
+        "type": "object"
+      },
       "ProtectedResourceMetadata": {
         "properties": {
           "authorization_servers": {
@@ -13407,7 +13758,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.131"
+    "version": "v0.86.132"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -23365,10 +23716,155 @@
     },
     "/admin/prompts/promotions": {
       "get": {
+        "description": "Existing prompt lifecycle API. view=workspace opts into bounded metadata (GET) or a reviewed manual stage change (POST). Global admin:read/write authorization is unchanged. No model deployment or routing changes. Workspace reads combine registered stages and observed versions in one read snapshot. Statistics count requests once and evaluation failure records separately. Stage changes require a keyed revision and a safe non-empty reason, reject concurrent changes with 409, and commit an audit with the stage. No automatic mutation retries. Unsafe identities are hidden and cannot be changed through this view. Legacy requests without view retain their original bodies and success responses.",
         "operationId": "get__admin_prompts_promotions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stage",
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "experiment",
+                "validation",
+                "production"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "workspace"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "default": "7d",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PromptStageLegacyView"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PromptStageWorkspacePage"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Legacy view or workspace page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -23382,10 +23878,124 @@
         ]
       },
       "post": {
+        "description": "Existing prompt lifecycle API. view=workspace opts into bounded metadata (GET) or a reviewed manual stage change (POST). Global admin:read/write authorization is unchanged. No model deployment or routing changes. Workspace reads combine registered stages and observed versions in one read snapshot. Statistics count requests once and evaluation failure records separately. Stage changes require a keyed revision and a safe non-empty reason, reject concurrent changes with 409, and commit an audit with the stage. No automatic mutation retries. Unsafe identities are hidden and cannot be changed through this view. Legacy requests without view retain their original bodies and success responses.",
         "operationId": "post__admin_prompts_promotions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "workspace"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PromptStageChange"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PromptStageLegacyChange"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PromptStageLegacyResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PromptStageChangeReceipt"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Legacy result or committed workspace receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid input, permission, conflicting revision or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

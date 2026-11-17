@@ -62,6 +62,8 @@ const scenarios = new Set([
   "AUTH-LIVE-052",
   "AUTH-LIVE-053",
   "AUTH-LIVE-054",
+  "AUTH-LIVE-055",
+  "AUTH-LIVE-056",
 ]);
 const sourceFiles = new Set([
   "keycloak-product.spec.ts",
@@ -83,6 +85,7 @@ const sourceFiles = new Set([
   "request-bulk-live.spec.ts",
   "context-registry-live.spec.ts",
   "product-registry-live.spec.ts",
+  "prompt-stage-live.spec.ts",
 ]);
 const testStatuses = new Set(["passed", "failed", "timedOut", "skipped", "interrupted"]);
 const runStatuses = new Set(["passed", "failed", "timedout", "interrupted"]);

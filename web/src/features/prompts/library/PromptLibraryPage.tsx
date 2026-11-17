@@ -4,6 +4,8 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
 import { ContextRegistryTab } from "./ContextRegistryTab";
 import { contextMessages } from "./context-registry-messages";
+import { PromptStagesTab } from "./PromptStagesTab";
+import { stageMessages } from "./stage-messages";
 import { ProductRegistryTab } from "./ProductRegistryTab";
 import { productMessages } from "./product-registry-messages";
 
@@ -20,7 +22,7 @@ import { TabPanel, Tabs } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import "@/features/prompts/prompts.css";
 
-const tabIds = ["search", "assets", "debt", "contexts", "products"] as const;
+const tabIds = ["search", "assets", "debt", "contexts", "products", "promotions"] as const;
 type TabId = (typeof tabIds)[number];
 
 const tabItems = [
@@ -49,6 +51,8 @@ function LibraryContent(): React.JSX.Element {
     availableTabs.push({ id: "contexts", label: contextMessages.tab });
   if (versionAtLeast(backendVersion, "v0.86.131") || tab === "products")
     availableTabs.push({ id: "products", label: productMessages.tab });
+  if (versionAtLeast(backendVersion, "v0.86.132") || tab === "promotions")
+    availableTabs.push({ id: "promotions", label: stageMessages.tab });
   const metadataOnly = tab === "contexts" || tab === "products";
 
   return (
@@ -58,13 +62,15 @@ function LibraryContent(): React.JSX.Element {
         status={metadataOnly ? "preview_read_only" : "preview"}
         readOnly={metadataOnly}
         description={
-          tab === "products"
-            ? productMessages.description
-            : tab === "contexts"
-              ? contextMessages.description
-              : "프롬프트 검색과 지문, 재사용 자산, 프롬프트 부채를 한곳에서 관리합니다."
+          tab === "promotions"
+            ? stageMessages.description
+            : tab === "products"
+              ? productMessages.description
+              : tab === "contexts"
+                ? contextMessages.description
+                : "프롬프트 검색과 지문, 재사용 자산, 프롬프트 부채를 한곳에서 관리합니다."
         }
-        legacyHref={metadataOnly ? undefined : "/admin#/prompts"}
+        legacyHref={metadataOnly || tab === "promotions" ? undefined : "/admin#/prompts"}
         actions={
           <Button
             variant="primary"
@@ -112,6 +118,11 @@ function LibraryContent(): React.JSX.Element {
       {tab === "contexts" ? (
         <TabPanel id="contexts" panelIdPrefix="prompts-library">
           <ContextRegistryTab />
+        </TabPanel>
+      ) : null}
+      {tab === "promotions" ? (
+        <TabPanel id="promotions" panelIdPrefix="prompts-library">
+          <PromptStagesTab />
         </TabPanel>
       ) : null}
       {tab === "products" ? (

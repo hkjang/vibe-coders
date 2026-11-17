@@ -251,7 +251,17 @@ func (f *policyImportContractFixture) request(t *testing.T, method, path string,
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	// The complete generated API document now exceeds the policy payload's
+	// 1 MiB fixture cap. Keep policy responses bounded separately and fail
+	// explicitly on truncation rather than attempting to decode partial JSON.
+	limit := int64(1 << 20)
+	if method == http.MethodGet && path == "/openapi.json" {
+		limit = 2 << 20
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if int64(len(data)) > limit {
+		t.Fatal("contract fixture response exceeds its explicit byte limit")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

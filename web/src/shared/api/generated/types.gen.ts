@@ -2244,6 +2244,91 @@ export type PromptProductMetadataPage = {
     total: number;
 };
 
+export type PromptStageChange = {
+    name: string;
+    reason: string;
+    revision: string;
+    stage: 'experiment' | 'validation' | 'production';
+    version: string;
+};
+
+export type PromptStageChangeReceipt = {
+    reference: string;
+    revision: string;
+    stage: 'experiment' | 'validation' | 'production';
+    updated_at: string;
+};
+
+export type PromptStageLegacyChange = {
+    action?: string;
+    note?: string;
+    prompt_name?: string;
+    prompt_version?: string;
+    stage?: 'experiment' | 'validation' | 'production';
+};
+
+export type PromptStageLegacyResult = {
+    promotion: {
+        [key: string]: unknown;
+    };
+} | {
+    count: number;
+    promoted: Array<{
+        [key: string]: unknown;
+    }>;
+};
+
+export type PromptStageLegacyView = {
+    promotions: Array<{
+        [key: string]: unknown;
+    }>;
+    since: string;
+    stages: Array<'experiment' | 'validation' | 'production'>;
+    versions: Array<{
+        [key: string]: unknown;
+    }>;
+};
+
+export type PromptStageWorkspaceItem = {
+    calls: number;
+    can_change: boolean;
+    eligible_stage: '' | 'validation' | 'production';
+    errors: number;
+    evaluation_failures: number;
+    name: string;
+    reference: string;
+    registered: boolean;
+    revision: string;
+    stage: 'experiment' | 'validation' | 'production' | 'unknown';
+    updated_at: string | null;
+    version: string;
+};
+
+export type PromptStageWorkspacePage = {
+    criteria: [
+        {
+            maximum_error_rate: number;
+            maximum_evaluation_failures_per_call: number;
+            minimum_calls: number;
+            stage: 'validation' | 'production';
+        },
+        {
+            maximum_error_rate: number;
+            maximum_evaluation_failures_per_call: number;
+            minimum_calls: number;
+            stage: 'validation' | 'production';
+        }
+    ];
+    items: Array<PromptStageWorkspaceItem>;
+    limit: number;
+    offset: number;
+    since: string;
+    stage: 'all' | 'experiment' | 'validation' | 'production';
+    total: number;
+    until: string;
+    window: '1h' | '24h' | '7d' | '30d';
+};
+
 export type ProtectedResourceMetadata = {
     authorization_servers: Array<string>;
     bearer_methods_supported: Array<string>;
@@ -9824,30 +9909,108 @@ export type GetAdminPromptsFingerprintsResponses = {
 export type GetAdminPromptsPromotionsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        limit?: number;
+        offset?: number;
+        stage?: 'all' | 'experiment' | 'validation' | 'production';
+        view?: 'workspace';
+        window?: '1h' | '24h' | '7d' | '30d';
+    };
     url: '/admin/prompts/promotions';
 };
+
+export type GetAdminPromptsPromotionsErrors = {
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    403: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    405: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    409: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminPromptsPromotionsError = GetAdminPromptsPromotionsErrors[keyof GetAdminPromptsPromotionsErrors];
 
 export type GetAdminPromptsPromotionsResponses = {
     /**
-     * OK
+     * Legacy view or workspace page
      */
-    200: unknown;
+    200: PromptStageLegacyView | PromptStageWorkspacePage;
 };
 
+export type GetAdminPromptsPromotionsResponse = GetAdminPromptsPromotionsResponses[keyof GetAdminPromptsPromotionsResponses];
+
 export type PostAdminPromptsPromotionsData = {
-    body?: never;
+    body: PromptStageChange | PromptStageLegacyChange;
     path?: never;
-    query?: never;
+    query?: {
+        view?: 'workspace';
+    };
     url: '/admin/prompts/promotions';
 };
 
+export type PostAdminPromptsPromotionsErrors = {
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    403: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    405: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    409: AppError;
+    /**
+     * Invalid input, permission, conflicting revision or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminPromptsPromotionsError = PostAdminPromptsPromotionsErrors[keyof PostAdminPromptsPromotionsErrors];
+
 export type PostAdminPromptsPromotionsResponses = {
     /**
-     * OK
+     * Legacy result or committed workspace receipt
      */
-    200: unknown;
+    200: PromptStageLegacyResult | PromptStageChangeReceipt;
 };
+
+export type PostAdminPromptsPromotionsResponse = PostAdminPromptsPromotionsResponses[keyof PostAdminPromptsPromotionsResponses];
 
 export type PostAdminProviderConnectionTestData = {
     body: ProviderConnectionTestRequestWritable;
