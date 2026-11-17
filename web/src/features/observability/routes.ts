@@ -33,6 +33,7 @@ export const observabilityFeatureModules = defineFeatureModules([
       "model",
       "selected_ref",
       ...traceRelatedQueryKeys,
+      "timeline_view",
       "flow_kind",
       "flow_status",
       "selected_request",
