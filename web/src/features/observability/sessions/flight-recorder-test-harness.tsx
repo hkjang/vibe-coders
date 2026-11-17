@@ -55,6 +55,7 @@ vi.mock("@/app/auth/AuthProvider", async () => {
   return {
     useAuth: () => {
       const base = testAuth({
+        backendVersion: "v0.86.152",
         scopes: runtime.scopes,
         role: runtime.role,
         legacyFallback: false,

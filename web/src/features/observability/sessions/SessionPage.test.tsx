@@ -12,7 +12,7 @@ const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] })
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return { useAuth: () => testAuth({ backendVersion: "v0.86.152", scopes: authRuntime.scopes }) };
 });
 
 const sessionsResponse = {

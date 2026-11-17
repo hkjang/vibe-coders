@@ -2,6 +2,7 @@
 // here with `operation()` from "@/shared/api/endpoint-factory" and a zod schema
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
+import { sessionExplorerPageSchema, sessionExplorerQuerySchema } from "./session-page.schema";
 import { traceRelatedRunsQuerySchema, traceRelatedRunsSchema } from "./trace-related-runs.schema";
 import { traceSafeFlowQuerySchema, traceSafeFlowSchema } from "./trace-safe-flow.schema";
 
@@ -46,6 +47,8 @@ import {
 } from "@/shared/api/domains/observability.schemas";
 import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
+  GetAdminSessionsPageData,
+  GetAdminSessionsPageResponse,
   GetAdminTracesTraceIdRunsData,
   GetAdminTracesTraceIdRunsResponse,
   GetAdminAppRequestFlowData,
@@ -227,6 +230,12 @@ const podsQuerySchema = z.object({ stale_s: optionalNumber });
 export type PodsQuery = z.infer<typeof podsQuerySchema>;
 
 export const observabilityEndpoints = {
+  sessionPage: operation<GetAdminSessionsPageData, GetAdminSessionsPageResponse>()(
+    "GET",
+    "/admin/sessions/page",
+    sessionExplorerPageSchema,
+    sessionExplorerQuerySchema,
+  ),
   relatedRuns: operation<GetAdminTracesTraceIdRunsData, GetAdminTracesTraceIdRunsResponse>()(
     "GET",
     "/admin/traces/{trace_id}/runs",

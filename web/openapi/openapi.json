@@ -12486,6 +12486,172 @@
         ],
         "type": "object"
       },
+      "SessionExplorerPage": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "maximum": 365,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limit": {
+            "enum": [
+              25,
+              50,
+              100
+            ],
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_page_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionExplorerRow"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/SessionExplorerSummary"
+          },
+          "to": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "days",
+          "from",
+          "limit",
+          "offset",
+          "session_page_version",
+          "sessions",
+          "summary",
+          "to"
+        ],
+        "type": "object"
+      },
+      "SessionExplorerRow": {
+        "additionalProperties": false,
+        "properties": {
+          "api_keys": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cost_krw": {
+            "maximum": 1000000000000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "errors": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "first_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_message": {
+            "maxLength": 160,
+            "type": "string"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "models": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requests": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "row_key": {
+            "pattern": "^session_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 1024,
+            "nullable": true,
+            "type": "string"
+          },
+          "total_tokens": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_keys",
+          "cost_krw",
+          "errors",
+          "first_seen",
+          "last_message",
+          "last_seen",
+          "models",
+          "requests",
+          "row_key",
+          "session_id",
+          "total_tokens"
+        ],
+        "type": "object"
+      },
+      "SessionExplorerSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_krw": {
+            "maximum": 1000000000000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "errors": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requests": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sessions": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_tokens": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cost_krw",
+          "errors",
+          "requests",
+          "sessions",
+          "total_tokens"
+        ],
+        "type": "object"
+      },
       "SettingBatchItem": {
         "additionalProperties": false,
         "properties": {
@@ -15385,7 +15551,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.152"
+    "version": "v0.86.153"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -31163,6 +31329,128 @@
         "summary": "Recent coding sessions (flight-recorder index)",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/admin/sessions/page": {
+      "get": {
+        "description": "Server-side session ID substring search within the caller's team and last N days, ending at response.to (exclusive). Search is case-insensitive and treats SQL wildcard characters literally; prompt text is not searched. Count, total usage and the current page share one SQL statement snapshot. Live pages can shift as new requests arrive. Usage records contribute tokens/cost without multiplying request counts. Ordering is UTC last activity at nanosecond precision, then binary session ID descending. Stored redacted last-user-message previews are additionally masked for every caller. Unsafe session IDs are null and cannot open a recorder. A three-second query deadline and no-store apply. The legacy /admin/sessions response is unchanged.",
+        "operationId": "get__admin_sessions_page",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "default": 7,
+              "maximum": 365,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Session ID only; maximum 256 UTF-8 bytes. Sensitive text is rejected; not echoed in the response.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "enum": [
+                25,
+                50,
+                100
+              ],
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Must be a multiple of limit.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionExplorerPage"
+                }
+              }
+            },
+            "description": "Session page and full matching totals"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid, unknown or duplicate query parameter"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Administrator read required"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "GET required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Query failed; no partial totals"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Team-scoped session search, totals and server pagination",
+        "tags": [
+          "observability"
         ]
       }
     },

@@ -3630,6 +3630,39 @@ export type SsoStatusResponse = {
     login_url: string;
 };
 
+export type SessionExplorerPage = {
+    days: number;
+    from: string;
+    limit: 25 | 50 | 100;
+    offset: number;
+    session_page_version: 1;
+    sessions: Array<SessionExplorerRow>;
+    summary: SessionExplorerSummary;
+    to: string;
+};
+
+export type SessionExplorerRow = {
+    api_keys: number;
+    cost_krw: number;
+    errors: number;
+    first_seen: string;
+    last_message: string;
+    last_seen: string;
+    models: number;
+    requests: number;
+    row_key: string;
+    session_id: string | null;
+    total_tokens: number;
+};
+
+export type SessionExplorerSummary = {
+    cost_krw: number;
+    errors: number;
+    requests: number;
+    sessions: number;
+    total_tokens: number;
+};
+
 export type SettingBatchItem = {
     expected_version?: number;
     key: string;
@@ -13248,6 +13281,58 @@ export type GetAdminSessionsResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminSessionsPageData = {
+    body?: never;
+    path?: never;
+    query?: {
+        days?: number;
+        /**
+         * Session ID only; maximum 256 UTF-8 bytes. Sensitive text is rejected; not echoed in the response.
+         */
+        q?: string;
+        limit?: 25 | 50 | 100;
+        /**
+         * Must be a multiple of limit.
+         */
+        offset?: number;
+    };
+    url: '/admin/sessions/page';
+};
+
+export type GetAdminSessionsPageErrors = {
+    /**
+     * Invalid, unknown or duplicate query parameter
+     */
+    400: AppError;
+    /**
+     * Administrator read required
+     */
+    401: AppError;
+    /**
+     * GET required
+     */
+    405: AppError;
+    /**
+     * Query failed; no partial totals
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSessionsPageError = GetAdminSessionsPageErrors[keyof GetAdminSessionsPageErrors];
+
+export type GetAdminSessionsPageResponses = {
+    /**
+     * Session page and full matching totals
+     */
+    200: SessionExplorerPage;
+};
+
+export type GetAdminSessionsPageResponse = GetAdminSessionsPageResponses[keyof GetAdminSessionsPageResponses];
 
 export type GetAdminSessionsSessionIdFlightRecorderData = {
     body?: never;
