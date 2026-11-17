@@ -171,6 +171,6 @@ func (s *Server) handleRedTeamReviewedExecution(w http.ResponseWriter, r *http.R
 	result["review_id"], result["execution_kind"], result["limits"] = review.ID, review.Kind, review.Limits
 	result["planned_live_calls"], result["planned_case_executions"] = plan.LiveCalls, plan.CaseExecutions
 	summary := result["summary"].(map[string]any)
-	result["complete"] = result["status"] == "completed" && summary["live_calls"] == plan.LiveCalls && summary["results"] == plan.CaseExecutions && ctx.Err() == nil
+	result["complete"] = result["recording"].(redTeamRecording).Confirmed && result["status"] == "completed" && summary["live_calls"] == plan.LiveCalls && summary["results"] == plan.CaseExecutions && ctx.Err() == nil
 	writeJSON(w, http.StatusOK, result)
 }

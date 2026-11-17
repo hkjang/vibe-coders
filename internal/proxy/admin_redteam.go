@@ -639,6 +639,8 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 	modelCache := &redTeamModelCache{} // one /v1/models auto-discovery per run, reused across targets
 	var lastLiveCall time.Time         // for QPS throttling of live invocations
 	stopped := ""                      // set to a reason if budget/kill-switch aborts the run mid-flight
+	recording := redTeamRecording{Confirmed: true}
+	baselines := []store.RedTeamBaseline{}
 	admitLive := func() bool {
 		switch {
 		case r.Context().Err() != nil:
@@ -665,7 +667,10 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			break
 		}
 		run := store.RedTeamRun{ID: newID("rtrun"), CampaignID: c.ID, TargetID: t.ID, Status: "running", Mode: c.ExecutionMode}
-		_ = s.db.InsertRedTeamRun(r.Context(), run)
+		if err := s.db.InsertRedTeamRun(r.Context(), run); err != nil && review != nil {
+			recording.fail("run_start", &stopped)
+			break
+		}
 		maxRisk, failed, total, cost := 0, 0, 0, 0.0
 		// record persists one case result (+evidence/remediation) and folds it into the counters.
 		record := func(cs store.RedTeamProbeCase, result store.RedTeamCaseResult, ev store.RedTeamEvidence, rem store.RedTeamRemediation) {
@@ -675,11 +680,21 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			result.EvidenceHash = ev.ExportHash
 			recordCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 			defer cancelRecord()
-			_ = s.db.InsertRedTeamCaseResult(recordCtx, result)
-			_ = s.db.InsertRedTeamEvidence(recordCtx, ev)
 			if rem.ActionType != "" {
 				rem.ID, rem.ResultID = newID("rtrm"), result.ID
-				_ = s.db.InsertRedTeamRemediation(recordCtx, rem)
+			}
+			if review != nil {
+				if err := s.db.SaveRedTeamCaseBundle(recordCtx, result, ev, rem); err != nil {
+					recording.fail("case_result", &stopped)
+					return
+				}
+				recording.Results++
+			} else {
+				_ = s.db.InsertRedTeamCaseResult(recordCtx, result)
+				_ = s.db.InsertRedTeamEvidence(recordCtx, ev)
+				if rem.ActionType != "" {
+					_ = s.db.InsertRedTeamRemediation(recordCtx, rem)
+				}
 			}
 			total++
 			totalResults++
@@ -777,16 +792,35 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			run.Status = "stopped"
 		}
 		run.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-		_ = s.db.UpdateRedTeamRun(finishCtx, run)
-		cancelFinish()
+		if review == nil {
+			finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+			_ = s.db.UpdateRedTeamRun(finishCtx, run)
+			cancelFinish()
+		}
 		runs = append(runs, run)
 		for _, p := range packs {
 			if run.Status == "passed" {
-				_ = s.db.UpsertRedTeamBaseline(r.Context(), store.RedTeamBaseline{
+				if review != nil {
+					applicable := false
+					for _, cs := range cases {
+						if cs.PackID == p.ID && redTeamCaseApplies(t, cs) {
+							applicable = true
+							break
+						}
+					}
+					if !applicable {
+						continue
+					}
+				}
+				baseline := store.RedTeamBaseline{
 					ID: "rtb_" + audit.HashText(t.ID + "|" + p.ID)[:16], TargetID: t.ID, PackID: p.ID,
 					BaselineScore: maxRisk, LastPassedAt: run.EndedAt, DriftThreshold: 10,
-				})
+				}
+				if review != nil {
+					baselines = append(baselines, baseline)
+				} else {
+					_ = s.db.UpsertRedTeamBaseline(r.Context(), baseline)
+				}
 			}
 		}
 	}
@@ -796,7 +830,17 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 	}
 	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancelFinish()
-	_ = s.db.UpdateRedTeamCampaignStatus(finishCtx, c.ID, finalStatus, c.ApprovedBy)
+	if review != nil {
+		if !recording.Confirmed || finalStatus != "completed" {
+			baselines = nil
+		}
+		if err := s.db.FinalizeRedTeamExecution(finishCtx, c.ID, finalStatus, c.ApprovedBy, runs, baselines); err != nil {
+			recording.fail("finalize", &stopped)
+			finalStatus = "stopped"
+		}
+	} else {
+		_ = s.db.UpdateRedTeamCampaignStatus(finishCtx, c.ID, finalStatus, c.ApprovedBy)
+	}
 	if criticals > 0 {
 		s.auditAdmin(r, "redteam.critical", "", auditJSON(map[string]any{"campaign_id": c.ID, "critical": criticals}))
 		// §27.8: critical → alert. Fires for both manual and scheduled runs (no-op if Mattermost
@@ -815,13 +859,18 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 	if stopped != "" {
 		note = "실행이 " + stopped + " 사유로 중단되었습니다. " + note
 	}
-	return map[string]any{
+	result := map[string]any{
 		"campaign_id": c.ID, "status": finalStatus, "stopped": stopped, "runs": runs, "summary": map[string]any{
 			"runs": len(runs), "results": totalResults, "warnings": warnings, "failures": failures, "critical": criticals,
 			"live_calls": liveCalls, "live_cost_krw": liveCost, "mode": mode,
 		},
 		"note": note,
-	}, nil
+	}
+	if review != nil {
+		result["recording"] = recording
+		result["note"] = "검토한 단일 LLM 호출과 시뮬레이션의 수행 결과입니다. Text2SQL·MCP·앱·워크플로 대상은 시뮬레이션으로 처리합니다. 증적 원문 보관은 검토한 캠페인 설정을 따릅니다. 저장 확인은 데이터베이스의 응답 기준이며, 전송된 호출의 되돌리기나 전체 실행의 원자성을 뜻하지 않습니다."
+	}
+	return result, nil
 }
 
 func (s *Server) redTeamSelection(r *http.Request, c store.RedTeamCampaign) ([]store.RedTeamTarget, []store.RedTeamProbePack, []store.RedTeamProbeCase, error) {

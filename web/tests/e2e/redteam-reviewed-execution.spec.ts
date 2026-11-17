@@ -8,7 +8,7 @@ import {
 async function fixture(page: Page, status = 200) {
   await page.clock.setFixedTime(new Date("2026-11-17T00:00:00Z"));
   const base = await installPromptLibrary(page);
-  base.bootstrap.backend_version = "v0.86.139";
+  base.bootstrap.backend_version = "v0.86.140";
   base.bootstrap.allowed_features = ["security.redteam"];
   const feature = base.bootstrap.migration_registry[0];
   if (!feature) throw Error("missing feature");

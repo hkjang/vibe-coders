@@ -14,7 +14,7 @@ describe("레드팀 중단 결과", () => {
     ["context_cancelled", "요청 연결 또는 실행 대기가 취소되었습니다"],
     ["cost_unavailable", "호출 비용을 확인할 수 없습니다"],
     ["new-server-code", "서버가 실행 중단을 보고했습니다"],
-  ])("%s를 한글로 안내하고 저장된 결과만 연다", async (stopped, label) => {
+  ])("%s를 한글로 안내하고 반환된 실행의 이력을 연다", async (stopped, label) => {
     const onOpenRun = vi.fn(),
       onClose = vi.fn();
     const outcome = redTeamRunOutcomeSchema.parse({
@@ -57,7 +57,7 @@ describe("레드팀 중단 결과", () => {
     const panel = screen.getByRole("dialog", { name: "캠페인 실행 결과" });
     expect(within(panel).getByText("0건", { exact: true })).toBeVisible();
     expect(within(panel).queryByText(/시뮬레이션/)).toBeNull();
-    expect(within(panel).getByText(/저장된 대상별 실행이 없습니다/)).toBeVisible();
+    expect(within(panel).getByText(/반환된 대상별 실행이 없습니다/)).toBeVisible();
     expect((await axe.run(panel)).violations).toEqual([]);
   });
 

@@ -460,9 +460,13 @@ func (s *SQLStore) UpsertRedTeamCampaign(ctx context.Context, c RedTeamCampaign)
 }
 
 func (s *SQLStore) UpdateRedTeamCampaignStatus(ctx context.Context, id, status, approvedBy string) error {
-	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE redteam_campaigns SET status = ?, approved_by = ?, updated_at = ? WHERE id = ?`),
-		status, approvedBy, time.Now().UTC().Format(time.RFC3339Nano), id)
+	_, err := s.updateRedTeamCampaignStatus(ctx, s.db, id, status, approvedBy)
 	return err
+}
+
+func (s *SQLStore) updateRedTeamCampaignStatus(ctx context.Context, q redTeamExecer, id, status, approvedBy string) (sql.Result, error) {
+	return q.ExecContext(ctx, s.bind(`UPDATE redteam_campaigns SET status = ?, approved_by = ?, updated_at = ? WHERE id = ?`),
+		status, approvedBy, time.Now().UTC().Format(time.RFC3339Nano), id)
 }
 
 func (s *SQLStore) ListRedTeamCampaigns(ctx context.Context, limit int) ([]RedTeamCampaign, error) {
@@ -575,20 +579,27 @@ func (s *SQLStore) InsertRedTeamRun(ctx context.Context, r RedTeamRun) error {
 	if r.CreatedAt == "" {
 		r.CreatedAt = now
 	}
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_runs
+	result, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_runs
 		(id, campaign_id, target_id, started_at, ended_at, status, total_cases, failed_cases, risk_score, cost_krw, mode, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		r.ID, r.CampaignID, r.TargetID, r.StartedAt, r.EndedAt, r.Status, r.TotalCases, r.FailedCases, r.RiskScore, r.CostKRW, r.Mode, r.CreatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return redTeamExactlyOneRow(result)
 }
 
 func (s *SQLStore) UpdateRedTeamRun(ctx context.Context, r RedTeamRun) error {
+	_, err := s.updateRedTeamRun(ctx, s.db, r)
+	return err
+}
+
+func (s *SQLStore) updateRedTeamRun(ctx context.Context, q redTeamExecer, r RedTeamRun) (sql.Result, error) {
 	if r.EndedAt == "" {
 		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE redteam_runs SET ended_at = ?, status = ?, total_cases = ?, failed_cases = ?, risk_score = ?, cost_krw = ? WHERE id = ?`),
+	return q.ExecContext(ctx, s.bind(`UPDATE redteam_runs SET ended_at = ?, status = ?, total_cases = ?, failed_cases = ?, risk_score = ?, cost_krw = ? WHERE id = ?`),
 		r.EndedAt, r.Status, r.TotalCases, r.FailedCases, r.RiskScore, r.CostKRW, r.ID)
-	return err
 }
 
 func (s *SQLStore) ListRedTeamRuns(ctx context.Context, limit int) ([]RedTeamRun, error) {
@@ -634,14 +645,21 @@ func scanRedTeamRun(sc interface{ Scan(...any) error }) (RedTeamRun, error) {
 }
 
 func (s *SQLStore) InsertRedTeamCaseResult(ctx context.Context, r RedTeamCaseResult) error {
+	return s.insertRedTeamCaseResult(ctx, s.db, r)
+}
+
+func (s *SQLStore) insertRedTeamCaseResult(ctx context.Context, q redTeamExecer, r RedTeamCaseResult) error {
 	if r.CreatedAt == "" {
 		r.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_case_results
+	written, err := q.ExecContext(ctx, s.bind(`INSERT INTO redteam_case_results
 		(id, run_id, case_id, request_id, decision, severity, evidence_hash, policy_decision, latency_ms, cost_krw, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		r.ID, r.RunID, r.CaseID, r.RequestID, r.Decision, r.Severity, r.EvidenceHash, r.PolicyDecision, r.LatencyMS, r.CostKRW, r.CreatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return redTeamExactlyOneRow(written)
 }
 
 func (s *SQLStore) ListRedTeamCaseResults(ctx context.Context, runID string) ([]RedTeamCaseResult, error) {
@@ -709,19 +727,26 @@ func (s *SQLStore) GetRedTeamProbeCase(ctx context.Context, id string) (RedTeamP
 }
 
 func (s *SQLStore) InsertRedTeamEvidence(ctx context.Context, e RedTeamEvidence) error {
+	return s.insertRedTeamEvidence(ctx, s.db, e)
+}
+
+func (s *SQLStore) insertRedTeamEvidence(ctx context.Context, q redTeamExecer, e RedTeamEvidence) error {
 	if e.CreatedAt == "" {
 		e.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	tools, _ := json.Marshal(e.ToolCalls)
 	headers, _ := json.Marshal(nonNilMap(e.HeadersSummary))
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_evidence
+	written, err := q.ExecContext(ctx, s.bind(`INSERT INTO redteam_evidence
 		(id, result_id, masked_prompt, masked_response, raw_prompt, raw_response, tool_calls_json, headers_summary_json, export_hash, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(result_id) DO UPDATE SET masked_prompt=excluded.masked_prompt, masked_response=excluded.masked_response,
 			raw_prompt=excluded.raw_prompt, raw_response=excluded.raw_response,
 			tool_calls_json=excluded.tool_calls_json, headers_summary_json=excluded.headers_summary_json, export_hash=excluded.export_hash`),
 		e.ID, e.ResultID, e.MaskedPrompt, e.MaskedResponse, e.RawPrompt, e.RawResponse, string(tools), string(headers), e.ExportHash, e.CreatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return redTeamExactlyOneRow(written)
 }
 
 func (s *SQLStore) RedTeamEvidenceByResult(ctx context.Context, resultID string) (RedTeamEvidence, bool, error) {
@@ -745,6 +770,10 @@ func (s *SQLStore) RedTeamEvidenceByResult(ctx context.Context, resultID string)
 }
 
 func (s *SQLStore) InsertRedTeamRemediation(ctx context.Context, r RedTeamRemediation) error {
+	return s.insertRedTeamRemediation(ctx, s.db, r)
+}
+
+func (s *SQLStore) insertRedTeamRemediation(ctx context.Context, q redTeamExecer, r RedTeamRemediation) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if r.CreatedAt == "" {
 		r.CreatedAt = now
@@ -756,12 +785,15 @@ func (s *SQLStore) InsertRedTeamRemediation(ctx context.Context, r RedTeamRemedi
 		r.Status = "open"
 	}
 	payload, _ := json.Marshal(nonNilMap(r.ActionPayload))
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_remediations
+	written, err := q.ExecContext(ctx, s.bind(`INSERT INTO redteam_remediations
 		(id, result_id, action_type, action_payload, status, owner, due_date, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET status=excluded.status, owner=excluded.owner, due_date=excluded.due_date, updated_at=excluded.updated_at`),
 		r.ID, r.ResultID, r.ActionType, string(payload), r.Status, r.Owner, r.DueDate, r.CreatedAt, r.UpdatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return redTeamExactlyOneRow(written)
 }
 
 func (s *SQLStore) ListRedTeamRemediations(ctx context.Context, limit int) ([]RedTeamRemediation, error) {
@@ -847,16 +879,23 @@ func (s *SQLStore) DeleteRedTeamProbeCase(ctx context.Context, id string) error 
 }
 
 func (s *SQLStore) UpsertRedTeamBaseline(ctx context.Context, b RedTeamBaseline) error {
+	return s.upsertRedTeamBaseline(ctx, s.db, b)
+}
+
+func (s *SQLStore) upsertRedTeamBaseline(ctx context.Context, q redTeamExecer, b RedTeamBaseline) error {
 	if b.UpdatedAt == "" {
 		b.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_baselines
+	written, err := q.ExecContext(ctx, s.bind(`INSERT INTO redteam_baselines
 		(id, target_id, pack_id, baseline_score, last_passed_at, drift_threshold, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(target_id, pack_id) DO UPDATE SET baseline_score=excluded.baseline_score,
 			last_passed_at=excluded.last_passed_at, drift_threshold=excluded.drift_threshold, updated_at=excluded.updated_at`),
 		b.ID, b.TargetID, b.PackID, b.BaselineScore, b.LastPassedAt, b.DriftThreshold, b.UpdatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return redTeamExactlyOneRow(written)
 }
 
 func (s *SQLStore) ListRedTeamBaselines(ctx context.Context) ([]RedTeamBaseline, error) {
