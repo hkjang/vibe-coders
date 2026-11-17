@@ -1,3 +1,8 @@
+import { FeatureAccessContext } from "@/shared/feature-access/context";
+import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
+import { tokenStore } from "@/shared/auth/token-store";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { useRedTeamMutation } from "./use-redteam-mutation";
 import { useLocation } from "react-router";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 import { RedTeamHistoryBoundary } from "./RedTeamHistoryBoundary";
@@ -6,7 +11,7 @@ import { useSearchState } from "@/shared/hooks/use-search-state";
 import { readRunQuery, runQueryKeys } from "@/shared/utils/redteam-run-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Zap } from "lucide-react";
-import { useState } from "react";
+import { useContext, useState, useSyncExternalStore } from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { RedTeamEmergencyPanel } from "./RedTeamEmergencyPanel";
@@ -29,7 +34,6 @@ import { Button } from "@/shared/components/ui/Button";
 import { Input } from "@/shared/components/ui/Input";
 import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import "@/features/security/redteam/redteam.css";
@@ -49,8 +53,33 @@ const tabItems: ReadonlyArray<TabItem<RedTeamTabId>> = [
 
 export function RedTeamPage(): React.JSX.Element {
   const auth = useAuth();
+  const access = useContext(FeatureAccessContext);
+  const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
+  // Discard execution keys, open forms and pending callbacks when their owner changes.
+  const owner = JSON.stringify([
+    epoch,
+    auth.mode,
+    auth.user?.id,
+    auth.user?.role,
+    auth.user?.roles,
+    auth.user?.team_id,
+    auth.user?.scopes,
+    access?.featureId,
+    access?.permitted,
+    access?.readOnly,
+  ]);
+  return <RedTeamWorkspace key={owner} />;
+}
+
+function RedTeamWorkspace(): React.JSX.Element {
+  const auth = useAuth();
   const client = useQueryClient();
-  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
+  const writeAccess = useFeatureMutationAccess(
+    ["security.redteam"],
+    auth.user?.scopes.includes("admin:write") ?? false,
+    writeDeniedReason,
+  );
+  const canWrite = writeAccess.allowed;
   const [tab, setTab] = useTabParam<RedTeamTabId>([...tabIds]);
   const pagedHistory = versionAtLeast(auth.backendVersion, "v0.86.145");
   const [params, updateSearch] = useSearchState();
@@ -74,7 +103,7 @@ export function RedTeamPage(): React.JSX.Element {
   const allFailed = queries.every((query) => query.isError);
   const firstError = queries.find((query) => query.isError)?.error;
 
-  const runQuickStart = useMutationFeedback({
+  const runQuickStart = useRedTeamMutation(canWrite, {
     mutate: async () => {
       const packs = (data.probePacks.data?.probe_packs ?? []).filter((pack) => !pack.requires_approval);
       if (packs.length === 0) {
@@ -94,6 +123,7 @@ export function RedTeamPage(): React.JSX.Element {
         },
         routeId,
       });
+      writeAccess.assertCurrent();
       return readPreflight(created.campaign.id);
     },
     invalidates: [redteamKeys.campaigns],
@@ -161,7 +191,7 @@ export function RedTeamPage(): React.JSX.Element {
           <>
             <Button
               disabled={!canWrite || runQuickStart.isPending}
-              title={canWrite ? undefined : writeDeniedReason}
+              title={writeAccess.reason}
               onClick={(event) => {
                 remember(event);
                 runQuickStart.mutate(undefined);
@@ -178,6 +208,12 @@ export function RedTeamPage(): React.JSX.Element {
 
       <RedTeamEmergencyPanel canWrite={canWrite} />
 
+      {writeAccess.reason ? (
+        <InlineNotice tone="info" title="조회 모드">
+          {writeAccess.reason} 실행 이력과 증적은 현재 조회 권한으로 확인할 수 있습니다.
+        </InlineNotice>
+      ) : null}
+
       <section className="rt-safety" aria-label="레드팀 안전장치">
         <form className="rt-key-form" onSubmit={(event) => event.preventDefault()}>
           <label htmlFor="rt-proxy-key">
@@ -185,6 +221,7 @@ export function RedTeamPage(): React.JSX.Element {
           </label>
           <Input
             id="rt-proxy-key"
+            disabled={!canWrite}
             type="password"
             autoComplete="off"
             spellCheck={false}
@@ -213,6 +250,7 @@ export function RedTeamPage(): React.JSX.Element {
       {tab === "campaigns" ? (
         <TabPanel id="campaigns" panelIdPrefix="redteam">
           <RedTeamCampaignsTab
+            writeReason={writeAccess.reason}
             canWrite={canWrite}
             data={data}
             onOpenRunResults={openRunResults}
@@ -222,13 +260,14 @@ export function RedTeamPage(): React.JSX.Element {
       ) : null}
       {tab === "targets" ? (
         <TabPanel id="targets" panelIdPrefix="redteam">
-          <RedTeamTargetsTab canWrite={canWrite} data={data} />
+          <RedTeamTargetsTab writeReason={writeAccess.reason} canWrite={canWrite} data={data} />
         </TabPanel>
       ) : null}
       {tab === "runs" ? (
         <TabPanel id="runs" panelIdPrefix="redteam">
           <RedTeamHistoryBoundary>
             <RedTeamRunsTab
+              writeReason={writeAccess.reason}
               canWrite={canWrite}
               data={data}
               onOpenRun={openRunResults}
@@ -240,7 +279,7 @@ export function RedTeamPage(): React.JSX.Element {
       ) : null}
       {tab === "schedules" ? (
         <TabPanel id="schedules" panelIdPrefix="redteam">
-          <RedTeamSchedulesTab canWrite={canWrite} data={data} />
+          <RedTeamSchedulesTab writeReason={writeAccess.reason} canWrite={canWrite} data={data} />
         </TabPanel>
       ) : null}
 

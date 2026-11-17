@@ -1,3 +1,4 @@
+import { useRedTeamMutation } from "./use-redteam-mutation";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
 import { useSearchState } from "@/shared/hooks/use-search-state";
@@ -26,13 +27,13 @@ import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatNumber, formatRelative } from "@/shared/utils/format";
 
 const redteam = endpoints.domains.redteam;
 
 interface RunsTabProps {
   canWrite: boolean;
+  writeReason?: string;
   data: RedTeamData;
   onOpenRun: (runId: string) => void;
   openRunId: string;
@@ -41,6 +42,7 @@ interface RunsTabProps {
 
 export function RedTeamRunsTab({
   canWrite,
+  writeReason = writeDeniedReason,
   data,
   onOpenRun,
   openRunId,
@@ -55,13 +57,13 @@ export function RedTeamRunsTab({
   const [evidenceFocusId, setEvidenceFocusId] = useState("");
   const evidenceFocus = useReturnFocus();
   const [pendingApply, setPendingApply] = useState<RedTeamRemediation | undefined>();
-  const writeTitle = canWrite ? undefined : writeDeniedReason;
+  const writeTitle = canWrite ? undefined : writeReason;
 
   const remediationByResult = new Map(
     (remediations.data?.remediations ?? []).map((item) => [item.result_id, item]),
   );
 
-  const updateRemediation = useMutationFeedback({
+  const updateRemediation = useRedTeamMutation(canWrite, {
     mutate: ({ id, status }: { id: string; status: string }) =>
       apiClient.request(withPathParams(redteam.remediations.update, { id }), {
         body: { status },
@@ -72,7 +74,7 @@ export function RedTeamRunsTab({
     errorMessage: "조치 상태를 변경하지 못했습니다.",
   });
 
-  const applyRemediation = useMutationFeedback({
+  const applyRemediation = useRedTeamMutation(canWrite, {
     mutate: (remediation: RedTeamRemediation) =>
       apiClient.request(withPathParams(redteam.remediations.apply, { id: remediation.id }), {
         routeId,
@@ -82,7 +84,7 @@ export function RedTeamRunsTab({
     errorMessage: "조치를 적용하지 못했습니다.",
   });
 
-  const createRemediation = useMutationFeedback({
+  const createRemediation = useRedTeamMutation(canWrite, {
     mutate: (resultId: string) =>
       apiClient.request(withPathParams(redteam.results.remediation, { id: resultId }), {
         body: { action_type: "owner_action", action_payload: { source: "app_console" } },
@@ -153,6 +155,7 @@ export function RedTeamRunsTab({
             caption="레드팀 결과에 대한 조치 목록"
             columns={remediationColumns({
               canWrite,
+              writeReason,
               onApply: (remediation, event) => {
                 remember(event);
                 setPendingApply(remediation);
@@ -265,15 +268,17 @@ function baselineColumns(): ReadonlyArray<DataTableColumn<RedTeamBaseline>> {
 
 function remediationColumns({
   canWrite,
+  writeReason = writeDeniedReason,
   onApply,
   onStatus,
 }: {
   canWrite: boolean;
+  writeReason?: string;
   onApply: (remediation: RedTeamRemediation, event: { currentTarget: HTMLElement }) => void;
   onStatus: (remediation: RedTeamRemediation, status: string) => void;
 }): ReadonlyArray<DataTableColumn<RedTeamRemediation>> {
   const column = createDataTableColumnHelper<RedTeamRemediation>();
-  const writeTitle = canWrite ? undefined : writeDeniedReason;
+  const writeTitle = canWrite ? undefined : writeReason;
   return column.columns([
     column.accessor((row) => row.action_type, { id: "action_type", header: "조치 유형" }),
     column.accessor((row) => row.result_id, {

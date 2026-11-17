@@ -1,3 +1,4 @@
+import { useRedTeamMutation } from "./use-redteam-mutation";
 import { campaignColumns } from "./campaign-columns";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -50,6 +51,7 @@ const invalidatesAfterRun = [
 
 interface CampaignsTabProps {
   canWrite: boolean;
+  writeReason?: string;
   data: RedTeamData;
   onOpenRunResults: (runId: string) => void;
   proxyKey: string;
@@ -74,7 +76,13 @@ export function RedTeamCampaignsTab(props: CampaignsTabProps): React.JSX.Element
   ]);
   return <CampaignsTab key={owner} {...props} />;
 }
-function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsTabProps): React.JSX.Element {
+function CampaignsTab({
+  canWrite,
+  writeReason = writeDeniedReason,
+  data,
+  onOpenRunResults,
+  proxyKey,
+}: CampaignsTabProps): React.JSX.Element {
   const client = useQueryClient();
   const { campaigns, probePacks, runs, targets } = data;
   const packs = probePacks.data?.probe_packs ?? [];
@@ -104,7 +112,7 @@ function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsT
     return () => window.clearInterval(timer);
   }, [pollingCampaignId, refetchRuns]);
 
-  const saveCampaign = useMutationFeedback({
+  const saveCampaign = useRedTeamMutation(canWrite, {
     mutate: ({ values, campaignId }: { values: CampaignFormValues; campaignId: string }) => {
       const targetFilter: Record<string, unknown> = {};
       if (values.provider !== "") targetFilter.provider = values.provider;
@@ -132,7 +140,7 @@ function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsT
     errorMessage: "캠페인을 저장하지 못했습니다.",
   });
 
-  const deleteCampaign = useMutationFeedback({
+  const deleteCampaign = useRedTeamMutation(canWrite, {
     mutate: (campaign: RedTeamCampaign) =>
       apiClient.request(withPathParams(redteam.campaigns.remove, { id: campaign.id }), { routeId }),
     invalidates: [redteamKeys.campaigns, redteamKeys.runs, redteamKeys.dashboard],
@@ -146,7 +154,7 @@ function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsT
     onSuccess: (result) => setDryRun(result),
   });
 
-  const approveCampaign = useMutationFeedback({
+  const approveCampaign = useRedTeamMutation(canWrite, {
     mutate: (campaign: RedTeamCampaign) =>
       apiClient.request(withPathParams(redteam.campaigns.approve, { id: campaign.id }), { routeId }),
     invalidates: [redteamKeys.campaigns],
@@ -157,6 +165,7 @@ function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsT
   const liveRuns = runs.data?.runs.filter((run) => run.campaign_id === pollingCampaignId) ?? [];
   const columns = campaignColumns({
     canWrite,
+    writeReason,
     checking: runDryRun.isPending,
     preflightTriggerRef: preflightFocus.register,
     runTriggerRef: runFocus.register,
@@ -213,7 +222,7 @@ function CampaignsTab({ canWrite, data, onOpenRunResults, proxyKey }: CampaignsT
               disabled={!canWrite || packs.length === 0}
               title={
                 !canWrite
-                  ? writeDeniedReason
+                  ? writeReason
                   : packs.length === 0
                     ? "검사 묶음이 없어 캠페인을 만들 수 없습니다."
                     : undefined

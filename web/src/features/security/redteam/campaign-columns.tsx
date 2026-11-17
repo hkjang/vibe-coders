@@ -12,6 +12,7 @@ import {
 } from "./redteam-ui";
 interface CampaignActionHandlers {
   canWrite: boolean;
+  writeReason?: string;
   checking: boolean;
   preflightTriggerRef: (id: string, node: HTMLButtonElement | null) => void;
   runTriggerRef: (id: string, node: HTMLButtonElement | null) => void;
@@ -27,7 +28,7 @@ export function campaignColumns(
   handlers: CampaignActionHandlers,
 ): ReadonlyArray<DataTableColumn<RedTeamCampaign>> {
   const column = createDataTableColumnHelper<RedTeamCampaign>();
-  const writeTitle = handlers.canWrite ? undefined : writeDeniedReason;
+  const writeTitle = handlers.canWrite ? undefined : (handlers.writeReason ?? writeDeniedReason);
   return column.columns([
     column.accessor((row) => row.name, {
       id: "name",

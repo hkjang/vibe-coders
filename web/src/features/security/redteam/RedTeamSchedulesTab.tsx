@@ -1,3 +1,4 @@
+import { useRedTeamMutation } from "./use-redteam-mutation";
 import { useState } from "react";
 
 import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
@@ -14,16 +15,17 @@ import { Select } from "@/shared/components/ui/Select";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { FormField } from "@/shared/components/form/FormField";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatNumber, formatRelative } from "@/shared/utils/format";
 
 const redteam = endpoints.domains.redteam;
 
 export function RedTeamSchedulesTab({
   canWrite,
+  writeReason = writeDeniedReason,
   data,
 }: {
   canWrite: boolean;
+  writeReason?: string;
   data: RedTeamData;
 }): React.JSX.Element {
   const { campaigns, schedules } = data;
@@ -32,9 +34,9 @@ export function RedTeamSchedulesTab({
   const [campaignId, setCampaignId] = useState("");
   const [cron, setCron] = useState<string>(cronPresets[0].value);
   const selectedCampaign = campaignId || campaignRows[0]?.id || "";
-  const writeTitle = canWrite ? undefined : writeDeniedReason;
+  const writeTitle = canWrite ? undefined : writeReason;
 
-  const upsert = useMutationFeedback({
+  const upsert = useRedTeamMutation(canWrite, {
     mutate: (schedule: {
       id?: string;
       campaign_template_id: string;
@@ -136,6 +138,7 @@ export function RedTeamSchedulesTab({
           columns={scheduleColumns({
             campaignNames,
             canWrite,
+            writeReason,
             onToggle: (schedule) =>
               upsert.mutate({
                 id: schedule.id,
@@ -160,14 +163,16 @@ export function RedTeamSchedulesTab({
 function scheduleColumns({
   campaignNames,
   canWrite,
+  writeReason = writeDeniedReason,
   onToggle,
 }: {
   campaignNames: ReadonlyMap<string, string>;
   canWrite: boolean;
+  writeReason?: string;
   onToggle: (schedule: RedTeamSchedule) => void;
 }): ReadonlyArray<DataTableColumn<RedTeamSchedule>> {
   const column = createDataTableColumnHelper<RedTeamSchedule>();
-  const writeTitle = canWrite ? undefined : writeDeniedReason;
+  const writeTitle = canWrite ? undefined : writeReason;
   return column.columns([
     column.accessor((row) => row.campaign_template_id, {
       id: "campaign",

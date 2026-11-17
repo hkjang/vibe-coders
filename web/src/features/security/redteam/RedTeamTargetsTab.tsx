@@ -1,3 +1,4 @@
+import { useRedTeamMutation } from "./use-redteam-mutation";
 import { usePreflightReturnFocus } from "./use-preflight-return-focus";
 import { riskLabel, expectedPolicyLabel, targetTypeLabel, probeCategoryLabel } from "./redteam-labels";
 import { matchesTarget, targetLabel } from "./target-search";
@@ -86,10 +87,15 @@ function targetColumns(): ReadonlyArray<DataTableColumn<RedTeamTarget>> {
 
 interface TargetsTabProps {
   canWrite: boolean;
+  writeReason?: string;
   data: RedTeamData;
 }
 
-export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JSX.Element {
+export function RedTeamTargetsTab({
+  canWrite,
+  writeReason = writeDeniedReason,
+  data,
+}: TargetsTabProps): React.JSX.Element {
   const { probePacks, targets } = data;
   const packs = probePacks.data?.probe_packs ?? [];
   const [params, updateParams] = useSearchState();
@@ -127,7 +133,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
     enabled: selectedTargetId !== "",
   });
 
-  const saveCase = useMutationFeedback({
+  const saveCase = useRedTeamMutation(canWrite, {
     mutate: (values: ProbeCaseFormValues) =>
       apiClient.request(redteam.probeCases.upsert, {
         body: {
@@ -153,7 +159,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
     onSuccess: () => setOpenPack(undefined),
   });
 
-  const deleteCase = useMutationFeedback({
+  const deleteCase = useRedTeamMutation(canWrite, {
     mutate: (probeCase: RedTeamProbeCase) =>
       apiClient.request(withPathParams(redteam.probeCases.remove, { id: probeCase.id }), { routeId }),
     invalidates: [redteamKeys.probePacks],
@@ -168,7 +174,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
     errorMessage: "프롬프트 CSV를 내보내지 못했습니다.",
   });
 
-  const importCsv = useMutationFeedback({
+  const importCsv = useRedTeamMutation(canWrite, {
     mutate: (csv: string) => importProbePrompts(csv),
     invalidates: [redteamKeys.probePacks],
     successMessage: (result) =>
@@ -187,7 +193,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
   const visibleTargets = allTargets.filter((target) => matchesTarget(target, query));
   const selectedTarget =
     targetDetail.data?.target ?? allTargets.find((target) => target.id === selectedTargetId);
-  const writeTitle = canWrite ? undefined : writeDeniedReason;
+  const writeTitle = canWrite ? undefined : writeReason;
 
   return (
     <div className="rt-stack">
@@ -443,6 +449,7 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
               caption={`${openPack.name} 묶음의 프롬프트 검사`}
               columns={caseColumns({
                 canWrite,
+                writeReason,
                 register: caseFocus.register,
                 onDelete: (probeCase, event) => {
                   rememberCase(event);
@@ -493,17 +500,19 @@ export function RedTeamTargetsTab({ canWrite, data }: TargetsTabProps): React.JS
 
 function caseColumns({
   canWrite,
+  writeReason = writeDeniedReason,
   register,
   onDelete,
   onEdit,
 }: {
   canWrite: boolean;
+  writeReason?: string;
   register: (id: string, node: HTMLButtonElement | null) => void;
   onDelete: (probeCase: RedTeamProbeCase, event: { currentTarget: HTMLElement }) => void;
   onEdit: (probeCase: RedTeamProbeCase, event: { currentTarget: HTMLElement }) => void;
 }): ReadonlyArray<DataTableColumn<RedTeamProbeCase>> {
   const column = createDataTableColumnHelper<RedTeamProbeCase>();
-  const writeTitle = canWrite ? undefined : writeDeniedReason;
+  const writeTitle = canWrite ? undefined : writeReason;
   return column.columns([
     column.accessor((row) => row.case_key, {
       id: "case_key",
