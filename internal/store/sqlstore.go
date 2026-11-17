@@ -300,22 +300,29 @@ func (s *SQLStore) ensurePostgresAppRequestPlannerStats(ctx context.Context) err
 // name but indisvalid=false. PostgreSQL's IF NOT EXISTS treats that shell as existing, so
 // every later startup would otherwise skip the build forever. The advisory migration lock
 // makes it safe for the next pod to remove the invalid shell and retry the declared index.
+// Also rebuild the two trace metadata indexes from an earlier candidate if their
+// predicate parsed text as BYTEA. Other valid indexes are left untouched.
 func (s *SQLStore) dropInvalidPostgresIndex(ctx context.Context, statement string) error {
 	index, ok := parseCreateIndex(statement)
 	if !ok {
 		return fmt.Errorf("parse concurrent PostgreSQL index statement: %s", statement)
 	}
 	var valid bool
-	err := s.db.QueryRowContext(ctx, `SELECT i.indisvalid
+	var predicate string
+	err := s.db.QueryRowContext(ctx, `SELECT i.indisvalid, COALESCE(pg_get_expr(i.indpred, i.indrelid), '')
 		FROM pg_index i
 		JOIN pg_class c ON c.oid = i.indexrelid
 		JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE n.nspname = current_schema() AND c.relname = $1`, index.Name).Scan(&valid)
-	if err == sql.ErrNoRows || valid {
+		WHERE n.nspname = current_schema() AND c.relname = $1`, index.Name).Scan(&valid, &predicate)
+	if err == sql.ErrNoRows {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("inspect PostgreSQL index %s: %w", index.Name, err)
+	}
+	legacyTraceBytes := (index.Name == "idx_workflow_runs_trace_metadata" || index.Name == "idx_ai_app_runs_trace_metadata") && strings.Contains(predicate, "::bytea")
+	if valid && !legacyTraceBytes {
+		return nil
 	}
 	quoted := `"` + strings.ReplaceAll(index.Name, `"`, `""`) + `"`
 	if _, err := s.db.ExecContext(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+quoted); err != nil {
@@ -385,6 +392,12 @@ func (s *SQLStore) acquireMigrationLock(ctx context.Context) (func(), error) {
 func renderForDialect(statement, dialect string) string {
 	if dialect != "postgres" {
 		return statement
+	}
+	// These two new trace indexes measure the stored text, not BYTEA escapes.
+	// Restrict this rewrite to their fixed declarations; binary table columns keep
+	// their normal BYTEA conversion below.
+	if strings.Contains(statement, "idx_workflow_runs_trace_metadata") || strings.Contains(statement, "idx_ai_app_runs_trace_metadata") {
+		statement = strings.ReplaceAll(statement, traceRunIndexPredicate(), traceRunIndexPredicateForDialect(dialect))
 	}
 	// PostgreSQL does not support BLOB; it uses BYTEA instead.
 	// Using regex guarantees that any variation of case or spacing is handled properly.
