@@ -26,6 +26,14 @@ export default defineConfig({
       output: {
         codeSplitting: {
           groups: [
+            // Keep the loader's CSS/module preload helper independent of React
+            // and feature chunks, so their load/evaluation failures are caught.
+            {
+              name: "startup-preload",
+              test: /vite\/preload-helper\.js$/u,
+              priority: 10,
+              includeDependenciesRecursively: false,
+            },
             {
               name: "settings-recovery-shared",
               test: /[\\/]features[\\/]system[\\/]settings[\\/](settings-utils|use-system-settings|setting-save-outcome|settings-workspace-context|use-settings-mutation)\.(ts|tsx)$/u,

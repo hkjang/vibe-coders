@@ -1,0 +1,78 @@
+@import "../../shared/styles/tokens.css";
+
+body:has(#app-startup) {
+  margin: 0;
+  background: var(--color-startup-background);
+}
+
+#app-startup {
+  box-sizing: border-box;
+  min-height: 100svh;
+  padding: var(--space-6);
+  display: grid;
+  place-items: center;
+  background: var(--color-startup-background);
+  color: var(--color-startup-foreground);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+#app-startup-state {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 40rem;
+  border: 1px solid var(--color-startup-border);
+  border-radius: var(--radius-medium);
+  padding: var(--space-6);
+}
+
+#app-startup h1 {
+  margin-block: var(--space-2) var(--space-4);
+  font-size: 1.5rem;
+  line-height: 1.4;
+}
+
+#app-startup .startup-brand {
+  margin-block: 0 var(--space-2);
+  font-weight: 600;
+}
+
+#app-startup .startup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-start: var(--space-6);
+}
+
+#app-startup button,
+#app-startup a {
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-small);
+  background: var(--color-startup-background);
+  color: var(--color-startup-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+#app-startup :focus-visible {
+  outline: 2px solid var(--color-startup-link);
+  outline-offset: var(--space-1);
+}
+
+#app-startup [hidden] {
+  display: none;
+}
+
+@media (max-width: 30rem) {
+  #app-startup,
+  #app-startup-state {
+    padding: var(--space-4);
+  }
+}

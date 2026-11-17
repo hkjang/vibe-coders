@@ -21,6 +21,12 @@
   --color-info: #096caa;
   --color-info-soft: #e8f5ff;
   --color-overlay: rgb(14 22 38 / 52%);
+  /* Available before the saved app theme and React are initialized. Browser
+     system colors retain contrast in light, dark and forced-color modes. */
+  --color-startup-background: Canvas;
+  --color-startup-foreground: CanvasText;
+  --color-startup-border: GrayText;
+  --color-startup-link: LinkText;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;

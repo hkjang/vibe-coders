@@ -6,10 +6,27 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="description" content="Vibe Coders Next Admin Console" />
     <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/src/app/bootstrap/startup.css" />
     <title>Vibe Coders Console</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="root">
+      <main id="app-startup">
+        <section id="app-startup-state" aria-live="polite" aria-atomic="true">
+          <p class="startup-brand">Vibe Coders</p>
+          <h1 id="app-startup-title" tabindex="-1">신규 콘솔을 준비하고 있습니다.</h1>
+          <p id="app-startup-description">잠시 후 로그인 화면이나 작업 화면이 열립니다.</p>
+          <p>화면이 열리지 않으면 처음 화면을 다시 열어 주세요. 문제가 계속되면 관리자에게 문의하세요.</p>
+          <noscript
+            ><p>이 콘솔은 JavaScript가 필요합니다. 브라우저 설정을 확인한 뒤 다시 열어 주세요.</p></noscript
+          >
+          <div class="startup-actions">
+            <button id="app-startup-retry" type="button" hidden>현재 주소로 다시 시도</button>
+            <a href="/app/">콘솔 처음 화면 열기</a>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/app/bootstrap/startup.ts"></script>
   </body>
 </html>

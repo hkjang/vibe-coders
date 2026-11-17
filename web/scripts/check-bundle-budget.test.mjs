@@ -18,6 +18,7 @@ import { gzipSync } from "node:zlib";
 import {
   analyzeBundle,
   INITIAL_WIRE_LIMIT,
+  STARTUP_WIRE_LIMIT,
   ROUTE_RAW_LIMIT,
   INTERACTIVE_FEATURES,
 } from "./check-bundle-budget.mjs";
@@ -61,6 +62,61 @@ function analyze({ manifest, files }) {
 function route(report, entry = "src/route.js") {
   return report.routes.find((candidate) => candidate.entry === entry);
 }
+
+function startupFixture() {
+  const input = fixture();
+  input.manifest["index.html"].dynamicImports = ["src/main.tsx"];
+  input.manifest["src/main.tsx"] = {
+    file: "assets/runtime.js",
+    isDynamicEntry: true,
+    imports: ["_shared.js"],
+    dynamicImports: ["src/route.js"],
+    css: ["assets/runtime.css"],
+  };
+  input.files.set("assets/index.js", Buffer.from('import("./runtime.js");'));
+  input.files.set("assets/runtime.js", Buffer.from("export {};"));
+  input.files.set("assets/runtime.css", Buffer.from('body { background: url("./runtime-font.woff2") }'));
+  input.files.set("assets/runtime-font.woff2", Buffer.alloc(10));
+  return input;
+}
+
+test("startup import still pays the complete runtime shell in the initial envelope", () => {
+  const report = analyze(startupFixture());
+  assert.equal(report.passed, true);
+  for (const file of [
+    "assets/runtime.js",
+    "assets/runtime.css",
+    "assets/runtime-font.woff2",
+    "assets/shared.js",
+  ]) {
+    assert.equal(report.initial.files.filter((name) => name === file).length, 1);
+  }
+  assert.equal(route(report, "src/main.tsx"), undefined);
+  assert.deepEqual(route(report).files, ["assets/route.js"]);
+});
+
+test("an oversized startup runtime cannot hide behind a small loader", () => {
+  const input = startupFixture();
+  input.files.set("assets/runtime-font.woff2", Buffer.alloc(INITIAL_WIRE_LIMIT + 1));
+  const report = analyze(input);
+  assert.equal(report.initial.passed, false);
+  assert.equal(report.passed, false);
+  assert.equal(route(report).passed, true);
+});
+
+test("the recovery loader cannot pull a large runtime dependency into its static envelope", () => {
+  const input = startupFixture();
+  input.files.set("assets/shell.css", Buffer.from('body{background:url("./startup.woff2")}'));
+  input.files.set("assets/startup.woff2", Buffer.alloc(STARTUP_WIRE_LIMIT + 1));
+  assert.throws(() => analyze(input), /startup recovery dependencies exceed/u);
+});
+
+test("the explicit runtime entry must be reachable from the startup shell", () => {
+  const input = startupFixture();
+  input.manifest["index.html"].dynamicImports = ["src/route.js"];
+  input.files.set("assets/index.js", Buffer.from("export {};"));
+  assert.throws(() => analyze(input), /runtime.*startup/u);
+});
 
 function interactiveFixture() {
   const input = fixture();
