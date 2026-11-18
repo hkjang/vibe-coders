@@ -3,10 +3,11 @@ import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { appearanceEntry } from "./scripts/appearance-entry";
 
 export default defineConfig({
   base: "/app/",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), appearanceEntry()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
