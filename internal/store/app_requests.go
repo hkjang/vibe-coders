@@ -137,17 +137,21 @@ func appRequestCreatedAtExpr(column string) string {
 // partial cursor indexes. Keeping malformed or oversized identifiers outside
 // those indexes gives PostgreSQL an ordered path with useful statistics and
 // keeps SQLite from walking rows the public projection must reject anyway.
-func appRequestValidRowPredicate(idColumn, createdAtColumn string) string {
-	return appRequestBoundedTextPredicate(idColumn) + " AND length(" + createdAtColumn + ") BETWEEN 20 AND 30"
+func appRequestValidRowPredicate(idColumn, createdAtColumn, dialect string) string {
+	return appRequestBoundedTextPredicate(idColumn, dialect) + " AND length(" + createdAtColumn + ") BETWEEN 20 AND 30"
 }
 
-func appRequestBoundedTextPredicate(column string) string {
+func appRequestBoundedTextPredicate(column, dialect string) string {
+	if dialect == "postgres" {
+		// Text-to-BYTEA casts parse escapes; measure the stored UTF-8 text instead.
+		return "octet_length(" + column + ") BETWEEN 1 AND 512"
+	}
 	return "length(CAST(" + column + " AS BLOB)) BETWEEN 1 AND 512"
 }
 
-func appRequestValidChildPredicate(requestIDColumn, idColumn, createdAtColumn string) string {
-	return appRequestBoundedTextPredicate(requestIDColumn) + " AND " +
-		appRequestBoundedTextPredicate(idColumn) + " AND length(" + createdAtColumn + ") BETWEEN 20 AND 30"
+func appRequestValidChildPredicate(requestIDColumn, idColumn, createdAtColumn, dialect string) string {
+	return appRequestBoundedTextPredicate(requestIDColumn, dialect) + " AND " +
+		appRequestBoundedTextPredicate(idColumn, dialect) + " AND length(" + createdAtColumn + ") BETWEEN 20 AND 30"
 }
 
 func appRequestFixedTime(value time.Time) string {
@@ -164,12 +168,12 @@ func (s *SQLStore) appRecentRequestsQuery(filter AppRequestFilter) (string, []an
 		limit = 50
 	}
 	createdAt := appRequestCreatedAtExpr("r.created_at")
-	validRow := renderForDialect(appRequestValidRowPredicate("r.id", "r.created_at"), s.dialect)
-	validRequestAPIKey := renderForDialect(appRequestBoundedTextPredicate("r.api_key_id"), s.dialect)
-	validTraceID := renderForDialect(appRequestBoundedTextPredicate("r.trace_id"), s.dialect)
-	validTeamKey := renderForDialect(appRequestBoundedTextPredicate("k.id")+" AND "+appRequestBoundedTextPredicate("k.team"), s.dialect)
-	validTokenUsage := renderForDialect(appRequestValidChildPredicate("t_pick.request_id", "t_pick.id", "t_pick.created_at"), s.dialect)
-	validResponse := renderForDialect(appRequestValidChildPredicate("resp_pick.request_id", "resp_pick.id", "resp_pick.created_at"), s.dialect)
+	validRow := appRequestValidRowPredicate("r.id", "r.created_at", s.dialect)
+	validRequestAPIKey := appRequestBoundedTextPredicate("r.api_key_id", s.dialect)
+	validTraceID := appRequestBoundedTextPredicate("r.trace_id", s.dialect)
+	validTeamKey := appRequestBoundedTextPredicate("k.id", s.dialect) + " AND " + appRequestBoundedTextPredicate("k.team", s.dialect)
+	validTokenUsage := appRequestValidChildPredicate("t_pick.request_id", "t_pick.id", "t_pick.created_at", s.dialect)
+	validResponse := appRequestValidChildPredicate("resp_pick.request_id", "resp_pick.id", "resp_pick.created_at", s.dialect)
 	where := []string{validRow}
 	args := []any{}
 	addExact := func(column, value string) {

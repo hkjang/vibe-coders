@@ -243,19 +243,29 @@ func supersededAppRequestCursorDropSQL(dialect string) string {
 func (s *SQLStore) ensurePostgresAppRequestPlannerStats(ctx context.Context) error {
 	const (
 		indexName             = "idx_request_logs_app_valid_cursor"
-		requestStatisticsName = "app_request_guard_stats_v2"
-		keyStatisticsName     = "app_request_key_guard_stats_v1"
+		requestStatisticsName = "app_request_guard_stats_v3"
+		keyStatisticsName     = "app_request_key_guard_stats_v2"
 	)
-	// Version the statistics object instead of changing the definition behind
-	// IF NOT EXISTS. PostgreSQL keeps the old definition on upgraded databases,
-	// which would leave api_key_id selectivity unknown for team-scoped pages.
-	if _, err := s.db.ExecContext(ctx, `CREATE STATISTICS IF NOT EXISTS app_request_guard_stats_v2
-		ON (length(CAST(id AS BYTEA))), (length(created_at)),
-			(length(CAST(api_key_id AS BYTEA))) FROM request_logs`); err != nil {
+	// Older owned statistics would still parse BYTEA escapes on every ANALYZE,
+	// even after replacing the indexes. Remove them in this schema only, while
+	// holding the startup migration lock; unrelated statistics are preserved.
+	var schema string
+	if err := s.db.QueryRowContext(ctx, `SELECT current_schema()`).Scan(&schema); err != nil {
+		return fmt.Errorf("inspect app request statistics schema: %w", err)
+	}
+	quotedSchema := `"` + strings.ReplaceAll(schema, `"`, `""`) + `"`
+	for _, name := range []string{"app_request_guard_stats_v1", "app_request_guard_stats_v2", "app_request_key_guard_stats_v1"} {
+		if _, err := s.db.ExecContext(ctx, `DROP STATISTICS IF EXISTS `+quotedSchema+`."`+name+`"`); err != nil {
+			return fmt.Errorf("drop superseded app request statistics %s: %w", name, err)
+		}
+	}
+	// New names also force the one-time ANALYZE on populated upgrades.
+	if _, err := s.db.ExecContext(ctx, `CREATE STATISTICS IF NOT EXISTS app_request_guard_stats_v3
+		ON (octet_length(id)), (length(created_at)), (octet_length(api_key_id)) FROM request_logs`); err != nil {
 		return fmt.Errorf("create app request guard statistics: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `CREATE STATISTICS IF NOT EXISTS app_request_key_guard_stats_v1
-		ON (length(CAST(id AS BYTEA))), (length(CAST(team AS BYTEA))) FROM api_keys`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `CREATE STATISTICS IF NOT EXISTS app_request_key_guard_stats_v2
+		ON (octet_length(id)), (octet_length(team)) FROM api_keys`); err != nil {
 		return fmt.Errorf("create app request API-key guard statistics: %w", err)
 	}
 	var indexReady bool
@@ -300,8 +310,8 @@ func (s *SQLStore) ensurePostgresAppRequestPlannerStats(ctx context.Context) err
 // name but indisvalid=false. PostgreSQL's IF NOT EXISTS treats that shell as existing, so
 // every later startup would otherwise skip the build forever. The advisory migration lock
 // makes it safe for the next pod to remove the invalid shell and retry the declared index.
-// Also rebuild the two trace metadata indexes from an earlier candidate if their
-// predicate parsed text as BYTEA. Other valid indexes are left untouched.
+// Rebuild only owned metadata indexes whose old predicates parsed text as BYTEA.
+// Other valid indexes are left untouched.
 func (s *SQLStore) dropInvalidPostgresIndex(ctx context.Context, statement string) error {
 	index, ok := parseCreateIndex(statement)
 	if !ok {
@@ -320,8 +330,8 @@ func (s *SQLStore) dropInvalidPostgresIndex(ctx context.Context, statement strin
 	if err != nil {
 		return fmt.Errorf("inspect PostgreSQL index %s: %w", index.Name, err)
 	}
-	legacyTraceBytes := (index.Name == "idx_workflow_runs_trace_metadata" || index.Name == "idx_ai_app_runs_trace_metadata") && strings.Contains(predicate, "::bytea")
-	if valid && !legacyTraceBytes {
+	legacyTextBytes := (appRequestTextIndex(index.Name) || index.Name == "idx_workflow_runs_trace_metadata" || index.Name == "idx_ai_app_runs_trace_metadata") && strings.Contains(predicate, "::bytea")
+	if valid && !legacyTextBytes {
 		return nil
 	}
 	quoted := `"` + strings.ReplaceAll(index.Name, `"`, `""`) + `"`
@@ -386,6 +396,16 @@ func (s *SQLStore) acquireMigrationLock(ctx context.Context) (func(), error) {
 	}), nil
 }
 
+func appRequestTextIndex(name string) bool {
+	switch name {
+	case "idx_api_keys_team_id", "idx_request_logs_app_valid_cursor", "idx_request_logs_app_team_valid_cursor",
+		"idx_request_logs_app_trace_valid_cursor", "idx_token_usage_request_latest", "idx_response_logs_request_latest":
+		return true
+	default:
+		return false
+	}
+}
+
 // renderForDialect turns a declared statement into the one this dialect actually runs.
 // Migrate applies it and the admin SQL view displays it, so what an operator reads is what
 // executed rather than a second rendering that can disagree with it.
@@ -398,6 +418,11 @@ func renderForDialect(statement, dialect string) string {
 	// their normal BYTEA conversion below.
 	if strings.Contains(statement, "idx_workflow_runs_trace_metadata") || strings.Contains(statement, "idx_ai_app_runs_trace_metadata") {
 		statement = strings.ReplaceAll(statement, traceRunIndexPredicate(), traceRunIndexPredicateForDialect(dialect))
+	}
+	if index, ok := parseCreateIndex(statement); ok && appRequestTextIndex(index.Name) {
+		for _, column := range []string{"id", "trace_id", "api_key_id", "team", "request_id"} {
+			statement = strings.ReplaceAll(statement, appRequestBoundedTextPredicate(column, "sqlite"), appRequestBoundedTextPredicate(column, dialect))
+		}
 	}
 	// PostgreSQL does not support BLOB; it uses BYTEA instead.
 	// Using regex guarantees that any variation of case or spacing is handled properly.
@@ -450,7 +475,7 @@ func migrationStatements() []string {
 			grace_ends_at TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_api_keys_team_id ON api_keys(team, id) WHERE ` + appRequestBoundedTextPredicate("team") + ` AND ` + appRequestBoundedTextPredicate("id"),
+		`CREATE INDEX IF NOT EXISTS idx_api_keys_team_id ON api_keys(team, id) WHERE ` + appRequestBoundedTextPredicate("team", "sqlite") + ` AND ` + appRequestBoundedTextPredicate("id", "sqlite"),
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			email TEXT NOT NULL UNIQUE,
@@ -621,9 +646,9 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_project ON request_logs(project)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_cost_center ON request_logs(cost_center)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_valid_cursor ON request_logs(` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at"),
-		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_team_valid_cursor ON request_logs(api_key_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at") + ` AND ` + appRequestBoundedTextPredicate("api_key_id"),
-		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_trace_valid_cursor ON request_logs(trace_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at") + ` AND ` + appRequestBoundedTextPredicate("trace_id"),
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_valid_cursor ON request_logs(` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at", "sqlite"),
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_team_valid_cursor ON request_logs(api_key_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at", "sqlite") + ` AND ` + appRequestBoundedTextPredicate("api_key_id", "sqlite"),
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_trace_valid_cursor ON request_logs(trace_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at", "sqlite") + ` AND ` + appRequestBoundedTextPredicate("trace_id", "sqlite"),
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_ingested_cursor ON request_logs(ingested_at, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_xview_legacy ON request_logs(ingested_at, created_at DESC, id DESC) WHERE ingested_at = ''`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_xview_team_cursor ON request_logs(api_key_id, created_at, ingested_at, id)`,
@@ -695,7 +720,7 @@ func migrationStatements() []string {
 		`ALTER TABLE token_usage ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE token_usage ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS idx_token_usage_request_id ON token_usage(request_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_token_usage_request_latest ON token_usage(request_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidChildPredicate("request_id", "id", "created_at"),
+		`CREATE INDEX IF NOT EXISTS idx_token_usage_request_latest ON token_usage(request_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidChildPredicate("request_id", "id", "created_at", "sqlite"),
 		`CREATE TABLE IF NOT EXISTS language_stats (
 			id TEXT PRIMARY KEY,
 			request_id TEXT NOT NULL,
@@ -2422,7 +2447,7 @@ func migrationStatements() []string {
 		// so every purge run scanned them end to end — on tables that gain a row per
 		// request and are among the largest in a long-lived deployment.
 		`CREATE INDEX IF NOT EXISTS idx_response_logs_request_id ON response_logs(request_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_response_logs_request_latest ON response_logs(request_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidChildPredicate("request_id", "id", "created_at"),
+		`CREATE INDEX IF NOT EXISTS idx_response_logs_request_latest ON response_logs(request_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidChildPredicate("request_id", "id", "created_at", "sqlite"),
 		`CREATE INDEX IF NOT EXISTS idx_language_stats_request_id ON language_stats(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_domain_routing_decisions_request_id ON domain_routing_decisions(request_id)`,
 

@@ -44,7 +44,7 @@ type AppRequestFlowText2SQL struct {
 
 func (s *SQLStore) appRequestFlowCandidatesQuery(at time.Time) (string, []any) {
 	createdAt := appRequestCreatedAtExpr("r.created_at")
-	valid := renderForDialect(appRequestValidRowPredicate("r.id", "r.created_at"), s.dialect)
+	valid := appRequestValidRowPredicate("r.id", "r.created_at", s.dialect)
 	// The whole bucket is either accepted or rejected on overflow; its order
 	// has no meaning. An ORDER BY on the normalized expression can make SQLite
 	// sort the entire equality bucket before LIMIT despite using this index.
@@ -81,9 +81,9 @@ func (s *SQLStore) AppRequestFlowCandidates(ctx context.Context, at time.Time) (
 }
 
 func (s *SQLStore) appRequestFlowScopeCondition(scope AppRequestFlowScope) (string, []any) {
-	valid := renderForDialect(appRequestValidRowPredicate("r.id", "r.created_at"), s.dialect)
-	requestKey := renderForDialect(appRequestBoundedTextPredicate("r.api_key_id"), s.dialect)
-	keyRow := renderForDialect(appRequestBoundedTextPredicate("k.id")+" AND "+appRequestBoundedTextPredicate("k.team"), s.dialect)
+	valid := appRequestValidRowPredicate("r.id", "r.created_at", s.dialect)
+	requestKey := appRequestBoundedTextPredicate("r.api_key_id", s.dialect)
+	keyRow := appRequestBoundedTextPredicate("k.id", s.dialect) + " AND " + appRequestBoundedTextPredicate("k.team", s.dialect)
 	where := []string{"r.id = ?", appRequestCreatedAtExpr("r.created_at") + " = ?", valid}
 	args := []any{scope.RequestID, appRequestFixedTime(scope.CreatedAt)}
 	where, args = appendRequestTeamConditionWithPredicates(where, args, "", scope.Teams, scope.TeamScoped, requestKey, keyRow, s.dialect == "sqlite")
