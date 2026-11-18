@@ -3,6 +3,11 @@ import { resolve } from "node:path";
 import type { FullResult, Reporter, TestCase, TestResult, TestStep } from "@playwright/test/reporter";
 
 const scenarios = new Set([
+  "SIMULATION-LIVE-001",
+  "SIMULATION-LIVE-002",
+  "SIMULATION-LIVE-003",
+  "SIMULATION-LIVE-004",
+  "SIMULATION-LIVE-005",
   "KEYCLOAK-LIVE-001",
   "KEYCLOAK-LIVE-002",
   "KEYCLOAK-LIVE-003",
@@ -70,6 +75,7 @@ const scenarios = new Set([
   "AUTH-LIVE-060",
 ]);
 const sourceFiles = new Set([
+  "simulation-live.spec.ts",
   "keycloak-product.spec.ts",
   "auth-live.spec.ts",
   "access-live.spec.ts",
@@ -120,6 +126,13 @@ function failureSourceLine(stack: unknown): number | undefined {
 /** No error text, steps, URLs, request bodies, attachments, or authentication
  * values are written. The harness also suppresses child stdout and stderr. */
 export default class SafeAuthReporter implements Reporter {
+  private readonly summaryName: string;
+
+  constructor(options: { report?: string } = {}) {
+    // Never derive an output path from an arbitrary reporter option.
+    this.summaryName =
+      options.report === "simulation" ? "simulation-live-summary.json" : "auth-live-summary.json";
+  }
   private results: {
     scenario: string;
     status: TestResult["status"];
@@ -178,7 +191,7 @@ export default class SafeAuthReporter implements Reporter {
     const directory = resolve("test-results");
     await mkdir(directory, { recursive: true });
     await writeFile(
-      resolve(directory, "auth-live-summary.json"),
+      resolve(directory, this.summaryName),
       JSON.stringify(
         { status: runStatuses.has(result.status) ? result.status : "failed", tests: this.results },
         null,
