@@ -20,24 +20,26 @@ export const workflowStepTypeLabels: Record<(typeof workflowStepTypes)[number], 
   skill: "스킬",
   condition: "조건",
   approval: "승인",
-  transform: "변환",
+  transform: "입력 전달",
 };
 
-const stepSchema = z.object({
-  name: z.string().optional(),
-  type: z.string(),
-  ref: z.string().optional(),
-  timeout_ms: z.number().optional(),
-  max_cost_krw: z.number().optional(),
-  max_tokens: z.number().optional(),
-  allowed_tools: z.array(z.string()).optional(),
-  allowed_tables: z.array(z.string()).optional(),
-  note: z.string().optional(),
-});
+const stepSchema = z
+  .object({
+    name: z.string().optional(),
+    type: z.string(),
+    ref: z.string().optional(),
+    timeout_ms: z.number().optional(),
+    max_cost_krw: z.number().optional(),
+    max_tokens: z.number().optional(),
+    allowed_tools: z.array(z.string()).optional(),
+    allowed_tables: z.array(z.string()).optional(),
+    note: z.string().optional(),
+  })
+  .strict();
 
 export const workflowStepsExample = JSON.stringify(
   [
-    { name: "요청 정리", type: "transform", note: "입력을 표준 형식으로 정리" },
+    { name: "요청 정리", type: "transform", note: "입력을 바꾸지 않고 다음 단계로 전달" },
     { name: "초안 작성", type: "chat", ref: "vibe/auto", max_tokens: 800, timeout_ms: 30000 },
     { name: "담당자 승인", type: "approval" },
   ],
@@ -70,7 +72,8 @@ export const workflowFormSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["steps"],
-        message: "단계는 name/type을 가진 객체 배열이어야 합니다.",
+        message:
+          "단계는 지원하는 필드와 name/type을 가진 객체 배열이어야 합니다. 분기 정의는 분기 편집기를 사용하세요.",
       });
       return;
     }

@@ -169,6 +169,11 @@ jobs:
           VIBE_ROUTING_DRAFT_BROWSER_TEST: "1"
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: go test ./internal/proxy -run '^TestRoutingDraftBrowserIntegration$' -count=1 -timeout=3m
+      - name: Actual workflow graph edit, publication and concurrent change rejection
+        env:
+          VIBE_WORKFLOW_GRAPH_BROWSER_TEST: "1"
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: go test ./internal/proxy -run '^TestWorkflowGraphBrowserIntegration$' -count=1 -timeout=4m
       - name: Upload sanitized authentication summary only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -178,6 +183,7 @@ jobs:
             web/test-results/auth-live-summary.json
             web/test-results/simulation-live-summary.json
             web/test-results/routing-draft-live-summary.json
+            web/test-results/workflow-graph-live-summary.json
           if-no-files-found: error
           retention-days: 7
 
@@ -324,6 +330,9 @@ jobs:
       - name: Verify PostgreSQL workflow pagination, independent detail and existing authorization
         run: go test -race ./internal/store ./internal/proxy -run '^Test(Workflow(Page|Roundtrip)|AdminWorkflowPage)' -count=1 -timeout=5m
 
+      - name: Verify PostgreSQL workflow graph revisions, atomic publication and execution receipts
+        run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestWorkflow(Graph|LegacyPublish)' -count=1 -timeout=5m
+
       - name: Verify PostgreSQL work app pagination, independent detail and existing authorization
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^Test(WorkAppPage|AdminWorkAppPage)' -count=1 -timeout=5m
       - name: Verify PostgreSQL UI telemetry concurrency and retention
@@ -414,7 +423,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.159
+      SOURCE_SBOM_VERSION: v0.86.160
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

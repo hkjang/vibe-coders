@@ -9,6 +9,7 @@ interface SheetProps {
   description: string;
   footer?: ReactNode;
   onOpenChange: (open: boolean) => void;
+  onOpenAutoFocus?: (event: Event) => void;
   open: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
   title: ReactNode;
@@ -24,6 +25,7 @@ export function Sheet({
   description,
   footer,
   onOpenChange,
+  onOpenAutoFocus,
   open,
   returnFocusRef,
   size = "default",
@@ -35,6 +37,7 @@ export function Sheet({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="dialog-overlay" />
         <DialogPrimitive.Content
+          onOpenAutoFocus={onOpenAutoFocus}
           onEscapeKeyDown={(event) => {
             if (
               event.target instanceof Element &&

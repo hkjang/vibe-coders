@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workflowGraphFlowSchema, workflowGraphConditionSchema } from "./workflow-graph.schemas";
 
 const text = z.string();
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -22,10 +23,13 @@ export const workflowPageSchema = z.object({
   summary: z.object({ total: count, enabled: count }),
 });
 export const workflowDefinitionSchema = z.object({
+  flow: workflowGraphFlowSchema.optional(),
   ...metadata,
   steps: z
     .array(
       z.object({
+        id: text.optional(),
+        condition: workflowGraphConditionSchema.optional(),
         name: text,
         type: text,
         ref: text.optional(),

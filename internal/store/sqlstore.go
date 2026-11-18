@@ -2384,6 +2384,11 @@ func migrationStatements() []string {
 		// silent marks a prompt=none attempt so the callback can tell a provider's
 		// "no session" answer apart from a real login failure.
 		`ALTER TABLE oidc_flow_states ADD COLUMN silent INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE workflow_step_runs ADD COLUMN step_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflow_step_runs ADD COLUMN definition_index INTEGER NOT NULL DEFAULT -1`,
+		`ALTER TABLE workflow_step_runs ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflows ADD COLUMN flow TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflow_versions ADD COLUMN flow TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workflow_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE ai_app_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
 		// Agent Routes: operator-defined virtual models that run an agentic loop over pinned

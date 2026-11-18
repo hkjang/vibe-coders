@@ -55,9 +55,15 @@ func TestWorkflowRoundtripAndRuns(t *testing.T) {
 	if err != nil || v1 != 1 {
 		t.Fatalf("publish v1 = %d err=%v", v1, err)
 	}
-	v2, _ := db.PublishWorkflowVersion(ctx, got, "admin@x", "second")
-	if v2 != 2 {
-		t.Fatalf("publish v2 = %d, want 2", v2)
+	// A publish changes the current revision; a second explicit publish reads
+	// that definition again, just as the HTTP route does for each request.
+	got, found, err = db.GetWorkflow(ctx, "wf1")
+	if err != nil || !found {
+		t.Fatalf("reload after publish: %v", err)
+	}
+	v2, err := db.PublishWorkflowVersion(ctx, got, "admin@x", "second")
+	if err != nil || v2 != 2 {
+		t.Fatalf("publish v2 = %d err=%v, want 2", v2, err)
 	}
 	versions, err := db.ListWorkflowVersions(ctx, "wf1")
 	if err != nil || len(versions) != 2 || versions[0].Version != 2 {

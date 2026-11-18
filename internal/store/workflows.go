@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -9,18 +10,20 @@ import (
 )
 
 // WorkflowStep is one ordered step of a workflow chain. Type is chat | text2sql | mcp_tool |
-// skill | condition | approval | transform. Per-step safety limits bound cost/tokens/time and
-// the tools/tables a step may touch.
+// skill | condition | approval | transform. Legacy limit fields are metadata; graph
+// mode accepts only limits that its executor enforces.
 type WorkflowStep struct {
-	Name          string   `json:"name"`
-	Type          string   `json:"type"`
-	Ref           string   `json:"ref,omitempty"`
-	TimeoutMS     int64    `json:"timeout_ms,omitempty"`
-	MaxCostKRW    float64  `json:"max_cost_krw,omitempty"`
-	MaxTokens     int64    `json:"max_tokens,omitempty"`
-	AllowedTools  []string `json:"allowed_tools,omitempty"`
-	AllowedTables []string `json:"allowed_tables,omitempty"`
-	Note          string   `json:"note,omitempty"`
+	ID            string             `json:"id,omitempty"`
+	Condition     *WorkflowCondition `json:"condition,omitempty"`
+	Name          string             `json:"name"`
+	Type          string             `json:"type"`
+	Ref           string             `json:"ref,omitempty"`
+	TimeoutMS     int64              `json:"timeout_ms,omitempty"`
+	MaxCostKRW    float64            `json:"max_cost_krw,omitempty"`
+	MaxTokens     int64              `json:"max_tokens,omitempty"`
+	AllowedTools  []string           `json:"allowed_tools,omitempty"`
+	AllowedTables []string           `json:"allowed_tables,omitempty"`
+	Note          string             `json:"note,omitempty"`
 }
 
 // Workflow is a named, ordered chain of steps that automates a business procedure.
@@ -29,6 +32,7 @@ type Workflow struct {
 	Name         string         `json:"name"`
 	Description  string         `json:"description"`
 	Steps        []WorkflowStep `json:"steps"`
+	Flow         *WorkflowFlow  `json:"flow,omitempty"`
 	AllowedTeams string         `json:"allowed_teams"`
 	Enabled      bool           `json:"enabled"`
 	CreatedBy    string         `json:"created_by"`
@@ -37,6 +41,9 @@ type Workflow struct {
 }
 
 func (s *SQLStore) UpsertWorkflow(ctx context.Context, wf Workflow) error {
+	if err := ValidateWorkflowGraph(wf); err != nil {
+		return err
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if wf.CreatedAt == "" {
 		wf.CreatedAt = now
@@ -45,32 +52,53 @@ func (s *SQLStore) UpsertWorkflow(ctx context.Context, wf Workflow) error {
 	if wf.Enabled {
 		enabled = 1
 	}
-	steps, _ := json.Marshal(wf.Steps)
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO workflows
-		(id, name, description, steps, allowed_teams, enabled, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	steps, err := json.Marshal(wf.Steps)
+	if err != nil {
+		return err
+	}
+	flow, err := encodeWorkflowFlow(wf.Flow)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO workflows
+		(id, name, description, steps, allowed_teams, enabled, created_by, created_at, updated_at, flow)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description,
 			steps=excluded.steps, allowed_teams=excluded.allowed_teams, enabled=excluded.enabled,
-			updated_at=excluded.updated_at`),
-		wf.ID, wf.Name, wf.Description, string(steps), wf.AllowedTeams, enabled, wf.CreatedBy, wf.CreatedAt, now)
-	return err
+			updated_at=excluded.updated_at, flow=excluded.flow
+		WHERE workflows.flow = '' OR excluded.flow <> ''`),
+		wf.ID, wf.Name, wf.Description, string(steps), wf.AllowedTeams, enabled, wf.CreatedBy, wf.CreatedAt, now, flow)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return ErrWorkflowGraphEditRequired
+	}
+	return nil
 }
 
 func scanWorkflow(sc interface{ Scan(...any) error }) (Workflow, error) {
 	var wf Workflow
-	var steps string
+	var steps, flow string
 	var enabled int
-	if err := sc.Scan(&wf.ID, &wf.Name, &wf.Description, &steps, &wf.AllowedTeams, &enabled, &wf.CreatedBy, &wf.CreatedAt, &wf.UpdatedAt); err != nil {
+	if err := sc.Scan(&wf.ID, &wf.Name, &wf.Description, &steps, &wf.AllowedTeams, &enabled, &wf.CreatedBy, &wf.CreatedAt, &wf.UpdatedAt, &flow); err != nil {
 		return Workflow{}, err
 	}
 	wf.Enabled = enabled != 0
 	if steps != "" {
 		_ = json.Unmarshal([]byte(steps), &wf.Steps)
 	}
+	if err := decodeWorkflowFlow(flow, &wf.Flow); err != nil {
+		return Workflow{}, err
+	}
 	return wf, nil
 }
 
-const workflowColumns = `id, name, description, steps, allowed_teams, enabled, created_by, created_at, updated_at`
+const workflowColumns = `id, name, description, steps, allowed_teams, enabled, created_by, created_at, updated_at, flow`
 
 func (s *SQLStore) ListWorkflows(ctx context.Context) ([]Workflow, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowColumns+` FROM workflows ORDER BY created_at DESC`)
@@ -114,6 +142,7 @@ type WorkflowVersion struct {
 	Name         string         `json:"name"`
 	Description  string         `json:"description"`
 	Steps        []WorkflowStep `json:"steps"`
+	Flow         *WorkflowFlow  `json:"flow,omitempty"`
 	AllowedTeams string         `json:"allowed_teams"`
 	PublishedBy  string         `json:"published_by"`
 	PublishedAt  string         `json:"published_at"`
@@ -123,30 +152,16 @@ type WorkflowVersion struct {
 // PublishWorkflowVersion snapshots the workflow's current definition as the next version and
 // enables it. Returns the new version number.
 func (s *SQLStore) PublishWorkflowVersion(ctx context.Context, wf Workflow, publishedBy, note string) (int, error) {
-	var maxVer int
-	row := s.db.QueryRowContext(ctx, s.bind(`SELECT COALESCE(MAX(version), 0) FROM workflow_versions WHERE workflow_id = ?`), wf.ID)
-	if err := row.Scan(&maxVer); err != nil {
+	revision, err := WorkflowRevision(wf)
+	if err != nil {
 		return 0, err
 	}
-	version := maxVer + 1
-	steps, _ := json.Marshal(wf.Steps)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO workflow_versions
-		(id, workflow_id, version, name, description, steps, allowed_teams, published_by, published_at, note)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		"wfver_"+wf.ID+"_"+itoaStore(version), wf.ID, version, wf.Name, wf.Description, string(steps),
-		wf.AllowedTeams, publishedBy, now, note); err != nil {
-		return 0, err
-	}
-	if _, err := s.db.ExecContext(ctx, s.bind(`UPDATE workflows SET enabled = 1, updated_at = ? WHERE id = ?`), now, wf.ID); err != nil {
-		return 0, err
-	}
-	return version, nil
+	return s.PublishWorkflowVersionReviewed(ctx, wf, revision, publishedBy, note, AdminAuditLog{ID: "aal_" + rand.Text(), AdminID: publishedBy, Action: "workflow.publish"})
 }
 
 // ListWorkflowVersions returns a workflow's version history, newest first.
 func (s *SQLStore) ListWorkflowVersions(ctx context.Context, workflowID string) ([]WorkflowVersion, error) {
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, workflow_id, version, name, description, steps, allowed_teams, published_by, published_at, note
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, workflow_id, version, name, description, steps, allowed_teams, published_by, published_at, note, flow
 		FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC`), workflowID)
 	if err != nil {
 		return nil, err
@@ -155,12 +170,15 @@ func (s *SQLStore) ListWorkflowVersions(ctx context.Context, workflowID string) 
 	out := []WorkflowVersion{}
 	for rows.Next() {
 		var v WorkflowVersion
-		var steps string
-		if err := rows.Scan(&v.ID, &v.WorkflowID, &v.Version, &v.Name, &v.Description, &steps, &v.AllowedTeams, &v.PublishedBy, &v.PublishedAt, &v.Note); err != nil {
+		var steps, flow string
+		if err := rows.Scan(&v.ID, &v.WorkflowID, &v.Version, &v.Name, &v.Description, &steps, &v.AllowedTeams, &v.PublishedBy, &v.PublishedAt, &v.Note, &flow); err != nil {
 			return nil, err
 		}
 		if steps != "" {
 			_ = json.Unmarshal([]byte(steps), &v.Steps)
+		}
+		if err := decodeWorkflowFlow(flow, &v.Flow); err != nil {
+			return nil, err
 		}
 		out = append(out, v)
 	}
@@ -216,26 +234,33 @@ func (s *SQLStore) GetWorkflowRun(ctx context.Context, id string) (WorkflowRun, 
 
 // WorkflowStepRun is one step's outcome within a run — safe metadata only (no raw output/SQL/args).
 type WorkflowStepRun struct {
-	ID          string `json:"id"`
-	RunID       string `json:"run_id"`
-	StepIndex   int    `json:"step_index"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Ref         string `json:"ref"`
-	Status      string `json:"status"` // ok | error | pending_approval | stopped | passed | skipped
-	OutputChars int    `json:"output_chars"`
-	ErrorClass  string `json:"error_class"`
-	CreatedAt   string `json:"created_at"`
+	StepID          string `json:"step_id,omitempty"`
+	DefinitionIndex *int   `json:"definition_index,omitempty"`
+	Branch          string `json:"branch,omitempty"`
+	ID              string `json:"id"`
+	RunID           string `json:"run_id"`
+	StepIndex       int    `json:"step_index"`
+	Name            string `json:"name"`
+	Type            string `json:"type"`
+	Ref             string `json:"ref"`
+	Status          string `json:"status"` // ok | error | pending_approval | stopped | passed | skipped
+	OutputChars     int    `json:"output_chars"`
+	ErrorClass      string `json:"error_class"`
+	CreatedAt       string `json:"created_at"`
 }
 
 // RecordWorkflowStepRuns persists per-step outcomes for a run (best-effort batch insert).
 func (s *SQLStore) RecordWorkflowStepRuns(ctx context.Context, runID string, steps []WorkflowStepRun) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, st := range steps {
+		definitionIndex := -1
+		if st.DefinitionIndex != nil {
+			definitionIndex = *st.DefinitionIndex
+		}
 		if _, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO workflow_step_runs
-			(id, run_id, step_index, name, type, ref, status, output_chars, error_class, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			runID+"_"+itoaStore(st.StepIndex), runID, st.StepIndex, st.Name, st.Type, st.Ref, st.Status, st.OutputChars, st.ErrorClass, now); err != nil {
+			(id, run_id, step_index, name, type, ref, status, output_chars, error_class, created_at, step_id, definition_index, branch)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			runID+"_"+itoaStore(st.StepIndex), runID, st.StepIndex, st.Name, st.Type, st.Ref, st.Status, st.OutputChars, st.ErrorClass, now, st.StepID, definitionIndex, st.Branch); err != nil {
 			return err
 		}
 	}
@@ -244,7 +269,7 @@ func (s *SQLStore) RecordWorkflowStepRuns(ctx context.Context, runID string, ste
 
 // ListWorkflowStepRuns returns a run's per-step outcomes in step order.
 func (s *SQLStore) ListWorkflowStepRuns(ctx context.Context, runID string) ([]WorkflowStepRun, error) {
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, run_id, step_index, name, type, ref, status, output_chars, error_class, created_at
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, run_id, step_index, name, type, ref, status, output_chars, error_class, created_at, step_id, definition_index, branch
 		FROM workflow_step_runs WHERE run_id = ? ORDER BY step_index ASC`), runID)
 	if err != nil {
 		return nil, err
@@ -253,8 +278,12 @@ func (s *SQLStore) ListWorkflowStepRuns(ctx context.Context, runID string) ([]Wo
 	out := []WorkflowStepRun{}
 	for rows.Next() {
 		var st WorkflowStepRun
-		if err := rows.Scan(&st.ID, &st.RunID, &st.StepIndex, &st.Name, &st.Type, &st.Ref, &st.Status, &st.OutputChars, &st.ErrorClass, &st.CreatedAt); err != nil {
+		var definitionIndex int
+		if err := rows.Scan(&st.ID, &st.RunID, &st.StepIndex, &st.Name, &st.Type, &st.Ref, &st.Status, &st.OutputChars, &st.ErrorClass, &st.CreatedAt, &st.StepID, &definitionIndex, &st.Branch); err != nil {
 			return nil, err
+		}
+		if definitionIndex >= 0 {
+			st.DefinitionIndex = &definitionIndex
 		}
 		out = append(out, st)
 	}

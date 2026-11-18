@@ -4501,6 +4501,7 @@ export type WorkflowDefinition = {
     created_by: string;
     description: string;
     enabled: boolean;
+    flow?: WorkflowGraphFlow;
     id: string;
     name: string;
     steps: Array<WorkflowDefinitionStep> | null;
@@ -4510,6 +4511,8 @@ export type WorkflowDefinition = {
 export type WorkflowDefinitionStep = {
     allowed_tables?: Array<string>;
     allowed_tools?: Array<string>;
+    condition?: WorkflowGraphCondition;
+    id?: string;
     max_cost_krw?: number;
     max_tokens?: number;
     name: string;
@@ -4521,6 +4524,97 @@ export type WorkflowDefinitionStep = {
 
 export type WorkflowDetail = {
     workflow: WorkflowDefinition | null;
+};
+
+export type WorkflowExecutionReceipt = {
+    cost_krw: number;
+    created_at: string;
+    error_class: string;
+    kind: 'workflow';
+    latency_ms: number;
+    note: string;
+    run_id: string;
+    status: string;
+    steps: Array<WorkflowReceiptStep>;
+    steps_ok: number;
+    steps_total: number;
+    workflow_id: string;
+    workflow_name: string;
+};
+
+export type WorkflowGraphCondition = {
+    operator: 'non_empty' | 'equals' | 'contains';
+    /**
+     * Case-sensitive comparison value, at most 4096 UTF-8 bytes; empty for non_empty and nonempty for contains.
+     */
+    value?: string;
+};
+
+export type WorkflowGraphEdge = {
+    from: string;
+    /**
+     * Existing step ID or $end.
+     */
+    to: string;
+    when: 'next' | 'true' | 'false';
+};
+
+export type WorkflowGraphFlow = {
+    edges: Array<WorkflowGraphEdge>;
+    entry: string;
+    version: 1;
+};
+
+export type WorkflowGraphInput = {
+    allowed_teams: string;
+    description: string;
+    enabled: boolean;
+    flow: WorkflowGraphFlow;
+    id: string;
+    name: string;
+    steps: Array<WorkflowGraphStep>;
+};
+
+export type WorkflowGraphPublishRequest = {
+    expected_revision: string;
+    note: string;
+};
+
+export type WorkflowGraphReview = {
+    revision: string;
+    workflow: WorkflowDefinition;
+};
+
+export type WorkflowGraphStep = {
+    allowed_tables?: Array<string>;
+    /**
+     * Exact namespaced MCP tool names; nonempty only for mcp_tool.
+     */
+    allowed_tools?: Array<string>;
+    condition?: WorkflowGraphCondition;
+    id: string;
+    /**
+     * Per-step cost bounds are not enforced and cannot be enabled in graph mode.
+     */
+    max_cost_krw?: 0;
+    /**
+     * Nonzero only for chat/skill.
+     */
+    max_tokens?: number;
+    name: string;
+    note?: string;
+    ref?: string;
+    timeout_ms?: number;
+    type: 'chat' | 'skill' | 'text2sql' | 'mcp_tool' | 'condition' | 'approval' | 'transform';
+};
+
+export type WorkflowGraphWriteRequest = {
+    /**
+     * Empty means create-only; otherwise the complete reviewed definition token.
+     */
+    expected_revision: string;
+    reason: string;
+    workflow: WorkflowGraphInput;
 };
 
 export type WorkflowLegacyList = {
@@ -4548,6 +4642,45 @@ export type WorkflowPage = {
     };
     total: number;
     workflows: Array<WorkflowMetadata>;
+};
+
+export type WorkflowPublishResult = {
+    enabled: boolean;
+    published: boolean;
+    version: number;
+    workflow_id: string;
+};
+
+export type WorkflowPublishedVersion = {
+    allowed_teams: string;
+    description: string;
+    flow?: WorkflowGraphFlow;
+    id: string;
+    name: string;
+    note: string;
+    published_at: string;
+    published_by: string;
+    steps: Array<WorkflowDefinitionStep> | null;
+    version: number;
+    workflow_id: string;
+};
+
+export type WorkflowPublishedVersions = {
+    versions: Array<WorkflowPublishedVersion>;
+    workflow_id: string;
+};
+
+export type WorkflowReceiptStep = {
+    branch?: 'true' | 'false';
+    definition_index?: number;
+    error_class: string;
+    name: string;
+    output_chars: number;
+    ref: string;
+    status: string;
+    step_id?: string;
+    step_index: number;
+    type: string;
 };
 
 export type WorkflowRunList = {
@@ -15911,9 +16044,9 @@ export type GetAdminWorkflowsData = {
     body?: never;
     path?: never;
     query?: {
-        view?: '' | 'page' | 'detail';
+        view?: '' | 'page' | 'detail' | 'review';
         /**
-         * Required only for view=detail. Exact nonempty UTF-8 identifier, at most 4096 bytes, without control characters. Whitespace and reserved characters are preserved. Cannot be combined with page filters.
+         * Required for view=detail or view=review. Exact nonempty UTF-8 identifier, at most 4096 bytes, without control characters. Whitespace and reserved characters are preserved. Cannot be combined with page filters.
          */
         id?: string;
         /**
@@ -15941,6 +16074,10 @@ export type GetAdminWorkflowsErrors = {
      */
     401: AppError;
     /**
+     * Review definition not found
+     */
+    404: AppError;
+    /**
      * Workflow query failed
      */
     500: AppError;
@@ -15956,24 +16093,57 @@ export type GetAdminWorkflowsResponses = {
     /**
      * Response selected by view; new views use Cache-Control: no-store
      */
-    200: WorkflowLegacyList | WorkflowPage | WorkflowDetail;
+    200: WorkflowLegacyList | WorkflowPage | WorkflowDetail | WorkflowGraphReview;
 };
 
 export type GetAdminWorkflowsResponse = GetAdminWorkflowsResponses[keyof GetAdminWorkflowsResponses];
 
 export type PostAdminWorkflowsData = {
-    body?: never;
+    body: WorkflowGraphWriteRequest | {
+        [key: string]: unknown;
+    };
     path?: never;
-    query?: never;
+    query?: {
+        review?: 'graph';
+    };
     url: '/admin/workflows';
 };
 
+export type PostAdminWorkflowsErrors = {
+    /**
+     * invalid_workflow_graph: malformed/duplicate/unknown/null fields, invalid graph, revision, reason or size.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: authentication or required admin scopes denied.
+     */
+    401: AppError;
+    /**
+     * workflow_graph_conflict: changed/deleted definition, repeated create, or legacy edit omits graph.
+     */
+    409: AppError;
+    /**
+     * workflow_graph_failed: read, write or audit failed. Unconfirmed response is not proof of non-application.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkflowsError = PostAdminWorkflowsErrors[keyof PostAdminWorkflowsErrors];
+
 export type PostAdminWorkflowsResponses = {
     /**
-     * OK
+     * Graph review response, or legacy id/ok acknowledgment without review.
      */
-    200: unknown;
+    200: WorkflowGraphReview | {
+        [key: string]: unknown;
+    };
 };
+
+export type PostAdminWorkflowsResponse = PostAdminWorkflowsResponses[keyof PostAdminWorkflowsResponses];
 
 export type PostAdminWorkflowsIdDryRunData = {
     body?: never;
@@ -15992,7 +16162,9 @@ export type PostAdminWorkflowsIdDryRunResponses = {
 };
 
 export type PostAdminWorkflowsIdPublishData = {
-    body?: never;
+    body?: WorkflowGraphPublishRequest | {
+        note?: string;
+    };
     path: {
         id: string;
     };
@@ -16000,12 +16172,39 @@ export type PostAdminWorkflowsIdPublishData = {
     url: '/admin/workflows/{id}/publish';
 };
 
+export type PostAdminWorkflowsIdPublishErrors = {
+    /**
+     * Invalid graph, reason, body, query or validation.
+     */
+    400: AppError;
+    /**
+     * Read or write authorization denied.
+     */
+    401: AppError;
+    /**
+     * Reviewed workflow changed or was deleted.
+     */
+    409: AppError;
+    /**
+     * Publication failed or outcome unconfirmed; do not retry automatically.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkflowsIdPublishError = PostAdminWorkflowsIdPublishErrors[keyof PostAdminWorkflowsIdPublishErrors];
+
 export type PostAdminWorkflowsIdPublishResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: WorkflowPublishResult;
 };
+
+export type PostAdminWorkflowsIdPublishResponse = PostAdminWorkflowsIdPublishResponses[keyof PostAdminWorkflowsIdPublishResponses];
 
 export type GetAdminWorkflowsIdVersionsData = {
     body?: never;
@@ -16016,12 +16215,23 @@ export type GetAdminWorkflowsIdVersionsData = {
     url: '/admin/workflows/{id}/versions';
 };
 
+export type GetAdminWorkflowsIdVersionsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkflowsIdVersionsError = GetAdminWorkflowsIdVersionsErrors[keyof GetAdminWorkflowsIdVersionsErrors];
+
 export type GetAdminWorkflowsIdVersionsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: WorkflowPublishedVersions;
 };
+
+export type GetAdminWorkflowsIdVersionsResponse = GetAdminWorkflowsIdVersionsResponses[keyof GetAdminWorkflowsIdVersionsResponses];
 
 export type GetAdminXviewDeltaData = {
     body?: never;
@@ -18475,12 +18685,43 @@ export type GetV1WorkflowRunsRunIdReceiptData = {
     url: '/v1/workflow-runs/{run_id}/receipt';
 };
 
+export type GetV1WorkflowRunsRunIdReceiptErrors = {
+    /**
+     * Receipt authorization, address or lookup error.
+     */
+    400: AppError;
+    /**
+     * Receipt authorization, address or lookup error.
+     */
+    401: AppError;
+    /**
+     * Receipt authorization, address or lookup error.
+     */
+    403: AppError;
+    /**
+     * Receipt authorization, address or lookup error.
+     */
+    404: AppError;
+    /**
+     * Receipt authorization, address or lookup error.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetV1WorkflowRunsRunIdReceiptError = GetV1WorkflowRunsRunIdReceiptErrors[keyof GetV1WorkflowRunsRunIdReceiptErrors];
+
 export type GetV1WorkflowRunsRunIdReceiptResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: WorkflowExecutionReceipt;
 };
+
+export type GetV1WorkflowRunsRunIdReceiptResponse = GetV1WorkflowRunsRunIdReceiptResponses[keyof GetV1WorkflowRunsRunIdReceiptResponses];
 
 export type PostV1WorkflowsIdRunData = {
     body?: never;

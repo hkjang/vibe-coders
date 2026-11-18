@@ -197,7 +197,8 @@ export function WorkflowStepsEditor({ onChange, value }: WorkflowStepsEditorProp
 
                 {extras.length ? (
                   <p className="workflow-step-extras">
-                    이 화면에서 다루지 않는 항목은 그대로 유지됩니다: {extras.join(", ")}
+                    지원하지 않는 필드가 있습니다. JSON 보기에서 확인하거나 지원하는 편집기를 사용하세요. 해당
+                    필드가 남아 있으면 저장을 차단합니다: {extras.join(", ")}
                   </p>
                 ) : null}
               </li>

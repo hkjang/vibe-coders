@@ -1,3 +1,4 @@
+import { workflowGraphEndpoints } from "./domains/workflow-graph";
 import { stageBulkEndpoints } from "./domains/prompt-stage-bulk";
 import { stageEndpoints } from "./domains/prompt-stages";
 import { activitySummaryEndpoints } from "./domains/activity-summaries";
@@ -141,6 +142,7 @@ export type {
 const statusResponseSchema = z.object({ status: z.string() }) satisfies z.ZodType<PostAuthLogoutResponse>;
 
 export const endpoints = {
+  workflowGraph: workflowGraphEndpoints,
   uiTelemetry: uiTelemetryEndpoints,
   health: operation<GetHealthData, GetHealthResponse>()("GET", "/health", gatewayHealthSchema),
   ready: operation<GetReadyData, GetReadyResponse>()("GET", "/ready", readinessSchema, undefined, {

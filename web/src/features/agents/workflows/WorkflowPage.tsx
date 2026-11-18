@@ -1,3 +1,6 @@
+import { versionAtLeast } from "@/config/migration-registry";
+import { WorkflowGraphPublishDialog } from "./WorkflowGraphPublishDialog";
+import { WorkflowGraphDialog } from "./WorkflowGraphDialog";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -85,7 +88,11 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
     currentSelection.current = selectedId;
   }, [selectedId]);
   const [formOpen, setFormOpen] = useState(false);
+  const [graphTarget, setGraphTarget] = useState<{ id?: string }>();
+  const [restoreGraphAction, setRestoreGraphAction] = useState<"edit" | "convert" | "publish">();
+  const graphSupported = versionAtLeast(auth.backendVersion, "v0.86.160");
   const [editing, setEditing] = useState<Workflow | undefined>();
+  const [graphPublishTarget, setGraphPublishTarget] = useState<string>();
   const [publishTarget, setPublishTarget] = useState<Workflow | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<Workflow | undefined>();
   const createButtonRef = useRef<HTMLButtonElement>(null);
@@ -157,6 +164,17 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
             >
               <Plus aria-hidden="true" /> 새 워크플로
             </Button>
+            {graphSupported ? (
+              <Button
+                disabled={!canWrite}
+                onClick={() => {
+                  dialogReturnRef.current = document.activeElement as HTMLElement;
+                  setGraphTarget({});
+                }}
+              >
+                새 분기 워크플로
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -271,14 +289,37 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
         canWrite={canWrite}
         onDelete={() => setDeleteTarget(selected)}
         onEdit={() => {
-          setEditing(selected);
-          setFormOpen(true);
+          dialogReturnRef.current = document.activeElement as HTMLElement;
+          if (selected?.flow) {
+            if (graphSupported) {
+              setRestoreGraphAction("edit");
+              setGraphTarget({ id: selected.id });
+            }
+          } else {
+            setEditing(selected);
+            setFormOpen(true);
+          }
         }}
+        onEditGraph={
+          graphSupported && selected && !selected.flow
+            ? () => {
+                dialogReturnRef.current = document.activeElement as HTMLElement;
+                setRestoreGraphAction("convert");
+                setGraphTarget({ id: selected.id });
+              }
+            : undefined
+        }
         onOpenChange={(open) => {
           if (!open) closeSheet();
         }}
-        onPublish={() => setPublishTarget(selected)}
-        open={!receipt.open && params.has("workflow")}
+        onPublish={() => {
+          dialogReturnRef.current = document.activeElement as HTMLElement;
+          if (selected?.flow && graphSupported) {
+            setRestoreGraphAction("publish");
+            setGraphPublishTarget(selected.id);
+          } else setPublishTarget(selected);
+        }}
+        open={!receipt.open && !graphTarget && !graphPublishTarget && params.has("workflow")}
         loading={selectedValid && (detail.isPending || detail.isFetching)}
         detailError={selectedValid ? detail.error : undefined}
         invalidAddress={params.has("workflow") && !selectedValid}
@@ -286,7 +327,36 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
         returnFocusRef={rowTriggerRef}
         workflow={selected}
         writeDisabledReason={writeDisabledReason}
+        restoreAction={restoreGraphAction}
+        onRestoreFocus={(target) => {
+          dialogReturnRef.current = target;
+          setRestoreGraphAction(undefined);
+        }}
       />
+
+      {graphTarget && graphSupported ? (
+        <WorkflowGraphDialog
+          key={graphTarget.id ?? "new"}
+          workflowId={graphTarget.id}
+          owner={owner}
+          canWrite={canWrite}
+          assertCurrent={mutationAccess.assertCurrent}
+          onClose={() => setGraphTarget(undefined)}
+          returnFocusRef={dialogReturnRef}
+        />
+      ) : null}
+
+      {graphPublishTarget && graphSupported ? (
+        <WorkflowGraphPublishDialog
+          key={graphPublishTarget}
+          workflowId={graphPublishTarget}
+          owner={owner}
+          canWrite={canWrite}
+          assertCurrent={mutationAccess.assertCurrent}
+          onClose={() => setGraphPublishTarget(undefined)}
+          returnFocusRef={dialogReturnRef}
+        />
+      ) : null}
 
       <WorkflowFormDialog
         canWrite={canWrite}
@@ -302,7 +372,7 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
 
       <ConfirmDialog
         title="워크플로 게시"
-        description={`'${publishTarget?.name ?? ""}' 워크플로의 현재 정의를 새 버전으로 게시합니다. 검증에 실패한 단계가 있으면 게시되지 않습니다.`}
+        description={`'${publishTarget?.name ?? ""}' 워크플로의 현재 정의를 버전 이력으로 남기고 실행을 허용합니다. 실행은 항상 현재 저장된 정의를 사용합니다.`}
         confirmLabel="게시"
         requireReason
         confirmDisabled={!canWrite}

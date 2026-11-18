@@ -42,3 +42,39 @@ it("누락된 수치와 알 수 없는 종류·상태를 정상으로 표시하�
   expect(within(table).getByText("상태 확인 필요")).toBeVisible();
   expect(within(table).getAllByText("—")).toHaveLength(2);
 });
+
+it("분기 영수증은 실행 순서와 정의 위치를 구분하고 선택한 조건을 표시한다", async () => {
+  renderScreen(
+    <WorkflowReceiptSteps
+      steps={[
+        {
+          step_index: 0,
+          name: "분기 조건",
+          type: "condition",
+          status: "passed",
+          output_chars: 0,
+          step_id: "condition_3",
+          definition_index: 2,
+          branch: "false",
+        },
+        {
+          step_index: 1,
+          name: "거짓 경로",
+          type: "transform",
+          status: "ok",
+          output_chars: 0,
+          step_id: "fallback_1",
+          definition_index: 0,
+        },
+      ]}
+    />,
+  );
+  const table = await screen.findByRole("table", { name: "워크플로 실행 단계별 결과" });
+  expect(within(table).getByRole("columnheader", { name: /^정의 위치/u })).toBeVisible();
+  expect(within(table).getByText("거짓", { exact: true })).toBeVisible();
+  const row = within(table).getAllByRole("row")[1];
+  if (!row) throw new Error("실행 단계 행이 없습니다.");
+  expect(within(row).getByText("condition_3")).toBeVisible();
+  expect(within(row).getByText("3", { exact: true })).toBeVisible();
+  expect(within(row).getByText("1", { exact: true })).toBeVisible();
+});

@@ -9,7 +9,7 @@ import { flowType } from "./workflow-flow";
 
 type Step = NonNullable<WorkflowRunReceipt["steps"]>[number];
 type Row = { step: Step; index: number };
-const columns = [
+const baseColumns = [
   displayColumn<Row>("index", "단계", ({ step }) =>
     Number.isSafeInteger(step.step_index) && (step.step_index ?? -1) >= 0
       ? formatNumber((step.step_index ?? 0) + 1)
@@ -28,6 +28,20 @@ const columns = [
 ];
 
 export function WorkflowReceiptSteps({ steps }: { steps: readonly Step[] }) {
+  const columns = steps.some((step) => step.step_id !== undefined)
+    ? [
+        ...baseColumns,
+        displayColumn<Row>("step_id", "실행한 단계 ID", ({ step }) => step.step_id || "—"),
+        displayColumn<Row>("definition_index", "정의 위치", ({ step }) =>
+          Number.isSafeInteger(step.definition_index) && (step.definition_index ?? -1) >= 0
+            ? formatNumber((step.definition_index ?? 0) + 1)
+            : "—",
+        ),
+        displayColumn<Row>("branch", "선택 분기", ({ step }) =>
+          step.branch === "true" ? "참" : step.branch === "false" ? "거짓" : "—",
+        ),
+      ]
+    : baseColumns;
   const [page, setPage] = useState(0);
   const [size, setSize] = useState(25);
   const count = Math.max(1, Math.ceil(steps.length / size));

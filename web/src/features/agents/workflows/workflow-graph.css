@@ -1,0 +1,78 @@
+.workflow-graph-diagram {
+  max-width: 100%;
+  max-height: 24rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-background);
+}
+.workflow-graph-diagram > svg {
+  display: block;
+  max-width: none;
+}
+.workflow-graph-node rect {
+  fill: var(--color-card);
+  stroke: var(--color-border);
+  stroke-width: 2;
+}
+.workflow-graph-node text {
+  fill: var(--color-foreground);
+  font-size: 14px;
+}
+.workflow-graph-node .workflow-graph-kind,
+.workflow-graph-node .workflow-graph-ending {
+  font-size: 13px;
+  fill: var(--color-muted);
+}
+.workflow-graph-node[role="button"] {
+  cursor: pointer;
+}
+.workflow-graph-node.is-selected rect,
+.workflow-graph-node:focus rect {
+  stroke: var(--color-primary);
+  stroke-width: 3;
+}
+.workflow-graph-edge path {
+  fill: none;
+  stroke: var(--color-muted);
+  stroke-width: 1.5;
+}
+.workflow-graph-edge text {
+  font-size: 13px;
+  fill: var(--color-foreground);
+}
+.workflow-graph-arrow {
+  fill: var(--color-muted);
+}
+.workflow-graph-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.workflow-graph-fields label {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.workflow-graph-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.workflow-graph-editor {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.workflow-graph-review pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+@media (max-width: 767px) {
+  .workflow-graph-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

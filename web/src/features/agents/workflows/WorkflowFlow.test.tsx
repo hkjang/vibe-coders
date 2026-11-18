@@ -65,17 +65,17 @@ describe("워크플로 정의 흐름", () => {
     const next = screen.getByRole("button", { name: "다음 25단계" });
     const previous = screen.getByRole("button", { name: "이전 25단계" });
     await user.click(next);
-    expect(panel()).toHaveAccessibleName("26. 업무 26 변환");
+    expect(panel()).toHaveAccessibleName("26. 업무 26 입력 전달");
     await user.click(next);
     expect(screen.getAllByRole("tab")).toHaveLength(10);
     expect(previous).toHaveFocus();
     expect(next).toBeDisabled();
-    expect(panel()).toHaveAccessibleName("51. 업무 51 변환");
+    expect(panel()).toHaveAccessibleName("51. 업무 51 입력 전달");
     await user.click(previous);
     await user.click(previous);
     expect(next).toHaveFocus();
     expect(previous).toBeDisabled();
-    expect(panel()).toHaveAccessibleName("1. 업무 1 변환");
+    expect(panel()).toHaveAccessibleName("1. 업무 1 입력 전달");
   });
 
   it("새 정의에서는 이전 선택을 폐기하고 표시 보호 기준 변경을 반영한다", async () => {
