@@ -92,21 +92,11 @@ func TestReplayFallbackDropsDuplicateImportedRecords(t *testing.T) {
 }
 
 func openStoreForTest(t *testing.T) *SQLStore {
+	t.Helper()
 	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
 		return openPostgresStoreForTest(t, dsn)
 	}
-	t.Helper()
-	db, err := Open(context.Background(), config.DatabaseConfig{
-		Driver: "sqlite",
-		DSN:    filepath.Join(t.TempDir(), "gateway.db"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	return db
+	return openSQLiteStoreForTest(t)
 }
 
 func fallbackRecord(id string) LogRecord {
