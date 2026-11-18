@@ -165,7 +165,8 @@ func classifyPostChangeRedTeam(action, before, after string) (postChangeRedTeamS
 		spec.Reason = "Provider 연결·모델 매핑·신뢰 경계 변경 후 라우팅과 egress 회귀를 자동 점검했습니다."
 		spec.ProbePacks = []string{"rtp_model_routing_abuse", "rtp_header_trust", "rtp_data_leakage"}
 
-	case action == "routing_rule.create" || action == "routing_rule.update" || action == "routing_rule.delete":
+	case action == "routing_rule.create" || action == "routing_rule.update" || action == "routing_rule.delete" ||
+		action == "routing_rule.reviewed_update" || action == "routing_rule.reorder":
 		spec.Scope = "provider"
 		spec.Ref = firstNonEmpty(value("id", "name"), rawRef(), "routing-rules")
 		spec.Reason = "라우팅 규칙 변경 후 alias·provider override·fallback 정책 경계를 자동 점검했습니다."
