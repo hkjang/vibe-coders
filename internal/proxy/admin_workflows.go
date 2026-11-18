@@ -249,6 +249,11 @@ func (s *Server) handleV1WorkflowRun(w http.ResponseWriter, r *http.Request) {
 
 	// Execute mode: run the steps server-side, chaining each step's output to the next.
 	if runReq.Execute {
+		if wf.Flow != nil {
+			// Only this authenticated HTTP entry may bridge a login session to a
+			// live step. MCP-origin workflows retain their original key/OAuth scope.
+			r = r.WithContext(context.WithValue(r.Context(), workflowHTTPCallerKey{}, true))
+		}
 		s.executeWorkflowRun(w, r, wf, runReq.Input, claims)
 		return
 	}
@@ -410,12 +415,16 @@ func (s *Server) workflowChatStep(r *http.Request, model, prompt string, maxToke
 	if strings.TrimSpace(prompt) == "" {
 		return "", errGateway("step input is empty")
 	}
+	caller, err := s.workflowHTTPReentry(r, "chat:completion")
+	if err != nil {
+		return "", err
+	}
 	msg, _ := json.Marshal(map[string]string{"role": "user", "content": prompt})
 	body := map[string]any{"model": model, "messages": []json.RawMessage{msg}, "stream": false}
 	if maxTokens > 0 {
 		body["max_tokens"] = maxTokens
 	}
-	return s.runGatewayChat(r, body, headers)
+	return s.runGatewayChat(caller, body, headers)
 }
 
 // finishWorkflowRun persists aggregate run metadata and writes the response.
