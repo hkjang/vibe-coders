@@ -138,13 +138,19 @@ async function install(context: BrowserContext) {
 }
 
 export const test = base.extend<{ gateway: Awaited<ReturnType<typeof install>> }>({
-  gateway: async ({ context }, runFixture) => {
-    const gateway = await install(context);
-    try {
-      await runFixture(gateway);
-    } finally {
-      gateway.releaseSimulation();
-    }
-    expect(gateway.unexpected).toEqual([]);
-  },
+  // Every imported test needs the isolated gateway, including visual cases
+  // that do not read its write counters. Otherwise health polls reach the real
+  // preview server and render different status text in CI and embedded runs.
+  gateway: [
+    async ({ context }, runFixture) => {
+      const gateway = await install(context);
+      try {
+        await runFixture(gateway);
+      } finally {
+        gateway.releaseSimulation();
+      }
+      expect(gateway.unexpected).toEqual([]);
+    },
+    { auto: true },
+  ],
 });
