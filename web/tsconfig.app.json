@@ -48,6 +48,7 @@
     "tests/e2e/work-app-pagination.spec.ts",
     "tests/e2e/audit-export-lifecycle.spec.ts",
     "tests/e2e/startup-recovery.spec.ts",
+    "tests/e2e/startup-appearance.spec.ts",
     "tests/e2e/account-resource-search.spec.ts",
     "tests/e2e/redteam-evidence-read.spec.ts",
     "tests/e2e/redteam-readonly-controls.spec.ts",
