@@ -110,9 +110,13 @@ for (const theme of ["light", "dark"] as const)
       });
       expect(violations).toEqual([]);
       expect(await state.detail.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-      await expect(state.detail.locator(".workflow-graph-viewer")).toHaveScreenshot(
-        `workflow-graph-navigation-${theme}-${width}.png`,
-      );
+      const viewer = state.detail.locator(".workflow-graph-viewer");
+      // Locator screenshots may scroll the dialog under the last pointer position.
+      // Capture the idle controls after stabilizing the viewer's viewport position.
+      await viewer.scrollIntoViewIfNeeded();
+      await page.mouse.move(0, 0);
+      await expect.poll(() => viewer.evaluate((element) => element.matches(":hover"))).toBe(false);
+      await expect(viewer).toHaveScreenshot(`workflow-graph-navigation-${theme}-${width}.png`);
       expect(state.writes).toEqual([]);
       expect(gateway.writes).toEqual([]);
       expect(gateway.simulations).toEqual([]);
