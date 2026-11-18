@@ -105,9 +105,12 @@ test("다른 설정 탭으로 이동한 뒤 이전 다운로드가 시작되지 
   await button(page).click();
   await expect(page.getByText("감사 로그 CSV 준비 중", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "시스템 오류", exact: true }).click();
+  // Router navigation may commit after click() returns. Release the old request
+  // only after the destination panel has replaced the audit workspace.
+  await expect(page.getByRole("tabpanel", { name: "시스템 오류", exact: true })).toBeVisible();
+  await expect(button(page)).toHaveCount(0);
   api.release();
   await expect.poll(() => api.state.completed).toBe(1);
-  await expect(button(page)).toHaveCount(0);
   expect(api.downloads).toEqual([]);
   api.check();
 });
