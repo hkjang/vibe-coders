@@ -22,9 +22,14 @@ func enrichRoutingOrderOpenAPI(method string, op, responses map[string]any) {
 	case "post":
 		op["description"] = "Existing ordinary routing preview is preserved. Presence of rule_order or rule_revision selects strict order comparison: exactly model, complexity, rule_order, rule_revision, with no query. This read-only comparison reuses the live first-match complexity-rule evaluator, including disabled and no-op semantics, and compares only that stage. It does not execute model calls or simulate policy, user/team routing, learning, provider health or failover. ambiguous_before_order warns when the legacy baseline ties are unspecified. It does not mutate rules, cache or audit. Existing raw-read redaction applies."
 		op["requestBody"] = requestBody("RoutingPreviewRequest")
+		op["description"] = op["description"].(string) + " Presence of rule_edit selects RoutingDraftPreviewRequest instead. It compares an immutable saved rule set and an unsaved seven-field edit with the same full intelligent-routing planner used by real unpinned requests. Automatic model selection bypasses the complexity rule stage. Key scope is fixed once; provider health, learning and provider configuration remain sequential live reads, explicitly indicated by runtime_consistency. No model/tool call or mutation occurs; results are plans, not measured whole-traffic impact. Stored rule revision is checked again after both plans; ambiguous precedence is rejected. The supported trial request is text messages without tools or client pin/no-route headers."
 		responses["200"] = successResponse("RoutingPreviewResponse")
-		responses["409"] = errorResponse("routing_order_conflict: reviewed configuration changed; no comparison result is returned.")
-		responses["413"] = errorResponse("body_too_large: existing preview request exceeds 4 MiB; order comparisons have an additional 512 KiB limit.")
+		responses["400"] = errorResponse("invalid_routing_order or invalid_routing_draft: malformed, duplicate, unknown, missing or null canonical fields, invalid trial or patch, unexpected query, or additional 512 KiB comparison limit exceeded.")
+		responses["404"] = errorResponse("routing_rule_not_found: the rule being reviewed no longer exists.")
+		responses["409"] = errorResponse("routing_order_conflict or routing_draft_conflict: reviewed configuration changed; no comparison result is returned.")
+		responses["422"] = errorResponse("routing_order_limit, routing_draft_limit or routing_draft_ambiguous: the bounded rule set cannot be safely compared; no partial result is returned.")
+		responses["500"] = errorResponse("routing_order_failed or routing_draft_failed: comparison or revision verification failed.")
+		responses["413"] = errorResponse("body_too_large: existing preview request exceeds 4 MiB; order and draft comparisons have an additional 512 KiB limit reported as 400.")
 	}
 }
 
@@ -36,7 +41,7 @@ func routingOrderOpenAPISchemas() map[string]any {
 	object := func(required []string, properties map[string]any) map[string]any {
 		return map[string]any{"type": "object", "additionalProperties": false, "required": required, "properties": properties}
 	}
-	legacyRequest := map[string]any{"type": "object", "additionalProperties": true, "not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"rule_order"}}, map[string]any{"required": []string{"rule_revision"}}}}}
+	legacyRequest := map[string]any{"type": "object", "additionalProperties": true, "not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"rule_order"}}, map[string]any{"required": []string{"rule_revision"}}, map[string]any{"required": []string{"rule_edit"}}}}}
 	legacyResponse := map[string]any{"type": "object", "additionalProperties": true, "not": map[string]any{"required": []string{"stage"}}, "description": "Existing ordinary intelligent routing preview response, unchanged."}
 	return map[string]any{
 		"RoutingRuleReadResponse":     map[string]any{"oneOf": []any{schemaRef("RoutingRuleListResponse"), schemaRef("RoutingOrderSnapshot")}},
@@ -45,7 +50,7 @@ func routingOrderOpenAPISchemas() map[string]any {
 		"RoutingOrderPreviewRequest":  object([]string{"model", "complexity", "rule_order", "rule_revision"}, map[string]any{"model": map[string]any{"type": "string", "minLength": 1, "maxLength": 256}, "complexity": map[string]any{"type": "integer", "minimum": 0, "maximum": 100}, "rule_order": order, "rule_revision": revision}),
 		"RoutingOrderDecision":        object([]string{"matched_rule_id", "applied", "target_model", "target_provider"}, map[string]any{"matched_rule_id": text, "applied": flag, "target_model": text, "target_provider": text}),
 		"RoutingOrderPreviewResponse": object([]string{"stage", "revision", "ambiguous_before_order", "before", "after"}, map[string]any{"stage": map[string]any{"type": "string", "enum": []string{"complexity_rules"}}, "revision": revision, "ambiguous_before_order": flag, "before": schemaRef("RoutingOrderDecision"), "after": schemaRef("RoutingOrderDecision")}),
-		"RoutingPreviewRequest":       map[string]any{"oneOf": []any{schemaRef("RoutingOrderPreviewRequest"), legacyRequest}},
-		"RoutingPreviewResponse":      map[string]any{"oneOf": []any{schemaRef("RoutingOrderPreviewResponse"), legacyResponse}},
+		"RoutingPreviewRequest":       map[string]any{"oneOf": []any{schemaRef("RoutingOrderPreviewRequest"), schemaRef("RoutingDraftPreviewRequest"), legacyRequest}},
+		"RoutingPreviewResponse":      map[string]any{"oneOf": []any{schemaRef("RoutingOrderPreviewResponse"), schemaRef("RoutingDraftPreviewResponse"), legacyResponse}},
 	}
 }

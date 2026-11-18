@@ -22,6 +22,7 @@ const runtime = vi.hoisted(() => ({
   userId: "operator-a",
   mode: "authenticated" as "authenticated" | "legacy" | "open",
   prefixes: ["vc_sk_", "vc_sa_"],
+  backendVersion: "v0.86.158",
 }));
 const captured = vi.hoisted(() => ({
   buttons: new Map<string, (event?: unknown) => unknown>(),
@@ -33,7 +34,11 @@ vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
   return {
     useAuth: () => {
-      const auth = testAuth({ scopes: runtime.scopes, user: { id: runtime.userId } });
+      const auth = testAuth({
+        scopes: runtime.scopes,
+        user: { id: runtime.userId },
+        backendVersion: runtime.backendVersion,
+      });
       return {
         ...auth,
         mode: runtime.mode,
@@ -85,6 +90,7 @@ beforeEach(() => {
     userId: "operator-a",
     mode: "authenticated",
     prefixes: ["vc_sk_", "vc_sa_"],
+    backendVersion: "v0.86.158",
   });
   captured.buttons.clear();
   editToasts.success.mockClear();
@@ -103,34 +109,47 @@ export function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-export async function setupEdit(overrides: Partial<RoutingRule> = {}) {
+export async function setupEdit(overrides: Partial<RoutingRule> = {}, draftMode = false) {
+  if (draftMode) runtime.backendVersion = "v0.86.159";
   const rule = { ...initialEditRule, ...overrides };
   const records = new Map([[rule.id, { ...rule }]]);
-  const calls: Array<{ key: string; body?: unknown }> = [];
+  const calls: Array<{ key: string; body?: unknown; query?: unknown }> = [];
   const response: {
     read?: () => unknown;
     patch?: (saved: RoutingRule) => unknown;
+    preview?: () => unknown;
   } = {};
   // Transport-only fixture: records an attempt BEFORE any processing. It does
   // not implement UI permission, readonly, owner, review, baseline or ACK rules.
   // The actual endpoint schema is parsed (including the new strict operation).
   // Epoch checks mirror the existing shared client, not a new UI security proof.
   vi.spyOn(apiClient, "request").mockImplementation(async (endpoint, ...args) => {
-    const options = (args[0] ?? {}) as { body?: unknown };
+    const options = (args[0] ?? {}) as { body?: unknown; query?: { view?: string; review?: string } };
     const key = `${endpoint.method} ${endpoint.path}`;
-    calls.push({ key, body: options.body });
+    calls.push({ key, body: options.body, query: options.query });
     const epoch = tokenStore.getSessionEpoch();
     let raw: unknown;
     if (key === listPath) {
-      raw = await (response.read
-        ? response.read()
-        : { rules: [...records.values()].map((row) => ({ ...row })) });
+      raw =
+        options.query?.view === "order"
+          ? { rules: [...records.values()], revision: "a".repeat(64), ambiguous_ties: false }
+          : await (response.read
+              ? response.read()
+              : { rules: [...records.values()].map((row) => ({ ...row })) });
     } else if (key === patchPath) {
       const current = records.get(rule.id);
       if (!current) throw new AppError("합성 대상 없음", { kind: "http", status: 404 });
-      const saved = { ...current, ...(options.body as object) };
+      const body = options.body as { patch?: object };
+      const saved = {
+        ...current,
+        ...(options.query?.review === "edit" ? body.patch : (options.body as object)),
+      };
       records.set(rule.id, saved);
-      raw = await (response.patch ? response.patch(saved) : { rule: { ...saved } });
+      raw = await (response.patch
+        ? response.patch(saved)
+        : { rule: { ...saved }, ...(options.query?.review === "edit" ? { revision: "b".repeat(64) } : {}) });
+    } else if (key === "POST /admin/routing/preview" && response.preview) {
+      raw = await response.preview();
     } else {
       throw new AppError(`Unexpected test request: ${key}`, { kind: "contract" });
     }

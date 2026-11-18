@@ -24,6 +24,9 @@ const markers = [
 ];
 const sensitive = markers.join(" ");
 const allowedScenarios = [
+  "ROUTING-DRAFT-LIVE-001",
+  "ROUTING-DRAFT-LIVE-002",
+  "ROUTING-DRAFT-LIVE-003",
   "SIMULATION-LIVE-001",
   "SIMULATION-LIVE-002",
   "SIMULATION-LIVE-003",
@@ -182,9 +185,11 @@ async function report(rows, status = "failed", product = false, reporterOptions 
     assert.deepEqual(await readdir(temporaryDirectory), ["test-results"]);
     const summaryName = product
       ? "keycloak-live-summary.json"
-      : reporterOptions.report === "simulation"
-        ? "simulation-live-summary.json"
-        : "auth-live-summary.json";
+      : reporterOptions.report === "routing-draft"
+        ? "routing-draft-live-summary.json"
+        : reporterOptions.report === "simulation"
+          ? "simulation-live-summary.json"
+          : "auth-live-summary.json";
     assert.deepEqual(await readdir(join(temporaryDirectory, "test-results")), [summaryName]);
     const raw = await readFile(join(temporaryDirectory, "test-results", summaryName), "utf8");
     for (const marker of markers) {
@@ -613,6 +618,7 @@ for (const [filename, scenario, timedOut = false] of [
   ["mcp-risk-live.spec.ts", "AUTH-LIVE-035"],
   ["mcp-risk-live.spec.ts", "AUTH-LIVE-036"],
   ["routing-order-live.spec.ts", "AUTH-LIVE-037"],
+  ["routing-draft-live.spec.ts", "ROUTING-DRAFT-LIVE-001"],
   ["routing-order-live.spec.ts", "AUTH-LIVE-038"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011"],
   ["recovery-live.spec.ts", "AUTH-LIVE-011", true],
@@ -630,7 +636,16 @@ for (const [filename, scenario, timedOut = false] of [
       const fixtureDirectory = join(temporaryDirectory, "fixture");
       const reportDirectory = join(temporaryDirectory, "published");
       const scratchDirectory = join(temporaryDirectory, "scratch");
-      const configUrl = new URL("../playwright.auth.config.ts", import.meta.url);
+      // Exercise the suite that actually selects this spec. Importing the base
+      // auth config for a dedicated suite silently discovers zero tests.
+      const routingDraft = filename === "routing-draft-live.spec.ts";
+      const authConfigUrl = new URL("../playwright.auth.config.ts", import.meta.url);
+      const configUrl = new URL(
+        routingDraft ? "../playwright.routing-draft.config.ts" : "../playwright.auth.config.ts",
+        import.meta.url,
+      );
+      const reportOptions = routingDraft ? { report: "routing-draft" } : {};
+      const summaryName = routingDraft ? "routing-draft-live-summary.json" : "auth-live-summary.json";
       const canary = `SYNTHETIC_AUTH_ARTIFACT_CANARY_${randomUUID()}`;
       try {
         for (const directory of [fixtureDirectory, reportDirectory, scratchDirectory])
@@ -660,7 +675,8 @@ for (const [filename, scenario, timedOut = false] of [
           else probeEnvironment.TMPDIR = scratch;
           const probe = spawnSync(
             process.execPath,
-            ["--input-type=module", "-e", configProbe, configUrl.href],
+            // Dedicated suites inherit the same fail-closed scratch guard.
+            ["--input-type=module", "-e", configProbe, authConfigUrl.href],
             {
               cwd: reportDirectory,
               env: probeEnvironment,
@@ -720,7 +736,7 @@ ${failureBody}
 export default {
   ...liveConfig,
   testDir: ${JSON.stringify(fixtureDirectory)},
-  reporter: [[${JSON.stringify(fileURLToPath(reporterUrl))}]],
+  reporter: [[${JSON.stringify(fileURLToPath(reporterUrl))}, ${JSON.stringify(reportOptions)}]],
   preserveOutput: "always",
 };
 `,
@@ -750,11 +766,11 @@ export default {
         );
         const summaryDirectory = join(reportDirectory, "test-results");
         assert.equal(
-          (await readdir(summaryDirectory)).join("\n") === "auth-live-summary.json",
+          (await readdir(summaryDirectory)).join("\n") === summaryName,
           true,
           "Only the safe summary may be written outside private scratch",
         );
-        const raw = await readFile(join(summaryDirectory, "auth-live-summary.json"), "utf8");
+        const raw = await readFile(join(summaryDirectory, summaryName), "utf8");
         assert.equal(raw.includes(canary), false, "The safe report must omit the generated DOM canary");
         const summary = JSON.parse(raw);
         assert.equal(summary.status === "failed" && summary.tests?.length === 1, true);
@@ -829,4 +845,9 @@ test("simulation reporter uses a fixed sanitized result name and ignores arbitra
   const result = await report([row("SIMULATION-LIVE-001")], "failed", false, { report: "simulation" });
   assert.equal(result.tests[0].scenario, "SIMULATION-LIVE-001");
   await report([row("SIMULATION-LIVE-002")], "failed", false, { report: "../private-token" });
+});
+
+test("routing draft reporter uses a fixed sanitized result name", async () => {
+  const result = await report([row("ROUTING-DRAFT-LIVE-001")], "failed", false, { report: "routing-draft" });
+  assert.equal(result.tests[0].scenario, "ROUTING-DRAFT-LIVE-001");
 });

@@ -14,8 +14,8 @@ func TestRoutingEditOpenAPIContract(t *testing.T) {
 	spec := buildOpenAPISpec()
 	paths := spec["paths"].(map[string]any)
 	assertJSONOperationSchema(t, paths, "/admin/routing-rules", "get", "200", "RoutingRuleReadResponse")
-	assertJSONOperationSchema(t, paths, "/admin/routing-rules/{id}", "patch", "200", "RoutingRuleWriteResponse")
-	assertJSONRequestSchema(t, paths, "/admin/routing-rules/{id}", "patch", "RoutingRulePatchRequest")
+	assertJSONOperationSchema(t, paths, "/admin/routing-rules/{id}", "patch", "200", "RoutingRuleEditResponse")
+	assertJSONRequestSchema(t, paths, "/admin/routing-rules/{id}", "patch", "RoutingRuleEditRequest")
 	for _, status := range []string{"400", "401", "404", "500"} {
 		assertJSONOperationSchema(t, paths, "/admin/routing-rules/{id}", "patch", status, "AppError")
 	}

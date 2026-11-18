@@ -18,6 +18,8 @@ import {
   type RuleEdit,
 } from "./routing-rule-edit-state";
 import { RoutingRuleEditFields } from "./RoutingRuleEditFields";
+import { RoutingDraftComparison } from "./RoutingDraftComparison";
+import type { DraftWriteProof } from "@/shared/api/domains/routing-draft";
 import "./routing-rule-edit.css";
 
 interface Props {
@@ -31,6 +33,8 @@ function Editor({ rule, access, onClose, returnFocusRef }: Props) {
   const latestEdit = useRef(edit);
   const [review, setReview] = useState<RuleReview>();
   const reviewRef = useRef<RuleReview | undefined>(undefined);
+  const proofRef = useRef<{ review: RuleReview; proof: DraftWriteProof } | undefined>(undefined);
+  const [compared, setCompared] = useState(false);
   const [error, setError] = useState<RuleEditProblem | string>();
   const [unchanged, setUnchanged] = useState(false);
   const region = useRef<HTMLDivElement>(null);
@@ -43,6 +47,7 @@ function Editor({ rule, access, onClose, returnFocusRef }: Props) {
     dirty,
     onClose,
     isReview: (candidate) => reviewRef.current === candidate,
+    draftProof: (candidate) => (proofRef.current?.review === candidate ? proofRef.current.proof : undefined),
   });
   const active = useRef(true);
   useLayoutEffect(() => {
@@ -55,6 +60,8 @@ function Editor({ rule, access, onClose, returnFocusRef }: Props) {
     if (!active.current || operation.pending || operation.saved) return;
     latestEdit.current = next;
     reviewRef.current = undefined;
+    proofRef.current = undefined;
+    setCompared(false);
     setReview(undefined);
     setEdit(next);
     setError(undefined);
@@ -67,11 +74,19 @@ function Editor({ rule, access, onClose, returnFocusRef }: Props) {
     try {
       const stamps = operation.capture();
       const patch = buildRulePatch(rule, latestEdit.current, access.prefixes);
+      if (
+        access.draftSupported &&
+        patch.target_model !== undefined &&
+        Array.from(patch.target_model).length > 256
+      )
+        throw new RuleEditProblem("target_model", "대상 모델은 256자 이하로 입력하세요.");
       if (!Object.keys(patch).length) {
         setUnchanged(true);
         return;
       }
       const candidate = { patch, approval: access.approval, ...stamps };
+      proofRef.current = undefined;
+      setCompared(false);
       reviewRef.current = candidate;
       setReview(candidate);
     } catch (cause) {
@@ -118,6 +133,8 @@ function Editor({ rule, access, onClose, returnFocusRef }: Props) {
               onClick={() => {
                 if (!active.current || operation.pending) return;
                 reviewRef.current = undefined;
+                proofRef.current = undefined;
+                setCompared(false);
                 setReview(undefined);
               }}
             >
@@ -132,6 +149,7 @@ function Editor({ rule, access, onClose, returnFocusRef }: Props) {
                 aria-disabled={
                   operation.pending ||
                   operation.unconfirmed ||
+                  (access.draftSupported && !compared) ||
                   !access.write.allowed ||
                   !validReview ||
                   !operation.ready
@@ -154,10 +172,17 @@ function Editor({ rule, access, onClose, returnFocusRef }: Props) {
       }
     >
       <div className="routing-rule-edit" ref={region}>
-        <p>
-          저장 직전에 다시 조회하지만, 동시에 발생한 다른 변경까지 막을 수는 없습니다. 사용 중인 규칙의 수정은
-          실제 라우팅에 영향을 줄 수 있습니다.
-        </p>
+        {access.draftSupported ? (
+          <p>
+            저장 시 검토한 전체 규칙 기준을 서버에서 다시 확인합니다. 다른 변경이 있으면 저장을 거부하며, 규칙
+            변경과 감사 기록을 함께 저장합니다.
+          </p>
+        ) : (
+          <p>
+            저장 직전에 다시 조회하지만, 동시에 발생한 다른 변경까지 막을 수는 없습니다. 사용 중인 규칙의
+            수정은 실제 라우팅에 영향을 줄 수 있습니다.
+          </p>
+        )}
         <p>
           서버 설정에 따라 후속 모의 검사와 감사 기록이 추가될 수 있습니다. 모든 서버에 즉시 반영되는 것은
           아닙니다.
@@ -266,6 +291,19 @@ function Editor({ rule, access, onClose, returnFocusRef }: Props) {
                 ? "저장은 확인했으며 목록을 다시 조회 중입니다."
                 : "현재 원본을 확인 중입니다."}
           </p>
+        ) : null}
+        {access.draftSupported && review && !operation.saved ? (
+          <RoutingDraftComparison
+            baseline={rule}
+            review={review}
+            access={access}
+            disabled={operation.pending || !validReview || operation.unconfirmed}
+            onProof={(proof) => {
+              if (!active.current || reviewRef.current !== review) return;
+              proofRef.current = proof ? { review, proof } : undefined;
+              setCompared(proof !== undefined);
+            }}
+          />
         ) : null}
         <Button
           aria-disabled={operation.pending || operation.query.isFetching || !access.readable}
