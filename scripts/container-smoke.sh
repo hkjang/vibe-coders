@@ -85,7 +85,6 @@ docker run --rm --detach \
     --mount "source=${VOLUME_NAME},target=/data" \
     --env DB_DSN=/data/smoke.db \
     --env LOG_FALLBACK_PATH=/data/fallback.ndjson \
-    --env UI_APP_ENABLED=true \
     "$IMAGE" >/dev/null
 STARTED=1
 
@@ -108,6 +107,18 @@ done
 
 expect_status 200 GET /health
 expect_status 200 GET /ready
+# Verify the shipped default, without an environment override enabling /app.
+for method in GET HEAD; do
+    if [[ "$method" == HEAD ]]; then
+        ROOT_HEADERS="$(curl -sS --head "${BASE_URL}/")"
+    else
+        ROOT_HEADERS="$(curl -sS -D - -o /dev/null "${BASE_URL}/")"
+    fi
+    grep -Eq '^HTTP/[^ ]+ 302([[:space:]]|$)' <<<"$ROOT_HEADERS" || fail "$method / is not a 302 redirect"
+    grep -Eiq '^location:[[:space:]]*/app/[[:space:]]*$' <<<"$ROOT_HEADERS" || fail "$method / does not open the app console"
+    grep -Eiq '^cache-control:[[:space:]]*no-store[[:space:]]*$' <<<"$ROOT_HEADERS" || fail "$method / redirect must not be cached"
+done
+
 expect_status 200 GET /admin
 ADMIN_HTML="$(curl -fsS "${BASE_URL}/admin")" || fail "GET /admin body could not be read"
 grep -Fq '<title>vibe-coders AI 게이트웨이</title>' <<<"$ADMIN_HTML" || \

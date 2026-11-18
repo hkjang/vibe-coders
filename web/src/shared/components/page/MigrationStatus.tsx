@@ -1,7 +1,7 @@
 import { useContext, type ReactNode } from "react";
 
 import type { MigrationStatus } from "@/config/migration-registry";
-import { migrationStatusLabels, uiLabels } from "@/config/ui-labels";
+import { migrationStatusLabels, navigationStatusLabel, uiLabels } from "@/config/ui-labels";
 import { Badge } from "@/shared/components/ui/Badge";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 
@@ -15,8 +15,9 @@ function usePresentation(fallbackStatus: MigrationStatus, readOnly = false) {
 }
 
 /** The sidebar passes its own resolved feature; it must not inherit the active route. */
-export function MigrationStatusBadge({ status }: { status: MigrationStatus }): React.JSX.Element {
-  return <Badge tone={status === "legacy" ? "warning" : "info"}>{migrationStatusLabels[status]}</Badge>;
+export function MigrationStatusBadge({ status }: { status: MigrationStatus }): React.JSX.Element | null {
+  const label = navigationStatusLabel(status);
+  return label ? <Badge tone={status === "legacy" ? "warning" : "info"}>{label}</Badge> : null;
 }
 
 export function MigrationEyebrow({

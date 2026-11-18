@@ -49,10 +49,11 @@ go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=dev" ./cmd/gateway
 ```
 
 다른 터미널에서 `curl http://localhost:8080/health`와
-`curl http://localhost:8080/ready`로 상태를 확인합니다. Legacy Stable Console은
-`http://localhost:8080/admin`, Next Console Preview는
-`http://localhost:8080/app/`에서 엽니다. `/app`은 기본 OFF이며
-`UI_APP_ENABLED=true`로 활성화합니다. 실제 외부 모델 호출 없이 핵심 중계를 재현하려면
+`curl http://localhost:8080/ready`로 상태를 확인합니다. 관리자 콘솔은
+`http://localhost:8080/`에서 `/app/`으로 자동 이동하며 기본 활성화됩니다.
+기존 관리자는 `http://localhost:8080/admin`에서 열 수 있습니다.
+`UI_APP_ENABLED=false` 또는 저장된 `ui.app.enabled=false` 설정이 있으면
+루트 주소는 기존 관리자로 이동합니다. 실제 외부 모델 호출 없이 핵심 중계를 재현하려면
 `bash tests/smoke.sh`를 실행하십시오.
 
 Docker로 독립 실행할 때는 사용할 버전의 소스에서 이미지를 먼저 빌드합니다. 아래 배포 예시는
@@ -140,7 +141,7 @@ named volume `proxy-gateway-data`에 유지됩니다. `down -v`는 사용하지 
 - 호출 단건 상세 + 첫 청크/전체 지연 + 프롬프트 전문(마스킹) + 응답 메타 조회
 - API 키 / 팀 / IP / 전체 단위 일별·월별 쿼터 (토큰·KRW). 한도 초과 시 429 + Retry-After + X-Quota-*
 - 보존 정책 (RETENTION_REQUEST_DAYS / RETENTION_PROMPT_DAYS / RETENTION_RESPONSE_DAYS) 기반 백그라운드 cleanup
-- `/admin` 기존 안정 운영 콘솔과 기본 OFF인 `/app` React 차세대 콘솔 미리보기. `/app` 메뉴·버튼·기능명은 한글을 우선하고 기존 한국어 관리자 다중 탭과 비용 KRW 표기는 그대로 유지
+- `/app` 기본 React 관리자 콘솔과 `/admin` 기존 관리 콘솔. `/app` 메뉴·버튼·기능명은 한글을 우선하고 기존 한국어 관리자 다중 탭과 비용 KRW 표기는 그대로 유지
 - `/app` 공급자·모델 운영 표의 한글 `열 설정`: 필수 식별 열을 보호하면서 표시·순서·너비를 키보드와 마우스로 조정하고, 행 데이터나 요청 ID 없이 표 레이아웃만 브라우저에 안전하게 복원
 - `/app/gateway/providers` 목록 탐색 (`v0.86.49` 출고): 공개 표시 이름·설정 우선순위·제한 시간으로 현재 받은 연결 설정을 정렬하고 10·25·50건씩 확인합니다. 화면 정렬은 실제 라우팅 우선순위를 바꾸지 않으며 URL·뒤로/앞으로·새로고침·비공개 공급자 참조와 초점 복귀를 유지합니다. 새 서버 정렬·페이지 API나 쓰기는 추가하지 않습니다. PR #79·정확한 메인 CI·새 정식 이미지·공개 7종 검증을 마쳤으며, 서버 페이지네이션·전체 운영 인수·Stable 승격은 별도 조건입니다.
 - `/app/governance/policies` 긴급 정지 (`v0.86.50`): 정확한 대상 문구·사유·확인한 상태가 일치할 때만 전송합니다. 응답한 서버의 처리 중 요청과 관측 시각을 표시하고, 조회 실패는 과거 상태로 구분합니다. 기존 POST의 상태/감사 저장을 원자화했지만 전체 서버 즉시 반영·진행 중 요청 취소·다른 Critical 작업까지 보장하지는 않습니다.

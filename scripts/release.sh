@@ -282,7 +282,7 @@ cat > "$README_PATH" <<EOF
            "GATEWAY_VERSION=${VERSION}" \\
            "ADMIN_TOKEN=\${ADMIN_TOKEN_VALUE}" \\
            "GATEWAY_SECRET=\${GATEWAY_SECRET_VALUE}" \\
-           'UI_APP_ENABLED=false' \\
+           'UI_APP_ENABLED=true' \\
            'MODEL_PRICING_KRW_PER_1M={"gpt-4.1-mini":{"input_krw_per_1m":540,"output_krw_per_1m":2160}}' \\
            > "\$ENV_TMP" || exit 1
        chmod 0600 "\$ENV_TMP" && mv -f -- "\$ENV_TMP" "\$ENV_FILE" || exit 1
@@ -317,9 +317,9 @@ cat > "$README_PATH" <<EOF
 
 4. 관리자 UI
 
-   - Legacy Stable Console: http://<host>:8080/admin
-   - Next Console Preview: http://<host>:8080/app/
-   - \`/app\`은 기본 OFF입니다. Preview를 사용하려면 \`UI_APP_ENABLED=true\`로 실행합니다.
+   - 관리자 콘솔: http://<host>:8080/app/ (루트 주소에서 자동 이동)
+   - 기존 관리자: http://<host>:8080/admin
+   - \`/app\`은 기본 활성화됩니다. \`UI_APP_ENABLED=false\` 또는 저장된 \`ui.app.enabled=false\` 설정으로 비활성화하면 루트 주소는 기존 관리자로 이동합니다.
    - 토큰은 ADMIN_TOKEN 값
    - React 정적 에셋은 Go 바이너리에 포함되며 운영 컨테이너에는 Node.js가 없습니다.
 

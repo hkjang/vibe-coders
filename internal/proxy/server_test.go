@@ -330,6 +330,7 @@ func TestProviderHeaderRoutesToConfiguredProvider(t *testing.T) {
 }
 
 func TestOperationalHealthReadyMetricsAndFavicon(t *testing.T) {
+	t.Setenv("UI_APP_ENABLED", "")
 	db := openTestStore(t)
 	defer db.Close()
 	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
@@ -348,7 +349,7 @@ func TestOperationalHealthReadyMetricsAndFavicon(t *testing.T) {
 		t.Fatal(err)
 	}
 	root.Body.Close()
-	if root.StatusCode != http.StatusFound || root.Header.Get("Location") != "/admin" || root.Header.Get("Cache-Control") != "no-store" {
+	if root.StatusCode != http.StatusFound || root.Header.Get("Location") != "/app/" || root.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("root redirect unexpected status=%d location=%q cache=%q", root.StatusCode, root.Header.Get("Location"), root.Header.Get("Cache-Control"))
 	}
 	missing, err := noRedirect.Get(proxy.URL + "/unknown-page")

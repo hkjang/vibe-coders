@@ -20,7 +20,7 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:?generate once and persist securely}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
       GATEWAY_SECRET: ${GATEWAY_SECRET:?generate once and persist securely}
-      UI_APP_ENABLED: ${UI_APP_ENABLED:-false}
+      UI_APP_ENABLED: ${UI_APP_ENABLED:-true}
       MODEL_PRICING_KRW_PER_1M: ${MODEL_PRICING_KRW_PER_1M:-{}}
       LOG_RAW_PROMPTS: ${LOG_RAW_PROMPTS:-false}
       DB_DRIVER: sqlite

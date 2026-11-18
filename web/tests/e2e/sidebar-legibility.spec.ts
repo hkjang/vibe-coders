@@ -3,7 +3,7 @@ import type axe from "axe-core";
 import { installIpUsage } from "../fixtures/ip-usage-browser";
 
 const title = "사용자와 팀의 계정·접근 권한 및 IP 사용량 관리";
-const accessibleName = title + " 읽기 전용 미리보기";
+const accessibleName = title + " 읽기 전용";
 
 for (const viewport of [
   { width: 1440, height: 900 },

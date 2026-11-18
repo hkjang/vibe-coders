@@ -255,7 +255,7 @@ func (s *Server) appUIConf() appUIRuntimeConfig {
 	if value := s.appUIRuntime.Load(); value != nil {
 		return *value
 	}
-	return appUIRuntimeConfig{DefaultEntry: "/app/overview", LegacyFallback: true}
+	return appUIRuntimeConfig{Enabled: true, DefaultEntry: "/app/overview", LegacyFallback: true}
 }
 
 func (s *Server) reloadAppUIRuntime(stored map[string]store.AdminSetting) {
@@ -279,7 +279,7 @@ func (s *Server) reloadAppUIRuntime(stored map[string]store.AdminSetting) {
 		entry = "/app/overview"
 	}
 	conf := appUIRuntimeConfig{
-		Enabled:          boolValue(appUIEnabledKey, false),
+		Enabled:          boolValue(appUIEnabledKey, true),
 		DefaultEntry:     entry,
 		LegacyFallback:   boolValue(appUILegacyFallbackKey, true),
 		FeedbackEnabled:  boolValue(appUIFeedbackEnabledKey, false),

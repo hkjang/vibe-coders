@@ -33,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.162"
+var AppVersion = "v0.86.163"
 
 type Server struct {
 	cfg      config.Config
@@ -729,7 +729,11 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, "/admin", http.StatusFound)
+	entry := "/admin"
+	if s.appUIConf().Enabled {
+		entry = "/app/"
+	}
+	http.Redirect(w, r, entry, http.StatusFound)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
