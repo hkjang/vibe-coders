@@ -636,7 +636,16 @@ for (const [filename, scenario, timedOut = false] of [
       const fixtureDirectory = join(temporaryDirectory, "fixture");
       const reportDirectory = join(temporaryDirectory, "published");
       const scratchDirectory = join(temporaryDirectory, "scratch");
-      const configUrl = new URL("../playwright.auth.config.ts", import.meta.url);
+      // Exercise the suite that actually selects this spec. Importing the base
+      // auth config for a dedicated suite silently discovers zero tests.
+      const routingDraft = filename === "routing-draft-live.spec.ts";
+      const authConfigUrl = new URL("../playwright.auth.config.ts", import.meta.url);
+      const configUrl = new URL(
+        routingDraft ? "../playwright.routing-draft.config.ts" : "../playwright.auth.config.ts",
+        import.meta.url,
+      );
+      const reportOptions = routingDraft ? { report: "routing-draft" } : {};
+      const summaryName = routingDraft ? "routing-draft-live-summary.json" : "auth-live-summary.json";
       const canary = `SYNTHETIC_AUTH_ARTIFACT_CANARY_${randomUUID()}`;
       try {
         for (const directory of [fixtureDirectory, reportDirectory, scratchDirectory])
@@ -666,7 +675,8 @@ for (const [filename, scenario, timedOut = false] of [
           else probeEnvironment.TMPDIR = scratch;
           const probe = spawnSync(
             process.execPath,
-            ["--input-type=module", "-e", configProbe, configUrl.href],
+            // Dedicated suites inherit the same fail-closed scratch guard.
+            ["--input-type=module", "-e", configProbe, authConfigUrl.href],
             {
               cwd: reportDirectory,
               env: probeEnvironment,
@@ -726,7 +736,7 @@ ${failureBody}
 export default {
   ...liveConfig,
   testDir: ${JSON.stringify(fixtureDirectory)},
-  reporter: [[${JSON.stringify(fileURLToPath(reporterUrl))}]],
+  reporter: [[${JSON.stringify(fileURLToPath(reporterUrl))}, ${JSON.stringify(reportOptions)}]],
   preserveOutput: "always",
 };
 `,
@@ -756,11 +766,11 @@ export default {
         );
         const summaryDirectory = join(reportDirectory, "test-results");
         assert.equal(
-          (await readdir(summaryDirectory)).join("\n") === "auth-live-summary.json",
+          (await readdir(summaryDirectory)).join("\n") === summaryName,
           true,
           "Only the safe summary may be written outside private scratch",
         );
-        const raw = await readFile(join(summaryDirectory, "auth-live-summary.json"), "utf8");
+        const raw = await readFile(join(summaryDirectory, summaryName), "utf8");
         assert.equal(raw.includes(canary), false, "The safe report must omit the generated DOM canary");
         const summary = JSON.parse(raw);
         assert.equal(summary.status === "failed" && summary.tests?.length === 1, true);
