@@ -39,7 +39,8 @@ async function install(page: Page, kind: "prompt_asset" | "prompt_experiment", f
 }
 async function open(page: Page, start: string) {
   await page.goto(start);
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.getByLabel("화면 표시 설정", { exact: true })).toBeVisible();
+  await expect(page.locator("#app-startup")).toHaveCount(0);
   await page.keyboard.press("Control+k");
   const dialog = page.getByRole("dialog", { name: "명령 팔레트", exact: true });
   await dialog.getByRole("button", { name: "자원 검색", exact: true }).click();
