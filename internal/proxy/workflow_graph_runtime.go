@@ -10,6 +10,30 @@ import (
 	"vibe-coders/internal/store"
 )
 
+// This private context marker is set only after the HTTP workflow entry has
+// authenticated its caller and checked workflow visibility. No request header
+// can set it, and MCP-origin workflows never receive it.
+type workflowHTTPCallerKey struct{}
+
+func (s *Server) workflowHTTPReentry(r *http.Request, scope string) (*http.Request, error) {
+	if r.Context().Value(workflowHTTPCallerKey{}) != true {
+		return r, nil
+	}
+	// Check each live session again at the step boundary. Carry its granted
+	// scopes, never permissions inferred from a role or a different API key.
+	claims, ok := s.currentAccessClaims(r)
+	if !ok || claims.Subject == "" || !hasScope(claims.Scopes, scope) {
+		return nil, errGateway("워크플로 단계를 실행할 로그인 상태와 권한을 확인하세요")
+	}
+	id := ssoPrincipalID(claims.Subject)
+	authCtx := store.AuthContext{
+		UserID: claims.Subject, TeamID: claims.TeamID, KeyTeam: claims.TeamID,
+		Role: claims.Role, Scopes: append([]string(nil), claims.Scopes...), APIKeyID: id,
+	}
+	s.enrichAuthContextTeam(r.Context(), &authCtx)
+	return r.WithContext(withMCPPrincipal(r.Context(), id, &authCtx)), nil
+}
+
 // Graph MCP steps use the same authenticated gateway and policy/governance path
 // as external tools/call requests. They cannot dispatch local gateway workflow
 // tools recursively. Input must be a JSON object; output text feeds the next step.
@@ -40,11 +64,20 @@ func (s *Server) workflowMCPToolStep(r *http.Request, step store.WorkflowStep, i
 	if err != nil {
 		return "", errGateway("MCP 도구 입력을 만들 수 없습니다")
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body)).WithContext(r.Context())
+	caller, err := s.workflowHTTPReentry(r, "mcp:use")
+	if err != nil {
+		return "", err
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body)).WithContext(caller.Context())
 	req.Header = r.Header.Clone()
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Del("Content-Length")
 	req.RemoteAddr = r.RemoteAddr
+	if r.Context().Value(workflowHTTPCallerKey{}) == true {
+		// The principal is already verified. Do not reinterpret its HS256 login
+		// token as an external RS256 MCP OAuth token when that option is enabled.
+		req.Header.Del("Authorization")
+	}
 	rec := httptest.NewRecorder()
 	s.handleMCPGateway(rec, req)
 	if rec.Code != http.StatusOK {
