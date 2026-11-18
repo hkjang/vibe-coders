@@ -123,7 +123,10 @@ grep -Eiq '^content-type:[[:space:]]*text/html' <<<"$APP_HEADERS" || fail "GET /
 grep -Eiq '^cache-control:[[:space:]]*no-cache' <<<"$APP_HEADERS" || fail "GET /app/ is not revalidated"
 
 APP_HTML="$(curl -fsS "${BASE_URL}/app/")"
-grep -Fq '<div id="root"></div>' <<<"$APP_HTML" || fail "GET /app/ is not the React index"
+# The root may contain the accessible startup/recovery screen before React runs.
+grep -Fq '<div id="root">' <<<"$APP_HTML" || fail "GET /app/ is not the React index"
+grep -Eq '<script[^>]*type="module"[^>]*src="/app/assets/[^"[:space:]]+\.js"' <<<"$APP_HTML" || \
+    fail "React index does not reference its local module entry"
 
 expect_status 200 GET /app/providers
 expect_status 200 GET /app/routing/decisions/123
