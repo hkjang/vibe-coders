@@ -2440,7 +2440,7 @@ Node 검사는 49개 통과·호스트에서 브라우저 전용 4개 생략이�
 | ACCEPT-017 | 단일 Go 바이너리·Distroless | 회귀 근거 있음: embed 계약·nonroot 컨테이너 smoke·오프라인 이미지 릴리즈 |
 | ACCEPT-018 | Go·Frontend CI 통과 | 릴리즈별 확인: lint·typecheck·단위·브라우저·접근성·Go race·계약·SBOM·컨테이너 gate. 이전 커밋의 성공을 새 커밋에 재사용하지 않음 |
 | ACCEPT-019 | Go+npm SBOM | 회귀 근거 있음: `scripts/generate-source-sbom.sh`, canonical drift CI, 릴리즈 7개 첨부파일 검증 |
-| ACCEPT-020 | 기존 화면 보존하며 기본화 가능 | 부분 검증: 기본 경로·역할·배포율·기존 화면 복귀 설정 및 선택적 사용 관측. 운영 검증·Stable 승격·실제 기본화는 미완료 |
+| ACCEPT-020 | 기존 화면 보존하며 기본화 가능 | 부분 검증: 기본 경로·역할·배포율·기존 화면 복귀 설정 및 선택적 사용 관측. v163 후보에서 사용자 요청에 따른 기본 진입·배포 기본값 전환과 명시적 비활성화 보존을 Go·내장 브라우저·컨테이너로 검증. 공개 출고와 운영 검증·기능별 Stable 승격은 별도 |
 
 ## 필수 브라우저 시나리오
 
