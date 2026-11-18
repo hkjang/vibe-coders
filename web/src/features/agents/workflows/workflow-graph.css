@@ -1,7 +1,39 @@
+.workflow-graph-viewer {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.workflow-graph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.workflow-graph-controls .select {
+  flex: 1 1 12rem;
+  max-width: 20rem;
+  min-width: 0;
+}
+.workflow-graph-controls label,
+.workflow-graph-help {
+  flex-basis: 100%;
+  font-size: 14px;
+}
+.workflow-graph-help {
+  color: var(--color-muted);
+  margin: 0;
+}
+.workflow-graph-controls output {
+  min-width: 4ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .workflow-graph-diagram {
   max-width: 100%;
   max-height: 24rem;
   overflow: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-medium);
