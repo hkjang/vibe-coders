@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import type { CSSProperties } from "react";
+import { useState } from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { apiClient } from "@/shared/api/client";
@@ -14,22 +14,13 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { requestDetailQueryOptions, type RequestDetailReadScope } from "./request-detail-read-scope";
-import {
-  flowCount,
-  flowInteger,
-  flowKind,
-  flowMilliseconds,
-  flowScale,
-  flowSessionHref,
-  flowStatus,
-  flowText,
-} from "./request-flow-display";
+import { flowCount, flowInteger, flowScale, flowSessionHref, flowText } from "./request-flow-display";
 import "@/features/observability/observability.css";
 import "./request-flow.css";
+import { RequestSpanRecord } from "./RequestSpanRecord";
+import { RequestSpanHierarchy } from "./RequestSpanHierarchy";
 
 const routeId = "observability.requests";
-
-type LaneStyle = CSSProperties & { "--span-offset": string; "--span-width": string };
 
 function FlowError({ error, prefixes }: { error: unknown; prefixes: readonly string[] }): React.JSX.Element {
   const requestId = isAppError(error) ? error.requestId : undefined;
@@ -53,6 +44,7 @@ interface RequestSpanWaterfallProps {
  */
 export function RequestSpanWaterfall({ requestId, readScope }: RequestSpanWaterfallProps): React.JSX.Element {
   const { credentialPrefixes } = useAuth();
+  const [view, setView] = useState<"waterfall" | "hierarchy">("waterfall");
   const trace = useQuery({
     enabled: requestId !== "",
     ...requestDetailQueryOptions(readScope, requestId, "trace", (signal) =>
@@ -171,57 +163,31 @@ export function RequestSpanWaterfall({ requestId, readScope }: RequestSpanWaterf
             참고 표시로, 전체 업무 시간이나 실행 순서를 보장하지 않습니다. 기록된 지연 0도 실측 0을 보장하지
             않으며 도구별 소요 시간은 기록되지 않습니다.
           </p>
-          <ol className="obs-span-lanes" aria-label="요청 스팬 흐름">
-            {spans.map((span) => {
-              const start = flowInteger(span.start_offset_ms);
-              const duration = flowInteger(span.duration_ms);
-              const positionKnown =
-                start !== undefined && duration !== undefined && flowInteger(start + duration) !== undefined;
-              const status = flowStatus(span);
-              const style: LaneStyle = {
-                "--span-offset": `${Math.min(100, ((start ?? 0) / totalMs) * 100)}%`,
-                "--span-width": `${Math.max(0.5, Math.min(100, ((duration ?? 0) / totalMs) * 100))}%`,
-              };
-              return (
-                <li key={span.span_id} className="obs-span-lane">
-                  <span className="obs-span-heading">
-                    <span>
-                      <code>{flowText(span.name || span.span_id, credentialPrefixes)}</code>
-                      <small>{flowKind(span.kind, credentialPrefixes)}</small>
-                    </span>
-                    <span className="request-flow-status">
-                      <Badge tone={status.tone}>{status.label}</Badge>
-                      {span.cache_hit ? <Badge tone="info">캐시 적중</Badge> : null}
-                    </span>
-                  </span>
-                  {positionKnown ? (
-                    <span className="obs-span-track" style={style} aria-hidden="true">
-                      <span className="obs-span-bar" />
-                    </span>
-                  ) : null}
-                  <span className="obs-span-facts">
-                    <span>
-                      기록된 상대 위치 {start === undefined ? "미확인" : `+${flowMilliseconds(start)}`}
-                    </span>
-                    <span>
-                      {span.kind === "tool" || span.kind === "mcp_tool"
-                        ? "소요 시간 미기록"
-                        : `기록된 지연 ${flowMilliseconds(duration)}`}
-                    </span>
-                    {span.tokens !== undefined && span.tokens !== null ? (
-                      <span>토큰 {flowCount(span.tokens, "개")}</span>
-                    ) : null}
-                    {status.label === "상태 미확인" ? (
-                      <span>기록 상태: {flowText(span.status, credentialPrefixes, "미확인")}</span>
-                    ) : null}
-                    {span.error ? (
-                      <span className="obs-span-error">{flowText(span.error, credentialPrefixes)}</span>
-                    ) : null}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
+          <div className="request-flow-actions" role="group" aria-label="처리 기록 보기 방식">
+            <Button size="small" aria-pressed={view === "waterfall"} onClick={() => setView("waterfall")}>
+              흐름 막대
+            </Button>
+            <Button size="small" aria-pressed={view === "hierarchy"} onClick={() => setView("hierarchy")}>
+              기록 관계
+            </Button>
+          </div>
+          {view === "hierarchy" ? (
+            <RequestSpanHierarchy spans={spans} totalMs={totalMs} credentialPrefixes={credentialPrefixes} />
+          ) : (
+            <ol className="obs-span-lanes" aria-label="요청 스팬 흐름">
+              {spans.map((span, index) => {
+                return (
+                  <li key={index} className="obs-span-lane">
+                    <RequestSpanRecord
+                      span={span}
+                      totalMs={totalMs}
+                      credentialPrefixes={credentialPrefixes}
+                    />
+                  </li>
+                );
+              })}
+            </ol>
+          )}
         </>
       ) : null}
     </SectionCard>
