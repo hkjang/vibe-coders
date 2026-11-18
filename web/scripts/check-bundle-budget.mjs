@@ -7,6 +7,7 @@ import { JSDOM, VirtualConsole } from "jsdom";
 import ts from "typescript";
 
 export const INITIAL_WIRE_LIMIT = 350_000;
+export const STARTUP_WIRE_LIMIT = 8_000;
 export const ROUTE_RAW_LIMIT = 250_000;
 // Explicit user-activated tools have their own complete envelope. This is not
 // a route exemption: static reachability still fails and ordinary routes keep
@@ -527,6 +528,20 @@ export function analyzeBundle(manifest, readFile) {
     return { keys, files };
   }
   const initialClosure = closure("index.html");
+  const startupFiles = new Set(initialClosure.files);
+  // The startup recovery loader imports the application dynamically so it can
+  // catch network/evaluation errors. That runtime is still required to use the
+  // first screen, so it must pay the same initial shell budget as before.
+  const runtimeEntry = "src/main.tsx";
+  if (Object.hasOwn(manifest, runtimeEntry)) {
+    const reachedAtStartup =
+      initialClosure.keys.has(runtimeEntry) ||
+      [...initialClosure.keys].some((key) => (manifest[key].dynamicImports ?? []).includes(runtimeEntry));
+    if (!reachedAtStartup) fail("application runtime must be reachable from startup");
+    const runtime = closure(runtimeEntry);
+    for (const key of runtime.keys) initialClosure.keys.add(key);
+    for (const file of runtime.files) initialClosure.files.add(file);
+  }
   const featureClosures = Object.entries(INTERACTIVE_FEATURES)
     .filter(([entry]) => Object.hasOwn(manifest, entry))
     .map(([entry, limits]) => {
@@ -541,7 +556,10 @@ export function analyzeBundle(manifest, readFile) {
     featureClosures.flatMap(({ keys }) => [...keys].filter((key) => !beforeActivation.keys.has(key))),
   );
   const routeClosures = Object.entries(manifest)
-    .filter(([key, value]) => value.isDynamicEntry === true && !featureOnly.has(key))
+    .filter(
+      ([key, value]) =>
+        value.isDynamicEntry === true && !featureOnly.has(key) && !initialClosure.keys.has(key),
+    )
     .sort(([left], [right]) => compare(left, right))
     .map(([entry]) => ({ entry, ...closure(entry, initialClosure.keys, initialClosure.files, true, true) }));
   const measurements = new Map(
@@ -572,6 +590,10 @@ export function analyzeBundle(manifest, readFile) {
       { files: paths, rawBytes: 0, gzipBytes: 0, wireBytes: 0 },
     );
   }
+  // A recovery loader must not depend on the large runtime it is guarding.
+  const startup = Object.hasOwn(manifest, runtimeEntry) ? totals(startupFiles) : undefined;
+  if (startup && startup.wireBytes > STARTUP_WIRE_LIMIT)
+    fail(`startup recovery dependencies exceed ${STARTUP_WIRE_LIMIT} wire bytes`);
   const initial = { entry: "index.html", ...totals(initialClosure.files) };
   initial.passed = initial.wireBytes <= INITIAL_WIRE_LIMIT;
   const routes = routeClosures.map(({ entry, files }) => {
@@ -590,8 +612,9 @@ export function analyzeBundle(manifest, readFile) {
       interactive.every((feature) => feature.passed),
     limits: { initialWireBytes: INITIAL_WIRE_LIMIT, routeRawBytes: ROUTE_RAW_LIMIT },
     accounting:
-      "Per-file Node gzip level 9; Go-compressible files use min(raw,gzip), other assets use raw. Routes include uncached nested dynamic imports up to named interactive boundaries, whose complete closures (including literal workers) have separate raw and wire limits. Computed runtime references are reported, not resolved or measured; this is not an HTTP timing measurement.",
+      "Per-file Node gzip level 9; Go-compressible files use min(raw,gzip), other assets use raw. Initial includes the complete application runtime even when reached through the recovery loader's dynamic import. Routes include uncached nested dynamic imports up to named interactive boundaries, whose complete closures (including literal workers) have separate raw and wire limits. Computed runtime references are reported, not resolved or measured; this is not an HTTP timing measurement.",
     initial,
+    startup,
     routes,
     interactive,
     files: [...measurements.values()].sort((left, right) => compare(left.path, right.path)),

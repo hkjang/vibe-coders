@@ -3,10 +3,11 @@ import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { appearanceEntry } from "./scripts/appearance-entry";
 
 export default defineConfig({
   base: "/app/",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), appearanceEntry()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -26,6 +27,14 @@ export default defineConfig({
       output: {
         codeSplitting: {
           groups: [
+            // Keep the loader's CSS/module preload helper independent of React
+            // and feature chunks, so their load/evaluation failures are caught.
+            {
+              name: "startup-preload",
+              test: /vite\/preload-helper\.js$/u,
+              priority: 10,
+              includeDependenciesRecursively: false,
+            },
             {
               name: "settings-recovery-shared",
               test: /[\\/]features[\\/]system[\\/]settings[\\/](settings-utils|use-system-settings|setting-save-outcome|settings-workspace-context|use-settings-mutation)\.(ts|tsx)$/u,
