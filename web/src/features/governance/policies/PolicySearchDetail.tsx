@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useContext, useRef, useSyncExternalStore } from "react";
+import { useLocation } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { resourceSearchPath } from "@/app/layouts/resource-search-items";
 import { apiClient } from "@/shared/api/client";
@@ -21,6 +22,7 @@ export function PolicySearchDetail(): React.JSX.Element | null {
   const access = useContext(FeatureAccessContext);
   const epoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   const [params, update] = useSearchState();
+  const { search } = useLocation();
   const id = params.get("policy");
   const returnRef = useRef<HTMLElement>(null);
   if (id === null) return null;
@@ -28,10 +30,17 @@ export function PolicySearchDetail(): React.JSX.Element | null {
     access?.featureId === "governance.policies" &&
     access.permitted === true &&
     auth.user?.scopes.includes("security:read") === true;
-  const valid =
+  let valid =
+    params.getAll("policy").length === 1 &&
     id.trim() === id &&
     !/[\p{Cc}]/u.test(id) &&
     Boolean(resourceSearchPath("policy", id, auth.credentialPrefixes));
+  try {
+    // URLSearchParams replaces malformed UTF-8; do not silently select that different identity.
+    decodeURIComponent(search.replace(/\+/gu, " "));
+  } catch {
+    valid = false;
+  }
   const owner = JSON.stringify([
     epoch,
     auth.mode,
