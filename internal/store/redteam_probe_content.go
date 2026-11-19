@@ -11,6 +11,17 @@ import (
 // Excluding those columns from ON CONFLICT preserves their current database
 // values without a read/restore race. New packs use the caller's normal defaults.
 func (s *SQLStore) UpsertRedTeamProbePackContent(ctx context.Context, pack RedTeamProbePack) error {
+	return s.upsertRedTeamProbePackContent(ctx, pack, false)
+}
+
+// UpsertRedTeamProbePackContentPreservingApproval retains an existing approval requirement:
+// a manual prompt form or legacy CSV row without the approval field cannot clear it.
+// A higher-risk new edit can still require approval, in the same atomic upsert.
+func (s *SQLStore) UpsertRedTeamProbePackContentPreservingApproval(ctx context.Context, pack RedTeamProbePack) error {
+	return s.upsertRedTeamProbePackContent(ctx, pack, true)
+}
+
+func (s *SQLStore) upsertRedTeamProbePackContent(ctx context.Context, pack RedTeamProbePack, preserveApproval bool) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if pack.CreatedAt == "" {
 		pack.CreatedAt = now
@@ -22,10 +33,12 @@ func (s *SQLStore) UpsertRedTeamProbePackContent(ctx context.Context, pack RedTe
   (id, name, category, severity, version, enabled, requires_approval, created_by, created_at, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET name=excluded.name, category=excluded.category,
-   severity=excluded.severity, requires_approval=excluded.requires_approval,
+   severity=excluded.severity,
+   requires_approval=CASE WHEN ? = 1 AND redteam_probe_packs.requires_approval = 1
+     THEN 1 ELSE excluded.requires_approval END,
    updated_at=excluded.updated_at`),
 		pack.ID, pack.Name, pack.Category, pack.Severity, pack.Version, boolInt(pack.Enabled),
-		boolInt(pack.RequiresApproval), pack.CreatedBy, pack.CreatedAt, pack.UpdatedAt)
+		boolInt(pack.RequiresApproval), pack.CreatedBy, pack.CreatedAt, pack.UpdatedAt, boolInt(preserveApproval))
 	return err
 }
 

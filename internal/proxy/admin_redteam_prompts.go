@@ -181,12 +181,16 @@ func (s *Server) redTeamImportProbeCSV(w http.ResponseWriter, r *http.Request) {
 		}
 		if !packsSeen[packID] {
 			sev := normalizeRedTeamSeverity(get(row, "pack_severity"))
-			approval := redTeamTruthy(get(row, "requires_approval")) || severityRank(sev) >= severityRank("high")
+			approval := redTeamTruthy(get(row, "requires_approval")) || redTeamSeverityRank(sev) >= redTeamSeverityRank("high")
 			pack := store.RedTeamProbePack{
 				ID: packID, Name: packName, Category: redTeamDefault(get(row, "category"), "custom"),
 				Severity: sev, Version: "v1", Enabled: true, RequiresApproval: approval, CreatedBy: adminID(r),
 			}
-			if err := s.db.UpsertRedTeamProbePackContent(r.Context(), pack); err != nil {
+			savePack := s.db.UpsertRedTeamProbePackContent
+			if approvalColumn, exists := table.columns["requires_approval"]; !exists || approvalColumn >= len(row) {
+				savePack = s.db.UpsertRedTeamProbePackContentPreservingApproval
+			}
+			if err := savePack(r.Context(), pack); err != nil {
 				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_pack_save_failed")
 				return
 			}
@@ -261,9 +265,9 @@ func (s *Server) handleRedTeamProbeCases(w http.ResponseWriter, r *http.Request)
 			packName := redTeamDefault(body.PackName, "사용자 정의 프롬프트")
 			packID = redTeamCustomPackID(packName)
 			sev := normalizeRedTeamSeverity(body.Severity)
-			if err := s.db.UpsertRedTeamProbePackContent(r.Context(), store.RedTeamProbePack{
+			if err := s.db.UpsertRedTeamProbePackContentPreservingApproval(r.Context(), store.RedTeamProbePack{
 				ID: packID, Name: packName, Category: "custom", Severity: sev,
-				Version: "v1", Enabled: true, RequiresApproval: severityRank(sev) >= severityRank("high"),
+				Version: "v1", Enabled: true, RequiresApproval: redTeamSeverityRank(sev) >= redTeamSeverityRank("high"),
 				CreatedBy: adminID(r),
 			}); err != nil {
 				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_pack_save_failed")

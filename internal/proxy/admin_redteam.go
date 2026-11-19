@@ -114,7 +114,7 @@ func (s *Server) handleRedTeamProbePacks(w http.ResponseWriter, r *http.Request)
 		p.Version = redTeamDefault(p.Version, "v1")
 		p.CreatedBy = adminID(r)
 		p.Enabled = true
-		if severityRank(p.Severity) >= severityRank("high") {
+		if redTeamSeverityRank(p.Severity) >= redTeamSeverityRank("high") {
 			p.RequiresApproval = true
 		}
 		if err := s.db.UpsertRedTeamProbePackWithCases(r.Context(), p, p.Cases); err != nil {
@@ -603,7 +603,7 @@ func (s *Server) redTeamDryRun(r *http.Request, c store.RedTeamCampaign) (map[st
 			activeEligible++
 			eligible = true
 		}
-		if t.TargetType == "mcp_tool" && severityRank(t.RiskLevel) >= severityRank("high") {
+		if t.TargetType == "mcp_tool" && redTeamSeverityRank(t.RiskLevel) >= redTeamSeverityRank("high") {
 			destructive++
 		}
 		for _, cs := range cases {
@@ -1256,7 +1256,7 @@ func evaluateRedTeamCase(t store.RedTeamTarget, pack store.RedTeamProbePack, cs 
 		decision = "warning"
 		policy = "egress_review"
 	}
-	if t.TargetType == "mcp_tool" && severityRank(t.RiskLevel) >= severityRank("high") {
+	if t.TargetType == "mcp_tool" && redTeamSeverityRank(t.RiskLevel) >= redTeamSeverityRank("high") {
 		switch normalizeDestructiveToolPolicy(c.DestructiveToolPolicy) {
 		case "allow":
 			decision = "fail"
@@ -1269,7 +1269,7 @@ func evaluateRedTeamCase(t store.RedTeamTarget, pack store.RedTeamProbePack, cs 
 			policy = "dry_run"
 		}
 	}
-	if severityRank(cs.Severity) >= severityRank("critical") && decision == "fail" {
+	if redTeamSeverityRank(cs.Severity) >= redTeamSeverityRank("critical") && decision == "fail" {
 		decision = "critical"
 	}
 	response := "SAFE_SIMULATION: expected=" + cs.ExpectedPolicy + ", policy=" + policy + ", target=" + t.TargetRef
@@ -1390,7 +1390,7 @@ func redTeamCaseApplies(t store.RedTeamTarget, cs store.RedTeamProbeCase) bool {
 
 func redTeamRequiresApproval(packs []store.RedTeamProbePack) bool {
 	for _, p := range packs {
-		if p.RequiresApproval || severityRank(p.Severity) >= severityRank("high") {
+		if p.RequiresApproval || redTeamSeverityRank(p.Severity) >= redTeamSeverityRank("high") {
 			return true
 		}
 	}
@@ -1535,6 +1535,21 @@ func normalizeDestructiveToolPolicy(value string) string {
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return "dry-run"
+	}
+}
+
+// redTeamSeverityRank uses the probe/target vocabulary. Incident severityRank
+// orders info/warning/critical and must not be used for low/medium/high probes.
+func redTeamSeverityRank(value string) int {
+	switch normalizeRedTeamSeverity(value) {
+	case "critical":
+		return 3
+	case "high":
+		return 2
+	case "medium":
+		return 1
+	default:
+		return 0
 	}
 }
 
