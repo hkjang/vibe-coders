@@ -171,6 +171,7 @@ export const uiBootstrapSchema = z.object({
     .object({
       raw_prompt_view: z.boolean(),
       legacy_request_detail: z.boolean().optional(),
+      legacy_provider_detail: z.boolean().optional(),
       legacy_request_filters: z.boolean().optional(),
     })
     .default({ raw_prompt_view: false }),

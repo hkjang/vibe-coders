@@ -1,3 +1,4 @@
+import { legacyProviderDetailHref } from "@/config/legacy-provider-map";
 import { legacyRoutes } from "@/config/legacy-route-map";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { ExternalLink, LockKeyhole, Plus, RefreshCw, Search } from "lucide-react";
@@ -404,6 +405,14 @@ function ProviderPageContent(): React.JSX.Element {
         returnFocusRef={returnFocusRef}
         row={selectedRow}
         showLegacyAdmin={showLegacyAdmin}
+        legacyHref={
+          auth.capabilities?.legacy_provider_detail === true
+            ? legacyProviderDetailHref(
+                auth.features.find((feature) => feature.featureId === "gateway.providers")?.legacyPath,
+                selectedRow?.identity,
+              )
+            : undefined
+        }
         providerState={{
           error: providers.error,
           hasData: Boolean(providers.data),

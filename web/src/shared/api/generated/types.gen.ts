@@ -4361,6 +4361,10 @@ export type UiBootstrapResponse = {
     backend_version: string;
     capabilities: {
         /**
+         * Supports a read-only provider detail in Legacy settings using the existing app projection and opaque reference. Does not grant provider access.
+         */
+        legacy_provider_detail?: boolean;
+        /**
          * Supports opening an existing request detail from the Legacy requests hash route. Does not grant request access.
          */
         legacy_request_detail?: boolean;

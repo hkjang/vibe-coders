@@ -14891,6 +14891,10 @@
           "capabilities": {
             "additionalProperties": false,
             "properties": {
+              "legacy_provider_detail": {
+                "description": "Supports a read-only provider detail in Legacy settings using the existing app projection and opaque reference. Does not grant provider access.",
+                "type": "boolean"
+              },
               "legacy_request_detail": {
                 "description": "Supports opening an existing request detail from the Legacy requests hash route. Does not grant request access.",
                 "type": "boolean"

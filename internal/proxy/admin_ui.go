@@ -842,7 +842,19 @@ const adminHTML = `<!doctype html>
     let authRevision = 0;
     let authChanging = false;
     let authRefreshFlight = null;
+    // Preserve only an initial read-only handoff through the local login prompt.
+    // A deliberate logout or a changed URL must not replay another session's intent.
+    function initialLegacyReadHandoff(hash) {
+      if (typeof hash !== 'string' || hash.length > 8192 || /[\u0000-\u001f\u007f]/.test(hash)) return '';
+      const providerPrefix = '#/settings?provider_ref=';
+      if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
+      if (/^#\/requests(?:\?|$)/.test(hash)) return hash;
+      return '';
+    }
+    let initialLegacyHandoff = initialLegacyReadHandoff(location.hash);
     function retireAuth(changing = false) {
+      const providerDetail = document.getElementById('legacy-provider-detail');
+      if (providerDetail) providerDetail.textContent = '';
       authEpoch++;
       navigationRevision++;
       navigationReady = false;
@@ -1005,7 +1017,9 @@ const adminHTML = `<!doctype html>
         authChanging = false;
         document.getElementById('login-password').value = '';
         hideLogin();
-        location.hash = ''; // let bootAfterAuth route to the role's default home
+        const returnHash = location.hash === initialLegacyHandoff ? initialLegacyHandoff : '';
+        initialLegacyHandoff = '';
+        location.hash = returnHash; // otherwise use the role's default home
         await bootAfterAuth(null, epoch);
       } catch (ex) {
         if (epoch !== authEpoch) return;
@@ -1019,6 +1033,7 @@ const adminHTML = `<!doctype html>
       }
     });
     document.getElementById('auth-logout').addEventListener('click', async () => {
+      initialLegacyHandoff = '';
       const access = authState.access;
       const refresh = authState.refresh;
       const epoch = retireAuth(true);
@@ -1501,7 +1516,8 @@ const adminHTML = `<!doctype html>
         assertAuthCurrent(epoch);
         const requestHeaders = headers();
         if (options.body) requestHeaders['Content-Type'] = 'application/json';
-        const { success, ...init } = options;
+        if (options.appProjection === true) requestHeaders['X-Vibe-UI'] = 'app';
+        const { success, appProjection, ...init } = options;
         return fetch(path, { ...init, headers: requestHeaders });
       };
       let res = await doFetch();
@@ -2017,6 +2033,8 @@ const adminHTML = `<!doctype html>
     }
 
     async function route() {
+      const providerDetail = document.getElementById('legacy-provider-detail');
+      if (providerDetail) providerDetail.textContent = '';
       const generation = ++legacyRouteGeneration;
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
@@ -2113,6 +2131,8 @@ const adminHTML = `<!doctype html>
               await renderSystemErrors();
             } else if (rest[0] === 'sso') {
               await renderSSOSettings();
+            } else if (rest.length === 0 && params.has('provider_ref')) {
+              await renderLegacyProviderDetail(params);
             } else {
               await renderSettings();
             }
@@ -17273,6 +17293,56 @@ const adminHTML = `<!doctype html>
       }
     }
 
+    function legacyProviderRefValid(value) {
+      return typeof value === 'string' && value.length === 47 && /^prv_[A-Za-z0-9_-]{43}$/.test(value);
+    }
+    // Reuse the safe app projection; ordinary Legacy GET/POST contracts and editors stay unchanged.
+    // This view is read-only: opening a resource never tests an upstream or submits a mutation.
+    async function renderLegacyProviderDetail(initial) {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration;
+      const epoch = authEpoch;
+      const hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && hash === location.hash && authCurrent(epoch);
+      const refs = initial.getAll('provider_ref');
+      const back = '<p><a href="#/settings">기존 설정 목록 열기</a></p>';
+      const render = (body) => {
+        if (!current()) return;
+        view.innerHTML = section('공급자 상세', '<div id="legacy-provider-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' + body + back + '</div>');
+        document.getElementById('legacy-provider-detail').focus();
+      };
+      if (refs.length !== 1 || !legacyProviderRefValid(refs[0])) {
+        render('<p role="alert">공급자 상세 주소가 올바르지 않습니다.</p>');
+        return;
+      }
+      render('<p role="status">선택한 공급자를 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/providers', { appProjection: true, cache: 'no-store' });
+        if (!current()) return;
+        if (!data || !Array.isArray(data.providers)) throw new Error('Invalid provider list');
+        const selected = data.providers.filter(p => p && p.provider_ref === refs[0]);
+        if (selected.length !== 1) {
+          render('<p role="alert">선택한 공급자를 찾을 수 없습니다. 삭제되었거나 참조가 변경되었을 수 있습니다.</p>');
+          return;
+        }
+        const p = selected[0];
+        const fields = [
+          ['이름', p.name], ['공급자 참조', p.provider_ref], ['Base URL', p.base_url],
+          ['상태', p.enabled ? '사용' : '중지'], ['API 키', p.api_key_configured ? '설정됨' : '미설정'],
+          ['타임아웃 (ms)', p.timeout_ms], ['모델 패턴', p.model_patterns],
+          ['폴백 그룹', p.failover_group], ['우선순위', p.priority],
+        ];
+        render('<p role="status">선택한 공급자의 저장된 연결 설정입니다. 이 화면에서는 값을 변경하지 않습니다.</p>' +
+          '<dl>' + fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1] == null || pair[1] === '' ? '—' : pair[1])) + '</dd>').join('') + '</dl>');
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">공급자 정보를 확인하지 못했습니다. 로그인 상태와 접근 권한을 확인한 뒤 다시 시도하세요.</p><button type="button" id="legacy-provider-retry">다시 시도</button>');
+        document.getElementById('legacy-provider-retry').addEventListener('click', () => {
+          if (current()) void route();
+        });
+      }
+    }
     async function renderSettings() {
       const [keys, providers, patternAnalysis, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([
         api('/admin/api-keys'),

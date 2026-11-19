@@ -36,6 +36,7 @@ interface ProviderDetailDialogProps {
   routingState: ProviderDetailSourceState;
   row?: ProviderCatalogRow;
   showLegacyAdmin: boolean;
+  legacyHref?: string;
   sloState: ProviderDetailSourceState;
 }
 
@@ -204,15 +205,17 @@ export function ProviderDetailDialog({
   routingState,
   row,
   showLegacyAdmin,
+  legacyHref,
   sloState,
 }: ProviderDetailDialogProps): React.JSX.Element {
   const footer = showLegacyAdmin ? (
     <FeatureLegacyLink
       featureId="gateway.providers"
       className="button button-secondary button-default"
-      href={legacyRoutes.settings}
+      href={legacyHref ?? legacyRoutes.settings}
     >
-      기존 설정 화면 열기 <ExternalLink aria-hidden="true" />
+      {legacyHref ? "기존 화면에서 같은 공급자 열기" : "기존 설정 화면 열기"}{" "}
+      <ExternalLink aria-hidden="true" />
     </FeatureLegacyLink>
   ) : undefined;
 

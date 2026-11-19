@@ -37,7 +37,7 @@ async function until(check) {
 }
 const outcome = (promise) => promise.then(value => ({ ok: true, value }), () => ({ ok: false }));
 
-function harness(transport) {
+function harness(transport, initialHash = '') {
   const nodes = new Map();
   const storage = new Map();
   const calls = [];
@@ -58,7 +58,7 @@ function harness(transport) {
     }
     return nodes.get(id);
   }
-  const location = { hash: '', pathname: '/admin', search: '' };
+  const location = { hash: initialHash, pathname: '/admin', search: '' };
   const context = vm.createContext({
     document: { getElementById: node, querySelectorAll: () => [] },
     sessionStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) },
@@ -507,4 +507,44 @@ test('navigation failure hides the entry and a later focus refresh recovers', as
   assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
   failed = false; await h.refreshLegacyAppEntry();
   assert.equal(h.node('legacy-app-entry').getAttribute('href'), '/app/');
+});
+
+test('opt-in app projection preserves Legacy authentication and is not passed as a fetch option',async()=>{
+ const h=harness(()=>response(200,{providers:[]}));h.seed();
+ await h.api('/admin/providers',{appProjection:true,cache:'no-store',headers:{Authorization:'invalid-overwrite'}});
+ assert.equal(h.calls[0].headers['X-Vibe-UI'],'app');assert.equal(h.calls[0].headers.Authorization,'Bearer A-access');
+ assert.equal(h.calls[0].cache,'no-store');assert.equal(Object.hasOwn(h.calls[0],'appProjection'),false);
+ await h.api('/admin/providers');assert.equal(h.calls[1].headers['X-Vibe-UI'],undefined);
+});
+test('session retirement clears a rendered provider detail immediately',()=>{
+ const h=harness(()=>response(200));h.seed();h.node('legacy-provider-detail').textContent='SYNTHETIC_PRIVATE_DETAIL';
+ h.clearAuth();assert.equal(h.node('legacy-provider-detail').textContent,'');
+});
+
+test('the initial explicit provider detail survives local login',async()=>{
+ const target='#/settings?provider_ref=prv_'+'a'.repeat(43);
+ const h=harness(()=>response(200,tokens('A')),target);
+ await h.login('A');assert.equal(h.location.hash,target);assert.equal(h.routes,1);
+});
+test('the existing read-only request handoff also survives local login',async()=>{
+ const target='#/requests?model=public&request_id=public%20%ED%95%9C%EA%B8%80';
+ const h=harness(()=>response(200,tokens('A')),target);await h.login('A');assert.equal(h.location.hash,target);
+});
+for(const target of ['#/settings?provider_ref=unsafe','#/settings?provider_ref=prv_'+'a'.repeat(43)+'\n','#/redteam?run=1','#sso=private','//outside.invalid','#/requests-other']){
+ test('login does not restore an unapproved initial target '+JSON.stringify(target.slice(0,50)),async()=>{
+  const h=harness(()=>response(200,tokens('A')),target);await h.login('A');assert.equal(h.location.hash,'');
+ });
+}
+test('a changed hash supersedes the original provider handoff',async()=>{
+ const target='#/settings?provider_ref=prv_'+'a'.repeat(43);
+ const h=harness(()=>response(200,tokens('A')),target);h.location.hash='#/settings';await h.login('A');assert.equal(h.location.hash,'');
+});
+test('explicit logout discards an initial read-only handoff before another login',async()=>{
+ const target='#/settings?provider_ref=prv_'+'a'.repeat(43);
+ const h=harness(()=>response(200,tokens('A')),target);h.seed();await h.logout();await h.login('B');assert.equal(h.location.hash,'');
+});
+test('failed credentials do not consume the initial handoff',async()=>{
+ const target='#/settings?provider_ref=prv_'+'a'.repeat(43);let failed=true;
+ const h=harness(()=>response(failed?401:200,tokens('A')),target);await h.login('A');assert.equal(h.location.hash,target);
+ failed=false;await h.login('A');assert.equal(h.location.hash,target);
 });

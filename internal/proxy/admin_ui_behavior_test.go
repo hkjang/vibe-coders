@@ -52,3 +52,23 @@ func TestAdminUIRequestHandoffBehaviour(t *testing.T) {
 	}
 	t.Logf("\n%s", out)
 }
+
+// Execute the actual safe-projection provider handoff and deferred lifetime guards.
+func TestAdminUIProviderHandoffBehaviour(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; skipping provider handoff checks")
+	}
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve provider handoff test path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, "--test", filepath.Join(packageDir, "testdata", "admin_ui_provider_handoff.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("provider handoff checks failed: %v\n%s", err, out)
+	}
+	t.Logf("\n%s", out)
+}

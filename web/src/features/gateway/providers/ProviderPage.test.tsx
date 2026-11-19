@@ -16,6 +16,7 @@ import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({
   legacyFallback: true,
+  legacyProviderDetail: false,
   scopes: ["admin:read"],
   credentialPrefixes: ["vc_sk_", "vc_sa_"],
 }));
@@ -30,6 +31,7 @@ vi.mock("@/app/auth/AuthProvider", async () => {
         user: { id: "admin-1" },
       }),
       credentialPrefixes: authRuntime.credentialPrefixes,
+      capabilities: { raw_prompt_view: false, legacy_provider_detail: authRuntime.legacyProviderDetail },
     }),
   };
 });
@@ -305,10 +307,71 @@ function mockApi({
 describe("ProviderPage", () => {
   beforeEach(() => {
     authRuntime.legacyFallback = true;
+    authRuntime.legacyProviderDetail = false;
     authRuntime.scopes = ["admin:read"];
     authRuntime.credentialPrefixes = ["vc_sk_", "vc_sa_"];
     usePreferences.setState({ refreshInterval: 0 });
     vi.restoreAllMocks();
+  });
+
+  it("keeps the selected opaque provider identity in the Legacy detail handoff", async () => {
+    authRuntime.legacyProviderDetail = true;
+    mockApi();
+    renderPage("/gateway/providers?provider=" + openAIProvider.provider_ref);
+    const dialog = await screen.findByRole("dialog", { name: "openai" });
+    expect(within(dialog).getByRole("link", { name: "기존 화면에서 같은 공급자 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/settings?provider_ref=" + openAIProvider.provider_ref,
+    );
+  });
+
+  it("keeps a list destination when a server has not enabled provider handoff support", async () => {
+    mockApi();
+    renderPage("/gateway/providers?provider=" + openAIProvider.provider_ref);
+    const dialog = await screen.findByRole("dialog", { name: "openai" });
+    expect(within(dialog).getByRole("link", { name: "기존 설정 화면 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/settings",
+    );
+  });
+
+  it("preserves separate opaque identities when provider display names collide", async () => {
+    authRuntime.legacyProviderDetail = true;
+    mockApi({
+      providerData: {
+        providers: [
+          { ...openAIProvider, name: "[provider-name-omitted]" },
+          { ...anthropicProvider, name: "[provider-name-omitted]" },
+        ],
+      },
+    });
+    renderPage("/gateway/providers?provider=" + anthropicProvider.provider_ref);
+    const dialog = await screen.findByRole("dialog");
+    const link = await within(dialog).findByRole("link", { name: "기존 화면에서 같은 공급자 열기" });
+    expect(link).toHaveAttribute("href", "/admin#/settings?provider_ref=" + anthropicProvider.provider_ref);
+    expect(link.getAttribute("href")).not.toContain("provider-name-omitted");
+  });
+
+  it("does not invent a detail identity when the selected provider is missing", async () => {
+    authRuntime.legacyProviderDetail = true;
+    mockApi();
+    renderPage("/gateway/providers?provider=" + providerRef("unknown"));
+    const dialog = await screen.findByRole("dialog", { name: "공급자 상세" });
+    await within(dialog).findByText("공급자를 찾을 수 없습니다.");
+    expect(within(dialog).queryByRole("link", { name: "기존 화면에서 같은 공급자 열기" })).toBeNull();
+    expect(within(dialog).getByRole("link", { name: "기존 설정 화면 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/settings",
+    );
+  });
+
+  it("does not offer the selected provider handoff after global fallback is disabled", async () => {
+    authRuntime.legacyProviderDetail = true;
+    authRuntime.legacyFallback = false;
+    mockApi();
+    renderPage("/gateway/providers?provider=" + openAIProvider.provider_ref);
+    const dialog = await screen.findByRole("dialog", { name: "openai" });
+    expect(within(dialog).queryByRole("link", { name: /기존/ })).toBeNull();
   });
 
   it.each(["corp_", "%41_"])(
