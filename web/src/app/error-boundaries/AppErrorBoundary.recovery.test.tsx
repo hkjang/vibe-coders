@@ -43,6 +43,7 @@ describe("AppErrorBoundary recovery without a trusted authentication provider", 
 
     expect(screen.getByRole("alert")).toHaveTextContent("신규 콘솔에서 오류가 발생했습니다.");
     expect(screen.getByRole("button", { name: "다시 불러오기" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "기존 관리자 화면 열기" })).toBeEnabled();
     expect(document.body).not.toHaveTextContent(privateDetail);
     expect(console.error).toHaveBeenCalledWith("app_error_boundary", {
       name: "Error",

@@ -2,6 +2,7 @@ import type { FeatureId } from "./migration-registry";
 
 /** Canonical Legacy hash routes. Feature ownership remains in the migration registry. */
 export const legacyRoutes = {
+  home: "/admin",
   dashboard: "/admin#/dashboard",
   me: "/admin#/me",
   team: "/admin#/team",

@@ -1,5 +1,7 @@
 import { Component, createRef, type ErrorInfo, type PropsWithChildren, type ReactNode } from "react";
 
+import { RootLegacyRecovery } from "./RootLegacyRecovery";
+
 interface State {
   error?: Error;
 }
@@ -20,8 +22,6 @@ export class AppErrorBoundary extends Component<PropsWithChildren, State> {
 
   override render(): ReactNode {
     if (!this.state.error) return this.props.children;
-    // AuthProvider may itself have failed. Only the authenticated route-level
-    // boundary can offer a permission-aware Legacy link.
     return (
       <main className="fatal-error" id="main-content">
         <section className="page-state page-state-error" role="alert">
@@ -33,6 +33,7 @@ export class AppErrorBoundary extends Component<PropsWithChildren, State> {
             <button className="button button-primary button-default" onClick={() => window.location.reload()}>
               다시 불러오기
             </button>
+            <RootLegacyRecovery />
           </div>
         </section>
       </main>
