@@ -168,7 +168,7 @@ export async function protectedChat(page: Page, secret: string, model: string): 
 // Install after the new readonly query has finished, before releasing the old
 // write. Old success callbacks must not invalidate the new account's queries.
 export function watchLateAccessReads(page: Page): {
-  assertSettled: (response: Response) => Promise<void>;
+  assertSettled: (request: Request) => Promise<void>;
   stop: () => void;
 } {
   let reads = 0;
@@ -181,10 +181,10 @@ export function watchLateAccessReads(page: Page): {
   };
   page.on("request", collect);
   return {
-    assertSettled: async (response) => {
-      expect((await response.finished()) === null).toBe(true);
-      // A bounded observation window follows completed network delivery, not
-      // just two animation frames. It also catches callbacks awaiting refetch.
+    assertSettled: async (request) => {
+      await expect.poll(() => request.failure()?.errorText).toBe("net::ERR_ABORTED");
+      // Observe after the old route was released and the browser confirmed its
+      // cancellation. This also catches stale callbacks awaiting a refetch.
       await page.waitForTimeout(500);
       expect(reads).toBe(0);
     },

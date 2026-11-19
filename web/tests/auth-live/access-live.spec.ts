@@ -524,7 +524,11 @@ test("AUTH-LIVE-009 실제 발급 완료의 늦은 응답과 새 계정 비밀�
   });
   try {
     const dialog = await prepareIssue(page, name, ["chat:completion"]);
+    const requested = page.waitForRequest(
+      (request) => request.method() === "POST" && new URL(request.url()).pathname === keysPath,
+    );
     await dialog.getByRole("button", { name: "발급", exact: true }).click();
+    const retiredRequest = await requested;
     await expect.poll(() => Boolean(issued?.secret && issued.api_key.id)).toBe(true);
     await expect(dialog.getByRole("button", { name: "저장 중", exact: true })).toBeDisabled();
     await signOut(other);
@@ -535,13 +539,10 @@ test("AUTH-LIVE-009 실제 발급 완료의 늦은 응답과 새 계정 비밀�
     expect(await currentRole(page)).toBe("readonly_admin");
     await expect(keyRow(page, name)).toBeVisible();
     const staleReads = watchLateAccessReads(page);
-    const received = page.waitForResponse((response) => matches(response, "POST", keysPath));
     release();
     try {
-      const response = await received;
-      expect(response.status()).toBe(201);
       await expect.poll(() => delivered).toBe(true);
-      await staleReads.assertSettled(response);
+      await staleReads.assertSettled(retiredRequest);
     } finally {
       staleReads.stop();
     }
@@ -593,7 +594,11 @@ test("AUTH-LIVE-010 실제 권한 저장 완료의 늦은 응답과 이전 계�
     const dialog = await editScopes(page, name);
     await dialog.getByRole("checkbox", { name: /chat:completion/ }).check();
     await confirmKeyEdit(dialog, "browser-reviewed-scopes-late");
+    const requested = page.waitForRequest(
+      (request) => request.method() === "PATCH" && new URL(request.url()).pathname === path,
+    );
     await dialog.getByRole("button", { name: "권한 저장", exact: true }).click();
+    const retiredRequest = await requested;
     await expect.poll(() => ready).toBe(true);
     await expect(dialog.getByRole("checkbox", { name: /chat:completion/ })).toBeDisabled();
     await signOut(other);
@@ -604,13 +609,10 @@ test("AUTH-LIVE-010 실제 권한 저장 완료의 늦은 응답과 이전 계�
     expect(await currentRole(page)).toBe("readonly_admin");
     await expect(keyRow(page, name)).toBeVisible();
     const staleReads = watchLateAccessReads(page);
-    const received = page.waitForResponse((response) => matches(response, "PATCH", path));
     release();
     try {
-      const response = await received;
-      expect(response.status()).toBe(200);
       await expect.poll(() => delivered).toBe(true);
-      await staleReads.assertSettled(response);
+      await staleReads.assertSettled(retiredRequest);
     } finally {
       staleReads.stop();
     }

@@ -192,23 +192,24 @@ describe("정산 CSV 내보내기", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
   it.each(["account", "read", "feature", "unmount", "month"])(
-    "%s 변경 후 늦은 CSV 본문을 저장하지 않는다",
+    "%s 변경 후 진행 중인 CSV 읽기를 취소하고 저장하지 않는다",
     async (change) => {
-      const pending = deferred<string>();
-      const response = new Response("", { headers: { "Content-Type": "text/csv" } });
-      vi.spyOn(response, "text").mockReturnValue(pending.promise);
+      const cancel = vi.fn();
+      const stream = new ReadableStream<Uint8Array>({ cancel });
+      const read = vi.spyOn(stream, "getReader");
+      const response = new Response(stream, { headers: { "Content-Type": "text/csv" } });
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
       const fixture = setup("chargeback");
       await screen.findAllByText("공개 비용 항목");
       await userEvent.click(screen.getByRole("button", { name: "CSV 다운로드" }));
-      await waitFor(() => expect(response.text).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
       if (change === "account") runtime.id = "account_b";
       if (change === "read") runtime.read = false;
       if (change === "feature") runtime.permitted = false;
       if (change === "unmount") runtime.mounted = false;
       if (change === "month") fixture.navigate("month=2026-09");
       else fixture.refresh();
-      await act(async () => pending.resolve("fixture-csv"));
+      await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
       expect(downloadText).not.toHaveBeenCalled();
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect((fetchSpy.mock.calls[0]?.[1]?.signal as AbortSignal).aborted).toBe(true);

@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.transport.tsbuildinfo",
+    "types": ["node", "vite/client", "vitest/globals"]
+  },
+  "include": ["tests/transport", "src/vite-env.d.ts"],
+  "exclude": []
+}

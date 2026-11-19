@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { ApiFileEndpoint, FileResponseContract } from "@/shared/api/file-endpoint";
 
 import type { OpenApiMethod, OpenApiMethodFor, OpenApiPath } from "@/shared/api/generated/paths.gen";
 
@@ -82,6 +83,23 @@ export function operation<Data extends OperationData, Response>() {
     schema,
     ...(querySchema ? { querySchema } : {}),
     ...(errorSchemas ? { errorSchemas } : {}),
+  });
+}
+
+/** Buffered, read-only file operations retain generated path/method checking. */
+export function fileOperation<Data extends OperationData>() {
+  return <Method extends OpenApiMethodFor<Data["url"]> & "GET">(
+    method: Method,
+    path: Data["url"],
+    contract: FileResponseContract,
+    querySchema?: z.ZodType<object>,
+  ): ApiFileEndpoint<Data> => ({
+    [endpointBrand]: true,
+    method,
+    path,
+    ...contract,
+    responseFormat: "bytes",
+    ...(querySchema ? { querySchema } : {}),
   });
 }
 

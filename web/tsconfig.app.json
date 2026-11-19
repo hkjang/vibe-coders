@@ -27,6 +27,7 @@
   },
   "include": ["src", "tests"],
   "exclude": [
+    "tests/transport",
     "tests/keycloak-live",
     "tests/auth-live",
     "tests/provider-connection-live",

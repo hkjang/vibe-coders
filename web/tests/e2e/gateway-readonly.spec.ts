@@ -476,17 +476,18 @@ for (const kind of ["공급자", "차단기"] as const) {
         kind === "공급자" ? await prepare(page, "검토") : await prepareHealth(page, "개별 차단기");
       gateway.setWriteStatus(status);
       gateway.hold("write");
+      const pendingRequest = page.waitForRequest(
+        (item) => `${item.method()} ${new URL(item.url()).pathname}` === current.call,
+      );
       await current.save.click();
+      const retiredRequest = await pendingRequest;
       await expect.poll(() => gateway.writes.length).toBe(1);
       await other.getByLabel("사용자 메뉴").click();
       await other.getByRole("button", { name: "로그아웃", exact: true }).click();
       gateway.setMode(feature, "read_only");
       await signIn(page, secondEmail);
-      const response = page.waitForResponse(
-        (item) => `${item.request().method()} ${new URL(item.url()).pathname}` === current.call,
-      );
       gateway.release("write");
-      await (await response).finished();
+      await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
       await page.waitForTimeout(500);
       await expect(current.dialog).toBeHidden();
       await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);

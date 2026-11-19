@@ -1,4 +1,7 @@
 import { AppError } from "@/shared/api/error";
+import type { ApiFile, ApiFileEndpoint, ApiFileEndpointData } from "@/shared/api/file-endpoint";
+import type { RegisteredFileEndpoint } from "@/shared/api/file-endpoints";
+import { readFileBody } from "@/shared/api/read-file-body";
 import {
   endpoints,
   type ApiEndpointBase,
@@ -8,6 +11,7 @@ import {
 } from "@/shared/api/endpoints";
 import { openAIErrorSchema } from "@/shared/api/schemas";
 import { buildApiPath } from "@/shared/api/query";
+import { discardResponse, RequestLifetime } from "@/shared/api/request-lifetime";
 import { publishLogout, tokenStore } from "@/shared/auth/token-store";
 
 const defaultTimeoutMs = 15_000;
@@ -50,6 +54,17 @@ type ApiRequestArguments<Endpoint extends ApiEndpointBase> =
     ? [options: ApiRequestOptions<Endpoint>]
     : [options?: ApiRequestOptions<Endpoint>];
 
+type ApiFileQuery<Endpoint extends ApiFileEndpoint> =
+  ApiFileEndpointData<Endpoint> extends { query?: infer Query } ? Exclude<Query, undefined> : never;
+
+export type ApiFileRequestOptions<Endpoint extends ApiFileEndpoint> = Omit<
+  RequestInit,
+  "body" | "method" | "signal" | "redirect" | "credentials"
+> &
+  ApiRequestMetadata & {
+    assertCurrent?: () => void;
+  } & ([ApiFileQuery<Endpoint>] extends [never] ? { query?: never } : { query?: ApiFileQuery<Endpoint> });
+
 interface InternalApiRequestOptions
   extends Omit<RequestInit, "body" | "method" | "signal">, ApiRequestMetadata {
   body?: unknown;
@@ -65,11 +80,12 @@ export interface ApiClientDependencies {
   clearTokens: () => void;
   notifyLogout: () => void;
   getSessionEpoch: () => number;
+  subscribeSession: (listener: () => void) => () => void;
 }
 
 function defaultDependencies(): ApiClientDependencies {
   return {
-    fetch: globalThis.fetch.bind(globalThis),
+    fetch: (input, init) => globalThis.fetch(input, init),
     getAccessToken: tokenStore.getAccessToken,
     getRefreshToken: tokenStore.getRefreshToken,
     getLegacyToken: tokenStore.getLegacyToken,
@@ -77,6 +93,7 @@ function defaultDependencies(): ApiClientDependencies {
     clearTokens: tokenStore.clearTokens,
     notifyLogout: publishLogout,
     getSessionEpoch: tokenStore.getSessionEpoch,
+    subscribeSession: tokenStore.subscribeSession,
   };
 }
 
@@ -117,8 +134,17 @@ export class ApiClient {
   private readonly dependencies: ApiClientDependencies;
   private refreshFlight: { epoch: number; promise: Promise<void> } | undefined;
 
+  private refreshFailure: { epoch: number; error: AppError } | undefined;
+
   constructor(dependencies: Partial<ApiClientDependencies> = {}) {
-    this.dependencies = { ...defaultDependencies(), ...dependencies };
+    this.dependencies = {
+      ...defaultDependencies(),
+      ...dependencies,
+      // A custom epoch must not accidentally subscribe to the global token store.
+      ...(dependencies.getSessionEpoch && !dependencies.subscribeSession
+        ? { subscribeSession: () => () => undefined }
+        : {}),
+    };
   }
 
   async request<Endpoint extends RegisteredApiEndpoint>(
@@ -131,81 +157,143 @@ export class ApiClient {
     }
 
     const epoch = this.dependencies.getSessionEpoch();
-    const accessTokenAtRequestStart = this.dependencies.getAccessToken();
-    let response = await this.inSession(epoch, () => this.perform(endpoint, options), options.signal);
-    this.assertSession(epoch, options.signal);
+    const lifetime = this.createLifetime(epoch, options.timeoutMs, options.signal);
+    try {
+      const response = await this.authorizedResponse(endpoint, options, epoch, lifetime);
+      const body = await lifetime.run(() => readResponseBody(response));
+      if (!response.ok) throw this.endpointError(endpoint, response, body);
+      const parsed = endpoint.schema.safeParse(body);
+      lifetime.assertActive();
+      if (!parsed.success) {
+        throw new AppError("API 응답 형식이 예상 계약과 다릅니다.", {
+          kind: "contract",
+          status: response.status,
+          requestId: requestIdFrom(response, body),
+          details: parsed.error.flatten(),
+        });
+      }
+      return parsed.data as ApiEndpointOutput<Endpoint>;
+    } finally {
+      lifetime.dispose();
+    }
+  }
+
+  async file<Endpoint extends RegisteredFileEndpoint>(
+    endpoint: Endpoint,
+    options: ApiFileRequestOptions<Endpoint> = {},
+  ): Promise<ApiFile> {
+    if (!isInternalPath(endpoint.path))
+      throw new AppError("외부 API URL은 허용되지 않습니다.", { kind: "contract" });
+    const epoch = this.dependencies.getSessionEpoch();
+    const { assertCurrent: assertOwner, ...requestOptions } = options;
+    const assertCurrent = () => {
+      this.assertSession(epoch);
+      if (options.signal?.aborted) throw new AppError("이전 내보내기 요청입니다.", { kind: "aborted" });
+      assertOwner?.();
+    };
+    assertCurrent();
+    const lifetime = this.createLifetime(epoch, options.timeoutMs, options.signal, assertOwner);
+    let response: Response | undefined;
+    try {
+      const headers = new Headers(options.headers);
+      headers.set("Accept", endpoint.contentTypes.join(", "));
+      response = await this.authorizedResponse(
+        endpoint,
+        {
+          ...requestOptions,
+          headers,
+          query: options.query ?? (endpoint.querySchema ? {} : undefined),
+          redirect: "error",
+          credentials: "same-origin",
+          cache: options.cache ?? "no-store",
+        },
+        epoch,
+        lifetime,
+      );
+      const contentType = response.headers.get("Content-Type") ?? "";
+      const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+      if (!response.ok) {
+        let body: unknown;
+        // File errors may echo uploaded/private data. Only structured JSON errors
+        // are consumed, within a diagnostic cap; 401 bodies are never needed.
+        if (response.status !== 401 && mediaType === "application/json") {
+          const bytes = await readFileBody(response, lifetime, {
+            maxBytes: Math.min(endpoint.maxBytes ?? 65_536, 65_536),
+          });
+          try {
+            body = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+          } catch {
+            /* Use safe HTTP fallback. */
+          }
+        }
+        throw this.toAppError(response, body);
+      }
+      if (!endpoint.contentTypes.includes(mediaType))
+        throw new AppError("서버가 요청한 파일 형식으로 응답하지 않았습니다.", {
+          kind: "contract",
+          status: response.status,
+          requestId: lifetime.requestId,
+        });
+      const bytes = await readFileBody(response, lifetime, endpoint);
+      assertCurrent();
+      return { bytes, contentType, assertCurrent };
+    } finally {
+      if (response) discardResponse(response);
+      lifetime.dispose();
+    }
+  }
+
+  private createLifetime(
+    epoch: number,
+    timeoutMs = defaultTimeoutMs,
+    signal?: AbortSignal,
+    assertOwner?: () => void,
+  ): RequestLifetime {
+    return new RequestLifetime(
+      () => {
+        this.assertSession(epoch);
+        assertOwner?.();
+      },
+      this.dependencies.subscribeSession,
+      timeoutMs,
+      signal,
+    );
+  }
+
+  private assertSession(epoch: number): void {
+    if (epoch !== this.dependencies.getSessionEpoch()) {
+      // A failed current refresh intentionally ends its session. Preserve that auth
+      // error for its live waiters; unrelated logout/login remains cancellation.
+      if (this.refreshFailure?.epoch === epoch) throw this.refreshFailure.error;
+      throw new AppError("인증 세션이 변경되어 이전 요청을 취소했습니다.", { kind: "aborted" });
+    }
+  }
+
+  private async authorizedResponse(
+    endpoint: ApiEndpointBase | ApiFileEndpoint,
+    options: InternalApiRequestOptions,
+    epoch: number,
+    lifetime: RequestLifetime,
+  ): Promise<Response> {
+    const accessTokenAtStart = this.dependencies.getAccessToken();
+    let response = await this.perform(endpoint, options, lifetime);
     if (
       response.status === 401 &&
       options.retryUnauthorized !== false &&
       endpoint.path !== endpoints.auth.refresh.path
     ) {
       const currentAccessToken = this.dependencies.getAccessToken();
-      if (currentAccessToken && currentAccessToken !== accessTokenAtRequestStart) {
-        response = await this.inSession(
-          epoch,
-          () => this.perform(endpoint, { ...options, retryUnauthorized: false }),
-          options.signal,
-        );
+      if (currentAccessToken && currentAccessToken !== accessTokenAtStart) {
+        discardResponse(response);
+        response = await this.perform(endpoint, options, lifetime);
       } else if (this.dependencies.getRefreshToken()) {
-        // A caller cannot cancel the shared refresh needed by other active requests.
-        // Once it settles, only this caller's retry is suppressed if it was cancelled.
-        try {
-          await this.refreshOnce(epoch);
-        } catch (error) {
-          this.assertNotAborted(options.signal);
-          throw error;
-        }
-        this.assertSession(epoch, options.signal);
-        response = await this.inSession(
-          epoch,
-          () => this.perform(endpoint, { ...options, retryUnauthorized: false }),
-          options.signal,
-        );
+        discardResponse(response);
+        // This caller can retire promptly without aborting peers' shared refresh.
+        await lifetime.run(() => this.refreshOnce(epoch));
+        response = await this.perform(endpoint, options, lifetime);
       }
     }
-
-    const body = await this.inSession(epoch, () => readResponseBody(response), options.signal);
-    this.assertSession(epoch, options.signal);
-    if (!response.ok) throw this.endpointError(endpoint, response, body);
-
-    const parsed = endpoint.schema.safeParse(body);
-    if (!parsed.success) {
-      throw new AppError("API 응답 형식이 예상 계약과 다릅니다.", {
-        kind: "contract",
-        status: response.status,
-        requestId: requestIdFrom(response, body),
-        details: parsed.error.flatten(),
-      });
-    }
-    return parsed.data as ApiEndpointOutput<Endpoint>;
-  }
-
-  private assertNotAborted(signal?: AbortSignal): void {
-    if (signal?.aborted) throw new AppError("API 요청이 취소되었습니다.", { kind: "aborted" });
-  }
-
-  private assertSession(epoch: number, signal?: AbortSignal): void {
-    if (epoch !== this.dependencies.getSessionEpoch()) {
-      throw new AppError("인증 세션이 변경되어 이전 요청을 취소했습니다.", { kind: "aborted" });
-    }
-    this.assertNotAborted(signal);
-  }
-
-  private async inSession<Value>(
-    epoch: number,
-    read: () => Promise<Value>,
-    signal?: AbortSignal,
-  ): Promise<Value> {
-    this.assertSession(epoch, signal);
-    try {
-      const value = await read();
-      this.assertSession(epoch, signal);
-      return value;
-    } catch (error) {
-      // A transport or body reader may settle after its session or caller has retired.
-      this.assertSession(epoch, signal);
-      throw error;
-    }
+    return response;
   }
 
   private async refreshOnce(epoch: number): Promise<void> {
@@ -222,23 +310,22 @@ export class ApiClient {
   private async refresh(epoch: number): Promise<void> {
     const refreshToken = this.dependencies.getRefreshToken();
     if (!refreshToken) throw new AppError("로그인 세션이 만료되었습니다.", { kind: "auth", status: 401 });
-
+    const lifetime = this.createLifetime(epoch);
     try {
       const refreshBody: ApiEndpointBody<typeof endpoints.auth.refresh> = { refresh_token: refreshToken };
-      const response = await this.fetchWithTimeout(
+      const response = await this.fetchResponse(
         endpoints.auth.refresh.path,
         {
           method: endpoints.auth.refresh.method,
           headers: this.headers(undefined, false),
           body: JSON.stringify(refreshBody),
         },
-        defaultTimeoutMs,
-        undefined,
+        lifetime,
       );
-      const body = await readResponseBody(response);
-      this.assertSession(epoch);
+      const body = await lifetime.run(() => readResponseBody(response));
       if (!response.ok) throw this.toAppError(response, body);
       const parsed = endpoints.auth.refresh.schema.safeParse(body);
+      lifetime.assertActive();
       if (!parsed.success) {
         throw new AppError("토큰 갱신 응답 형식이 올바르지 않습니다.", {
           kind: "contract",
@@ -248,30 +335,34 @@ export class ApiClient {
         });
       }
       this.dependencies.saveTokens(parsed.data);
-    } catch (error) {
+    } catch (cause) {
       this.assertSession(epoch);
-      if (error instanceof AppError && error.kind === "aborted") throw error;
-      this.dependencies.clearTokens();
-      this.dependencies.notifyLogout();
-      throw new AppError("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.", {
+      if (cause instanceof AppError && cause.kind === "aborted") throw cause;
+      const error = new AppError("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.", {
         kind: "auth",
         status: 401,
-        cause: error,
+        requestId: cause instanceof AppError ? cause.requestId : lifetime.requestId,
+        cause,
       });
+      this.refreshFailure = { epoch, error };
+      this.dependencies.clearTokens();
+      this.dependencies.notifyLogout();
+      throw error;
+    } finally {
+      lifetime.dispose();
     }
   }
 
-  private async perform(endpoint: ApiEndpointBase, options: InternalApiRequestOptions): Promise<Response> {
-    const {
-      body,
-      query,
-      timeoutMs = defaultTimeoutMs,
-      signal,
-      routeId,
-      retryUnauthorized,
-      ...init
-    } = options;
+  private async perform(
+    endpoint: ApiEndpointBase | ApiFileEndpoint,
+    options: InternalApiRequestOptions,
+    lifetime: RequestLifetime,
+  ): Promise<Response> {
+    const { body, query, timeoutMs, signal, routeId, retryUnauthorized, ...init } = options;
     void retryUnauthorized;
+    void timeoutMs;
+    void signal;
+    lifetime.assertActive();
     const headers = this.headers(init.headers, true, routeId);
     let validatedQuery = query;
     if (query !== undefined) {
@@ -290,7 +381,7 @@ export class ApiClient {
       }
       validatedQuery = parsedQuery.data;
     }
-    return this.fetchWithTimeout(
+    return this.fetchResponse(
       buildApiPath(endpoint.path, validatedQuery),
       {
         ...init,
@@ -298,8 +389,7 @@ export class ApiClient {
         headers,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       },
-      timeoutMs,
-      signal,
+      lifetime,
     );
   }
 
@@ -317,48 +407,12 @@ export class ApiClient {
     return headers;
   }
 
-  private async fetchWithTimeout(
-    path: string,
-    init: RequestInit,
-    timeoutMs: number,
-    externalSignal?: AbortSignal,
-  ): Promise<Response> {
-    this.assertNotAborted(externalSignal);
-    const controller = new AbortController();
-    let timedOut = false;
-    const abortFromCaller = (): void => controller.abort(externalSignal?.reason);
-    if (externalSignal?.aborted) abortFromCaller();
-    else externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
-    const timeout = window.setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, timeoutMs);
-
-    try {
-      const response = await this.dependencies.fetch(path, { ...init, signal: controller.signal });
-      // Fulfilled transports must honor cancellation too, before any auth retry.
-      if (controller.signal.aborted) throw new AppError("종료된 API 응답입니다.", { kind: "aborted" });
+  private async fetchResponse(path: string, init: RequestInit, lifetime: RequestLifetime): Promise<Response> {
+    return lifetime.run(async () => {
+      const response = await this.dependencies.fetch(path, { ...init, signal: lifetime.signal });
+      lifetime.trackResponse(response);
       return response;
-    } catch (cause) {
-      if (timedOut) {
-        throw new AppError("API 요청 시간이 초과되었습니다.", {
-          kind: "timeout",
-          retryable: true,
-          cause,
-        });
-      }
-      if (externalSignal?.aborted || controller.signal.aborted) {
-        throw new AppError("API 요청이 취소되었습니다.", { kind: "aborted", cause });
-      }
-      throw new AppError("게이트웨이에 연결할 수 없습니다.", {
-        kind: "network",
-        retryable: true,
-        cause,
-      });
-    } finally {
-      window.clearTimeout(timeout);
-      externalSignal?.removeEventListener("abort", abortFromCaller);
-    }
+    });
   }
 
   private toAppError(response: Response, body: unknown): AppError {
