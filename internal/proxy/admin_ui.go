@@ -1170,6 +1170,9 @@ const adminHTML = `<!doctype html>
     // (possibly mutated) content so the "← 뒤로" button can return to it. Closing clears it.
     let modalStack = [];
     let currentModalState = null;
+    let modalGeneration = 0;
+    let legacyRouteGeneration = 0;
+    let requestDetailGeneration = 0;
 
     function _applyModalState(state) {
       document.getElementById('modal-title').textContent = state.title;
@@ -1385,6 +1388,7 @@ const adminHTML = `<!doctype html>
     window.openCommandPalette = openCommandPalette;
 
     function openModal(title, html, requestId, opts) {
+      modalGeneration++;
       opts = opts || {};
       const backdrop = document.getElementById('modal-backdrop');
       // If a modal is already open, snapshot its live content (captures appended AI analysis, etc.)
@@ -1407,9 +1411,11 @@ const adminHTML = `<!doctype html>
     }
     function modalBack() {
       if (modalStack.length === 0) return;
+      modalGeneration++;
       _applyModalState(modalStack.pop());
     }
     function closeModal() {
+      modalGeneration++;
       const backdrop = document.getElementById('modal-backdrop');
       const wasOpen = backdrop.classList.contains('open');
       backdrop.classList.remove('open');
@@ -1986,6 +1992,7 @@ const adminHTML = `<!doctype html>
     }
 
     async function route() {
+      const generation = ++legacyRouteGeneration;
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
       // XView owns a short-lived delta poller while its tab is active. Tear it down before
@@ -2088,6 +2095,7 @@ const adminHTML = `<!doctype html>
           default: await renderDashboard();
         }
       } catch (err) {
+        if (generation !== legacyRouteGeneration) return;
         // A bare message with no context left the operator with nowhere to go: which
         // screen failed, and how to retry. Name the screen, keep the detail, and offer
         // both a retry and a way out.
@@ -2102,8 +2110,10 @@ const adminHTML = `<!doctype html>
             '</div>' +
           '</div>';
       } finally {
-        wrapViewTables();
-        routeProgress(false);
+        if (generation === legacyRouteGeneration) {
+          wrapViewTables();
+          routeProgress(false);
+        }
       }
     }
     // tabLabelFor reads the nav so the error names the screen exactly as the menu does.
@@ -4449,17 +4459,40 @@ const adminHTML = `<!doctype html>
         '<div style="border:1px solid var(--border);border-radius:6px;padding:8px">' + rows + '</div></section>';
     }
 
-    window.openRequestDetail = async (id) => {
+    function legacyRequestDetailIDValid(id) {
+      // Match the existing detail API path contract, including reserved mux routes.
+      return typeof id === 'string' && id !== '' && !['.', '..', 'diff', 'io'].includes(id) &&
+        !/[/\p{Cc}]/u.test(id) && new TextEncoder().encode(id).length <= 4096 &&
+        !Array.from(id).some(c => c.length === 1 && c.charCodeAt(0) >= 0xd800 && c.charCodeAt(0) <= 0xdfff);
+    }
+    window.openRequestDetail = async (id, options = {}) => {
+      const fromRow = options.fromRow === true;
+      const selection = ++requestDetailGeneration;
+      const generation = legacyRouteGeneration;
+      let modal = modalGeneration;
+      const epoch = authEpoch;
+      const hash = location.hash;
+      const current = () => selection === requestDetailGeneration && generation === legacyRouteGeneration &&
+        modal === modalGeneration && hash === location.hash && authCurrent(epoch);
+      if (!current()) return;
+      if (!legacyRequestDetailIDValid(id)) {
+        openModal('오류', '<div class="error-line">요청 상세 주소가 올바르지 않습니다.</div>');
+        return;
+      }
       try {
         const [detail, note, links, trace] = await Promise.all([
           api('/admin/requests/' + encodeURIComponent(id)),
           api('/admin/requests/' + encodeURIComponent(id) + '/note').catch(() => ({ tags: [], note: '' })),
-          api('/admin/requests/' + encodeURIComponent(id) + '/links').catch(() => null),
-          api('/admin/requests/' + encodeURIComponent(id) + '/trace').catch(() => null),
+          fromRow ? null : api('/admin/requests/' + encodeURIComponent(id) + '/links').catch(() => null),
+          fromRow ? null : api('/admin/requests/' + encodeURIComponent(id) + '/trace').catch(() => null),
         ]);
-        openModal('요청 상세 - ' + (detail.request.trace_id || id), traceWaterfallHTML(trace) + requestDetailHTML(detail, note, links));
+        if (!current()) return;
+        openModal('요청 상세 - ' + (detail.request.trace_id || id), (fromRow ? '' : traceWaterfallHTML(trace)) + requestDetailHTML(detail, note, links), fromRow ? id : undefined);
+        modal = modalGeneration;
         wireNoteEditor(id);
+        if (fromRow) wireFeedbackEditor(id);
       } catch (err) {
+        if (!current()) return;
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
@@ -5929,17 +5962,7 @@ const adminHTML = `<!doctype html>
           if (e.target.closest('a')) return;
           const id = row.dataset.requestId;
           if (!id) return;
-          try {
-            const [detail, note] = await Promise.all([
-              api('/admin/requests/' + encodeURIComponent(id)),
-              api('/admin/requests/' + encodeURIComponent(id) + '/note').catch(() => ({ tags: [], note: '' })),
-            ]);
-            openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note), id);
-            wireNoteEditor(id);
-            wireFeedbackEditor(id);
-          } catch (err) {
-            openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
-          }
+          await window.openRequestDetail(id, { fromRow: true });
         });
       });
     }
@@ -7613,9 +7636,22 @@ const adminHTML = `<!doctype html>
 
     async function renderRequestsView(initial) {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration;
+      const epoch = authEpoch;
+      const current = () => generation === legacyRouteGeneration && parseHash().parts[0] === 'requests' && authCurrent(epoch);
+      const handoffModal = modalGeneration;
+      const handoffSelection = requestDetailGeneration;
+      const selectedIDs = initial ? initial.getAll('request_id') : [];
+      let selectedID = selectedIDs[0] || '';
+      let queryGeneration = 0;
+      if (selectedIDs.length > 1 || (selectedIDs.length && !legacyRequestDetailIDValid(selectedID))) {
+        view.innerHTML = '<div class="banner error">요청 상세 주소가 올바르지 않습니다.</div>';
+        return;
+      }
       const [models, ips, langs] = await Promise.all([
         suggestList('model'), suggestList('ip'), suggestList('language')
       ]);
+      if (!current()) return;
       view.innerHTML = section('호출 이력 검색',
         '<form class="toolbar" id="req-filter" autocomplete="off">' +
           '<input id="f-ip" placeholder="IP 필터" list="dl-ip">' +
@@ -7652,9 +7688,11 @@ const adminHTML = `<!doctype html>
       }
       document.getElementById('req-filter').addEventListener('submit', async (e) => {
         e.preventDefault();
+        selectedID = '';
         await loadRequests();
       });
       document.getElementById('req-reset').addEventListener('click', async () => {
+        selectedID = '';
         ['f-ip', 'f-model', 'f-language', 'f-from', 'f-to'].forEach(id => { document.getElementById(id).value = ''; });
         document.getElementById('f-limit').value = '100';
         document.getElementById('f-tz').value = 'Asia/Seoul';
@@ -7662,9 +7700,16 @@ const adminHTML = `<!doctype html>
       });
       document.getElementById('diff-btn').addEventListener('click', openDiffModal);
       updateDiffCount();
-      await loadRequests();
+      const loaded = await loadRequests();
+      if (loaded && selectedID && current() && handoffModal === modalGeneration && handoffSelection === requestDetailGeneration) {
+        await window.openRequestDetail(selectedID);
+      }
 
       async function loadRequests() {
+        if (!current()) return false;
+        const query = ++queryGeneration;
+        const results = document.getElementById('req-results');
+        const active = () => current() && query === queryGeneration && document.getElementById('req-results') === results;
         const params = new URLSearchParams();
         const ip = document.getElementById('f-ip').value.trim();
         const model = document.getElementById('f-model').value.trim();
@@ -7682,12 +7727,22 @@ const adminHTML = `<!doctype html>
         // timezone (default Asia/Seoul) instead of UTC.
         if (from || to) params.set('tz', tz);
         params.set('limit', limit);
-        updateHashParams(params);
-        const r = await api('/admin/requests?' + params.toString());
-        document.getElementById('req-results').innerHTML = requestsTable(r.requests || [], { selectable: true });
+        const hashParams = new URLSearchParams(params);
+        if (selectedID) hashParams.set('request_id', selectedID);
+        updateHashParams(hashParams);
+        let r;
+        try {
+          r = await api('/admin/requests?' + params.toString());
+        } catch (error) {
+          if (!active()) return false;
+          throw error;
+        }
+        if (!active()) return false;
+        results.innerHTML = requestsTable(r.requests || [], { selectable: true });
         attachRequestRowHandlers();
         attachDiffSelectionHandlers();
         makeSortable('#req-results', 'requests');
+        return true;
       }
     }
 

@@ -49,6 +49,22 @@ describe("OpenAPI runtime schemas", () => {
     expect(uiBootstrapSchema.safeParse(validBootstrap).success).toBe(true);
   });
 
+  it("enables Legacy request handoff only through an explicit optional server capability", () => {
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_request_detail).toBeUndefined();
+    expect(
+      uiBootstrapSchema.parse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_request_detail: true },
+      }).capabilities.legacy_request_detail,
+    ).toBe(true);
+    expect(
+      uiBootstrapSchema.safeParse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_request_detail: "true" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects missing top-level OpenAPI-required bootstrap fields", () => {
     expect(
       uiBootstrapSchema.safeParse({

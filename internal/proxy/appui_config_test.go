@@ -34,6 +34,10 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if len(prefixes) != 2 || prefixes[0] != "vc_sk_" || prefixes[1] != "vc_sa_" {
 		t.Fatalf("bootstrap credential prefixes = %#v", prefixes)
 	}
+	capabilities, _ := body["capabilities"].(map[string]any)
+	if supported, _ := capabilities["legacy_request_detail"].(bool); !supported {
+		t.Fatal("bootstrap must advertise the implemented Legacy request detail handoff")
+	}
 	features, _ := body["migration_registry"].([]any)
 	if len(features) != len(appUIFeatures) {
 		t.Fatalf("migration registry length = %d, want %d", len(features), len(appUIFeatures))

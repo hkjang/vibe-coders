@@ -6,6 +6,7 @@ import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featureByPath } from "@/config/migration-registry";
+import { legacyRequestDetailHref } from "@/config/legacy-route-map";
 import { RequestDetailDialog } from "@/features/observability/requests/RequestDetailDialog";
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
@@ -332,6 +333,13 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
         }}
         returnFocusRef={returnFocusRef}
         legacyHref={showLegacyAdmin ? legacyPath : undefined}
+        legacyDetailHref={
+          showLegacyAdmin &&
+          data?.request_contract_version === 2 &&
+          auth.capabilities?.legacy_request_detail === true
+            ? legacyRequestDetailHref(legacyPath, activeSelected?.request, auth.credentialPrefixes)
+            : undefined
+        }
         timeZone={selectedTimeZone}
       />
     </section>

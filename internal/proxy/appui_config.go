@@ -503,6 +503,8 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 		// letting a screen discover them from a 403 after the operator clicks.
 		"capabilities": map[string]any{
 			"raw_prompt_view": s.canViewRawPrompts(r),
+			// Navigation support only; existing request APIs still enforce authentication and scope.
+			"legacy_request_detail": true,
 		},
 		"permissions":        scopes,
 		"allowed_features":   allowedFeatures,

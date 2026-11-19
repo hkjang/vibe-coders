@@ -17,6 +17,7 @@ const authRuntime = vi.hoisted(() => ({
   credentialPrefixes: ["corp_"],
   featureFallback: true,
   legacyFallback: true,
+  legacyRequestDetail: false,
   legacyPath: "/admin#/requests" as `/admin${string}`,
   scopes: ["admin:read"] as string[],
 }));
@@ -34,6 +35,7 @@ vi.mock("@/app/auth/AuthProvider", async () => {
       return {
         ...auth,
         credentialPrefixes: authRuntime.credentialPrefixes,
+        capabilities: { ...auth.capabilities, legacy_request_detail: authRuntime.legacyRequestDetail },
         features: auth.features
           .filter((feature) => feature.featureId === "observability.requests")
           .map((feature) => ({
@@ -123,6 +125,7 @@ function renderPage(initialEntry = "/observability/requests") {
 
 describe("RequestPage", () => {
   beforeEach(() => {
+    authRuntime.legacyRequestDetail = false;
     authRuntime.featureFallback = true;
     authRuntime.legacyFallback = true;
     authRuntime.legacyPath = "/admin#/requests";
@@ -673,6 +676,41 @@ describe("RequestPage", () => {
     expect(screen.queryByText("목록 실패")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "기존 관리자 화면 열기" })).not.toBeInTheDocument();
   });
+
+  it("opens only the selected filterable request when the server advertises Legacy detail support", async () => {
+    authRuntime.legacyRequestDetail = true;
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+    expect(screen.getByRole("link", { name: "기존 화면에서 이 요청 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/requests?request_id=req-001",
+    );
+    expect(screen.queryByRole("link", { name: "기존 요청 화면 열기" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { version: 1, filterable: true, base: "/admin#/requests" },
+    { version: 2, filterable: false, base: "/admin#/requests" },
+    { version: 2, filterable: true, base: "/admin#/runtime-requests" },
+  ])(
+    "keeps an honestly labelled list fallback for incompatible request handoff %o",
+    async ({ version, filterable, base }) => {
+      authRuntime.legacyRequestDetail = true;
+      authRuntime.legacyPath = base as typeof authRuntime.legacyPath;
+      vi.spyOn(apiClient, "request").mockResolvedValue({
+        ...response,
+        request_contract_version: version,
+        requests: [{ ...row, request_filterable: filterable }],
+      } as never);
+      const user = userEvent.setup();
+      renderPage();
+      await user.click(await screen.findByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+      expect(screen.queryByRole("link", { name: "기존 화면에서 이 요청 열기" })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "기존 요청 화면 열기" })).toHaveAttribute("href", base);
+    },
+  );
 
   it("uses the runtime request Legacy path and honors its feature fallback toggle", async () => {
     authRuntime.legacyPath = "/admin#/runtime-requests";

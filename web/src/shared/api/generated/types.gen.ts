@@ -4356,6 +4356,10 @@ export type UiBootstrapResponse = {
     authentication: UiAuthentication;
     backend_version: string;
     capabilities: {
+        /**
+         * Supports opening an existing request detail from the Legacy requests hash route. Does not grant request access.
+         */
+        legacy_request_detail?: boolean;
         raw_prompt_view: boolean;
     };
     legacy_route_map: {

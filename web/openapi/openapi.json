@@ -14887,6 +14887,10 @@
           "capabilities": {
             "additionalProperties": false,
             "properties": {
+              "legacy_request_detail": {
+                "description": "Supports opening an existing request detail from the Legacy requests hash route. Does not grant request access.",
+                "type": "boolean"
+              },
               "raw_prompt_view": {
                 "type": "boolean"
               }

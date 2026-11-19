@@ -13,6 +13,7 @@ import { RequestSafeFlowPanel } from "./RequestSafeFlowPanel";
 
 interface RequestDetailDialogProps {
   legacyHref?: `/admin${string}`;
+  legacyDetailHref?: `/admin${string}`;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   request?: AppRequestSummary;
@@ -28,6 +29,7 @@ interface RequestDetailDialogProps {
 
 export function RequestDetailDialog({
   legacyHref,
+  legacyDetailHref,
   onOpenChange,
   open,
   request,
@@ -79,9 +81,9 @@ export function RequestDetailDialog({
             <FeatureLegacyLink
               featureId="observability.requests"
               className="button button-secondary button-default"
-              href={legacyHref}
+              href={legacyDetailHref ?? legacyHref}
             >
-              기존 요청 화면 열기
+              {legacyDetailHref ? "기존 화면에서 이 요청 열기" : "기존 요청 화면 열기"}
             </FeatureLegacyLink>
           ) : null}
           <Button variant="primary" onClick={() => onOpenChange(false)}>

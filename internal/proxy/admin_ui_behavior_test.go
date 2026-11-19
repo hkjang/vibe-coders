@@ -32,3 +32,23 @@ func TestAdminUIBehaviour(t *testing.T) {
 	}
 	t.Logf("\n%s", out)
 }
+
+// Cover asynchronous request selection with the actual embedded Legacy functions.
+func TestAdminUIRequestHandoffBehaviour(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; skipping admin UI request handoff checks")
+	}
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve admin UI request handoff path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, filepath.Join(packageDir, "testdata", "admin_ui_request_handoff.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("admin UI request handoff checks failed: %v\n%s", err, out)
+	}
+	t.Logf("\n%s", out)
+}
