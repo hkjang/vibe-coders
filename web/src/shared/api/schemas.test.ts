@@ -504,3 +504,19 @@ it("accepts only an optional boolean schema handoff capability", () => {
     }).success,
   ).toBe(false);
 });
+
+it("keeps exact work-app Legacy capability optional and boolean", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_work_app_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_work_app_detail: true },
+    }).capabilities.legacy_work_app_detail,
+  ).toBe(true);
+  expect(
+    uiBootstrapSchema.safeParse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_work_app_detail: "true" },
+    }).success,
+  ).toBe(false);
+});

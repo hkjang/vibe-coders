@@ -848,6 +848,7 @@ const adminHTML = `<!doctype html>
     function initialLegacyReadHandoff(hash) {
       if (typeof hash !== 'string' || hash.length > 16384 || /[\u0000-\u001f\u007f]/.test(hash)) return '';
       if (hash.startsWith('#/users?') && legacyAccessTarget(hash)) return hash;
+      if (hash.startsWith('#/apps?') && legacyWorkAppTarget(hash)) return hash;
       if (hash.length > 8192) return '';
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
@@ -894,6 +895,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const appDetail = document.getElementById('legacy-work-app-detail');
+      if (appDetail) appDetail.textContent = '';
       const schemaDetail = document.getElementById('legacy-text2sql-schema-detail');
       if (schemaDetail) schemaDetail.textContent = '';
       const accessDetail = document.getElementById('legacy-access-detail');
@@ -2221,6 +2224,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const appDetail = document.getElementById('legacy-work-app-detail');
+      if (appDetail) appDetail.textContent = '';
       const schemaDetail = document.getElementById('legacy-text2sql-schema-detail');
       if (schemaDetail) schemaDetail.textContent = '';
       const accessDetail = document.getElementById('legacy-access-detail');
@@ -2293,7 +2298,7 @@ const adminHTML = `<!doctype html>
           case 'productivity': await renderProductivityView(); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
-          case 'apps': await renderWorkApps(params); break;
+          case 'apps': if (params.has('app_id')) await renderLegacyWorkAppDetail(); else await renderWorkApps(); break;
           case 'changesets': await renderChangeSets(params); break;
           case 'users':
             if (rest.length) await renderUserDetail(rest.join('/'));
@@ -10413,12 +10418,96 @@ const adminHTML = `<!doctype html>
     window.csDelete = async (id) => { if (!confirm('이 변경 세트를 삭제할까요? 되돌릴 수 없습니다.')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { toast(e.message); } };
 
     // ---------- AI 업무 앱: Skill/Prompt Product/Text2SQL/MCP/모델 묶음 ----------
+
+    function legacyWorkAppTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/apps?')) return null;
+      const query = rawHash.slice('#/apps?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('app_id').length !== 1 || Array.from(params.keys()).some(key => key !== 'app_id')) return null;
+      const id = params.get('app_id');
+      if (!id || new TextEncoder().encode(id).length > 4096 || /\p{C}/u.test(id)) return null;
+      return id;
+    }
+    async function renderLegacyWorkAppDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const id = legacyWorkAppTarget(hash);
+      const retry = '<button type="button" id="legacy-work-app-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-work-app-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('AI 업무 앱 상세',
+          '<div id="legacy-work-app-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/apps">업무 앱 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (key, action) => {
+        if (current()) document.getElementById(key)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!id) { render('<p role="alert">업무 앱 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 업무 앱을 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/apps?' + new URLSearchParams({ view:'detail', id }), { cache:'no-store' });
+        if (!current()) return;
+        const row = data?.app;
+        if (!row || row.id !== id ||
+            ['id','title','description','icon','allowed_teams','allowed_roles','status','owner','created_at','updated_at'].some(key => typeof row[key] !== 'string') ||
+            !Array.isArray(row.components) || row.components.some(c => !c || ['kind','ref','label'].some(key => typeof c[key] !== 'string'))) throw new Error('Invalid selected work app');
+        const fields = [['앱 ID',row.id],['이름',row.title || '미지정'],['아이콘',row.icon || '미지정'],
+          ['상태',row.status === 'active' ? '활성' : row.status === 'archived' ? '지원 중단' : row.status || '미지정'],
+          ['책임자',row.owner || '미지정'],['허용 팀',row.allowed_teams || '전체'],['허용 역할',row.allowed_roles || '전체'],
+          ['생성 시각',row.created_at || '미확인'],['수정 시각',row.updated_at || '미확인']];
+        const metadata = '<p>현재 저장된 업무 앱과 구성 요소 참조입니다. 허용 팀·역할은 앱 실행 범위이며, 관리자 조회 권한과는 별도로 적용됩니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl>';
+        let descriptionPage = 0, componentPage = 0;
+        const descriptions = legacyDetailTextPages(row.description);
+        const componentCount = Math.max(1, Math.ceil(row.components.length / 50));
+        const kindLabels = { skill:'스킬', prompt_product:'프롬프트 상품', text2sql_report:'SQL 리포트', mcp_tool:'MCP 도구', model:'모델' };
+        const button = (key, label, disabled) => '<button type="button" id="' + key + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+        const paint = focusId => {
+          if (!current()) return;
+          const [start, end] = descriptions[descriptionPage];
+          let body = metadata + '<h3>앱 설명</h3><pre id="legacy-work-app-description" tabindex="0" aria-label="업무 앱 설명" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto">' +
+            escapeHTML(row.description.slice(start,end) || '등록된 설명이 없습니다.') + '</pre>';
+          if (descriptions.length > 1) body += '<nav aria-label="업무 앱 설명 페이지"><span role="status">' + (descriptionPage + 1) + ' / ' + descriptions.length +
+            '페이지</span>' + button('legacy-work-app-description-prev','이전 설명',descriptionPage === 0) + button('legacy-work-app-description-next','다음 설명',descriptionPage + 1 === descriptions.length) + '</nav>';
+          body += '<h3>구성 요소</h3><p>저장된 참조를 표시합니다. 참조 확인이나 앱 실행은 수행하지 않습니다.</p>';
+          if (row.components.length) {
+            body += '<ol aria-label="업무 앱 구성 요소" start="' + (componentPage * 50 + 1) + '">' +
+              row.components.slice(componentPage * 50,(componentPage + 1) * 50).map(c => '<li><dl>' +
+                [['종류',Object.hasOwn(kindLabels,c.kind) ? kindLabels[c.kind] : c.kind || '미지정'],['참조',c.ref || '미지정'],['라벨',c.label || '미지정']]
+                  .map(pair => '<dt>' + escapeHTML(pair[0]) + '</dt><dd style="white-space:pre-wrap;margin:4px 0">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl></li>').join('') +
+              '</ol><nav aria-label="업무 앱 구성 요소 페이지"><span id="legacy-work-app-components-status" role="status" tabindex="-1">' + row.components.length + '개 · ' +
+              (componentPage + 1) + ' / ' + componentCount + '페이지</span>' + button('legacy-work-app-components-prev','이전 구성 요소',componentPage === 0) +
+              button('legacy-work-app-components-next','다음 구성 요소',componentPage + 1 === componentCount) + '</nav>';
+          } else body += '<p>구성 요소가 없습니다.</p>';
+          render(body + retry,focusId);
+          bind('legacy-work-app-retry',() => { void route(); });
+          bind('legacy-work-app-description-prev',() => { if (descriptionPage > 0) { descriptionPage--; paint('legacy-work-app-description'); } });
+          bind('legacy-work-app-description-next',() => { if (descriptionPage + 1 < descriptions.length) { descriptionPage++; paint('legacy-work-app-description'); } });
+          bind('legacy-work-app-components-prev',() => { if (componentPage > 0) { componentPage--; paint('legacy-work-app-components-status'); } });
+          bind('legacy-work-app-components-next',() => { if (componentPage + 1 < componentCount) { componentPage++; paint('legacy-work-app-components-status'); } });
+        };
+        paint();
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 업무 앱을 불러오지 못했습니다. 삭제되었거나 조회할 수 없는 앱일 수 있습니다. 주소·로그인 상태·조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+        bind('legacy-work-app-retry',() => { void route(); });
+      }
+    }
+
     async function renderWorkApps() {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      if (!current()) return;
       view.innerHTML = section('AI 업무 앱', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/apps'); }
-      catch (e) { view.innerHTML = section('AI 업무 앱', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      catch (e) { if (!current()) return; view.innerHTML = section('AI 업무 앱', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      if (!current()) return;
       const apps = d.apps || [];
       const kindLabel = { skill: 'Skill', prompt_product: '프롬프트상품', text2sql_report: 'SQL리포트', mcp_tool: 'MCP', model: '모델' };
       const componentLink = { skill: 'skills', prompt_product: 'prompt-assets', text2sql_report: 'text2sql', mcp_tool: 'mcp-tools', model: 'routing' };
@@ -17093,7 +17182,7 @@ const adminHTML = `<!doctype html>
       if (!name || name.trim() !== name || Array.from(name).length > 512 || new TextEncoder().encode(name).length > 2048 || /\p{C}/u.test(name)) return null;
       return name;
     }
-    function legacySchemaTextPages(text) {
+    function legacyDetailTextPages(text) {
       const pages = [];
       for (let start = 0; start < text.length;) {
         let end = Math.min(start + 16384, text.length);
@@ -17138,7 +17227,7 @@ const adminHTML = `<!doctype html>
           fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
             '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1])) + '</dd>').join('') + '</dl>';
         let expanded = false, textPage = 0, tablePage = 0;
-        const textPages = data.raw_content_available ? legacySchemaTextPages(row.schema_text) : [];
+        const textPages = data.raw_content_available ? legacyDetailTextPages(row.schema_text) : [];
         const tableCount = Math.max(1, Math.ceil(row.allowed_tables.length / 50));
         const button = (id, label, disabled) => '<button type="button" id="' + id + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
         const paint = focusId => {

@@ -38,6 +38,9 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if supported, _ := capabilities["legacy_request_filters"].(bool); !supported {
 		t.Fatal("expected support for exact Legacy request filter handoff")
 	}
+	if supported, _ := capabilities["legacy_work_app_detail"].(bool); !supported {
+		t.Fatal("exact Legacy work app capability missing")
+	}
 	if supported, _ := capabilities["legacy_text2sql_schema_detail"].(bool); !supported {
 		t.Fatal("missing exact Text2SQL schema capability")
 	}

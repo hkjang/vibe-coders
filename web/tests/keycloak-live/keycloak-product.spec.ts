@@ -1084,3 +1084,144 @@ test("KEYCLOAK-LIVE-029 이전 서버 형식의 갱신 검증 실패는 자격 �
     await restoreGrantFixture(page);
   }
 });
+
+const workAppHandoffID = " 업무 앱 +%2F?&#/ ";
+async function openWorkAppBridge(page: Page, username: string, id = workAppHandoffID) {
+  await signIn(page, username);
+  let writes = 0,
+    broadReads = 0,
+    exactReads = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      (url.pathname.startsWith("/admin/") || url.pathname.startsWith("/v1/apps/")) &&
+      request.method() !== "GET"
+    )
+      writes++;
+    if (url.pathname === "/admin/apps") {
+      if (url.searchParams.get("view") === "detail") exactReads++;
+      else if (url.searchParams.get("view") !== "page") broadReads++;
+    }
+  });
+  await page.goto("/app/agents/apps?" + new URLSearchParams({ app: id }));
+  const sheet = page.getByRole("dialog", { name: /같은 업무 앱 제목/u });
+  await expect(sheet).toBeVisible();
+  const href = "/admin#/apps?" + new URLSearchParams({ app_id: id });
+  const link = sheet.getByRole("link", { name: "기존 화면에서 열기", exact: true });
+  await expect(link).toHaveAttribute("href", href);
+  await link.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-work-app-detail");
+  await expect(detail).toContainText("work-app-owner");
+  await expect(page).toHaveURL(gateway + href);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  return { detail, reads: () => ({ writes, broadReads, exactReads }) };
+}
+test("KEYCLOAK-LIVE-030 같은 이름의 앱 중 선택한 앱만 실제 SSO로 열고 참조를 탐색한다", async ({ page }) => {
+  const { detail, reads } = await openWorkAppBridge(page, "new-operator");
+  await expect(detail).toContainText("선택한 업무 앱 설명");
+  await expect(detail).not.toContainText("다른 앱의 설명");
+  await expect(detail).toContainText("지원 중단");
+  await expect(detail.getByRole("list", { name: "업무 앱 구성 요소" }).locator("li")).toHaveCount(50);
+  await detail.getByRole("button", { name: "다음 구성 요소", exact: true }).click();
+  await expect(detail.getByRole("list", { name: "업무 앱 구성 요소" }).locator("li")).toHaveCount(1);
+  await expect(detail).toContainText("work-app-component-050");
+  await expect(detail.locator("input,select,textarea,form")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: /발행|삭제|검증|실행|권한 관리/ })).toHaveCount(0);
+  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const detail = document.querySelector("#legacy-work-app-detail");
+        if (!detail) throw Error("Work app detail missing");
+        return (await axe.run(detail, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("#auth-user").click();
+  await page.locator("#auth-logout").click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(detail).toBeEmpty();
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+  expect(reads().exactReads).toBeGreaterThanOrEqual(2);
+});
+test("KEYCLOAK-LIVE-031 읽기 전용 관리자는 기존 관리자 조회 규칙으로 업무 앱을 읽는다", async ({ page }) => {
+  const { detail, reads } = await openWorkAppBridge(page, "reader");
+  await expect(detail).toContainText("지원 중단");
+  await expect(detail).toContainText("other-access-id");
+  await expect(detail).toContainText("developer");
+  await expect(detail).toContainText("선택한 업무 앱 설명");
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+});
+test("KEYCLOAK-LIVE-032 최대 UTF8 앱 ID와 긴 설명을 보존하며 오류가 다른 앱을 열지 않는다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openWorkAppBridge(page, "new-operator", "😀".repeat(1024));
+  const description = detail.getByLabel("업무 앱 설명", { exact: true });
+  await expect(description).toHaveText("가".repeat(16383));
+  await detail.getByRole("button", { name: "다음 설명", exact: true }).click();
+  await expect(description).toHaveText("😀work-app-final-tail");
+  await expect(description).toBeFocused();
+  await page.goto("/admin#/apps?app_id=missing-app");
+  await expect(detail).toContainText("선택한 업무 앱을 불러오지 못했습니다");
+  await expect(detail).not.toContainText("work-app-owner");
+  const before = reads().exactReads;
+  await page.goto("/admin#/apps?app_id=%ED%A0%80");
+  await expect(detail).toContainText("업무 앱 상세 주소가 올바르지 않습니다");
+  expect(reads().exactReads).toBe(before);
+  // An old list response must not replace the current exact detail.
+  let captured = false,
+    release: () => void = () => {};
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  let completed = false;
+  await page.route("**/admin/apps", async (route) => {
+    if (captured) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    captured = true;
+    await gate;
+    await route.fulfill({ response }).catch(() => {});
+    completed = true;
+  });
+  await detail.getByRole("link", { name: "업무 앱 전체 화면 열기", exact: true }).click();
+  await expect.poll(() => captured).toBe(true);
+  await page.goto("/admin#/apps?" + new URLSearchParams({ app_id: workAppHandoffID }));
+  await expect(detail).toContainText("선택한 업무 앱 설명");
+  release();
+  await expect.poll(() => completed).toBe(true);
+  await page.evaluate(
+    () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+  );
+  await expect(detail).toContainText("선택한 업무 앱 설명");
+  await expect(page.locator("#app-title")).toHaveCount(0);
+  await detail.getByRole("link", { name: "업무 앱 전체 화면 열기", exact: true }).click();
+  await expect(page.locator("#app-title")).toBeAttached();
+  await expect(detail).toHaveCount(0);
+  await page.goto("/admin#/apps?view=all");
+  await expect(page.locator("#app-title")).toBeAttached();
+  await expect(detail).toHaveCount(0);
+  expect(reads().writes).toBe(0);
+});
+test("KEYCLOAK-LIVE-033 팀 관리자의 기존 전체 앱 조회 정책을 변경하지 않는다", async ({ page }) => {
+  const { detail, reads } = await openWorkAppBridge(page, "routing-reader");
+  await expect(detail).toContainText("other-access-id");
+  await expect(detail).toContainText("선택한 업무 앱 설명");
+  await expect(page.locator("#auth-user")).toContainText("team_admin");
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+});

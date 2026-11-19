@@ -4392,6 +4392,10 @@ export type UiBootstrapResponse = {
          * Opens one exact stored Text2SQL schema in read-only Legacy detail using existing team scope and raw-content permissions. Never executes SQL or changes configuration.
          */
         legacy_text2sql_schema_detail?: boolean;
+        /**
+         * Opens one exact stored work app in Legacy using the existing administrator read policy. Shows saved metadata and component references without executing or changing the app.
+         */
+        legacy_work_app_detail?: boolean;
         raw_prompt_view: boolean;
     };
     legacy_route_map: {

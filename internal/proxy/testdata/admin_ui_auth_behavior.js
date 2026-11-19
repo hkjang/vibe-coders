@@ -16,7 +16,8 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
-const schemaTarget = block('function legacyText2SQLSchemaTarget(', 'function legacySchemaTextPages(');
+const workAppTarget = block('function legacyWorkAppTarget(', 'async function renderLegacyWorkAppDetail(');
+const schemaTarget = block('function legacyText2SQLSchemaTarget(', 'function legacyDetailTextPages(');
 const accessTarget = block('function legacyAccessTarget(', 'function legacyAccessKeyLifecycle(');
 const routingTarget = block('function legacyRoutingRuleTarget(', 'async function renderLegacyRoutingRuleDetail(');
  const modelTarget = block('function legacyModelTarget(', 'async function renderLegacyModelDetail(') + block('function legacyProviderRefValid(', '// Reuse the safe app projection;');
@@ -83,7 +84,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -860,4 +861,20 @@ for (const invalid of [false, true]) test('authenticated navigation outage canno
   assert.equal(h.authState.nav.allowed_tabs.length, 0);
   assert.match(h.node('view').innerHTML, /권한 다시 확인/);
   assert.equal(h.storage.get('authRefresh'), 'A-refresh');
+});
+
+for (const id of [' 업무 앱 +%2F?&#/ ', ' 앱 ' + '가'.repeat(1300) + ' ']) {
+ test('exact work app handoff survives native SSO staging with long identity ' + id.slice(0,15), async () => {
+  const hash = '#/apps?' + new URLSearchParams({app_id:id});
+  const h = harness(call => call.path === '/auth/sso/exchange' ? response(200,tokens('SSO')) : response(200,{auth_enabled:true,user:tokens('SSO').user}), hash);
+  h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+  h.location.hash='#kc_code=synthetic';
+  await h.initAuth();
+  assert.equal(h.location.hash,hash); assert.equal(h.routes,1);
+ });
+}
+test('logout clears the displayed work app snapshot', async () => {
+ const h=harness(()=>response(200));h.seed();
+ h.node('legacy-work-app-detail').textContent='PRIVATE_APP';
+ await h.logout();assert.equal(h.node('legacy-work-app-detail').textContent,'');
 });

@@ -253,6 +253,51 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal("routing baseline invalid")
 	}
+
+	workAppID := " 업무 앱 +%2F?&#/ "
+	longWorkAppID := strings.Repeat("😀", 1024)
+	for i, id := range []string{workAppID, longWorkAppID, "other-work-app"} {
+		components := make([]store.AppComponent, 51)
+		for j := range components {
+			components[j] = store.AppComponent{Kind: "model", Ref: fmt.Sprintf("work-app-component-%03d", j), Label: fmt.Sprintf("참조 %d", j)}
+		}
+		description := "선택한 업무 앱 설명"
+		if i == 1 {
+			description = strings.Repeat("가", 16383) + "😀work-app-final-tail"
+		}
+		if i == 2 {
+			description = "다른 앱의 설명"
+		}
+		if err := db.CreateWorkApp(t.Context(), store.WorkApp{ID: id, Title: "같은 업무 앱 제목", Description: description, Icon: "🧩",
+			Components: components, AllowedTeams: "other-access-id", AllowedRoles: "developer", Status: "archived", Owner: "work-app-owner"}); err != nil {
+			t.Fatal("work app fixture unavailable")
+		}
+	}
+	workAppsSnapshot := func() string {
+		apps, err := db.ListWorkApps(t.Context())
+		if err != nil {
+			t.Fatal("work app snapshot unavailable")
+		}
+		rows := []any{apps}
+		for _, app := range apps {
+			versions, err := db.ListWorkAppVersions(t.Context(), app.ID)
+			if err != nil {
+				t.Fatal("work app versions unavailable")
+			}
+			permissions, err := db.ListAppPermissions(t.Context(), app.ID)
+			if err != nil {
+				t.Fatal("work app permissions unavailable")
+			}
+			rows = append(rows, versions, permissions)
+		}
+		raw, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatal("work app snapshot invalid")
+		}
+		return string(raw)
+	}
+	workAppsBefore := workAppsSnapshot()
+
 	assetsBefore, err := db.ListPromptTemplates(t.Context(), false)
 	if err != nil {
 		t.Fatal("asset baseline unavailable")
@@ -300,6 +345,9 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if command.Run() != nil {
 		t.Fatal("Keycloak product browser checks failed; see the numeric-only summary")
 	}
+	if workAppsSnapshot() != workAppsBefore {
+		t.Fatal("work app definitions, versions or permissions changed during read-only handoff")
+	}
 	summaryBytes, err := os.ReadFile(filepath.Join(web, "test-results", "keycloak-live-summary.json"))
 	if err != nil {
 		t.Fatal("Keycloak product summary missing")
@@ -311,12 +359,12 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 29 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 33 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024" && test.Scenario != "KEYCLOAK-LIVE-025" && test.Scenario != "KEYCLOAK-LIVE-026" && test.Scenario != "KEYCLOAK-LIVE-027" && test.Scenario != "KEYCLOAK-LIVE-028" && test.Scenario != "KEYCLOAK-LIVE-029") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024" && test.Scenario != "KEYCLOAK-LIVE-025" && test.Scenario != "KEYCLOAK-LIVE-026" && test.Scenario != "KEYCLOAK-LIVE-027" && test.Scenario != "KEYCLOAK-LIVE-028" && test.Scenario != "KEYCLOAK-LIVE-029" && test.Scenario != "KEYCLOAK-LIVE-030" && test.Scenario != "KEYCLOAK-LIVE-031" && test.Scenario != "KEYCLOAK-LIVE-032" && test.Scenario != "KEYCLOAK-LIVE-033") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true
@@ -381,5 +429,5 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if modelUpstreamMutations.Load() != 0 {
 		t.Fatal("model navigation mutated an upstream")
 	}
-	t.Log("twenty-nine real Keycloak HTTPS browser scenarios, scoped schema/access and persisted data preservation checks passed")
+	t.Log("thirty-three real Keycloak HTTPS browser scenarios, scoped schema/access and persisted data preservation checks passed")
 }

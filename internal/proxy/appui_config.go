@@ -512,6 +512,7 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 			"legacy_prompt_library":         true,
 			"legacy_model_detail":           true,
 			"legacy_text2sql_schema_detail": true,
+			"legacy_work_app_detail":        true,
 			"legacy_access_detail":          true,
 			"legacy_routing_rule_detail":    true,
 			"legacy_request_filters":        true,

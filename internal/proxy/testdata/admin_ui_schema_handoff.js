@@ -21,7 +21,7 @@ function harness(){
  const h={URLSearchParams,TextEncoder,document:{getElementById:node},location:{hash:hash()},calls,nodes,reply:async()=>response(),section:(title,html)=>title+html};
  h.window=h;vm.createContext(h);
  vm.runInContext('let legacyRouteGeneration=1,authEpoch=1;function authCurrent(epoch){return epoch===authEpoch}async function api(url,opts){calls.push({url,opts});return reply(url,opts)}function route(){globalThis.retries=(globalThis.retries||0)+1}'+
- ['legacyText2SQLSchemaTarget','legacySchemaTextPages','escapeHTML','renderLegacyText2SQLSchemaDetail'].map(grab).join('\n')+
+ ['legacyText2SQLSchemaTarget','legacyDetailTextPages','escapeHTML','renderLegacyText2SQLSchemaDetail'].map(grab).join('\n')+
  'globalThis.retire=kind=>{if(kind==="auth")authEpoch++;else if(kind==="route")legacyRouteGeneration++;else location.hash="#/other";document.getElementById("view").innerHTML="NEW";};',h);
  h.open=async(value=name)=>{h.location.hash=hash(value);await h.renderLegacyText2SQLSchemaDetail();};
  h.click=id=>h.nodes[id].listeners.click();
@@ -73,7 +73,7 @@ for(const [raw,exact] of [['#/text2sql?schema_name=exact?tail','exact?tail'],[ha
 }
 test('full text pagination never loses or splits surrogate pairs',async()=>{
  const h=harness();const text='a'.repeat(16383)+'😀'+'끝'.repeat(17000);
- const pages=h.legacySchemaTextPages(text);assert.equal(pages.map(([a,b])=>text.slice(a,b)).join(''),text);
+ const pages=h.legacyDetailTextPages(text);assert.equal(pages.map(([a,b])=>text.slice(a,b)).join(''),text);
  for(const [a,b] of pages){assert.ok(b-a<=16384);assert.doesNotThrow(()=>encodeURIComponent(text.slice(a,b)));}
  h.reply=async()=>response({schema_text:text});await h.open();h.click('legacy-schema-toggle');
  assert.ok(h.nodes.view.innerHTML.includes('a'.repeat(16383)));assert.ok(!h.nodes.view.innerHTML.includes('😀'));
