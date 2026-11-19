@@ -1709,3 +1709,127 @@ test("KEYCLOAK-LIVE-044 가져온 이름과 메타데이터를 보존해 편집�
   expect(writes.at(-1)).toMatchObject({ path: "/admin/skills", query: "?skill_ref=" + before.skill_ref });
   expect(await nativeSkill(page, "/imported-skill/")).toEqual(aliasBefore);
 });
+
+const sessionHandoffID = "세션 +%2F?&#";
+async function openSessionBridge(page: Page, username: string, id = sessionHandoffID) {
+  await signIn(page, username);
+  let writes = 0,
+    broadReads = 0,
+    exactReads = 0,
+    legacy = false;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+    if (legacy && (url.pathname === "/admin/sessions" || url.pathname === "/admin/sessions/page"))
+      broadReads++;
+    if (url.pathname.startsWith("/admin/sessions/") && url.pathname.endsWith("/flight-recorder"))
+      exactReads++;
+  });
+  await page.goto(
+    "/app/observability/sessions?" + new URLSearchParams({ session_id: id, days: "7", q: "not-in-list" }),
+  );
+  const sheet = page.getByRole("dialog", { name: "세션 비행기록", exact: true });
+  await expect(sheet).toBeVisible();
+  const href = "/admin#/sessions?" + new URLSearchParams({ session_id: id });
+  const link = sheet.getByRole("link", { name: "기존 화면에서 같은 세션 열기", exact: true });
+  await expect(link).toHaveAttribute("href", href);
+  await link.focus();
+  legacy = true;
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-session-detail");
+  await expect(detail.getByRole("region", { name: "선택한 세션 기록", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(gateway + href);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  return { detail, reads: () => ({ writes, broadReads, exactReads }) };
+}
+test("KEYCLOAK-LIVE-045 마스킹된 세션 표시와 실제 대상을 구분해 SSO로 연결하고 로그아웃 시 지운다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSessionBridge(page, "reader", "reader-session@example.invalid");
+  await expect(detail).toContainText("[REDACTED_EMAIL]");
+  await expect(detail).not.toContainText("reader-session@example.invalid");
+  await expect(detail).not.toContainText("RAW_SESSION_PRIVATE");
+  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const root = document.querySelector("#legacy-session-detail");
+        if (!root) throw Error("Session detail missing");
+        return (await axe.run(root, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  expect(reads()).toMatchObject({ writes: 0, broadReads: 0 });
+  await page.locator("#auth-user").click();
+  await page.locator("#auth-logout").click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(detail).toBeEmpty();
+});
+test("KEYCLOAK-LIVE-046 세션 목록 기간 밖 기록과 팀 권한을 유지하고 외부 팀은 조회하지 않는다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSessionBridge(page, "routing-reader");
+  await expect(detail).toContainText("OWN_SESSION_CURRENT");
+  await expect(detail).toContainText("OWN_SESSION_OLD");
+  await expect(detail).not.toContainText("FOREIGN_SESSION_SHARED");
+  await expect(detail).not.toContainText("RAW_SESSION_PRIVATE");
+  await page.goto("/admin#/sessions?session_id=foreign-session-only");
+  await expect(detail).toContainText("선택한 세션을 불러오지 못했습니다");
+  await expect(detail).not.toContainText("FOREIGN_SESSION_ONLY");
+  await expect(detail).not.toContainText("OWN_SESSION_CURRENT");
+  expect(reads()).toMatchObject({ writes: 0, broadReads: 0 });
+});
+test("KEYCLOAK-LIVE-047 최대 UTF8 세션 ID를 SSO로 유지하고 같은 요청 상세를 명시적으로 연다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSessionBridge(page, "new-operator", "😀".repeat(1024));
+  await expect(detail).toContainText("MAX_SESSION_PREVIEW");
+  expect(reads()).toMatchObject({ writes: 0, broadReads: 0 });
+  const request = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === "/admin/requests/session-max",
+  );
+  await detail.getByRole("button", { name: "상세", exact: true }).click();
+  await request;
+  expect(reads().writes).toBe(0);
+});
+test("KEYCLOAK-LIVE-048 잘못된 세션 주소와 늦은 전체 목록이 현재 상세를 바꾸지 않는다", async ({ page }) => {
+  const { detail, reads } = await openSessionBridge(page, "new-operator");
+  const before = reads().exactReads;
+  await page.goto("/admin#/sessions?session_id=one&session_id=two");
+  await expect(detail).toContainText("세션 상세 주소가 올바르지 않습니다");
+  expect(reads().exactReads).toBe(before);
+  let captured = false,
+    completed = false,
+    release: () => void = () => {};
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  await page.route("**/admin/sessions?days=*", async (route) => {
+    const response = await route.fetch();
+    captured = true;
+    await gate;
+    await route.fulfill({ response }).catch(() => {});
+    completed = true;
+  });
+  await detail.getByRole("link", { name: "세션 전체 화면 열기", exact: true }).click();
+  await expect.poll(() => captured).toBe(true);
+  await page.goto("/admin#/sessions?" + new URLSearchParams({ session_id: sessionHandoffID }));
+  await expect(detail).toContainText("OWN_SESSION_CURRENT");
+  release();
+  await expect.poll(() => completed).toBe(true);
+  await page.evaluate(
+    () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+  );
+  await expect(detail).toContainText("OWN_SESSION_CURRENT");
+  await expect(page.locator("#sess-days")).toHaveCount(0);
+  expect(reads().writes).toBe(0);
+});

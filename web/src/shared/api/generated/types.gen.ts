@@ -4437,6 +4437,10 @@ export type UiBootstrapResponse = {
          */
         legacy_routing_rule_detail?: boolean;
         /**
+         * Read-only same-session Legacy detail and SSO return path for existing flight-recorder identifiers. Existing team scope, projection and bounded history apply.
+         */
+        legacy_session_detail?: boolean;
+        /**
          * Opens one exact stored skill in read-only Legacy using the existing administrator read policy, including saved instructions and metadata. No evaluation, scan, promotion or execution.
          */
         legacy_skill_detail?: boolean;

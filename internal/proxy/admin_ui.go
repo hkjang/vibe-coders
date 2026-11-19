@@ -851,6 +851,7 @@ const adminHTML = `<!doctype html>
       if (hash.startsWith('#/apps?') && legacyWorkAppTarget(hash)) return hash;
       if (hash.startsWith('#/workflows?') && legacyWorkflowTarget(hash)) return hash;
       if (hash.startsWith('#/skills?') && legacySkillTarget(hash)) return hash;
+      if (hash.startsWith('#/sessions?') && legacySessionTarget(hash)) return hash;
       if (hash.length > 8192) return '';
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
@@ -897,6 +898,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const sessionDetail = document.getElementById('legacy-session-detail');
+      if (sessionDetail) sessionDetail.innerHTML = '';
       const skillDetail = document.getElementById('legacy-skill-detail');
       if (skillDetail) skillDetail.textContent = '';
       window._skillsByName = Object.create(null);
@@ -1395,6 +1398,7 @@ const adminHTML = `<!doctype html>
     let modalGeneration = 0;
     let legacyRouteGeneration = 0;
     let requestDetailGeneration = 0;
+    let flightRecorderGeneration = 0;
     let assetDetailGeneration = 0;
 
     function _applyModalState(state) {
@@ -2231,6 +2235,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const sessionDetail = document.getElementById('legacy-session-detail');
+      if (sessionDetail) sessionDetail.innerHTML = '';
       const skillDetail = document.getElementById('legacy-skill-detail');
       if (skillDetail) skillDetail.textContent = '';
       window._skillsByName = Object.create(null);
@@ -2300,7 +2306,7 @@ const adminHTML = `<!doctype html>
           case 'waterfall': await renderWaterfall(params); break;
           case 'llm':       await renderLLMObservability(); break;
           case 'requests':  await renderRequestsView(params); break;
-          case 'sessions':  await renderSessionsView(); break;
+          case 'sessions': if (params.has('session_id')) await renderLegacySessionDetail(); else await renderSessionsView(); break;
           case 'redteam':   await renderRedTeamView(); break;
           case 'agent-routes': await renderAgentRoutesView(); break;
           case 'sbom':      await renderSBOMView(); break;
@@ -4773,9 +4779,7 @@ const adminHTML = `<!doctype html>
     }
 
     // Agent Session Flight Recorder — 한 세션의 게이트웨이 활동을 시간순으로 재구성.
-    window.openFlightRecorder = async (sessionID) => {
-      try {
-        const d = await api('/admin/sessions/' + encodeURIComponent(sessionID) + '/flight-recorder');
+    function flightRecorderHTML(d, exact = false) {
         const ro = d.rollup || {};
         const sm = d.summary || {};
         const vcls = sm.verdict === '위험' ? 'error' : (sm.verdict === '주의' ? 'warn' : '');
@@ -4817,15 +4821,24 @@ const adminHTML = `<!doctype html>
           '<td>' + fmt(e.total_tokens || 0) + '<div class="muted" style="font-size:10px">' + money(e.cost_krw || 0) + '</div></td>' +
           '<td>' + fmt(e.tool_count || 0) + '</td>' +
           '<td>' + (flags.join(' ') || '-') + '</td>' +
-          '<td><a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(e.request_id) + '\');return false">상세</a></td>' +
+          '<td>' + (exact ? '<button type="button" data-legacy-session-request="' + i + '">상세</button>' : '<a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(e.request_id) + '\');return false">상세</a>') + '</td>' +
         '</tr>';
         }).join('') || '<tr><td colspan="11" class="muted">이벤트 없음</td></tr>';
-        openModal('세션 비행기록 - ' + escapeHTML(sessionID),
-          rcaHtml + summary +
+      return rcaHtml + summary +
           '<h3 style="margin-top:14px">타임라인 (' + (d.events || []).length + ')</h3>' +
-          '<table><thead><tr><th>#</th><th>시각</th><th>종류</th><th>모델</th><th>마지막 메시지</th><th>상태</th><th>지연</th><th>토큰/비용</th><th>도구</th><th>위험</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
-          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>');
+          '<table><thead><tr><th>#</th><th>시각</th><th>종류</th><th>모델</th><th>마지막 메시지</th><th>상태</th><th>지연</th><th>토큰/비용</th><th>도구</th><th>위험</th><th>요청 상세</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>';
+    }
+    window.openFlightRecorder = async (sessionID) => {
+      const selection = ++flightRecorderGeneration;
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash, modal = modalGeneration;
+      const current = () => selection === flightRecorderGeneration && generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && modal === modalGeneration && authCurrent(epoch);
+      try {
+        const data = await api('/admin/sessions/' + encodeURIComponent(sessionID) + '/flight-recorder', {cache:'no-store'});
+        if (!current()) return;
+        openModal('세션 비행기록 - ' + escapeHTML(sessionID), flightRecorderHTML(data));
       } catch (err) {
+        if (!current()) return;
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
@@ -6614,7 +6627,72 @@ const adminHTML = `<!doctype html>
     // ---------- requests view ----------
     let diffSelection = JSON.parse(sessionStorage.getItem('diffSelection') || '[]');
     // 세션 비행기록 인덱스 — 최근 코딩 세션 목록, 각 세션의 비행기록 모달로 드릴인.
+    function legacySessionTarget(rawHash) {
+      if (typeof rawHash !== 'string' || !rawHash.startsWith('#/sessions?') || rawHash.length > 16384) return null;
+      const query = rawHash.slice('#/sessions?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('session_id').length !== 1 || Array.from(params.keys()).some(key => key !== 'session_id')) return null;
+      const id = params.get('session_id');
+      if (!id || id === '.' || id === '..' || id.trim() !== id || new TextEncoder().encode(id).length > 4096 || /[\\/\p{C}]/u.test(id)) return null;
+      return id;
+    }
+    function validLegacySessionRecorder(data) {
+      if (!data || typeof data.session_id !== 'string' || !Array.isArray(data.events) || data.events.length > 500) return false;
+      const numbers = (item, keys) => item && keys.every(key => typeof item[key] === 'number' && Number.isFinite(item[key]));
+      const texts = (item, keys) => item && keys.every(key => typeof item[key] === 'string');
+      const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
+      const rollup = data.rollup, summary = data.summary;
+      return numbers(rollup,['requests','total_tokens','total_cost','errors','tool_calls']) &&
+        texts(rollup,['started_at','ended_at']) && ['models','providers','trace_ids'].every(key => strings(rollup[key])) &&
+        rollup.kinds && typeof rollup.kinds === 'object' && !Array.isArray(rollup.kinds) && Object.values(rollup.kinds).every(value => typeof value === 'number' && Number.isFinite(value)) &&
+        numbers(rollup.risk,['secret_requests','policy_block_requests','high_risk_code_requests']) &&
+        texts(summary,['verdict','headline']) && strings(summary.findings) && typeof data.note === 'string' &&
+        data.events.every(event => texts(event,['request_id','trace_id','kind','endpoint','model','provider','created_at','last_message','detail','trace']) &&
+          numbers(event,['status_code','latency_ms','total_tokens','cost_krw','tool_count']) && typeof event.is_error === 'boolean' &&
+          (event.secret_events === undefined || numbers(event,['secret_events'])) &&
+          (event.policy_blocks === undefined || numbers(event,['policy_blocks'])) &&
+          (event.code_risk === undefined || typeof event.code_risk === 'string'));
+    }
+    async function renderLegacySessionDetail() {
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const target = legacySessionTarget(hash);
+      const render = body => {
+        if (!current()) return;
+        document.getElementById('view').innerHTML = section('세션 비행기록',
+          '<div id="legacy-session-detail" tabindex="-1" style="padding:16px;overflow-wrap:anywhere;min-width:0">' +
+          '<p><a href="#/sessions">세션 전체 화면 열기</a> <button type="button" id="legacy-session-retry">다시 조회</button></p>' +
+          body + '</div>');
+        document.getElementById('legacy-session-detail').focus();
+        document.getElementById('legacy-session-retry').addEventListener('click', () => { if (current()) route(); });
+      };
+      if (!target) { render('<p role="alert">세션 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 세션을 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/sessions/' + encodeURIComponent(target) + '/flight-recorder', {cache:'no-store'});
+        if (!current()) return;
+        // The session_id field is a role-projected label. Its masking must not
+        // replace the exact request target or be mistaken for an identity check.
+        if (!validLegacySessionRecorder(data)) throw new Error('Invalid session recorder');
+        render('<p>목록 기간과 별개인 제한된 최근 기록입니다. 현재 계정에 허용된 요청만 표시합니다.</p>' +
+          '<div role="region" aria-label="선택한 세션 기록" tabindex="0" style="overflow:auto;max-width:100%">' + flightRecorderHTML(data, true) + '</div>');
+        const root = document.getElementById('legacy-session-detail');
+        root.querySelectorAll('[data-legacy-session-request]').forEach(button => {
+          button.addEventListener('click', () => {
+            if (!current()) return;
+            const event = data.events[Number(button.dataset.legacySessionRequest)];
+            if (event) openRequestDetail(event.request_id);
+          });
+        });
+      } catch {
+        if (current()) render('<p role="alert">선택한 세션을 불러오지 못했습니다. 권한과 저장된 기록을 확인한 뒤 다시 조회하세요.</p>');
+      }
+    }
+
     async function renderSessionsView() {
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
       const view = document.getElementById('view');
       const days = sessionStorage.getItem('sessionsDays') || '7';
       view.innerHTML = section('세션 비행기록',
@@ -6622,11 +6700,13 @@ const adminHTML = `<!doctype html>
         '<button type="button" id="sess-reload">조회</button></div>' +
         '<div id="sessions-results"><div class="loading">불러오는 중...</div></div>');
       const load = async () => {
+        if (!current()) return;
         const d = document.getElementById('sess-days').value.trim() || '7';
         sessionStorage.setItem('sessionsDays', d);
         const host = document.getElementById('sessions-results');
         try {
           const data = await api('/admin/sessions?days=' + encodeURIComponent(d));
+          if (!current()) return;
           const ss = data.sessions || [];
           if (!ss.length) { host.innerHTML = '<div class="empty">세션 없음 (클라이언트가 session_id를 보내야 집계됩니다)</div>'; return; }
           const rows = ss.map(s => '<tr>' +
@@ -6642,7 +6722,7 @@ const adminHTML = `<!doctype html>
           host.innerHTML = card('최근 세션 (' + ss.length + ')',
             '<div class="card-body"><table><thead><tr><th>세션</th><th>마지막 메시지</th><th>요청</th><th>모델</th><th>토큰</th><th>비용</th><th>마지막 활동</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
             '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(data.note || '') + '</p></div>');
-        } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+        } catch (e) { if (!current()) return; host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
       };
       document.getElementById('sess-reload').addEventListener('click', load);
       await load();

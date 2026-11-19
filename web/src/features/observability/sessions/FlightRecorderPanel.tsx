@@ -1,3 +1,5 @@
+import { useSessionLegacyHandoff } from "./legacy-session-handoff";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { isAppError } from "@/shared/api/error";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -47,6 +49,7 @@ function FlightRecorderContent({
     denied,
     denialRequestId,
   } = useFlightRecorder(sessionId, access);
+  const legacyHandoff = useSessionLegacyHandoff(sessionId);
   const requestId = isAppError(recorder.error) ? recorder.error.requestId : undefined;
   const safeRequestId =
     requestId && !containsPotentialSecret(requestId, access.prefixes) ? requestId : undefined;
@@ -73,7 +76,18 @@ function FlightRecorderContent({
       {safeRequestId ? <span className="request-id"> 요청 ID: {safeRequestId}</span> : null}
     </InlineNotice>
   ) : null;
-  const actions = <div className="section-card-actions">{retryButton}</div>;
+  const actions = (
+    <div className="section-card-actions">
+      {retryButton}
+      <FeatureLegacyLink
+        featureId="observability.sessions"
+        href={legacyHandoff.href}
+        className="button button-secondary button-small"
+      >
+        {legacyHandoff.sameSession ? "기존 화면에서 같은 세션 열기" : "기존 화면에서 열기"}
+      </FeatureLegacyLink>
+    </div>
+  );
   if (denied) return <SessionReadDenied detail onRetry={refresh} requestId={denialRequestId} />;
   if (!recorder.data)
     return (

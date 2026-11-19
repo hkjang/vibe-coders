@@ -1,4 +1,4 @@
-import { legacyRoutes } from "@/config/legacy-route-map";
+import { selectedSessionID, useSessionLegacyHandoff } from "./legacy-session-handoff";
 import { useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -50,7 +50,8 @@ export function PagedSessionPage() {
     !page ||
     query.offset + query.limit >= page.summary.sessions ||
     query.offset + query.limit > 1_000_000;
-  const openSession = search.get("session_id") ?? "";
+  const openSession = selectedSessionID(search, auth.credentialPrefixes);
+  const legacyHandoff = useSessionLegacyHandoff(openSession);
   const update = (changes: Record<string, string | undefined>) => {
     if (!owner.isCurrent()) return;
     const next = new URLSearchParams(search);
@@ -77,7 +78,7 @@ export function PagedSessionPage() {
       <PageHeader
         title="세션 비행기록"
         description="기간 전체의 세션을 검색하고 요청·오류·비용을 확인합니다."
-        legacyHref={legacyRoutes.sessions}
+        legacyHref={legacyHandoff.href}
         actions={
           <Button disabled={!valid || result.isFetching} onClick={refresh}>
             새로고침
@@ -177,7 +178,7 @@ export function PagedSessionPage() {
             errorID && !containsPotentialSecret(errorID, auth.credentialPrefixes) ? errorID : undefined
           }
           onRetry={refresh}
-          legacyHref={legacyRoutes.sessions}
+          legacyHref={legacyHandoff.href}
         />
       ) : (
         <>

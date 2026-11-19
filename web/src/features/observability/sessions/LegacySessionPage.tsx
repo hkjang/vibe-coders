@@ -1,4 +1,4 @@
-import { legacyRoutes } from "@/config/legacy-route-map";
+import { selectedSessionID, useSessionLegacyHandoff } from "./legacy-session-handoff";
 import { RefreshCw, Search } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { FlightRecorderPanel } from "./FlightRecorderPanel";
@@ -40,7 +40,8 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
   const days = sessionDays(params.get("days"));
   const keyword = params.get("q")?.trim() ?? "";
   const identity = JSON.stringify([params.get("days"), params.get("q")]);
-  const openSessionId = params.get("session_id")?.trim() ?? "";
+  const openSessionId = selectedSessionID(params, access.prefixes);
+  const legacyHandoff = useSessionLegacyHandoff(openSessionId);
   const [draft, setDraft] = useState({
     identity,
     days: String(days),
@@ -101,7 +102,7 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
       <PageHeader
         title="세션 비행기록"
         description="코딩 세션 단위로 게이트웨이 요청을 시간순으로 재구성해 원인을 추적합니다."
-        legacyHref={legacyRoutes.sessions}
+        legacyHref={legacyHandoff.href}
         actions={
           <Button onClick={refresh} disabled={sessions.isFetching}>
             <RefreshCw aria-hidden="true" /> 새로고침
@@ -175,7 +176,7 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
           requestId={safeRequestId}
           onRetry={refresh}
           onReset={resetFilters}
-          legacyHref={legacyRoutes.sessions}
+          legacyHref={legacyHandoff.href}
         />
       ) : null}
       {!denied && (sessions.data || !sessions.isError) ? (

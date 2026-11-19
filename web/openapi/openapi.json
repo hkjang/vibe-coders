@@ -15069,6 +15069,10 @@
                 "description": "Opens the exact stored routing rule in a read-only Legacy detail using the existing authorized configuration GET. Does not execute routing preview or mutations.",
                 "type": "boolean"
               },
+              "legacy_session_detail": {
+                "description": "Read-only same-session Legacy detail and SSO return path for existing flight-recorder identifiers. Existing team scope, projection and bounded history apply.",
+                "type": "boolean"
+              },
               "legacy_skill_detail": {
                 "description": "Opens one exact stored skill in read-only Legacy using the existing administrator read policy, including saved instructions and metadata. No evaluation, scan, promotion or execution.",
                 "type": "boolean"

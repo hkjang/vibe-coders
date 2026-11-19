@@ -16,6 +16,7 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
+const sessionTarget = block('function legacySessionTarget(', 'function validLegacySessionRecorder(');
 const skillTarget = block('function legacySkillTarget(', 'async function renderLegacySkillDetail(');
 const workflowTarget = block('function legacyWorkflowTarget(', '// Project only the persisted definition contract.');
 const workAppTarget = block('function legacyWorkAppTarget(', 'async function renderLegacyWorkAppDetail(');
@@ -86,7 +87,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + skillTarget + '\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + sessionTarget + skillTarget + '\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -923,4 +924,14 @@ test('opaque skill reference survives native SSO return without a name',async()=
  h.location.hash='#kc_code=synthetic';await h.initAuth();
  assert.equal(h.location.hash,hash);assert.equal(h.routes,1);
  assert.equal(new URLSearchParams(h.location.hash.split('?')[1]).has('skill_name'),false);
+});
+
+test('exact session selection survives SSO and is cleared on logout',async()=>{
+ const hash='#/sessions?'+new URLSearchParams({session_id:'😀'.repeat(1024)});
+ const h=harness(call=>call.path==='/auth/sso/exchange'?response(200,tokens('SSO')):response(200,{auth_enabled:true,user:tokens('SSO').user}),hash);
+ h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+ h.location.hash='#kc_code=synthetic';await h.initAuth();
+ assert.equal(h.location.hash,hash);assert.equal(h.routes,1);
+ h.node('legacy-session-detail').innerHTML='PRIVATE_SESSION';await h.logout();
+ assert.equal(h.node('legacy-session-detail').innerHTML,'');
 });
