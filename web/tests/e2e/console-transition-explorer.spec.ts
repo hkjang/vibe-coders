@@ -144,3 +144,43 @@ test("조회 계정도 기능을 찾되 편집창 저장은 기존 권한으로 
   await expect(editor.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
   expect(state.writes).toEqual([]);
 });
+
+test("빠른 검색·상태·쓰기 조건 변경을 모두 주소에 보존한다", async ({ page }) => {
+  const state = await install(page);
+  await page.goto("system/settings?tab=console&telemetry_days=7");
+  await expect(featureTable(page).getByRole("row")).toHaveCount(4);
+  const search = page.getByRole("textbox", { name: "전환 기능 검색", exact: true });
+  await search.fill("시스템");
+  // Dispatch adjacent native form events before React commits the router render.
+  await page.getByRole("button", { name: "검색", exact: true }).evaluate((button) => {
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing search button");
+    const form = button.form;
+    if (!form) throw new Error("Missing search form");
+    form.requestSubmit(button);
+    for (const [label, value] of [
+      ["전환 상태 필터", "preview"],
+      ["쓰기 차단 설정", "false"],
+    ]) {
+      const field = [...form.querySelectorAll("label")].find((node) => node.textContent === label);
+      const select = field && document.getElementById(field.htmlFor);
+      if (!(select instanceof HTMLSelectElement)) throw new Error("Missing filter control");
+      select.value = value ?? "";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+  await expect
+    .poll(() => Object.fromEntries(new URL(page.url()).searchParams))
+    .toEqual({
+      tab: "console",
+      telemetry_days: "7",
+      console_q: "시스템",
+      console_status: "preview",
+      console_readonly: "false",
+    });
+  await expect(search).toHaveValue("시스템");
+  await page.reload();
+  await expect(search).toHaveValue("시스템");
+  await expect(featureTable(page).getByRole("row")).toHaveCount(2);
+  expect(state.writes).toEqual([]);
+  expect(state.unexpected).toEqual([]);
+});

@@ -1,5 +1,6 @@
-import { useCallback } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import { useCallback, useContext } from "react";
+import { useHref, useLocation, useSearchParams } from "react-router";
+import { SearchLocationContext } from "./search-location";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import {
@@ -20,10 +21,17 @@ export function useSearchState(): [
 ] {
   const [searchParams, setSearchParams] = useSearchParams();
   const { pathname } = useLocation();
+  const routePath = useHref({ pathname });
+  const readLocation = useContext(SearchLocationContext);
   const { credentialPrefixes } = useAuth();
   const update = useCallback(
     (updates: SearchUpdates, options: { replace?: boolean; state?: unknown } = {}): void => {
-      const next = new URLSearchParams(searchParams);
+      // React may still show the previous location after navigation updates the
+      // router. Compose against its event-time location so adjacent controls do
+      // not overwrite each other. A control from a departed route cannot write.
+      const current = readLocation?.();
+      if (current && current.pathname !== routePath) return;
+      const next = new URLSearchParams(current?.search ?? searchParams);
       for (const [key, raw] of Object.entries(updates)) {
         const value = raw === undefined || raw === null ? "" : String(raw);
         if (value === "") next.delete(key);
@@ -37,7 +45,7 @@ export function useSearchState(): [
         state: locationStateWithSensitiveRejections(options.state, safe.sensitiveKeys),
       });
     },
-    [searchParams, setSearchParams, pathname, credentialPrefixes],
+    [searchParams, setSearchParams, pathname, routePath, readLocation, credentialPrefixes],
   );
   return [searchParams, update];
 }
