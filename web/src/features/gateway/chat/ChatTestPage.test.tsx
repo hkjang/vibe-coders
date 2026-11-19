@@ -423,7 +423,9 @@ describe("ChatTestPage", () => {
   it("exports the run from the server in the chosen format", async () => {
     const user = userEvent.setup();
     mockApi(compareHandlers());
-    const fetchMock = vi.fn(async () => new Response("model,provider\n", { status: 200 }));
+    const fetchMock = vi.fn(
+      async () => new Response("model,provider\n", { status: 200, headers: { "Content-Type": "text/csv" } }),
+    );
     globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 
     renderChat("/gateway/chat?tab=compare");

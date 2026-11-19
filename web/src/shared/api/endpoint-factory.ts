@@ -131,7 +131,7 @@ export function pathWithParams<Path extends OpenApiPath>(
  * `withPathParams(endpoints.domains.access.users.update, { id })`. Values are
  * percent-encoded, so an identifier can never add a path segment of its own.
  */
-export function withPathParams<Endpoint extends ApiEndpointBase>(
+export function withPathParams<Endpoint extends ApiRoute>(
   endpoint: Endpoint,
   params: Readonly<Record<string, string | number>>,
 ): Endpoint {

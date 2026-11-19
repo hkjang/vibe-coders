@@ -3,6 +3,7 @@ import { z } from "zod";
 import { fileOperation, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
   GetAdminCostChargebackPackData,
+  GetAdminChatTestMultiRunRunsIdExportData,
   GetAdminPoliciesExportData,
   GetAdminTeamsScorecardData,
   GetAdminReportsNarrativeData,
@@ -38,7 +39,30 @@ const warehouseQuery = z
   })
   .strict();
 
+const multiRunCsvQuery = z.object({ format: z.literal("csv") }).strict();
+const multiRunMarkdownQuery = z.object({ format: z.literal("md") }).strict();
+const multiRunJsonQuery = z.object({ format: z.literal("json") }).strict();
+
 export const fileEndpoints = {
+  multiRunCsv: fileOperation<
+    WithQuery<GetAdminChatTestMultiRunRunsIdExportData, z.infer<typeof multiRunCsvQuery>>
+  >()("GET", "/admin/chat-test/multi-run/runs/{id}/export", { contentTypes: ["text/csv"] }, multiRunCsvQuery),
+  multiRunMarkdown: fileOperation<
+    WithQuery<GetAdminChatTestMultiRunRunsIdExportData, z.infer<typeof multiRunMarkdownQuery>>
+  >()(
+    "GET",
+    "/admin/chat-test/multi-run/runs/{id}/export",
+    { contentTypes: ["text/markdown"] },
+    multiRunMarkdownQuery,
+  ),
+  multiRunJson: fileOperation<
+    WithQuery<GetAdminChatTestMultiRunRunsIdExportData, z.infer<typeof multiRunJsonQuery>>
+  >()(
+    "GET",
+    "/admin/chat-test/multi-run/runs/{id}/export",
+    { contentTypes: ["application/json"] },
+    multiRunJsonQuery,
+  ),
   scorecard: fileOperation<WithQuery<GetAdminTeamsScorecardData, z.infer<typeof scorecardQuery>>>()(
     "GET",
     "/admin/teams/scorecard",

@@ -457,6 +457,40 @@ for (const method of ["rule", "model"] as const) {
   });
 }
 
+for (const permission of ["raw", "read"] as const) {
+  test(`${permission}: held export retires on permission removal and requires a fresh manual download`, async ({
+    page,
+    gateway,
+  }) => {
+    await login(page);
+    await complete(page);
+    const downloads: string[] = [];
+    page.on("download", (download) => downloads.push(download.suggestedFilename()));
+    gateway.hold("export");
+    await page.getByRole("button", { name: "서버에서 내보내기", exact: true }).click();
+    await expect.poll(() => gateway.count("export")).toBe(1);
+    if (permission === "raw") gateway.setRaw(false);
+    else gateway.setRead(false);
+    await refreshRuntime(page);
+    await release(gateway, "export");
+    await expect(page.getByText("실행 원문 조회 권한이 없습니다.", { exact: true })).toBeVisible();
+    if (permission === "raw") gateway.setRaw(true);
+    else gateway.setRead(true);
+    await refreshRuntime(page);
+    const button = page.getByRole("button", { name: "서버에서 내보내기", exact: true });
+    await expect(button).toBeEnabled();
+    expect(downloads).toEqual([]);
+    expect(gateway.count("export")).toBe(1);
+    const next = page.waitForEvent("download");
+    await button.click();
+    expect((await next).suggestedFilename()).toBe("multi-model-public-run-1.md");
+    expect(downloads).toEqual(["multi-model-public-run-1.md"]);
+    expect(gateway.count("export")).toBe(2);
+    expect(gateway.count("run")).toBe(1);
+    expect(gateway.unexpected).toEqual([]);
+  });
+}
+
 for (const action of ["run", "golden", "export"] as const) {
   for (const status of [200, 503]) {
     test(`${action} 이전 세션의 늦은 ${status}가 새 계정 초안·알림·다운로드를 오염시키지 않는다`, async ({
