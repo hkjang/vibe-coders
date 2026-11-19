@@ -66,6 +66,7 @@ def main():
         realm = {
             "realm": "vibe-browser", "enabled": True, "sslRequired": "all",
             "registrationAllowed": False, "resetPasswordAllowed": False,
+            "groups": [{"name": "teams", "subGroups": [{"name": "Shared access"}]}],
             "roles": {"realm": [{"name": "vibe-admin"}, {"name": "vibe-auditor"}, {"name": "vibe-team-admin"}]},
             "clients": [{
                 "clientId": "vibe-browser", "secret": secret, "publicClient": False,
@@ -79,12 +80,17 @@ def main():
                     "name": "gateway roles", "protocol": "openid-connect",
                     "protocolMapper": "oidc-usermodel-realm-role-mapper",
                     "config": {"claim.name": "realm_access.roles", "jsonType.label": "String", "multivalued": "true", "id.token.claim": "true", "access.token.claim": "true"},
+                }, {
+                    "name": "gateway groups", "protocol": "openid-connect",
+                    "protocolMapper": "oidc-group-membership-mapper",
+                    "config": {"claim.name": "groups", "full.path": "true", "id.token.claim": "true", "access.token.claim": "true"},
                 }],
             }],
             "users": [{
                 "username": name, "email": email, "enabled": True, "emailVerified": True,
                 "firstName": "제품 검증", "lastName": "사용자",
                 "realmRoles": [role],
+                "groups": ["/teams/Shared access"] if name == "routing-reader" else [],
                 "credentials": [{"type": "password", "value": password, "temporary": False}],
             } for name, email, role in [
                 ("existing-operator", "existing@example.invalid", "vibe-admin"),
@@ -136,10 +142,10 @@ def main():
                 source = reports / "keycloak-live-summary.json"
                 if source.exists():
                     summary = json.loads(source.read_text())
-                    allowed = {f"KEYCLOAK-LIVE-{i:03d}" for i in range(1, 15)}
+                    allowed = {f"KEYCLOAK-LIVE-{i:03d}" for i in range(1, 21)}
                     assert set(summary) == {"status", "tests"}
                     assert summary["status"] in {"passed", "failed", "timedout", "interrupted"}
-                    assert len(summary["tests"]) == 14
+                    assert len(summary["tests"]) == 20
                     assert {item["scenario"] for item in summary["tests"]} == allowed
                     for item in summary["tests"]:
                         assert set(item) <= {"scenario", "status", "durationMs", "lastSourceLine", "failureSourceLine"}

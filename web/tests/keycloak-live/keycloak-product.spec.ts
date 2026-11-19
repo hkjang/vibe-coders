@@ -590,3 +590,150 @@ test("KEYCLOAK-LIVE-014 라우팅 조회 권한이 없는 기존 역할은 규�
   await expect(page.locator("#view")).not.toContainText("selected routing note");
   expect(writes).toBe(0);
 });
+
+const longAccessId = " 계정 +%2F?&#/ " + "가".repeat(1300) + " ";
+const accessCases = [
+  {
+    scenario: "015",
+    resource: "key",
+    id: "shared-access-id",
+    path: "/app/access/users?tab=keys",
+    parameter: "api_key_id",
+    title: "API 키 상세",
+    label: "API 키",
+    marker: "Shared access key",
+  },
+  {
+    scenario: "016",
+    resource: "account",
+    id: "shared-access-id",
+    path: "/app/access/users/accounts?",
+    parameter: "account_id",
+    title: "로그인 계정 상세",
+    label: "계정",
+    marker: "access-0@example.invalid",
+  },
+  {
+    scenario: "017",
+    resource: "team",
+    id: "shared-access-id",
+    path: "/app/access/users?tab=teams",
+    parameter: "registered_team",
+    title: "등록 팀 상세",
+    label: "팀",
+    marker: "Shared access",
+  },
+  {
+    scenario: "018",
+    resource: "account",
+    id: longAccessId,
+    path: "/app/access/users/accounts?",
+    parameter: "account_id",
+    title: "로그인 계정 상세",
+    label: "계정",
+    marker: "access-2@example.invalid",
+  },
+  {
+    scenario: "019",
+    resource: "team",
+    id: longAccessId,
+    path: "/app/access/users?tab=teams",
+    parameter: "registered_team",
+    title: "등록 팀 상세",
+    label: "팀",
+    marker: "Long access",
+  },
+];
+for (const item of accessCases) {
+  test("KEYCLOAK-LIVE-" + item.scenario + " 종류와 긴 ID를 실제 SSO 이후에도 보존한다", async ({ page }) => {
+    await signIn(page, "new-operator");
+    await page.goto(
+      item.path + (item.path.endsWith("?") ? "" : "&") + new URLSearchParams({ [item.parameter]: item.id }),
+    );
+    const panel = page.getByRole("dialog", { name: item.title });
+    await expect(panel).toContainText(item.marker);
+    const href = "/admin#/users?" + new URLSearchParams({ resource: item.resource, id: item.id });
+    const link = panel.getByRole("link", { name: "기존 화면에서 같은 " + item.label + " 열기", exact: true });
+    await expect(link).toHaveAttribute("href", href);
+    let writes = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+    });
+    await link.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#login-backdrop.open")).toBeVisible();
+    await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+    const detail = page.locator("#legacy-access-detail");
+    await expect(detail).toContainText(item.marker);
+    await expect(detail).not.toContainText("Other access");
+    await expect(detail).not.toContainText("disabled-access-fixture");
+    await expect(detail).not.toContainText("synthetic-access-hash");
+    await expect(detail.locator("input, select, textarea, form")).toHaveCount(0);
+    await expect(page).toHaveURL(gateway + href);
+    expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+    if (item.scenario === "015") {
+      await expect(detail).toContainText("수명 상태(조회 시각 기준)");
+      await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(
+          await page.evaluate(async () => {
+            const axe = (
+              window as unknown as {
+                axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+              }
+            ).axe;
+            const detail = document.querySelector("#legacy-access-detail");
+            if (!detail) throw Error("Access detail unavailable");
+            return (await axe.run(detail, { rules: { "color-contrast": { enabled: true } } })).violations
+              .length;
+          }),
+        ).toBe(0);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    await page.locator("#auth-user").click();
+    await page.locator("#auth-logout").click();
+    await expect(page.locator("#login-backdrop.open")).toBeVisible();
+    await expect(detail).toBeEmpty();
+    expect(writes).toBe(0);
+  });
+}
+test("KEYCLOAK-LIVE-020 실제 팀 관리자 SSO는 각 종류에서 자기 팀만 조회한다", async ({ page }) => {
+  await signIn(page, "routing-reader");
+  expect((await currentUser(page)).role).toBe("team_admin");
+  let writes = 0,
+    reads = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      ["/admin/api-keys", "/admin/users", "/admin/teams"].includes(url.pathname) &&
+      url.searchParams.has("id")
+    )
+      reads++;
+    if (url.pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+  });
+  await page.goto("/admin#/users?" + new URLSearchParams({ resource: "key", id: "shared-access-id" }));
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-access-detail");
+  await expect(detail).toContainText("Shared access key");
+  for (const resource of ["key", "account", "team"]) {
+    await page.goto("/admin#/users?" + new URLSearchParams({ resource, id: "shared-access-id" }));
+    await expect(detail).toContainText(resource === "account" ? "access-0@example.invalid" : "Shared access");
+    for (const id of ["other-access-id", "missing-access-id"]) {
+      await page.goto("/admin#/users?" + new URLSearchParams({ resource, id }));
+      await expect(detail).toContainText("조회 가능한 항목이 없습니다");
+      await expect(detail).not.toContainText("Other access");
+      await expect(detail).not.toContainText("access-1@example.invalid");
+    }
+  }
+  const beforeInvalid = reads;
+  await page.goto("/admin#/users?resource=account&id=%ED%A0%80");
+  await expect(detail).toContainText("상세 주소가 올바르지 않습니다");
+  expect(reads).toBe(beforeInvalid);
+  await page.goto("/admin#/users");
+  await expect(detail).toHaveCount(0);
+  await expect(page.locator("#view")).not.toContainText("access-0@example.invalid");
+  expect(writes).toBe(0);
+});

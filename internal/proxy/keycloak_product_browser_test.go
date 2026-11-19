@@ -153,6 +153,68 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			t.Fatal("synthetic routing rule unavailable")
 		}
 	}
+
+	const commonAccessID = "shared-access-id"
+	const otherAccessID = "other-access-id"
+	longAccessID := " 계정 +%2F?&#/ " + strings.Repeat("가", 1300) + " "
+	accessIDs := []string{commonAccessID, otherAccessID, longAccessID}
+	accessTime := time.Date(2026, time.November, 18, 1, 2, 3, 456000000, time.UTC)
+	for i, id := range accessIDs {
+		name := []string{"Shared access", "Other access", "Long access"}[i]
+		if err := db.UpsertAuthTeam(t.Context(), store.AuthTeam{ID: id, Name: name, CreatedAt: accessTime, UpdatedAt: accessTime}); err != nil {
+			t.Fatal("access team fixture unavailable")
+		}
+		user := store.AuthUser{ID: id, Email: fmt.Sprintf("access-%d@example.invalid", i), Name: name + " account", PasswordHash: "disabled-access-fixture", Role: "viewer", Status: "disabled", CreatedAt: accessTime, UpdatedAt: accessTime}
+		if err := db.CreateAuthUser(t.Context(), user); err != nil {
+			t.Fatal("access account fixture unavailable")
+		}
+		if err := db.SetUserTeam(t.Context(), id, id, "member"); err != nil {
+			t.Fatal("access membership fixture unavailable")
+		}
+		if i < 2 {
+			key := store.APIKeyRecord{ID: id, Name: name + " key", KeyHash: "synthetic-access-hash-" + id, Owner: name + " owner", Team: id, Role: "viewer", Status: "active", Scopes: []string{"admin:read"}, BudgetLimitKRW: 1234, CreatedAt: accessTime}
+			if err := db.UpsertAPIKey(t.Context(), key); err != nil {
+				t.Fatal("access key fixture unavailable")
+			}
+		}
+	}
+	accessSnapshot := func() string {
+		snapshot := []any{}
+		teams, err := db.ListAuthTeams(t.Context())
+		if err != nil {
+			t.Fatal("access teams snapshot unavailable")
+		}
+		snapshot = append(snapshot, teams)
+		for i, id := range accessIDs {
+			user, found, err := db.AuthUserByID(t.Context(), id)
+			if err != nil || !found {
+				t.Fatal("access user snapshot unavailable")
+			}
+			team, err := db.PrimaryTeamForUser(t.Context(), id)
+			if err != nil {
+				t.Fatal("access membership snapshot unavailable")
+			}
+			snapshot = append(snapshot, user, user.PasswordHash, team)
+			if i < 2 {
+				key, found, err := db.FindActiveAPIKeyByHash(t.Context(), "synthetic-access-hash-"+id)
+				if err != nil || !found {
+					t.Fatal("access credential snapshot unavailable")
+				}
+				public, err := db.ListAPIKeysByID(t.Context(), id, nil)
+				if err != nil {
+					t.Fatal("access key snapshot unavailable")
+				}
+				snapshot = append(snapshot, key, key.KeyHash, public)
+			}
+		}
+		encoded, err := json.Marshal(snapshot)
+		if err != nil {
+			t.Fatal("access snapshot invalid")
+		}
+		return string(encoded)
+	}
+	accessBefore := accessSnapshot()
+
 	rulesBefore, err := db.ListRoutingRules(t.Context())
 	if err != nil {
 		t.Fatal("routing baseline unavailable")
@@ -218,12 +280,12 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 14 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 20 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true
@@ -238,7 +300,7 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 		}
 	}
 	users, err := db.ListAuthUsers(t.Context())
-	if err != nil || len(users) != 5 {
+	if err != nil || len(users) != 8 {
 		t.Fatal("real IdP provisioning duplicated or lost a local/SSO account")
 	}
 	conflictAccounts := 0
@@ -249,6 +311,9 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	}
 	if conflictAccounts != 1 {
 		t.Fatal("email collision did not produce exactly one separate SSO-only account")
+	}
+	if accessBefore != accessSnapshot() {
+		t.Fatal("read-only handoff changed accounts, teams, memberships or credentials")
 	}
 	rulesAfter, err := db.ListRoutingRules(t.Context())
 	if err != nil {
@@ -277,5 +342,5 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if modelUpstreamMutations.Load() != 0 {
 		t.Fatal("model navigation mutated an upstream")
 	}
-	t.Log("eleven real Keycloak HTTPS browser scenarios, persisted provisioning and provider/asset data preservation checks passed")
+	t.Log("twenty real Keycloak HTTPS browser scenarios, scoped access and persisted data preservation checks passed")
 }

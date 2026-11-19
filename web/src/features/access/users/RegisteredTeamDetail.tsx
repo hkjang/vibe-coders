@@ -1,4 +1,4 @@
-import { legacyRoutes } from "@/config/legacy-route-map";
+import { accessLegacyHandoff } from "./legacy-access-handoff";
 import { useQuery } from "@tanstack/react-query";
 import type { RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -36,6 +36,13 @@ export function RegisteredTeamDetail({
   const auth = useAuth();
   const id = values[0] ?? "";
   const valid = values.length === 1 && validRegisteredTeamId(id, auth.credentialPrefixes);
+  const handoff = accessLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "access.users")?.legacyPath,
+    "team",
+    valid && owner.readable && !owner.denied ? id : undefined,
+    auth.capabilities?.legacy_access_detail === true,
+    auth.credentialPrefixes,
+  );
   const result = useQuery({
     queryKey: featureOwnedKey([...accessKeys.teams, "registered-detail", valid ? id : null], owner),
     enabled: valid && owner.readable && !owner.denied,
@@ -78,13 +85,13 @@ export function RegisteredTeamDetail({
       scrollLabel="등록 팀 정보"
       footer={
         <>
-          {canOpenLegacyAdmin(auth) ? (
+          {canOpenLegacyAdmin(auth) && handoff.href ? (
             <FeatureLegacyLink
               featureId="access.users"
               className="button button-secondary button-default"
-              href={legacyRoutes.users}
+              href={handoff.href}
             >
-              기존 사용자·팀 화면
+              {handoff.sameResource ? "기존 화면에서 같은 팀 열기" : "기존 화면에서 열기"}
             </FeatureLegacyLink>
           ) : null}
           <Button onClick={onClose}>닫기</Button>

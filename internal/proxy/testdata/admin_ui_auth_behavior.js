@@ -16,6 +16,7 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
+const accessTarget = block('function legacyAccessTarget(', 'function legacyAccessKeyLifecycle(');
 const routingTarget = block('function legacyRoutingRuleTarget(', 'async function renderLegacyRoutingRuleDetail(');
  const modelTarget = block('function legacyModelTarget(', 'async function renderLegacyModelDetail(') + block('function legacyProviderRefValid(', '// Reuse the safe app projection;');
 const http = block('// ---------- HTTP ----------', '// ---------- formatting ----------');
@@ -62,7 +63,7 @@ function harness(transport, initialHash = '', initialStorage) {
   }
   const location = { hash: initialHash, pathname: '/admin', search: '' };
   const context = vm.createContext({
-    URLSearchParams,
+    URLSearchParams, TextEncoder,
     document: { getElementById: id => id === 'sso-login-btn' ? nodes.get(id) : node(id), querySelectorAll: () => [], createElement: () => node('created-button') },
     sessionStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) },
     location, history: { replaceState(_state, _title, url) { const next = new URL(url, 'https://gateway.invalid'); Object.assign(location, { pathname: next.pathname, search: next.search, hash: next.hash }); } },
@@ -77,7 +78,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -673,4 +674,27 @@ test('a literal question mark in an exact routing ID survives SSO',async()=>{
  const hash='#/routing?rule_id=public?tail';
  const departure=harness(ssoTransport,hash);await departure.startSSO();
  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,hash);
+});
+
+for(const [resource,id] of [['key','shared-id'],['account',' 계정 +%2F?&#/ '+'가'.repeat(1300)],['team',' 팀 +%2F?&#/ '+'가'.repeat(1300)]]){
+ test('exact access kind and long ID survive local login and SSO '+resource,async()=>{
+  const hash='#/users?'+new URLSearchParams({resource,id});
+  if(resource!=='key')assert.ok(hash.length>9000);
+  const local=harness(ssoTransport,hash);await local.login();assert.equal(local.location.hash,hash);
+  const departure=harness(ssoTransport,hash);await departure.startSSO();assert.equal(departure.location.href,'/auth/keycloak/login');
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,hash);assert.equal(callback.storage.has(ssoReturnKey),false);
+ });
+}
+for(const hash of ['#/users?resource=team&id=%zz','#/users?resource=account&id=%ED%A0%80','#/users?resource=key&id=a&id=b',
+ '#/users?resource=team&id=a&save=true','#/users?resource=account&id='+('a'.repeat(4097)), '#/requests?q='+('a'.repeat(8193)),
+ '#/users?resource=unknown&id=a','#/users?resource=team&id='+('a'.repeat(16384))]){
+ test('invalid access and overlong old target are not staged '+hash.slice(0,70),async()=>{
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,'');
+ });
+}
+test('logout clears displayed access detail',async()=>{
+ const h=harness(ssoTransport);h.seed();h.node('legacy-access-detail').textContent='PRIVATE_ACCESS_DETAIL';
+ await h.logout();assert.equal(h.node('legacy-access-detail').textContent,'');
 });

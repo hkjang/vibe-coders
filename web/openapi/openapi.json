@@ -14891,6 +14891,10 @@
           "capabilities": {
             "additionalProperties": false,
             "properties": {
+              "legacy_access_detail": {
+                "description": "Opens the exact API key, login account or registered team in a read-only Legacy detail. Preserves existing authorization and team scope; never exposes credentials or runs mutations.",
+                "type": "boolean"
+              },
               "legacy_model_detail": {
                 "description": "Opens a read-only model catalogue detail in Legacy with exact model/provider identity and explicit source provenance. Does not execute model contracts.",
                 "type": "boolean"

@@ -4361,6 +4361,10 @@ export type UiBootstrapResponse = {
     backend_version: string;
     capabilities: {
         /**
+         * Opens the exact API key, login account or registered team in a read-only Legacy detail. Preserves existing authorization and team scope; never exposes credentials or runs mutations.
+         */
+        legacy_access_detail?: boolean;
+        /**
          * Opens a read-only model catalogue detail in Legacy with exact model/provider identity and explicit source provenance. Does not execute model contracts.
          */
         legacy_model_detail?: boolean;

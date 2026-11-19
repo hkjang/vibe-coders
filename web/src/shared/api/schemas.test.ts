@@ -472,3 +472,19 @@ describe("OpenAPI runtime schemas", () => {
     expect(modelUsageTagsResponseSchema.safeParse({ tags: [], extra: true }).success).toBe(false);
   });
 });
+
+it("accepts only an optional boolean access handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_access_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_access_detail: true },
+    }).capabilities.legacy_access_detail,
+  ).toBe(true);
+  expect(
+    uiBootstrapSchema.safeParse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_access_detail: "true" },
+    }).success,
+  ).toBe(false);
+});

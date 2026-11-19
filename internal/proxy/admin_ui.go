@@ -845,7 +845,9 @@ const adminHTML = `<!doctype html>
     // Preserve only an initial read-only handoff through the local login prompt.
     // A deliberate logout or a changed URL must not replay another session's intent.
     function initialLegacyReadHandoff(hash) {
-      if (typeof hash !== 'string' || hash.length > 8192 || /[\u0000-\u001f\u007f]/.test(hash)) return '';
+      if (typeof hash !== 'string' || hash.length > 16384 || /[\u0000-\u001f\u007f]/.test(hash)) return '';
+      if (hash.startsWith('#/users?') && legacyAccessTarget(hash)) return hash;
+      if (hash.length > 8192) return '';
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
       if (/^#\/(?:requests|prompts|prompt-assets|prompt-debt)(?:\?|$)/.test(hash)) return hash;
@@ -873,7 +875,7 @@ const adminHTML = `<!doctype html>
       try {
         const raw = sessionStorage.getItem(legacySsoHandoffKey);
         sessionStorage.removeItem(legacySsoHandoffKey);
-        if (!raw || raw.length > 9000) return '';
+        if (!raw || raw.length > 17000) return '';
         const value = JSON.parse(raw);
         const age = Date.now() - value?.createdAt;
         if (!Number.isSafeInteger(value?.createdAt) || age < 0 || age > 600000) return '';
@@ -890,6 +892,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const accessDetail = document.getElementById('legacy-access-detail');
+      if (accessDetail) accessDetail.textContent = '';
       const routingDetail = document.getElementById('legacy-routing-rule-detail');
       if (routingDetail) routingDetail.textContent = '';
       authEpoch++;
@@ -2109,6 +2113,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const accessDetail = document.getElementById('legacy-access-detail');
+      if (accessDetail) accessDetail.textContent = '';
       const routingDetail = document.getElementById('legacy-routing-rule-detail');
       if (routingDetail) routingDetail.textContent = '';
       const generation = ++legacyRouteGeneration;
@@ -2179,7 +2185,11 @@ const adminHTML = `<!doctype html>
           case 'prompt-assets': await renderPromptAssets(params); break;
           case 'apps': await renderWorkApps(params); break;
           case 'changesets': await renderChangeSets(params); break;
-          case 'users':     rest.length ? await renderUserDetail(rest.join('/')) : await renderUsers(); break;
+          case 'users':
+            if (rest.length) await renderUserDetail(rest.join('/'));
+            else if (params.has('resource') || params.has('id')) await renderLegacyAccessDetail();
+            else await renderUsers();
+            break;
           case 'teams':     rest.length ? await renderTeamDetail(decodeURIComponent(rest.join('/'))) : await renderTeams(); break;
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
           case 'quotas':    await renderQuotas(); break;
@@ -9202,6 +9212,96 @@ const adminHTML = `<!doctype html>
       if (status) p.set('status', status);
       p.set('limit', defaults.limit || '80');
       return p;
+    }
+
+
+    function legacyAccessTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/users?')) return null;
+      const query = rawHash.slice('#/users?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('resource').length !== 1 || params.getAll('id').length !== 1 ||
+          Array.from(params.keys()).some(key => key !== 'resource' && key !== 'id')) return null;
+      const resource = params.get('resource'), id = params.get('id');
+      if (!['key','account','team'].includes(resource) || !id || /\p{C}/u.test(id)) return null;
+      if (resource === 'key' ? !/^[A-Za-z0-9._:-]{1,512}$/.test(id) : new TextEncoder().encode(id).length > 4096) return null;
+      return { resource, id };
+    }
+
+    function legacyAccessKeyLifecycle(row, now) {
+      if (row.revoked_at || row.status === 'revoked') return '폐기';
+      if (row.status !== 'active') return row.status || '상태 확인 필요';
+      const deadline = Math.min(...[row.expires_at, ...(row.replaced_by ? [row.grace_ends_at] : [])].filter(Boolean).map(Date.parse));
+      if ((row.replaced_by && !row.grace_ends_at) || Number.isNaN(deadline)) return '만료 시각 확인 필요';
+      if (deadline <= now) return row.replaced_by ? '유예 종료' : '만료';
+      return row.replaced_by ? '교체 유예 중' : '사용';
+    }
+
+    async function renderLegacyAccessDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const target = legacyAccessTarget(hash);
+      const labels = {key:'API 키 상세',account:'로그인 계정 상세',team:'등록 팀 상세'};
+      const render = body => {
+        if (!current()) return;
+        view.innerHTML = section(target ? labels[target.resource] : '사용자·팀 상세',
+          '<div id="legacy-access-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/users">사용자 이용 현황 열기</a></p></div>');
+        document.getElementById('legacy-access-detail').focus();
+      };
+      if (!target) { render('<p role="alert">상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 항목을 확인하고 있습니다.</p>');
+      const retry = '<button type="button" id="legacy-access-retry">다시 조회</button>';
+      const { resource, id } = target;
+      const paged = resource !== 'key';
+      const path = resource === 'key' ? '/admin/api-keys' : resource === 'account' ? '/admin/users' : '/admin/teams';
+      const query = new URLSearchParams(paged ? { view:resource === 'account' ? 'accounts' : 'registered', id, limit:'1', offset:'0' } : { id });
+      try {
+        const data = await api(path + '?' + query, { cache:'no-store' });
+        if (!current()) return;
+        const rows = data?.[resource === 'key' ? 'api_keys' : resource === 'account' ? 'accounts' : 'auth_teams'];
+        if (!Array.isArray(rows) || rows.length > 1 || (paged && (data.total !== rows.length || data.limit !== 1 || data.offset !== 0))) throw new Error('Invalid access response');
+        if (rows.length === 0) {
+          render('<p role="status">조회 가능한 항목이 없습니다. 삭제되었거나 현재 조회 범위에 포함되지 않습니다.</p>' + retry);
+        } else {
+          const row = rows[0];
+          const strings = resource === 'key' ? ['id','name','owner','team','user_id','service_account_id','role','status','expires_at','revoked_at','created_at'] :
+            resource === 'account' ? ['id','email','name','role','status','team_id','team_name','created_at'] : ['id','name','created_at','updated_at'];
+          if (!row || row.id !== id || strings.some(key => typeof row[key] !== 'string')) throw new Error('Invalid selected resource');
+          let fields;
+          const queriedAt = Date.now();
+          if (resource === 'key') {
+            const lists = ['scopes','allowed_ips','allowed_models','denied_models','allowed_providers','denied_providers'];
+            if (lists.some(key => row[key] !== null && (!Array.isArray(row[key]) || row[key].some(value => typeof value !== 'string'))) ||
+                !Number.isFinite(row.budget_limit_krw) ||
+                ['replaced_by','grace_ends_at'].some(key => row[key] !== undefined && typeof row[key] !== 'string')) throw new Error('Invalid key metadata');
+            const list = (key, empty) => row[key]?.length ? row[key].join(', ') : empty;
+            fields = [['키 ID',row.id],['이름',row.name],['수명 상태(조회 시각 기준)',legacyAccessKeyLifecycle(row,queriedAt)],
+              ['저장된 상태',row.status],['소유자',row.owner],['팀 ID',row.team],['계정 ID',row.user_id],['서비스 계정 ID',row.service_account_id],['역할',row.role],
+              ['권한 범위',list('scopes','선택된 권한 없음')],['허용 IP',list('allowed_ips','제한 없음')],
+              ['허용 모델',list('allowed_models','제한 없음')],['차단 모델',list('denied_models','차단 없음')],
+              ['허용 공급자',list('allowed_providers','제한 없음')],['차단 공급자',list('denied_providers','차단 없음')],
+              ['예산 한도(KRW)',row.budget_limit_krw > 0 ? row.budget_limit_krw : '제한 없음'],
+              ['생성 시각',row.created_at],['만료 시각',row.expires_at || '무기한'],['폐기 시각',row.revoked_at],
+              ['교체된 새 키 ID',row.replaced_by || ''],['교체 유예 종료',row.grace_ends_at || '']];
+          } else if (resource === 'account') {
+            fields = [['계정 ID',row.id],['이메일',row.email],['이름',row.name],['역할',row.role],['상태',row.status],
+              ['주 소속 팀',row.team_name],['팀 ID',row.team_id],['생성 시각',row.created_at]];
+          } else {
+            fields = [['팀 ID',row.id],['팀 이름',row.name],['생성 시각',row.created_at],['수정 시각',row.updated_at]];
+          }
+          // Explicit metadata only: credentials, password hashes and unknown fields are never rendered.
+          fields.push(['조회 시각(UTC)',new Date(queriedAt).toISOString()]);
+          render('<p role="status">조회 시각의 저장 정보입니다. 최신 정보는 다시 조회하세요.</p><dl>' +
+            fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+              '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1] === '' ? '미지정' : pair[1])) + '</dd>').join('') + '</dl>' + retry);
+        }
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 항목을 확인하지 못했습니다. 로그인 상태와 조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+      }
+      if (current()) document.getElementById('legacy-access-retry').addEventListener('click', () => { if (current()) void route(); });
     }
 
     function legacyRoutingRuleTarget(params, rawHash) {
