@@ -6,7 +6,9 @@
     "strict": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "paths": { "@/*": ["./src/*"] },
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -47,6 +49,7 @@
     "tests/e2e/redteam-evidence-read.spec.ts",
     "tests/e2e/redteam-readonly-controls.spec.ts",
     "tests/fixtures/agent-code-editor.ts",
-    "eslint.config.js"
+    "eslint.config.js",
+    "tests/e2e/probe-csv-ownership.spec.ts"
   ]
 }
