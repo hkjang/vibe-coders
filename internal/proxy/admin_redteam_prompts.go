@@ -3,8 +3,10 @@ package proxy
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 
@@ -70,27 +72,60 @@ func (s *Server) redTeamExportProbeCSV(w http.ResponseWriter, r *http.Request) {
 	cw.Flush()
 }
 
+const redTeamProbeCSVMaxBytes int64 = 8 << 20
+const redTeamProbeMultipartOverhead int64 = 1 << 20
+
+// Bound the complete input before parsing rows or writing any pack/case. Multipart
+// framing has its own small allowance; the uploaded file retains the raw CSV limit.
+func readRedTeamProbeCSV(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, redTeamProbeCSVMaxBytes)
+		return io.ReadAll(r.Body)
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, redTeamProbeCSVMaxBytes+redTeamProbeMultipartOverhead)
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+	// Parse before reading r.Body. Large file parts spill to temporary storage and
+	// are removed on success as well as all validation/error paths.
+	if err := r.ParseMultipartForm(redTeamProbeMultipartOverhead); err != nil {
+		return nil, err
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	if header.Size > redTeamProbeCSVMaxBytes {
+		return nil, &http.MaxBytesError{Limit: redTeamProbeCSVMaxBytes}
+	}
+	body, err := io.ReadAll(io.LimitReader(file, redTeamProbeCSVMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > redTeamProbeCSVMaxBytes {
+		return nil, &http.MaxBytesError{Limit: redTeamProbeCSVMaxBytes}
+	}
+	return body, nil
+}
+
 // redTeamImportProbeCSV upserts probe packs and cases from an uploaded CSV (same schema as export).
 // It is idempotent: rows with a known case_id update in place; blank ids are derived deterministically
 // so re-imports don't duplicate. Existing cases not present in the file are left untouched.
 func (s *Server) redTeamImportProbeCSV(w http.ResponseWriter, r *http.Request) {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	raw, err := readRedTeamProbeCSV(w, r)
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadRequest, "cannot read body", "invalid_request_error", "bad_body")
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) || errors.Is(err, multipart.ErrMessageTooLarge) {
+			writeOpenAIError(w, http.StatusRequestEntityTooLarge, "CSV exceeds the 8 MiB file or bounded multipart request limit", "invalid_request_error", "csv_too_large")
+		} else {
+			writeOpenAIError(w, http.StatusBadRequest, "cannot read CSV upload", "invalid_request_error", "bad_body")
+		}
 		return
 	}
-	// Accept a multipart "file" upload or a raw CSV body.
 	body := string(raw)
-	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "multipart/form-data") {
-		if err := r.ParseMultipartForm(8 << 20); err == nil {
-			if f, _, ferr := r.FormFile("file"); ferr == nil {
-				defer f.Close()
-				if b, rerr := io.ReadAll(io.LimitReader(f, 8<<20)); rerr == nil {
-					body = string(b)
-				}
-			}
-		}
-	}
 	body = strings.TrimPrefix(body, "\uFEFF") // strip UTF-8 BOM if present
 	cr := csv.NewReader(strings.NewReader(body))
 	cr.FieldsPerRecord = -1
