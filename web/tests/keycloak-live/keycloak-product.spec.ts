@@ -138,3 +138,84 @@ test("KEYCLOAK-LIVE-005 실제 역할 클레임이 읽기 전용 권한으로 �
   );
   expect(status).toBe(401);
 });
+
+test("KEYCLOAK-LIVE-006 공급자 상세가 독립된 Legacy SSO 로그인 후에도 유지된다", async ({ page }) => {
+  await signIn(page, "new-operator");
+  const ref = await page.evaluate(async () => {
+    const response = await fetch("/admin/providers", {
+      headers: {
+        Authorization: "Bearer " + sessionStorage.getItem("vibe.app.auth.access"),
+        "X-Vibe-UI": "app",
+      },
+    });
+    const data: { providers: { provider_ref: string; name: string }[] } = await response.json();
+    return data.providers.find((provider) => provider.name === "SSO +%2F?&# 공급자")?.provider_ref;
+  });
+  expect(ref).toMatch(/^prv_[A-Za-z0-9_-]{43}$/);
+  if (!ref) throw new Error("Synthetic provider reference is missing.");
+  const target = "#/settings?provider_ref=" + ref;
+  await page.goto("/app/gateway/providers?provider=" + ref);
+  const handoff = page.getByRole("link", { name: "기존 화면에서 같은 공급자 열기", exact: true });
+  await expect(handoff).toHaveAttribute("href", "/admin" + target);
+  expect(await page.evaluate(() => sessionStorage.getItem("authAccess"))).toBeNull();
+  await handoff.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  let writes = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/admin/providers") && request.method() !== "GET")
+      writes += 1;
+  });
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  await expect(page.locator("#legacy-provider-detail")).toContainText("SSO +%2F?&# 공급자");
+  await expect(page).toHaveURL(gateway + "/admin" + target);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  await page.reload();
+  await expect(page.locator("#legacy-provider-detail")).toContainText(ref);
+  expect(writes).toBe(0);
+});
+
+test("KEYCLOAK-LIVE-007 읽기 전용 SSO가 요청 상세와 필터를 정확히 복원한다", async ({ page }) => {
+  const requestID = "SSO 요청 +%2F?&#";
+  const target =
+    "#/requests?" +
+    new URLSearchParams({
+      request_id: requestID,
+      model: "public-model",
+      ip: "2001:db8::7",
+      limit: "37",
+    });
+  await page.goto("/admin" + target);
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).origin).toBe(idp);
+  expect(new URL(page.url()).searchParams.get("redirect_uri")).toBe(gateway + "/auth/keycloak/callback");
+  const password = process.env.VIBE_KEYCLOAK_PASSWORD;
+  if (!password) throw new Error("Synthetic product password is missing.");
+  await page.locator("#username").fill("reader");
+  await page.locator("#password").fill(password);
+  await page.locator("#kc-login").click();
+  await expect(page.locator("#modal-backdrop.open")).toBeVisible();
+  await expect(page.locator("#modal-body")).toContainText(requestID);
+  await expect(page).toHaveURL((url) => url.pathname === "/admin" && url.hash.startsWith("#/requests?"));
+  // Legacy rewrites query order when it loads the list; exact values must survive.
+  expect(Object.fromEntries(new URLSearchParams(new URL(page.url()).hash.split("?")[1]))).toEqual({
+    request_id: requestID,
+    model: "public-model",
+    ip: "2001:db8::7",
+    limit: "37",
+  });
+  await expect(page.locator("#f-model")).toHaveValue("public-model");
+  await expect(page.locator("#f-ip")).toHaveValue("2001:db8::7");
+  await expect(page.locator("#f-limit")).toHaveValue("37");
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  const role = await page.evaluate(async () => {
+    const response = await fetch("/auth/me", {
+      headers: { Authorization: "Bearer " + sessionStorage.getItem("authAccess") },
+    });
+    const body: { user: { role: string } } = await response.json();
+    return body.user.role;
+  });
+  expect(role).toBe("readonly_admin");
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.app.auth.access"))).toBeNull();
+});

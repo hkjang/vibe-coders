@@ -37,9 +37,9 @@ async function until(check) {
 }
 const outcome = (promise) => promise.then(value => ({ ok: true, value }), () => ({ ok: false }));
 
-function harness(transport, initialHash = '') {
+function harness(transport, initialHash = '', initialStorage) {
   const nodes = new Map();
-  const storage = new Map();
+  const storage = initialStorage ?? new Map();
   const calls = [];
   const toasts = [];
   let routes = 0;
@@ -50,7 +50,7 @@ function harness(transport, initialHash = '') {
         id, value: '', style: {}, textContent: '', title: '', disabled: false, listeners: {},
         classList: { add: x => classes.add(x), remove: x => classes.delete(x), contains: x => classes.has(x) },
         addEventListener(type, callback) { this.listeners[type] = callback; },
-        focus() {}, appendChild() {}, attributes: {},
+        focus() {}, appendChild(child) { nodes.set(child.id, child); }, attributes: {},
         setAttribute(key, value) { this.attributes[key] = String(value); },
         removeAttribute(key) { delete this.attributes[key]; },
         getAttribute(key) { return this.attributes[key] ?? null; },
@@ -60,22 +60,22 @@ function harness(transport, initialHash = '') {
   }
   const location = { hash: initialHash, pathname: '/admin', search: '' };
   const context = vm.createContext({
-    document: { getElementById: node, querySelectorAll: () => [] },
+    document: { getElementById: id => id === 'sso-login-btn' ? nodes.get(id) : node(id), querySelectorAll: () => [], createElement: () => node('created-button') },
     sessionStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) },
-    location, history: { replaceState() {} },
+    location, history: { replaceState(_state, _title, url) { const next = new URL(url, 'https://gateway.invalid'); Object.assign(location, { pathname: next.pathname, search: next.search, hash: next.hash }); } },
     setTimeout: () => 0,
     route: () => { routes++; },
     toast: message => toasts.push(message),
     fetch: async (path, options = {}) => {
       const call = { path, ...options };
       calls.push(call);
-      if (path === '/auth/sso/status') return response(200, { keycloak_enabled: false });
+      if (path === '/auth/sso/status') return response(200, transport.sso ?? { keycloak_enabled: false });
       if (path === '/me/navigation' && !transport.navigation) return response(200, nav('default'));
       return transport(call);
     },
   });
   vm.runInContext('const tokenInput = document.getElementById("token");\n' + auth + '\n' + http +
-    '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry };', context);
+    '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
     ...client, calls, storage, toasts, node, location,
@@ -86,6 +86,7 @@ function harness(transport, initialHash = '') {
       await node('login-form').listeners.submit({ preventDefault() {} });
     },
     logout: () => node('auth-logout').listeners.click(),
+    async startSSO() { await client.maybeShowSSOButton(); nodes.get('sso-login-btn').onclick(); },
     count: path => calls.filter(call => call.path === path).length,
     loginVisible: () => node('login-backdrop').classList.contains('open'),
   };
@@ -547,4 +548,73 @@ test('failed credentials do not consume the initial handoff',async()=>{
  const target='#/settings?provider_ref=prv_'+'a'.repeat(43);let failed=true;
  const h=harness(()=>response(failed?401:200,tokens('A')),target);await h.login('A');assert.equal(h.location.hash,target);
  failed=false;await h.login('A');assert.equal(h.location.hash,target);
+});
+
+const ssoReturnKey = 'vibe.admin.auth.sso-return-to';
+const providerHandoff = '#/settings?provider_ref=prv_' + 'a'.repeat(43);
+const ssoTransport = call => response(200, call.path === '/auth/me' ? {auth_enabled:true,user:tokens('SSO').user} : tokens('SSO'));
+ssoTransport.sso = {keycloak_enabled:true,allow_local_login:true,login_url:'/auth/keycloak/login'};
+test('explicit Legacy SSO preserves the same provider through one-use tab storage',async()=>{
+ const departure=harness(ssoTransport,providerHandoff);await departure.startSSO();
+ assert.equal(departure.location.href,'/auth/keycloak/login');
+ const callback=harness(ssoTransport,'#kc_code=synthetic-code',departure.storage);await callback.initAuth();
+ assert.equal(callback.location.hash,providerHandoff);assert.equal(callback.storage.has(ssoReturnKey),false);
+ assert.equal(callback.authState.user.email,'SSO');assert.equal(callback.routes,1);
+});
+
+test('request detail and filter bytes survive SSO without entering the IdP URL',async()=>{
+ const target='#/requests?request_id=%ED%95%9C%EA%B8%80%20%2B%252F%3F%26%23&model=public%2B&limit=37';
+ const d=harness(ssoTransport,target);await d.startSSO();assert.equal(d.location.href,'/auth/keycloak/login');
+ const h=harness(ssoTransport,'#kc_code=synthetic',d.storage);await h.initAuth();assert.equal(h.location.hash,target);
+});
+for(const marker of ['#kc_error=access_denied','#kc_error=%E0%A4%A','#kc_code=%E0%A4%A']){
+ test('SSO failure keeps a one-use safe target for explicit retry '+marker,async()=>{
+  const d=harness(ssoTransport,providerHandoff);await d.startSSO();
+  const h=harness(ssoTransport,marker,d.storage);await h.initAuth();
+  assert.equal(h.location.hash,providerHandoff);assert.equal(h.loginVisible(),true);assert.equal(h.storage.has(ssoReturnKey),false);
+  await h.login();assert.equal(h.location.hash,providerHandoff);
+ });
+}
+for(const failure of ['401','network']){
+ test('exchange failure restores destination but never credentials '+failure,async()=>{
+  const d=harness(ssoTransport,providerHandoff);await d.startSSO();
+  const h=harness(()=>{if(failure==='network')throw Error('private');return response(401)},'#kc_code=synthetic',d.storage);
+  await h.initAuth();assert.equal(h.location.hash,providerHandoff);assert.equal(h.loginVisible(),true);assert.equal(h.storage.has('authAccess'),false);
+ });
+}
+for(const value of ['broken',JSON.stringify({hash:providerHandoff,createdAt:Date.now()-600001}),JSON.stringify({hash:providerHandoff,createdAt:Date.now()+600000}),JSON.stringify({hash:providerHandoff,createdAt:'100'}),JSON.stringify({hash:'//outside.invalid',createdAt:Date.now()}),'x'.repeat(9001)]){
+ test('invalid or stale staged intent is discarded '+value.slice(0,24),async()=>{
+  const storage=new Map([[ssoReturnKey,value]]);const h=harness(ssoTransport,'#kc_code=synthetic',storage);
+  await h.initAuth();assert.equal(h.location.hash,'');assert.equal(h.storage.has(ssoReturnKey),false);
+ });
+}
+for(const change of ['route','logout','login']){
+ test('in-flight SSO cannot restore retired intent after '+change,async()=>{
+  const d=harness(ssoTransport,providerHandoff);await d.startSSO();const exchange=deferred();
+  const h=harness(call=>call.path==='/auth/sso/exchange'?exchange.promise:ssoTransport(call),'#kc_code=synthetic',d.storage);
+  const boot=h.initAuth();await until(()=>h.count('/auth/sso/exchange')===1);
+  if(change==='route')h.location.hash='#/requests?model=new';
+  else if(change==='logout')await h.logout();else await h.login();
+  const current=h.location.hash;exchange.resolve(response(200,tokens('SSO')));await boot;
+  assert.equal(h.location.hash,current);assert.notEqual(h.location.hash,providerHandoff);assert.equal(h.storage.has(ssoReturnKey),false);
+ });
+}
+test('ordinary Legacy boot discards an abandoned SSO intent',async()=>{
+ const d=harness(ssoTransport,providerHandoff);await d.startSSO();
+ const h=harness(ssoTransport,'#/requests',d.storage);await h.initAuth();assert.equal(h.location.hash,'#/requests');assert.equal(h.storage.has(ssoReturnKey),false);
+ h.location.hash='#kc_code=synthetic';await h.initAuth();assert.equal(h.location.hash,'');
+});
+test('explicit logout and local login each discard pending SSO intent',async()=>{
+ for(const action of ['logout','login']){
+  const h=harness(ssoTransport,providerHandoff);await h.startSSO();await h[action]();assert.equal(h.storage.has(ssoReturnKey),false);
+ }
+});
+test('a new SSO selection supersedes an earlier staged target',async()=>{
+ const h=harness(ssoTransport,providerHandoff);await h.startSSO();h.location.hash='#/requests?model=new';await h.startSSO();
+ const c=harness(ssoTransport,'#kc_code=synthetic',h.storage);await c.initAuth();assert.equal(c.location.hash,'#/requests?model=new');
+});
+test('storage failure stops the redirect with a usable login error',async()=>{
+ const storage=new Map();storage.set=()=>{throw Error('unavailable')};
+ const h=harness(ssoTransport,providerHandoff,storage);await h.startSSO();assert.equal(h.location.href,undefined);assert.equal(h.loginVisible(),true);
+ assert.match(h.node('login-error').textContent,/저장할 수 없습니다/);
 });

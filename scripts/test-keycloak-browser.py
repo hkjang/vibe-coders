@@ -131,14 +131,14 @@ def main():
                 else: raise RuntimeError("Keycloak discovery did not become ready")
                 print("Pinned Keycloak HTTPS discovery ready; no host ports or external runtime network", flush=True)
                 phase = "real Keycloak browser and database verification"
-                result = subprocess.run(["docker", "exec", browser_name, "/proxy.test", "-test.run=^TestKeycloakProductBrowserIntegration$", "-test.count=1", "-test.timeout=5m"], stdout=log, stderr=log)
+                result = subprocess.run(["docker", "exec", browser_name, "/proxy.test", "-test.run=^TestKeycloakProductBrowserIntegration$", "-test.count=1", "-test.timeout=6m"], stdout=log, stderr=log)
                 source = reports / "keycloak-live-summary.json"
                 if source.exists():
                     summary = json.loads(source.read_text())
-                    allowed = {"KEYCLOAK-LIVE-00" + str(i) for i in range(1, 6)}
+                    allowed = {"KEYCLOAK-LIVE-00" + str(i) for i in range(1, 8)}
                     assert set(summary) == {"status", "tests"}
                     assert summary["status"] in {"passed", "failed", "timedout", "interrupted"}
-                    assert len(summary["tests"]) == 5
+                    assert len(summary["tests"]) == 7
                     assert {item["scenario"] for item in summary["tests"]} == allowed
                     for item in summary["tests"]:
                         assert set(item) <= {"scenario", "status", "durationMs", "lastSourceLine", "failureSourceLine"}

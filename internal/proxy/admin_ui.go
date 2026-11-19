@@ -852,6 +852,32 @@ const adminHTML = `<!doctype html>
       return '';
     }
     let initialLegacyHandoff = initialLegacyReadHandoff(location.hash);
+    // The callback uses the fragment for a one-time exchange code. Keep the read
+    // destination in this tab only, never in the IdP URL or a shared credential store.
+    const legacySsoHandoffKey = 'vibe.admin.auth.sso-return-to';
+    function clearLegacySsoHandoff() {
+      try { sessionStorage.removeItem(legacySsoHandoffKey); return true; } catch { return false; }
+    }
+    function stageLegacySsoHandoff() {
+      if (!clearLegacySsoHandoff()) return false;
+      const hash = initialLegacyReadHandoff(location.hash);
+      if (!hash) return true;
+      try {
+        sessionStorage.setItem(legacySsoHandoffKey, JSON.stringify({ hash, createdAt: Date.now() }));
+        return true;
+      } catch { return false; }
+    }
+    function consumeLegacySsoHandoff() {
+      try {
+        const raw = sessionStorage.getItem(legacySsoHandoffKey);
+        sessionStorage.removeItem(legacySsoHandoffKey);
+        if (!raw || raw.length > 9000) return '';
+        const value = JSON.parse(raw);
+        const age = Date.now() - value?.createdAt;
+        if (!Number.isSafeInteger(value?.createdAt) || age < 0 || age > 600000) return '';
+        return initialLegacyReadHandoff(value.hash);
+      } catch { return ''; }
+    }
     function retireAuth(changing = false) {
       const providerDetail = document.getElementById('legacy-provider-detail');
       if (providerDetail) providerDetail.textContent = '';
@@ -953,7 +979,14 @@ const adminHTML = `<!doctype html>
       const btn = document.createElement('button');
       btn.id = 'sso-login-btn'; btn.type = 'button'; btn.textContent = 'SSO 로그인 (Keycloak)';
       btn.style.cssText = 'margin-top:8px;width:100%';
-      btn.onclick = () => { location.href = st.login_url || '/auth/keycloak/login'; };
+      btn.onclick = () => {
+        if (authChanging) return;
+        if (!stageLegacySsoHandoff()) {
+          showLogin('로그인 상태를 저장할 수 없습니다. 브라우저의 사이트 저장소 설정을 확인한 뒤 다시 시도하세요.');
+          return;
+        }
+        location.href = st.login_url || '/auth/keycloak/login';
+      };
       form.appendChild(btn);
       if (st.allow_local_login === false) {
         // SSO-only: hide local email/password inputs.
@@ -992,6 +1025,7 @@ const adminHTML = `<!doctype html>
     }
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      clearLegacySsoHandoff();
       const epoch = retireAuth(true);
       const btn = document.getElementById('login-submit');
       const err = document.getElementById('login-error');
@@ -1034,6 +1068,7 @@ const adminHTML = `<!doctype html>
     });
     document.getElementById('auth-logout').addEventListener('click', async () => {
       initialLegacyHandoff = '';
+      clearLegacySsoHandoff();
       const access = authState.access;
       const refresh = authState.refresh;
       const epoch = retireAuth(true);
@@ -1132,11 +1167,22 @@ const adminHTML = `<!doctype html>
       const hash = location.hash || '';
       const codeM = hash.match(/[#&]kc_code=([^&]+)/);
       const errM = hash.match(/[#&]kc_error=([^&]+)/);
+      if (!codeM && !errM) { clearLegacySsoHandoff(); return {}; }
+      const returnHash = consumeLegacySsoHandoff();
+      const callbackPath = location.pathname + location.search;
+      // Remove even malformed callback fragments before decoding them.
+      history.replaceState(null, '', callbackPath);
+      const restoreHandoff = () => {
+        if (epoch !== authEpoch || location.pathname + location.search !== callbackPath || location.hash) return;
+        if (returnHash) {
+          initialLegacyHandoff = returnHash;
+          history.replaceState(null, '', callbackPath + returnHash);
+        }
+      };
       if (codeM) {
         epoch = retireAuth(true);
         try {
           const code = decodeURIComponent(codeM[1]);
-          history.replaceState(null, '', location.pathname + location.search);
           const res = await fetch('/auth/sso/exchange', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1145,6 +1191,7 @@ const adminHTML = `<!doctype html>
           if (epoch !== authEpoch) return {};
           if (!res.ok) {
             authChanging = false;
+            restoreHandoff();
             return { epoch, error: 'SSO 일회용 코드가 만료되었거나 다른 브라우저에서 시작되었습니다.' };
           }
           const tokens = await res.json();
@@ -1152,16 +1199,19 @@ const adminHTML = `<!doctype html>
           saveAuth(tokens);
           authState.enabled = true;
           authChanging = false;
+          restoreHandoff();
           return { epoch, ok: true };
         } catch (_) {
           if (epoch !== authEpoch) return {};
           authChanging = false;
+          restoreHandoff();
           return { epoch, error: 'SSO 세션 교환에 실패했습니다.' };
         }
       }
       if (errM) {
-        history.replaceState(null, '', location.pathname + location.search);
-        return { error: decodeURIComponent(errM[1]) };
+        restoreHandoff();
+        try { return { error: decodeURIComponent(errM[1]) }; }
+        catch { return { error: 'SSO 응답을 확인하지 못했습니다.' }; }
       }
       return {};
     }

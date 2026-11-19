@@ -76,6 +76,24 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 		Scopes:      []string{"openid", "profile", "email"}, DefaultRole: "viewer",
 		RoleClaim: "realm_access.roles", GroupClaim: "groups", AllowLocalLogin: true,
 	}
+	providerFixture := store.ProviderConfig{Name: "SSO +%2F?&# 공급자", BaseURL: "http://127.0.0.1:9", TimeoutMS: 1000, Enabled: false, Priority: 100}
+	if err := db.UpsertProvider(t.Context(), providerFixture); err != nil {
+		t.Fatal("synthetic provider unavailable")
+	}
+	if err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: store.RequestLog{
+		ID: "SSO 요청 +%2F?&#", Model: "public-model", ClientIP: "2001:db8::7",
+		Method: "POST", Endpoint: "/v1/chat/completions", StatusCode: 200, CreatedAt: time.Now().UTC(),
+	}}); err != nil {
+		t.Fatal("synthetic request unavailable")
+	}
+	providersBefore, err := db.ListProviderConfigs(t.Context())
+	if err != nil {
+		t.Fatal("provider baseline unavailable")
+	}
+	providerBytesBefore, err := json.Marshal(providersBefore)
+	if err != nil {
+		t.Fatal("provider baseline invalid")
+	}
 	logger := store.NewAsyncLogger(db, 32, filepath.Join(scratch, "fallback.ndjson"))
 	logger.Start()
 	t.Cleanup(func() {
@@ -97,7 +115,7 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	gateway.StartTLS()
 	t.Cleanup(gateway.Close)
 	web := browserAuthWebDirectory(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, "node", filepath.Join(web, "node_modules", "@playwright", "test", "cli.js"), "test", "--config", "playwright.keycloak.config.ts")
 	command.Dir = web
@@ -117,12 +135,12 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 5 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 7 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true
@@ -149,5 +167,13 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if conflictAccounts != 1 {
 		t.Fatal("email collision did not produce exactly one separate SSO-only account")
 	}
-	t.Log("five real Keycloak HTTPS browser scenarios and persisted provisioning checks passed")
+	providersAfter, err := db.ListProviderConfigs(t.Context())
+	if err != nil {
+		t.Fatal("provider verification unavailable")
+	}
+	providerBytesAfter, err := json.Marshal(providersAfter)
+	if err != nil || string(providerBytesBefore) != string(providerBytesAfter) {
+		t.Fatal("read-only SSO handoff changed provider data")
+	}
+	t.Log("seven real Keycloak HTTPS browser scenarios, persisted provisioning and provider data preservation checks passed")
 }
