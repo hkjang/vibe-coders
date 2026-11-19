@@ -74,7 +74,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('const tokenInput = document.getElementById("token");\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -618,3 +618,11 @@ test('storage failure stops the redirect with a usable login error',async()=>{
  const h=harness(ssoTransport,providerHandoff,storage);await h.startSSO();assert.equal(h.location.href,undefined);assert.equal(h.loginVisible(),true);
  assert.match(h.node('login-error').textContent,/저장할 수 없습니다/);
 });
+
+for (const target of ['#/prompts?q=public&since=2026-11-20T00%3A00%3A00.123Z&fp_window=90d','#/prompt-assets?asset=opaque-id&q=no-match','#/prompt-debt?window=90d']) {
+ test('prompt resource survives local login and SSO '+target, async()=>{
+  const local=harness(ssoTransport,target);await local.login();assert.equal(local.location.hash,target);
+  const departure=harness(ssoTransport,target);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,target);
+ });
+}

@@ -848,7 +848,7 @@ const adminHTML = `<!doctype html>
       if (typeof hash !== 'string' || hash.length > 8192 || /[\u0000-\u001f\u007f]/.test(hash)) return '';
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
-      if (/^#\/requests(?:\?|$)/.test(hash)) return hash;
+      if (/^#\/(?:requests|prompts|prompt-assets|prompt-debt)(?:\?|$)/.test(hash)) return hash;
       return '';
     }
     let initialLegacyHandoff = initialLegacyReadHandoff(location.hash);
@@ -879,6 +879,11 @@ const adminHTML = `<!doctype html>
       } catch { return ''; }
     }
     function retireAuth(changing = false) {
+      // Retire every modal snapshot, including a private asset behind a newer overlay.
+      if (typeof closeModal === 'function') closeModal();
+      const modalBody = document.getElementById('modal-body');
+      if (modalBody) modalBody.textContent = '';
+      window.__assetHistory = [];
       const providerDetail = document.getElementById('legacy-provider-detail');
       if (providerDetail) providerDetail.textContent = '';
       authEpoch++;
@@ -1263,6 +1268,7 @@ const adminHTML = `<!doctype html>
     let modalGeneration = 0;
     let legacyRouteGeneration = 0;
     let requestDetailGeneration = 0;
+    let assetDetailGeneration = 0;
 
     function _applyModalState(state) {
       document.getElementById('modal-title').textContent = state.title;
@@ -1504,7 +1510,16 @@ const adminHTML = `<!doctype html>
       modalGeneration++;
       _applyModalState(modalStack.pop());
     }
+    function retireAssetDetailModal() {
+      if ((currentModalState && currentModalState.opts && currentModalState.opts.assetDetail) ||
+          modalStack.some(state => state.opts && state.opts.assetDetail)) closeModal();
+    }
     function closeModal() {
+      window.__assetHistory = [];
+      const modalBody = document.getElementById('modal-body');
+      if (modalBody) modalBody.textContent = '';
+      const modalTitle = document.getElementById('modal-title');
+      if (modalTitle) modalTitle.textContent = '';
       modalGeneration++;
       const backdrop = document.getElementById('modal-backdrop');
       const wasOpen = backdrop.classList.contains('open');
@@ -2083,6 +2098,7 @@ const adminHTML = `<!doctype html>
     }
 
     async function route() {
+      retireAssetDetailModal();
       const providerDetail = document.getElementById('legacy-provider-detail');
       if (providerDetail) providerDetail.textContent = '';
       const generation = ++legacyRouteGeneration;
@@ -2124,7 +2140,7 @@ const adminHTML = `<!doctype html>
           case 'narrative': await renderNarrativeReport(); break;
           case 'skill-graph': await renderSkillGraph(); break;
           case 'chargeback': await renderChargeback(); break;
-          case 'prompt-debt': await renderPromptDebt(); break;
+          case 'prompt-debt': await renderPromptDebt(params); break;
           case 'app-templates': await renderAppTemplates(); break;
           case 'gateway-mcp': await renderGatewayMCP(); break;
           case 'workflows': await renderWorkflows(); break;
@@ -7966,7 +7982,11 @@ const adminHTML = `<!doctype html>
     // ---------- prompts search ----------
     async function renderPromptsView(initial) {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch;
+      const current = () => generation === legacyRouteGeneration && parseHash().parts[0] === 'prompts' && authCurrent(epoch);
+      let searchGeneration = 0, fingerprintGeneration = 0;
       const saved = (await api('/admin/saved-filters').catch(() => ({ filters: [] }))).filters || [];
+      if (!current()) return;
       const promptFilters = saved.filter(f => f.view === 'prompts');
       const savedOptions = '<option value="">저장된 필터 선택…</option>' +
         promptFilters.map(f => '<option value="' + encodeURIComponent(f.params) + '" data-id="' + escapeHTML(f.id) + '">' + escapeHTML(f.name) + '</option>').join('');
@@ -7976,7 +7996,7 @@ const adminHTML = `<!doctype html>
           '<input id="p-language" placeholder="언어">' +
           '<input id="p-ip" placeholder="IP">' +
           '<input id="p-key" placeholder="API 키 ID">' +
-          '<input id="p-since" type="datetime-local" placeholder="이후">' +
+          '<input id="p-since" type="datetime-local" step="any" placeholder="이후">' +
           '<input id="p-limit" type="number" min="1" max="10000" value="100">' +
           '<button type="submit">검색</button>' +
           '<button type="button" id="p-export" class="secondary">CSV 다운로드</button>' +
@@ -7984,10 +8004,10 @@ const adminHTML = `<!doctype html>
           '<button type="button" id="p-save" class="ghost">현재 필터 저장</button>' +
           '<button type="button" id="p-delete-saved" class="ghost" title="선택한 저장된 필터 삭제">선택 삭제</button>' +
         '</form>' +
-        '<div id="prompt-results"></div>'
+        '<p id="p-filter-error" class="banner error" role="alert" hidden></p><div id="prompt-results"></div>'
       ) + section('프롬프트 지문 — 반복 작업 클러스터 (Prompt Fingerprint)',
         '<div class="toolbar"><select id="pf-window">' +
-          ['24h', '7d', '30d'].map(wd => '<option value="' + wd + '"' + (wd === '7d' ? ' selected' : '') + '>' + wd + '</option>').join('') +
+          ['24h', '7d', '30d', '90d'].map(wd => '<option value="' + wd + '"' + (wd === '7d' ? ' selected' : '') + '>' + wd + '</option>').join('') +
         '</select><span class="muted" style="margin-left:auto">유사한 작업 프롬프트를 지문으로 묶어 건수·평균 비용·추천 모델을 집계합니다</span></div>' +
         '<div id="prompt-fingerprints"></div>'
       );
@@ -8003,16 +8023,35 @@ const adminHTML = `<!doctype html>
         if (language) params.set('language', language);
         if (ip) params.set('ip', ip);
         if (key) params.set('api_key_id', key);
+        const error = document.getElementById('p-filter-error');
+        if (since && !Number.isFinite(Date.parse(since))) {
+          error.textContent = '조회 시작 시각을 확인하세요.'; error.hidden = false; return null;
+        }
+        error.hidden = true;
         if (since) params.set('since', new Date(since).toISOString());
         params.set('limit', limit);
         return params;
       };
       if (initial) applyPromptParams(initial);
+      const requestedWindow = initial && initial.get('fp_window');
+      if (['24h','7d','30d','90d'].includes(requestedWindow)) document.getElementById('pf-window').value = requestedWindow;
       const runSearch = async () => {
+        if (!current()) return;
+        const query = ++searchGeneration;
         const params = collectParams();
-        updateHashParams(params);
-        const r = await api('/admin/prompts?' + params.toString());
-        document.getElementById('prompt-results').innerHTML = requestsTable(r.requests || []);
+        if (!params) return;
+        const hashParams = new URLSearchParams(params);
+        hashParams.set('fp_window', document.getElementById('pf-window').value);
+        updateHashParams(hashParams);
+        const host = document.getElementById('prompt-results');
+        try {
+          const r = await api('/admin/prompts?' + params.toString());
+          if (!current() || query !== searchGeneration || host !== document.getElementById('prompt-results')) return;
+          host.innerHTML = requestsTable(r.requests || []);
+        } catch (_) {
+          if (current() && query === searchGeneration) host.innerHTML = '<p role="alert">검색 결과를 불러오지 못했습니다. 검색을 다시 실행하세요.</p>';
+          return;
+        }
         attachRequestRowHandlers();
         makeSortable('#prompt-results', 'prompts');
       };
@@ -8026,6 +8065,7 @@ const adminHTML = `<!doctype html>
       }
       document.getElementById('p-export').addEventListener('click', async () => {
         const params = collectParams();
+        if (!params || !current()) return;
         const res = await fetch('/admin/export.csv?' + params.toString(), { headers: headers() });
         if (!res.ok) { toast('CSV 다운로드 실패: ' + (await res.text())); return; }
         const blob = await res.blob();
@@ -8047,9 +8087,11 @@ const adminHTML = `<!doctype html>
       });
       document.getElementById('p-save').addEventListener('click', async () => {
         const name = prompt('필터 이름을 입력하세요');
-        if (!name) return;
+        if (!name || !current()) return;
+        const params = collectParams();
+        if (!params) return;
         await api('/admin/saved-filters', { method: 'POST', body: JSON.stringify({
-          name: name.trim(), view: 'prompts', params: collectParams().toString(),
+          name: name.trim(), view: 'prompts', params: params.toString(),
         }) });
         route();
       });
@@ -8064,13 +8106,20 @@ const adminHTML = `<!doctype html>
 
       const pfWindow = document.getElementById('pf-window');
       const loadFingerprints = async () => {
+        if (!current()) return;
+        const query = ++fingerprintGeneration;
         const host = document.getElementById('prompt-fingerprints');
         host.innerHTML = '<div class="muted" style="padding:14px">불러오는 중…</div>';
         const d = await api('/admin/prompts/fingerprints?window=' + pfWindow.value + '&limit=100').catch(() => ({ fingerprints: [] }));
+        if (!current() || query !== fingerprintGeneration || host !== document.getElementById('prompt-fingerprints')) return;
         host.innerHTML = promptFingerprintTable(d.fingerprints || []);
         makeSortable('#prompt-fingerprints', 'pf');
       };
-      pfWindow.addEventListener('change', loadFingerprints);
+      pfWindow.addEventListener('change', () => {
+        if (!current()) return;
+        const params = parseHash().params; params.set('fp_window', pfWindow.value);
+        updateHashParams(params); void loadFingerprints();
+      });
       loadFingerprints();
     }
     function promptFingerprintTable(rows) {
@@ -8100,10 +8149,7 @@ const adminHTML = `<!doctype html>
         const el = document.getElementById(id);
         if (!el) return;
         let v = params.get(k) || '';
-        if (k === 'since' && v) {
-          const d = new Date(v);
-          if (!isNaN(d)) v = d.toISOString().slice(0, 16);
-        }
+        if (k === 'since') { restoreRequestTimeInput(el, v); return; }
         el.value = v;
       });
     }
@@ -8119,7 +8165,19 @@ const adminHTML = `<!doctype html>
         : escapeHTML(team);
     }
     // ── 프롬프트 자산 관리소 ──────────────────────────────────────────────
+    function legacyPromptAssetIDValid(id) {
+      return typeof id === 'string' && id.length > 0 && id.length <= 512 && id.trim() === id &&
+        !/[\u0000-\u001f\u007f]/.test(id);
+    }
     async function renderPromptAssets(initial) {
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && hash === location.hash && authCurrent(epoch);
+      const handoffModal = modalGeneration, handoffSelection = assetDetailGeneration;
+      const ids = initial ? initial.getAll('asset') : [];
+      if (ids.length > 1 || (ids.length === 1 && !legacyPromptAssetIDValid(ids[0]))) {
+        document.getElementById('view').innerHTML = '<p role="alert">자산 상세 주소가 올바르지 않습니다.</p>';
+        return;
+      }
       const statusFilter   = (initial && initial.get('status'))   || '';
       const tagFilter      = (initial && initial.get('tag'))      || '';
       const categoryFilter = (initial && initial.get('category')) || '';
@@ -8132,6 +8190,7 @@ const adminHTML = `<!doctype html>
       if (q)              qs.set('q',        q);
 
       const d = await api('/admin/prompt-assets' + (qs.toString() ? '?' + qs.toString() : ''));
+      if (!current()) return;
       const assets      = d.assets    || [];
       const stats       = d.stats     || {};
       const knownTags   = d.known_tags || [];
@@ -8222,6 +8281,7 @@ const adminHTML = `<!doctype html>
 
       document.getElementById('pa-filter').addEventListener('submit', e => {
         e.preventDefault();
+        if (!current()) return;
         const p = new URLSearchParams();
         const qv = document.getElementById('pa-q').value.trim();
         const sv = document.getElementById('pa-status').value;
@@ -8231,9 +8291,13 @@ const adminHTML = `<!doctype html>
         if (sv) p.set('status', sv);
         if (cv) p.set('category', cv);
         if (tv) p.set('tag', tv);
-        location.hash = '#/prompt-assets' + (p.toString() ? '?' + p.toString() : '');
-        route();
+        const next = '#/prompt-assets' + (p.toString() ? '?' + p.toString() : '');
+        if (location.hash === next) void route();
+        else location.hash = next;
       });
+      if (ids.length && current() && handoffModal === modalGeneration && handoffSelection === assetDetailGeneration) {
+        await window.openAssetDetail(ids[0]);
+      }
     }
 
     window.openAddAssetModal = () => {
@@ -8295,14 +8359,32 @@ const adminHTML = `<!doctype html>
     };
 
     window.openAssetDetail = async (id) => {
-      openModal('자산 상세 — ' + id, '<div class="loading">불러오는 중...</div>');
+      const selection = ++assetDetailGeneration, generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      let modal = modalGeneration;
+      const current = () => selection === assetDetailGeneration && generation === legacyRouteGeneration &&
+        epoch === authEpoch && authCurrent(epoch) && hash === location.hash && modal === modalGeneration;
+      if (!current()) return;
+      if (!legacyPromptAssetIDValid(id)) {
+        openModal('자산 상세', '<p role="alert">자산 상세 주소가 올바르지 않습니다.</p>'); return;
+      }
+      openModal('자산 상세 — ' + id, '<div id="legacy-asset-detail" class="loading">불러오는 중...</div>', undefined, { assetDetail: true });
+      modal = modalGeneration;
       try {
         const [resp, histResp, usageResp] = await Promise.all([
-          api('/admin/prompt-assets?q=' + encodeURIComponent(id)),
+          api('/admin/prompt-assets'),
           api('/admin/templates/' + encodeURIComponent(id) + '/history').catch(() => ({ history: [] })),
           api('/admin/templates/' + encodeURIComponent(id) + '/usage').catch(() => ({ usage: [] })),
         ]);
-        const a = (resp.assets || []).find(x => x.id === id) || {};
+        if (!current()) return;
+        if (!resp || !Array.isArray(resp.assets)) throw new Error('Invalid asset list');
+        const matches = resp.assets.filter(x => x && x.id === id);
+        if (matches.length !== 1) {
+          _applyModalState({ title: '자산 상세', html: '<div id="legacy-asset-detail"><p role="alert">선택한 자산을 찾을 수 없습니다.</p></div>', opts: { assetDetail: true } });
+          return;
+        }
+        const a = matches[0];
+        const scopes = authState.nav && authState.nav.scopes;
+        const canWrite = Array.isArray(scopes) && scopes.includes('admin:write');
         const history = histResp.history || [];
         const usage = usageResp.usage || [];
         window.__assetHistory = history; // for diff lookup
@@ -8376,8 +8458,7 @@ const adminHTML = `<!doctype html>
           '</div>'
         ) : '';
 
-        openModal('자산 상세 — ' + escapeHTML(a.name || id),
-          metricsBlock +
+        _applyModalState({ title: '자산 상세 — ' + (a.name || id), html: '<div id="legacy-asset-detail">' + (canWrite ? '' : '<p role="status">읽기 전용입니다. 자산을 변경할 수 없습니다.</p>') + metricsBlock +
           '<div class="kv">' +
             row('상태', statusBadge(a.status)) +
             row('카테고리', escapeHTML(a.category||'')) +
@@ -8408,16 +8489,23 @@ const adminHTML = `<!doctype html>
             (a.status==='approved' ? '<button type="button" class="secondary" onclick="approveAsset(\''+escapeAttr(id)+'\',\'standard\')">표준 승격</button>' : '') +
             ((a.status==='pending'||a.status==='approved'||a.status==='standard') ? '<button type="button" class="secondary" onclick="approveAsset(\''+escapeAttr(id)+'\',\'draft\')">반려</button>' : '') +
             '<button type="button" class="secondary" onclick="closeModal()">닫기</button>' +
-          '</div>'
-        );
-      } catch(err) {
-        openModal('자산 상세 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+          '</div></div>', opts: { assetDetail: true } });
+        if (!canWrite) {
+          document.querySelectorAll('#legacy-asset-detail input, #legacy-asset-detail textarea').forEach(el => { el.readOnly = true; });
+          document.querySelectorAll('#legacy-asset-detail select').forEach(el => { el.disabled = true; });
+          document.querySelectorAll('#legacy-asset-detail button[onclick]').forEach(el => {
+            if (/^(saveAssetEdit|submitAsset|approveAsset|rollbackAsset)\(/.test(el.getAttribute('onclick') || '')) el.disabled = true;
+          });
+        }
+      } catch(_error) {
+        if (!current()) return;
+        _applyModalState({ title: '자산 상세 오류', html: '<div id="legacy-asset-detail"><p role="alert">자산 정보를 불러오지 못했습니다. 목록에서 다시 열어 주세요.</p></div>', opts: { assetDetail: true } });
       }
     };
 
     window.addTagToEditInput = (tag) => {
       const el = document.getElementById('pa-edit-tags');
-      if (!el) return;
+      if (!el || el.readOnly || el.disabled) return;
       const existing = el.value.split(',').map(t=>t.trim()).filter(Boolean);
       if (!existing.includes(tag)) { el.value = [...existing, tag].join(', '); }
     };
@@ -14373,12 +14461,17 @@ const adminHTML = `<!doctype html>
     }
 
     // renderPromptDebt ranks recurring prompt clusters by accumulated "prompt debt".
-    async function renderPromptDebt() {
+    async function renderPromptDebt(initial) {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch;
+      const current = () => generation === legacyRouteGeneration && authCurrent(epoch);
+      const requested = initial && initial.get('window');
+      const period = ['7d','30d','90d'].includes(requested) ? requested : '30d';
       view.innerHTML = section('프롬프트 부채', '<div class="loading">분석 중...</div>');
       let d;
-      try { d = await api('/admin/prompts/debt?window=30d'); }
-      catch (e) { view.innerHTML = section('프롬프트 부채', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      try { d = await api('/admin/prompts/debt?window=' + period + '&limit=50'); }
+      catch (e) { if (!current()) return; view.innerHTML = section('프롬프트 부채', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      if (!current()) return;
       const items = d.items || [];
       const won = (v) => '₩' + fmt(Math.round(v || 0));
       const typeBadge = (t) => ({
@@ -14399,7 +14492,7 @@ const adminHTML = `<!doctype html>
       const table = items.length
         ? '<table><thead><tr><th>부채</th><th>유형</th><th>작업/지문</th><th>요청</th><th>성공률</th><th>평균비용</th><th>총비용</th><th>모델</th><th>권장 조치</th></tr></thead><tbody>' + rows + '</tbody></table>'
         : '<p class="muted">부채로 분류된 프롬프트가 없습니다. 👍</p>';
-      view.innerHTML = section('프롬프트 부채 (Prompt Debt) — 최근 30일',
+      view.innerHTML = section('프롬프트 부채 (Prompt Debt) — 최근 ' + period.slice(0, -1) + '일',
         '<div style="padding:8px 14px"><span class="muted" style="font-size:12px">부채 대상 ' + items.length + '건 · 누적 비용 ' + won(d.total_debt_cost_krw) + '</span></div>') +
         card('부채 우선순위 (점수 높은 순)',
           '<div class="card-body">' + table +

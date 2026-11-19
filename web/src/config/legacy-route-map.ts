@@ -18,6 +18,8 @@ export const legacyRoutes = {
   journeyProbe: "/admin#/journey-probe",
   promptLab: "/admin#/prompt-lab",
   prompts: "/admin#/prompts",
+  promptAssets: "/admin#/prompt-assets",
+  promptDebt: "/admin#/prompt-debt",
   users: "/admin#/users",
   safety: "/admin#/safety",
   remediation: "/admin#/remediation",

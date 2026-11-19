@@ -38,6 +38,9 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if supported, _ := capabilities["legacy_request_filters"].(bool); !supported {
 		t.Fatal("expected support for exact Legacy request filter handoff")
 	}
+	if supported, _ := capabilities["legacy_prompt_library"].(bool); !supported {
+		t.Fatal("prompt library Legacy handoff capability missing")
+	}
 	if supported, _ := capabilities["legacy_provider_detail"].(bool); !supported {
 		t.Fatal("provider Legacy detail capability missing")
 	}

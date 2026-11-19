@@ -135,10 +135,10 @@ def main():
                 source = reports / "keycloak-live-summary.json"
                 if source.exists():
                     summary = json.loads(source.read_text())
-                    allowed = {"KEYCLOAK-LIVE-00" + str(i) for i in range(1, 8)}
+                    allowed = {"KEYCLOAK-LIVE-00" + str(i) for i in range(1, 10)}
                     assert set(summary) == {"status", "tests"}
                     assert summary["status"] in {"passed", "failed", "timedout", "interrupted"}
-                    assert len(summary["tests"]) == 7
+                    assert len(summary["tests"]) == 9
                     assert {item["scenario"] for item in summary["tests"]} == allowed
                     for item in summary["tests"]:
                         assert set(item) <= {"scenario", "status", "durationMs", "lastSourceLine", "failureSourceLine"}

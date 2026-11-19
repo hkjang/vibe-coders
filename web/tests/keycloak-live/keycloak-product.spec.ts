@@ -219,3 +219,152 @@ test("KEYCLOAK-LIVE-007 읽기 전용 SSO가 요청 상세와 필터를 정확�
   expect(role).toBe("readonly_admin");
   expect(await page.evaluate(() => sessionStorage.getItem("vibe.app.auth.access"))).toBeNull();
 });
+
+test("KEYCLOAK-LIVE-008 자산 상세와 제외 필터가 읽기 전용 SSO 뒤에도 유지된다", async ({ page }) => {
+  const assetID = "handoff-opaque-asset";
+  await signIn(page, "reader", "/app/prompts/library?tab=assets&asset=" + assetID + "&asset_q=no-match");
+  const link = page.getByRole("link", { name: "기존 화면에서 같은 자산 열기", exact: true });
+  await expect(link).toHaveAttribute("href", "/admin#/prompt-assets?q=no-match&asset=" + assetID);
+  let writes = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/admin/templates") && request.method() !== "GET")
+      writes += 1;
+  });
+  await link.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  await expect(page.locator("#modal-backdrop.open")).toBeVisible();
+  await expect(page.locator("#pa-edit-name")).toHaveValue("서로 다른 자산 이름");
+  await expect(page.locator("#pa-edit-body")).toHaveValue("Public bridge template body");
+  await expect(page.locator("#pa-edit-body")).toHaveJSProperty("readOnly", true);
+  await expect(page.locator("#pa-edit-body")).toBeEnabled();
+  await page.locator("#pa-edit-body").focus();
+  await page.keyboard.press("Control+A");
+  expect(
+    await page.locator("#pa-edit-body").evaluate((node) => {
+      const body = node as HTMLTextAreaElement;
+      return body.value.slice(body.selectionStart, body.selectionEnd);
+    }),
+  ).toBe("Public bridge template body");
+  await expect(
+    page.locator("#legacy-asset-detail").getByRole("button", { name: "저장", exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator("#pa-q")).toHaveValue("no-match");
+  expect(new URLSearchParams(new URL(page.url()).hash.split("?")[1]).get("asset")).toBe(assetID);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  await page.locator("#modal-close").click();
+  await expect(page.locator("#modal-title")).toBeEmpty();
+  await page.goto("/admin#/prompt-assets?asset=" + assetID);
+  await expect(page.locator("#pa-edit-body")).toHaveValue("Public bridge template body");
+  // Exercise the real modal stack while an asset is hidden behind another overlay.
+  const nestModal = () =>
+    page.evaluate(() => {
+      const legacy = window as unknown as { openModal: (title: string, html: string) => void };
+      legacy.openModal("공개 도움말", "<p>Public help overlay</p>");
+    });
+  await nestModal();
+  await expect(page.locator("#pa-edit-body")).toHaveCount(0);
+  await page.locator("#modal-back").click();
+  await expect(page.locator("#pa-edit-body")).toHaveValue("Public bridge template body");
+  await expect(page.locator("#pa-edit-body")).toHaveJSProperty("readOnly", true);
+  await nestModal();
+  // A route retirement must discard hidden asset snapshots as well.
+  await page.evaluate(() => {
+    location.hash = "#/prompt-debt?window=7d";
+  });
+  await expect(page.locator("#view")).toContainText("최근 7일");
+  await expect(page.locator("#modal-backdrop.open")).toHaveCount(0);
+  await expect(page.locator("#modal-body")).toBeEmpty();
+  await page.goto("/admin#/prompt-assets?asset=" + assetID);
+  await expect(page.locator("#pa-edit-body")).toHaveValue("Public bridge template body");
+  await nestModal();
+  // Synthetic DOM event invokes the actual logout handler/HTTP while the header is occluded.
+  await page.locator("#auth-logout").dispatchEvent("click");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(page.locator("#modal-backdrop.open")).toHaveCount(0);
+  await expect(page.locator("#modal-body")).toBeEmpty();
+  expect(
+    await page.evaluate(() => (window as unknown as { __assetHistory: unknown[] }).__assetHistory),
+  ).toEqual([]);
+  await nestModal();
+  await expect(page.locator("#modal-back")).toBeHidden();
+  await page.evaluate(() => {
+    (window as unknown as { modalBack: () => void }).modalBack();
+  });
+  await expect(page.locator("#modal-body")).not.toContainText("Public bridge template body");
+  expect(writes).toBe(0);
+});
+
+test("KEYCLOAK-LIVE-009 검색 시각과 지문 및 부채 기간이 실제 API에 전달된다", async ({ page }) => {
+  const since = "2026-11-18T03:04:05.123Z";
+  const search = new URLSearchParams({ q: "public", since, limit: "37", fp_window: "90d" });
+  await signIn(page, "reader", "/app/prompts/library?" + search);
+  const expectedIDs = await page.evaluate(
+    async (query) => {
+      const response = await fetch("/admin/prompts?" + query, {
+        headers: { Authorization: "Bearer " + sessionStorage.getItem("vibe.app.auth.access") },
+      });
+      const body: { requests: { id: string }[] } = await response.json();
+      return body.requests.map((row) => row.id);
+    },
+    new URLSearchParams({ q: "public", since, limit: "37" }).toString(),
+  );
+  expect(expectedIDs.length).toBeGreaterThan(0);
+  const legacyResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/admin/prompts" && url.searchParams.get("since") === since;
+  });
+  const link = page.getByRole("link", { name: "기존 화면에서 열기", exact: true });
+  const reads: URL[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/admin/prompts")) reads.push(url);
+  });
+  await link.click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  await expect(page.locator("#p-since")).toHaveValue(since);
+  await expect(page.locator("#pf-window")).toHaveValue("90d");
+  const actual: { requests: { id: string }[] } = await (await legacyResponse).json();
+  expect(actual.requests.map((row) => row.id)).toEqual(expectedIDs);
+  await expect
+    .poll(() =>
+      page
+        .locator("#prompt-results tr[data-request-id]")
+        .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-request-id"))),
+    )
+    .toEqual(expectedIDs);
+
+  await expect
+    .poll(() =>
+      reads.some(
+        (url) =>
+          url.pathname === "/admin/prompts" &&
+          url.searchParams.get("since") === since &&
+          url.searchParams.get("q") === "public" &&
+          url.searchParams.get("limit") === "37",
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      reads.some(
+        (url) => url.pathname === "/admin/prompts/fingerprints" && url.searchParams.get("window") === "90d",
+      ),
+    )
+    .toBe(true);
+  await page.goto("/app/prompts/library?tab=debt&debt_window=7d");
+  await page.getByRole("link", { name: "기존 화면에서 열기", exact: true }).click();
+  await expect
+    .poll(() =>
+      reads.some(
+        (url) =>
+          url.pathname === "/admin/prompts/debt" &&
+          url.searchParams.get("window") === "7d" &&
+          url.searchParams.get("limit") === "50",
+      ),
+    )
+    .toBe(true);
+  await expect(page.locator("#view")).toContainText("최근 7일");
+});

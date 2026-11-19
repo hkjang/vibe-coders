@@ -5,6 +5,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -86,6 +87,30 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	}}); err != nil {
 		t.Fatal("synthetic request unavailable")
 	}
+	if err := db.UpsertPromptTemplate(t.Context(), store.PromptTemplate{
+		ID: "handoff-opaque-asset", Name: "서로 다른 자산 이름", Category: "custom", Body: "Public bridge template body", Enabled: true, Status: "draft",
+	}); err != nil {
+		t.Fatal("synthetic prompt asset unavailable")
+	}
+	searchBoundary := time.Date(2026, time.November, 18, 3, 4, 5, 123000000, time.UTC)
+	for i, offset := range []time.Duration{-time.Millisecond, 0, time.Millisecond} {
+		id := fmt.Sprintf("handoff-search-%d", i)
+		created := searchBoundary.Add(offset)
+		if err := db.InsertLogRecord(t.Context(), store.LogRecord{
+			Request: store.RequestLog{ID: id, Model: "public-model", ClientIP: "2001:db8::7", Method: "POST", Endpoint: "/v1/chat/completions", StatusCode: 200, CreatedAt: created},
+			Prompts: []store.PromptLog{{ID: id + "-prompt", RequestID: id, Role: "user", ContentHash: id, ContentText: "public bridge prompt", RedactedText: "public bridge prompt", LanguageHint: "go", CreatedAt: created}},
+		}); err != nil {
+			t.Fatal("synthetic prompt boundary unavailable")
+		}
+	}
+	assetsBefore, err := db.ListPromptTemplates(t.Context(), false)
+	if err != nil {
+		t.Fatal("asset baseline unavailable")
+	}
+	assetBytesBefore, err := json.Marshal(assetsBefore)
+	if err != nil {
+		t.Fatal("asset baseline invalid")
+	}
 	providersBefore, err := db.ListProviderConfigs(t.Context())
 	if err != nil {
 		t.Fatal("provider baseline unavailable")
@@ -135,12 +160,12 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 7 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 9 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true
@@ -175,5 +200,13 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if err != nil || string(providerBytesBefore) != string(providerBytesAfter) {
 		t.Fatal("read-only SSO handoff changed provider data")
 	}
-	t.Log("seven real Keycloak HTTPS browser scenarios, persisted provisioning and provider data preservation checks passed")
+	assetsAfter, err := db.ListPromptTemplates(t.Context(), false)
+	if err != nil {
+		t.Fatal("asset verification unavailable")
+	}
+	assetBytesAfter, err := json.Marshal(assetsAfter)
+	if err != nil || string(assetBytesBefore) != string(assetBytesAfter) {
+		t.Fatal("read-only handoff changed prompt asset data")
+	}
+	t.Log("nine real Keycloak HTTPS browser scenarios, persisted provisioning and provider/asset data preservation checks passed")
 }

@@ -4361,6 +4361,10 @@ export type UiBootstrapResponse = {
     backend_version: string;
     capabilities: {
         /**
+         * Preserves supported prompt library tabs, filters and selected asset in Legacy. Does not grant access or execute mutations.
+         */
+        legacy_prompt_library?: boolean;
+        /**
          * Supports a read-only provider detail in Legacy settings using the existing app projection and opaque reference. Does not grant provider access.
          */
         legacy_provider_detail?: boolean;

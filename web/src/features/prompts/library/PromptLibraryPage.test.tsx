@@ -8,12 +8,21 @@ import { PromptLibraryPage } from "@/features/prompts/library/PromptLibraryPage"
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
-const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] as string[] }));
+const authRuntime = vi.hoisted(() => ({
+  scopes: ["admin:read", "admin:write"] as string[],
+  legacyPromptLibrary: false,
+  legacyFallback: true,
+}));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return {
+    useAuth: () => ({
+      ...testAuth({ scopes: authRuntime.scopes, legacyFallback: authRuntime.legacyFallback }),
+      capabilities: { raw_prompt_view: false, legacy_prompt_library: authRuntime.legacyPromptLibrary },
+    }),
+  };
 });
 
 vi.mock("sonner", () => ({ toast: { success: toastSpy.success, error: toastSpy.error } }));
@@ -262,6 +271,8 @@ function mockAllEndpoints(overrides: Record<string, ApiHandler> = {}) {
 
 beforeEach(() => {
   authRuntime.scopes = ["admin:read", "admin:write"];
+  authRuntime.legacyPromptLibrary = false;
+  authRuntime.legacyFallback = true;
   toastSpy.success.mockClear();
   toastSpy.error.mockClear();
 });
@@ -282,6 +293,40 @@ function render(route = "/prompts/library") {
 }
 
 describe("PromptLibraryPage", () => {
+  it("maps the active asset tab and selected detail independently of list filters", async () => {
+    authRuntime.legacyPromptLibrary = true;
+    mockAllEndpoints();
+    render("/prompts/library?tab=assets&asset=refactor-basic&asset_q=no-match");
+    const link = await screen.findByRole("link", { name: "기존 화면에서 같은 자산 열기" });
+    expect(link).toHaveAttribute("href", "/admin#/prompt-assets?q=no-match&asset=refactor-basic");
+  });
+  it("maps the selected debt period to its own Legacy screen", async () => {
+    authRuntime.legacyPromptLibrary = true;
+    mockAllEndpoints();
+    render("/prompts/library?tab=debt&debt_window=90d");
+    expect(await screen.findByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/prompt-debt?window=90d",
+    );
+  });
+  it("explains state omission on an older backend while retaining the active tab", async () => {
+    mockAllEndpoints();
+    render("/prompts/library?tab=assets&asset_q=public");
+    expect(await screen.findByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/prompt-assets",
+    );
+    expect(screen.getByText("기존 화면 연결 안내")).toBeInTheDocument();
+  });
+  it("removes asset links and omission copy when fallback is disabled", async () => {
+    authRuntime.legacyFallback = false;
+    mockAllEndpoints();
+    render("/prompts/library?tab=assets&asset=refactor-basic");
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("link", { name: /기존 화면/ })).toBeNull();
+    expect(screen.queryByText("기존 화면 연결 안내")).toBeNull();
+  });
+
   it("프롬프트 검색 결과와 지문 클러스터를 표시한다", async () => {
     mockAllEndpoints();
     render();

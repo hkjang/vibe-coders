@@ -509,6 +509,7 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 			// Navigation support only; existing request APIs still enforce authentication and scope.
 			"legacy_request_detail":  true,
 			"legacy_provider_detail": true,
+			"legacy_prompt_library":  true,
 			"legacy_request_filters": true,
 		},
 		"permissions":        scopes,
