@@ -186,7 +186,7 @@ func (s *Server) redTeamImportProbeCSV(w http.ResponseWriter, r *http.Request) {
 				ID: packID, Name: packName, Category: redTeamDefault(get(row, "category"), "custom"),
 				Severity: sev, Version: "v1", Enabled: true, RequiresApproval: approval, CreatedBy: adminID(r),
 			}
-			if err := s.db.UpsertRedTeamProbePackWithCases(r.Context(), pack, nil); err != nil {
+			if err := s.db.UpsertRedTeamProbePackContent(r.Context(), pack); err != nil {
 				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_pack_save_failed")
 				return
 			}
@@ -205,7 +205,7 @@ func (s *Server) redTeamImportProbeCSV(w http.ResponseWriter, r *http.Request) {
 			TargetTypes:    targetTypes,
 			RiskTags:       riskTags,
 		}
-		if err := s.db.UpsertRedTeamProbeCase(r.Context(), c); err != nil {
+		if err := s.db.UpsertRedTeamProbeCaseContent(r.Context(), c); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_case_save_failed")
 			return
 		}
@@ -257,15 +257,15 @@ func (s *Server) handleRedTeamProbeCases(w http.ResponseWriter, r *http.Request)
 		packID := strings.TrimSpace(body.PackID)
 		if packID == "" {
 			// No target pack chosen: file the case under the admin's custom pack, creating it if
-			// needed. Passing nil cases upserts only the pack shell, leaving existing cases intact.
+			// needed. Updating content preserves existing controls and leaves other cases intact.
 			packName := redTeamDefault(body.PackName, "사용자 정의 프롬프트")
 			packID = redTeamCustomPackID(packName)
 			sev := normalizeRedTeamSeverity(body.Severity)
-			if err := s.db.UpsertRedTeamProbePackWithCases(r.Context(), store.RedTeamProbePack{
+			if err := s.db.UpsertRedTeamProbePackContent(r.Context(), store.RedTeamProbePack{
 				ID: packID, Name: packName, Category: "custom", Severity: sev,
 				Version: "v1", Enabled: true, RequiresApproval: severityRank(sev) >= severityRank("high"),
 				CreatedBy: adminID(r),
-			}, nil); err != nil {
+			}); err != nil {
 				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_pack_save_failed")
 				return
 			}
@@ -281,7 +281,7 @@ func (s *Server) handleRedTeamProbeCases(w http.ResponseWriter, r *http.Request)
 			Severity:       normalizeRedTeamSeverity(body.Severity),
 			TargetTypes:    body.TargetTypes, RiskTags: body.RiskTags,
 		}
-		if err := s.db.UpsertRedTeamProbeCase(r.Context(), c); err != nil {
+		if err := s.db.UpsertRedTeamProbeCaseContent(r.Context(), c); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_case_save_failed")
 			return
 		}
