@@ -416,7 +416,11 @@ for (const outcome of ["성공", "실패"] as const) {
     await scope(old, "chat:completion").check();
     if (outcome === "실패") gateway.failSaves();
     gateway.holdSaves();
+    const pendingRequest = page.waitForRequest(
+      (value) => new URL(value.url()).pathname === `/me/keys/${alpha.id}` && value.method() === "PATCH",
+    );
     await save(old).click();
+    const retiredRequest = await pendingRequest;
     await expect.poll(() => gateway.saves.length).toBe(1);
     await other.getByLabel("사용자 메뉴").click();
     await other.getByRole("button", { name: "로그아웃", exact: true }).click();
@@ -425,12 +429,8 @@ for (const outcome of ["성공", "실패"] as const) {
     const fresh = await openForm(page, second.id);
     await scope(fresh, "embeddings:create").check();
     const reads = gateway.reads();
-    const response = page.waitForResponse(
-      (value) =>
-        new URL(value.url()).pathname === `/me/keys/${alpha.id}` && value.request().method() === "PATCH",
-    );
     gateway.releaseSaves();
-    await (await response).finished();
+    await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
     await page.waitForTimeout(300);
     await expect(fresh).toBeVisible();
     await expect(fresh).toContainText(second.name);

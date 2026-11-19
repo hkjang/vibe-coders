@@ -588,7 +588,13 @@ for (const kind of ["sso", "notification"] as const) {
     await open(other, kind);
     await draftField(page, kind).fill("public-inline-draft");
     api.holdSave(kind);
+    const pendingRequest = page.waitForRequest(
+      (result) =>
+        new URL(result.url()).pathname === (kind === "sso" ? ssoPath : notificationPath) &&
+        result.method() === (kind === "sso" ? "PUT" : "POST"),
+    );
     await submit(page, kind);
+    const retiredRequest = await pendingRequest;
     await expect.poll(() => api.writes.length).toBe(1);
     api.holdLogout();
     await other.getByLabel("사용자 메뉴").click();
@@ -603,15 +609,8 @@ for (const kind of ["sso", "notification"] as const) {
     // The server did commit the earlier request; only this new client draft is protected.
     await draftField(page, kind).fill("public-fresh-session-draft");
     const readCount = api.reads[kind];
-    const response = page.waitForResponse(
-      (result) =>
-        new URL(result.url()).pathname === (kind === "sso" ? ssoPath : notificationPath) &&
-        result.request().method() === (kind === "sso" ? "PUT" : "POST"),
-    );
     api.releaseSave(kind);
-    // A stale-session 204 is rejected before body consumption. Chromium can
-    // leave response.finished pending; observe delivery and real UI interaction.
-    expect((await response).status()).toBe(kind === "sso" ? 204 : 200);
+    await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
     await expect.poll(() => api.responses[kind]).toBe(1);
     await page.getByRole("button", { name: "변경 취소", exact: true }).click();
     await expect(guard(page)).toBeVisible();

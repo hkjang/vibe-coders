@@ -580,7 +580,13 @@ for (const operation of ["추가", "회수"] as const)
       }
       if (outcome === "실패") gateway.failWrites();
       gateway.holdWrites();
+      const pendingRequest = page.waitForRequest(
+        (value) =>
+          new URL(value.url()).pathname === `/admin/apps/${alpha.id}/permissions` &&
+          value.method() === (operation === "추가" ? "POST" : "DELETE"),
+      );
       await (operation === "추가" ? add(old) : confirmRevoke(old)).click();
+      const retiredRequest = await pendingRequest;
       await expect.poll(() => gateway.writes.length).toBe(1);
       await other.getByLabel("사용자 메뉴").click();
       await other.getByRole("button", { name: "로그아웃", exact: true }).click();
@@ -594,13 +600,8 @@ for (const operation of ["추가", "회수"] as const)
       const fresh = await openGrant(page, freshSheet);
       await fillGrant(fresh, "fixture-new-session-subject", "user");
       const reads = gateway.permissionReads();
-      const response = page.waitForResponse(
-        (value) =>
-          new URL(value.url()).pathname === `/admin/apps/${alpha.id}/permissions` &&
-          value.request().method() === (operation === "추가" ? "POST" : "DELETE"),
-      );
       gateway.releaseWrites();
-      await (await response).finished();
+      await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
       await page.waitForTimeout(300);
       await expect(fresh).toBeVisible();
       await expect(fresh.getByRole("textbox", { name: "사용자 ID", exact: true })).toHaveValue(

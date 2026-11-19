@@ -515,24 +515,24 @@ test("로그아웃 전 저장의 늦은 응답은 재로그인 후 새 편집창
   await login(other);
   const oldForm = await openForm(page);
   gateway.holdSaves();
+  const pendingRequest = page.waitForRequest(
+    (response) => new URL(response.url()).pathname === "/admin/providers" && response.method() === "POST",
+  );
   await oldForm.getByRole("button", { name: "저장", exact: true }).click();
+  const retiredRequest = await pendingRequest;
   await expect.poll(gateway.saveCount).toBe(1);
   await other.getByLabel("사용자 메뉴").click();
   await other.getByRole("button", { name: "로그아웃", exact: true }).click();
   await expect(page.getByRole("heading", { name: "관리자 로그인" })).toBeVisible();
   await expect(guard(page)).toBeHidden();
-  // Reauthenticate through the existing SPA login form: a full page.goto here
-  // would abort the old request instead of exercising its late completion.
+  // Reauthenticate in the same document: session retirement must abort the old
+  // request even without a full page navigation.
   await signIn(page);
   const fresh = await openForm(page, false);
   await expect(fresh.getByLabel(/^이름/u)).toHaveValue("");
   await fresh.getByLabel(/^이름/u).fill("fresh-session-fixture");
-  const oldResponse = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === "/admin/providers" && response.request().method() === "POST",
-  );
   gateway.releaseSaves();
-  await (await oldResponse).finished();
+  await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
   await expect(fresh).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(guard(page)).toBeVisible();

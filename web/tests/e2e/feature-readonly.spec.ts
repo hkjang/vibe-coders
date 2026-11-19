@@ -546,7 +546,11 @@ test("이전 세션의 늦은 저장 응답은 새 계정의 readonly 화면과 
   await login(other);
   const current = await prepareEditor(page, "적합성 근거");
   gateway.holdWrites();
+  const pendingRequest = page.waitForRequest(
+    (value) => new URL(value.url()).pathname === "/admin/skills/fitness" && value.method() === "POST",
+  );
   await current.save.click();
+  const retiredRequest = await pendingRequest;
   await expect.poll(() => gateway.mutations().length).toBe(1);
   await other.getByLabel("사용자 메뉴").click();
   await other.getByRole("button", { name: "로그아웃", exact: true }).click();
@@ -555,12 +559,8 @@ test("이전 세션의 늦은 저장 응답은 새 계정의 readonly 화면과 
   await expect(
     page.getByRole("button", { name: "스킬 추가", exact: true, includeHidden: true }),
   ).toBeDisabled();
-  const response = page.waitForResponse(
-    (value) =>
-      new URL(value.url()).pathname === "/admin/skills/fitness" && value.request().method() === "POST",
-  );
   gateway.releaseWrites();
-  await (await response).finished();
+  await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
   await page.waitForTimeout(500);
   await expect(fitness(page)).toBeHidden();
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);

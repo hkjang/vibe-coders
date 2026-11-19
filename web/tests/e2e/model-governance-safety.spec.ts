@@ -594,18 +594,19 @@ for (const action of ["계약 수정", "정책 저장"] as const) {
         save = await finalButton(current);
       gateway.setWriteStatus(status);
       gateway.hold("write");
+      const pendingRequest = page.waitForRequest(
+        (item) => `${item.method()} ${new URL(item.url()).pathname}` === current.call,
+      );
       await save.click();
+      const retiredRequest = await pendingRequest;
       await expect.poll(() => gateway.writes.length).toBe(1);
       await other.getByLabel("사용자 메뉴").click();
       await other.getByRole("button", { name: "로그아웃", exact: true }).click();
       await signIn(page, secondEmail);
       const next = await prepare(page, action);
       await draftField(next).fill("새 계정의 별도 초안");
-      const response = page.waitForResponse(
-        (item) => `${item.request().method()} ${new URL(item.url()).pathname}` === current.call,
-      );
       gateway.release("write");
-      await (await response).finished();
+      await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
       await page.waitForTimeout(300);
       await expect(next.dialog).toBeVisible();
       await expect(draftField(next)).toHaveValue("새 계정의 별도 초안");
