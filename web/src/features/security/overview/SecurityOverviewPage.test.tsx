@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SecurityOverviewPage } from "@/features/security/overview/SecurityOverviewPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({
   scopes: ["admin:read", "admin:write", "security:read", "costs:read"] as string[],
@@ -171,7 +172,14 @@ function handlers(overrides: Record<string, () => unknown> = {}): Record<string,
 }
 
 function renderPage(route = "/security"): ReturnType<typeof renderScreen> {
-  return renderScreen(<SecurityOverviewPage />, { path: "/security/*", route });
+  return renderScreen(
+    <FeatureAccessContext
+      value={{ featureId: "security.overview", permitted: true, readOnly: false, status: "preview" }}
+    >
+      <SecurityOverviewPage />
+    </FeatureAccessContext>,
+    { path: "/security/*", route },
+  );
 }
 
 describe("SecurityOverviewPage", () => {
@@ -297,7 +305,7 @@ describe("SecurityOverviewPage", () => {
     await waitFor(() => expect(click).toHaveBeenCalled());
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/admin/privacy-ledger?dimension=team&days=30&format=csv");
-    expect((init.headers as Record<string, string>)["X-Vibe-UI"]).toBe("app");
+    expect(new Headers(init.headers).get("X-Vibe-UI")).toBe("app");
     vi.unstubAllGlobals();
   });
 

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WarehousePage } from "@/features/data/warehouse/WarehousePage";
 import { apiFailure, mockApi, type ApiHandler } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] as string[] }));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -305,7 +306,14 @@ afterEach(() => {
 });
 
 function render(route = "/data/warehouse") {
-  return renderScreen(<WarehousePage />, { route, path: "/data/warehouse" });
+  return renderScreen(
+    <FeatureAccessContext
+      value={{ featureId: "data.warehouse", permitted: true, readOnly: false, status: "preview" }}
+    >
+      <WarehousePage />
+    </FeatureAccessContext>,
+    { route, path: "/data/warehouse" },
+  );
 }
 
 describe("WarehousePage", () => {
@@ -463,7 +471,9 @@ describe("WarehousePage", () => {
     mockAllEndpoints();
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response("day,requests\n", { status: 200 }));
+      .mockResolvedValue(
+        new Response("day,requests\n", { status: 200, headers: { "Content-Type": "text/csv" } }),
+      );
     render("/data/warehouse?window=7d");
 
     await screen.findByText("₩210,000");

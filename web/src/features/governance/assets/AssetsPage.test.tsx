@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AssetsPage } from "@/features/governance/assets/AssetsPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] as string[] }));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -215,7 +216,14 @@ afterEach(() => {
 });
 
 function render(route = "/governance/assets") {
-  return renderScreen(<AssetsPage />, { route, path: "/governance/assets" });
+  return renderScreen(
+    <FeatureAccessContext
+      value={{ featureId: "governance.assets", permitted: true, readOnly: false, status: "preview" }}
+    >
+      <AssetsPage />
+    </FeatureAccessContext>,
+    { route, path: "/governance/assets" },
+  );
 }
 
 describe("AssetsPage", () => {

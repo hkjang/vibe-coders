@@ -1,41 +1,20 @@
 import type { DwDimension, DwOrder, DwWindow } from "@/features/data/warehouse/warehouse-filters";
-import { AppError } from "@/shared/api/error";
-import { tokenStore } from "@/shared/auth/token-store";
-import { downloadText } from "@/shared/utils/csv";
+import { apiClient } from "@/shared/api/client";
+import { downloadApiFile } from "@/shared/api/download-file";
+import { fileEndpoints } from "@/shared/api/file-endpoints";
+import type { FileDownloadContext } from "@/shared/hooks/use-file-download";
 
-const exportLimit = 100;
-
-/**
- * Downloads the server-rendered dashboard CSV. File responses bypass `apiClient`
- * (which parses JSON), so the auth and UI headers are attached by hand.
- */
 export async function downloadDwDashboardCsv(
   window: DwWindow,
   dimension: DwDimension,
   order: DwOrder,
+  ownership: FileDownloadContext,
 ): Promise<void> {
-  const query = new URLSearchParams({
-    window,
-    dimension,
-    order_by: order,
-    limit: String(exportLimit),
+  const file = await apiClient.file(fileEndpoints.warehouse, {
+    ...ownership,
+    query: { window, dimension, order_by: order, limit: 100 },
+    routeId: "data.warehouse",
   });
-  const token = tokenStore.getAccessToken() || tokenStore.getLegacyToken();
-  const response = await fetch(`/admin/dw/dashboard/export.csv?${query.toString()}`, {
-    headers: {
-      Accept: "text/csv",
-      "X-Vibe-UI": "app",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  if (!response.ok) {
-    throw new AppError("CSV를 내보내지 못했습니다.", {
-      kind: "http",
-      status: response.status,
-      requestId: response.headers.get("X-Request-ID") ?? undefined,
-    });
-  }
-  const csv = await response.text();
   const stamp = new Date().toISOString().slice(0, 10);
-  downloadText(`dw-dashboard-${dimension}-${stamp}.csv`, csv, "text/csv;charset=utf-8");
+  downloadApiFile(`dw-dashboard-${dimension}-${stamp}.csv`, file);
 }
