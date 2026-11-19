@@ -99,3 +99,39 @@ test('unknown response fields are omitted and stored text is never markup',async
  for(const text of ['&lt;script&gt;bad&lt;/script&gt;','&lt;img src=x&gt;','&lt;svg&gt;','__proto__'])assert.ok(html.includes(text),text);
  assert.ok(!/<script>|<img|<svg>|HIDDEN/.test(html));
 });
+
+const ref='skl_'+'A'.repeat(43);
+for(const name of ['a'.repeat(4097),'sk-ant-private-name-fixture',' exact ','/with/slash/','literal\u0000control']){
+ test('opaque reference opens exact full stored identity '+name.slice(0,20),async()=>{
+  const h=harness();h.location.hash='#/skills?'+new URLSearchParams({skill_ref:ref});
+  h.reply=async()=>({skill:row({name,skill_ref:ref})});
+  await h.renderLegacySkillDetail();
+  assert.equal(h.calls.length,1);
+  assert.equal(h.calls[0].url,'/admin/skills?'+new URLSearchParams({view:'detail',skill_ref:ref}));
+  assert.equal(new URL(h.calls[0].url,'https://local.invalid').searchParams.has('name'),false);
+  assert.match(h.nodes.view.innerHTML,/selected instructions/);
+  assert.ok(!/<input|<form|onclick=|skillPromote\(|skillSave\(/.test(h.nodes.view.innerHTML));
+ });
+}
+for(const query of ['skill_ref=','skill_ref=bad','skill_ref='+ref+'&skill_name='+encodeURIComponent(id),
+ 'skill_ref='+ref+'&skill_ref='+ref,'skill_ref='+ref+'&run=true','skill_ref=skl_'+'A'.repeat(42)+'B','skill_ref=%zz']){
+ test('invalid reference selector never falls back '+query.slice(0,70),async()=>{
+  const h=harness();h.location.hash='#/skills?'+query;await h.renderLegacySkillDetail();
+  assert.equal(h.calls.length,0);assert.match(h.nodes.view.innerHTML,/올바르지 않습니다/);
+ });
+}
+for(const reference of [undefined,'skl_'+'E'.repeat(43)]){
+ test('reference response must match requested reference '+reference,async()=>{
+  const h=harness();h.location.hash='#/skills?skill_ref='+ref;
+  h.reply=async()=>({skill:row({skill_ref:reference})});await h.renderLegacySkillDetail();
+  assert.match(h.nodes.view.innerHTML,/불러오지 못했습니다/);assert.ok(!h.nodes.view.innerHTML.includes('selected instructions'));
+ });
+}
+for(const kind of ['auth','route','hash']){
+ test('late reference response retires after '+kind,async()=>{
+  const h=harness();h.location.hash='#/skills?skill_ref='+ref;let finish;
+  h.reply=()=>new Promise(resolve=>finish=resolve);const flight=h.renderLegacySkillDetail();
+  h.retire(kind);finish({skill:row({skill_ref:ref})});await flight;
+  assert.equal(h.nodes.view.innerHTML,'NEW');
+ });
+}

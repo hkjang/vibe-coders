@@ -2338,7 +2338,7 @@ const adminHTML = `<!doctype html>
             if (!rest.length && params.has('schema_name')) await renderLegacyText2SQLSchemaDetail();
             else await renderText2SQL();
             break;
-          case 'skills': if (params.has('skill_name')) await renderLegacySkillDetail(); else await renderSkills(); break;
+          case 'skills': if (params.has('skill_name') || params.has('skill_ref')) await renderLegacySkillDetail(); else await renderSkills(); break;
           case 'skill-studio': await renderSkillStudio(params); break;
           case 'modeldeprecations': await renderModelDeprecations(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
@@ -16489,8 +16489,10 @@ const adminHTML = `<!doctype html>
       const query = rawHash.slice('#/skills?'.length);
       try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
       const params = new URLSearchParams(query);
-      if (params.getAll('skill_name').length !== 1 || Array.from(params.keys()).some(key => key !== 'skill_name')) return null;
-      const id = params.get('skill_name');
+      const key = params.has('skill_ref') ? 'skill_ref' : 'skill_name';
+      if (params.getAll(key).length !== 1 || Array.from(params.keys()).some(value => value !== key)) return null;
+      const id = params.get(key);
+      if (key === 'skill_ref') return /^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(id || '') ? id : null;
       if (!id || new TextEncoder().encode(id).length > 4096 || /\p{C}/u.test(id)) return null;
       return id;
     }
@@ -16501,6 +16503,7 @@ const adminHTML = `<!doctype html>
       const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
       const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
       const name = legacySkillTarget(hash);
+      const byRef = new URLSearchParams(hash.split('?')[1] || '').has('skill_ref');
       const retry = '<button type="button" id="legacy-skill-retry">다시 조회</button>';
       const render = (body, focusId = 'legacy-skill-detail') => {
         if (!current()) return;
@@ -16515,10 +16518,10 @@ const adminHTML = `<!doctype html>
       if (!name) { render('<p role="alert">스킬 상세 주소가 올바르지 않습니다.</p>'); return; }
       render('<p role="status">선택한 스킬을 확인하고 있습니다.</p>');
       try {
-        const data = await api('/admin/skills?' + new URLSearchParams({ view:'detail', name }), { cache:'no-store' });
+        const data = await api('/admin/skills?' + new URLSearchParams(byRef ? { view:'detail', skill_ref:name } : { view:'detail', name }), { cache:'no-store' });
         if (!current()) return;
         const row = data?.skill;
-        if (!row || row.name !== name ||
+        if (!row || (byRef ? row.skill_ref !== name : row.name !== name) ||
             ['name','description','version','owner','status','risk_level','allowed_models','allowed_tools','allowed_teams','instructions','metadata','created_at','updated_at','updated_by'].some(key => typeof row[key] !== 'string') ||
             !Number.isSafeInteger(row.daily_limit)) throw new Error('Invalid selected skill');
         const statusLabels = {draft:'초안',staging:'검증 중',production:'운영',deprecated:'지원 중단'};
@@ -16623,7 +16626,9 @@ const adminHTML = `<!doctype html>
             '<td class="muted">' + escapeHTML(sk.allowed_models || '*') + '</td>' +
             '<td class="muted">' + escapeHTML(sk.allowed_tools || '*') + '</td>' +
             '<td>' + ago(sk.updated_at) + '<div class="muted" style="font-size:11px">' + escapeHTML(sk.updated_by || '') + '</div></td>' +
-            '<td><button class="secondary" type="button" onclick="skillEdit(\'' + escapeAttr(sk.name) + '\')">편집</button> ' +
+            '<td>' + (/^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(sk.skill_ref || '') ?
+              '<a href="#/skills?' + new URLSearchParams({skill_ref:sk.skill_ref}) + '">상세</a> ' : '') +
+              '<button class="secondary" type="button" onclick="skillEdit(\'' + escapeAttr(sk.name) + '\')">편집</button> ' +
               '<button class="secondary" type="button" onclick="skillPromote(\'' + escapeAttr(sk.name) + '\',\'' + escapeAttr(sk.status) + '\')">승격</button> ' +
               '<button class="secondary" type="button" onclick="skillRuns(\'' + escapeAttr(sk.name) + '\')">실행로그</button> ' +
               '<button class="secondary" type="button" onclick="skillPromotions(\'' + escapeAttr(sk.name) + '\')">이력</button> ' +

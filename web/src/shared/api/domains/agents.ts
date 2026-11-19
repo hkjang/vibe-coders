@@ -7,6 +7,7 @@ import type {
   DeleteAdminAppsIdData,
   DeleteAdminAppsIdPermissionsData,
   DeleteAdminSkillsByNameNameData,
+  DeleteAdminSkillsData,
   DeleteAdminWorkflowsData,
   GetAdminAppsData,
   WorkAppPage,
@@ -76,6 +77,8 @@ import {
   skillFitnessSchema,
   skillImportSchema,
   skillListSchema,
+  skillExactSchema,
+  skillReferenceSchema,
   skillPromotionListSchema,
   skillReadinessSchema,
   skillRecommendationSchema,
@@ -107,6 +110,8 @@ import {
   type SkillGraphQuery,
   type SkillImportBody,
   type SkillListQuery,
+  type SkillDetailQuery,
+  type SkillFitnessBody,
   type SkillPromoteBody,
   type SkillPromotionsQuery,
   type SkillReadinessQuery,
@@ -291,6 +296,21 @@ export const agentsEndpoints = {
     >()("POST", "/admin/app-templates/instantiate", appTemplateInstantiateSchema),
   },
   skills: {
+    detail: operation<WithQuery<GetAdminSkillsData, SkillDetailQuery>, unknown>()(
+      "GET",
+      "/admin/skills",
+      skillExactSchema,
+      z.union([
+        z.object({ view: z.literal("detail"), skill_ref: skillReferenceSchema }).strict(),
+        z.object({ view: z.literal("detail"), name: z.string() }).strict(),
+      ]),
+    ),
+    removeByRef: operation<DeleteAdminSkillsData, unknown>()(
+      "DELETE",
+      "/admin/skills",
+      acknowledgementSchema,
+      z.object({ skill_ref: skillReferenceSchema }).strict(),
+    ),
     list: operation<WithQuery<GetAdminSkillsData, SkillListQuery>, unknown>()(
       "GET",
       "/admin/skills",
@@ -316,13 +336,25 @@ export const agentsEndpoints = {
       "GET",
       "/admin/skills/promotions",
       skillPromotionListSchema,
-      z.object({ skill: z.string().optional(), limit: z.number().optional() }),
+      z
+        .object({
+          skill: z.string().optional(),
+          skill_ref: skillReferenceSchema.optional(),
+          limit: z.number().optional(),
+        })
+        .refine((value) => value.skill === undefined || value.skill_ref === undefined),
     ),
     runs: operation<WithQuery<GetAdminSkillsRunsData, SkillRunsQuery>, unknown>()(
       "GET",
       "/admin/skills/runs",
       skillRunListSchema,
-      z.object({ skill: z.string().optional(), limit: z.number().optional() }),
+      z
+        .object({
+          skill: z.string().optional(),
+          skill_ref: skillReferenceSchema.optional(),
+          limit: z.number().optional(),
+        })
+        .refine((value) => value.skill === undefined || value.skill_ref === undefined),
     ),
     stats: operation<WithQuery<GetAdminSkillsStatsData, SkillStatsQuery>, unknown>()(
       "GET",
@@ -335,7 +367,9 @@ export const agentsEndpoints = {
       "GET",
       "/admin/skills/scan",
       skillScanListSchema,
-      z.object({ name: z.string().optional() }),
+      z
+        .object({ name: z.string().optional(), skill_ref: skillReferenceSchema.optional() })
+        .refine((value) => value.name === undefined || value.skill_ref === undefined),
     ),
     // Returns the full skill bundle: only call from an explicit export action.
     export: operation<WithQuery<GetAdminSkillsExportData, SkillExportQuery>, unknown>()(
@@ -376,13 +410,14 @@ export const agentsEndpoints = {
       "GET",
       "/admin/skills/fitness",
       skillFitnessSchema,
-      z.object({ skill: z.string() }),
+      z
+        .object({ skill: z.string().optional(), skill_ref: skillReferenceSchema.optional() })
+        .refine((value) => (value.skill !== undefined) !== (value.skill_ref !== undefined)),
     ),
-    recordFitness: operation<PostAdminSkillsFitnessData, PostAdminSkillsFitnessResponse>()(
-      "POST",
-      "/admin/skills/fitness",
-      skillFitnessRecordedSchema,
-    ),
+    recordFitness: operation<
+      WithBody<PostAdminSkillsFitnessData, SkillFitnessBody>,
+      PostAdminSkillsFitnessResponse
+    >()("POST", "/admin/skills/fitness", skillFitnessRecordedSchema),
     dependencyGraph: operation<WithQuery<GetAdminSkillsDependencyGraphData, SkillGraphQuery>, unknown>()(
       "GET",
       "/admin/skills/dependency-graph",
@@ -411,7 +446,9 @@ export const agentsEndpoints = {
       "GET",
       "/admin/skill-studio/readiness",
       skillReadinessSchema,
-      z.object({ name: z.string() }),
+      z
+        .object({ name: z.string().optional(), skill_ref: skillReferenceSchema.optional() })
+        .refine((value) => (value.name !== undefined) !== (value.skill_ref !== undefined)),
     ),
   },
 } as const;

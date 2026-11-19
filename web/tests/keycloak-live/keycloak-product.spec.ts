@@ -1412,7 +1412,28 @@ test("KEYCLOAK-LIVE-037 팀 관리자의 기존 전체 워크플로 조회 정�
 });
 
 const skillHandoffName = "/스킬 +%2F?&#/";
-async function openSkillBridge(page: Page, username: string, name = skillHandoffName) {
+async function nativeSkill(page: Page, name: string) {
+  return page.evaluate(async (target) => {
+    const response = await fetch("/admin/skills", {
+      headers: { Authorization: "Bearer " + sessionStorage.getItem("vibe.app.auth.access") },
+    });
+    if (!response.ok) throw new Error("Skill catalog unavailable");
+    const data: {
+      skills: {
+        name: string;
+        skill_ref: string;
+        description: string;
+        metadata: string;
+        version: string;
+        owner: string;
+      }[];
+    } = await response.json();
+    const selected = data.skills.find((skill) => skill.name === target);
+    if (!selected) throw new Error("Fixture skill unavailable");
+    return selected;
+  }, name);
+}
+async function openSkillBridge(page: Page, username: string, name = skillHandoffName, fromRow = false) {
   await signIn(page, username);
   let writes = 0,
     legacyBroadReads = 0,
@@ -1431,10 +1452,21 @@ async function openSkillBridge(page: Page, username: string, name = skillHandoff
       else if (legacy) legacyBroadReads++;
     } else if (legacy && url.pathname.startsWith("/admin/skills/")) legacyOtherReads++;
   });
-  await page.goto("/app/agents/skills?" + new URLSearchParams({ skill: name }));
+  const selected = await nativeSkill(page, name);
+  expect(selected.skill_ref).toMatch(/^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
+  if (fromRow) {
+    await page.goto("/app/agents/skills");
+    const row = page.getByRole("button", { name: name + " 상세 열기", exact: true });
+    await row.focus();
+    await page.keyboard.press("Enter");
+  } else {
+    await page.goto("/app/agents/skills?" + new URLSearchParams({ skill_ref: selected.skill_ref }));
+  }
+  expect(new URL(page.url()).searchParams.get("skill_ref")).toBe(selected.skill_ref);
+  expect(new URL(page.url()).searchParams.has("skill")).toBe(false);
   const sheet = page.getByRole("dialog", { name, exact: true });
   await expect(sheet).toBeVisible();
-  const href = "/admin#/skills?" + new URLSearchParams({ skill_name: name });
+  const href = "/admin#/skills?" + new URLSearchParams({ skill_ref: selected.skill_ref });
   const link = sheet.getByRole("link", { name: "기존 화면에서 열기", exact: true });
   await expect(link).toHaveAttribute("href", href);
   await link.focus();
@@ -1446,7 +1478,11 @@ async function openSkillBridge(page: Page, username: string, name = skillHandoff
   await expect(detail).toContainText("skill-owner");
   await expect(page).toHaveURL(gateway + href);
   expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
-  return { detail, reads: () => ({ writes, legacyBroadReads, exactReads, legacyOtherReads }) };
+  return {
+    detail,
+    reference: selected.skill_ref,
+    reads: () => ({ writes, legacyBroadReads, exactReads, legacyOtherReads }),
+  };
 }
 test("KEYCLOAK-LIVE-038 슬래시가 있는 스킬 이름을 실제 SSO로 유지하고 모든 저장 정책을 읽는다", async ({
   page,
@@ -1578,4 +1614,98 @@ test("KEYCLOAK-LIVE-041 팀 관리자의 기존 전체 스킬 카탈로그 조�
   await expect(detail).toContainText("other-access-id");
   await expect(page.locator("#auth-user")).toContainText("team_admin");
   expect(reads()).toMatchObject({ writes: 0, legacyBroadReads: 0, legacyOtherReads: 0 });
+});
+
+test("KEYCLOAK-LIVE-042 4096바이트를 넘는 이름을 키보드로 선택하고 식별자만 SSO로 전달한다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSkillBridge(page, "new-operator", "a".repeat(4097), true);
+  await expect(detail).toContainText("선택한 스킬 지침");
+  expect(new URL(page.url()).hash.length).toBeLessThan(100);
+  expect(reads()).toMatchObject({ writes: 0, legacyBroadReads: 0, legacyOtherReads: 0 });
+});
+test("KEYCLOAK-LIVE-043 보호된 이름을 식별자로 열어도 실제 읽기 전용 권한을 유지한다", async ({ page }) => {
+  const { detail, reference, reads } = await openSkillBridge(page, "reader", "vc_sk_" + "x".repeat(43), true);
+  await expect(detail).toContainText("선택한 스킬 지침");
+  expect(new URL(page.url()).hash).not.toContain("vc_sk_");
+  expect(reads().writes).toBe(0);
+  const status = await page.evaluate(
+    async (ref) =>
+      (
+        await fetch("/admin/skills?skill_ref=" + ref, {
+          method: "DELETE",
+          headers: { Authorization: "Bearer " + sessionStorage.getItem("authAccess") },
+        })
+      ).status,
+    reference,
+  );
+  expect(status).toBe(401);
+  await page.reload();
+  await expect(detail).toContainText("선택한 스킬 지침");
+});
+test("KEYCLOAK-LIVE-044 가져온 이름과 메타데이터를 보존해 편집하고 정확한 근거 기록과 삭제를 수행한다", async ({
+  page,
+}) => {
+  await signIn(page, "new-operator");
+  const name = " /imported-skill/ ";
+  const before = await nativeSkill(page, name);
+  const aliasBefore = await nativeSkill(page, "/imported-skill/");
+  const writes: { path: string; query: string; body: Record<string, unknown> | null }[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/admin/skills") && request.method() !== "GET")
+      writes.push({
+        path: url.pathname,
+        query: url.search,
+        body: request.postDataJSON() as Record<string, unknown> | null,
+      });
+  });
+  await page.goto("/app/agents/skills?skill_ref=" + before.skill_ref + "&status=production");
+  const detail = page.getByRole("dialog", { name: name.trim(), exact: true });
+  await expect(detail).toBeVisible();
+  await detail.getByRole("button", { name: "편집", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "스킬 수정 · " + name.trim(), exact: true });
+  await expect(editor.getByLabel("이름", { exact: false })).toHaveValue(name);
+  await editor.getByLabel("설명", { exact: true }).fill("after-exact-edit");
+  await editor.getByRole("button", { name: "수정 저장", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  const after = await nativeSkill(page, name);
+  expect(after).toMatchObject({
+    name,
+    skill_ref: before.skill_ref,
+    metadata: before.metadata,
+    owner: before.owner,
+    version: before.version,
+    description: "after-exact-edit",
+  });
+  expect(await nativeSkill(page, "/imported-skill/")).toEqual(aliasBefore);
+  await detail.getByRole("button", { name: "정책 시뮬레이션", exact: true }).click();
+  await detail.getByRole("button", { name: "정책 확인", exact: true }).click();
+  await expect(detail.getByText("허용", { exact: true })).toBeVisible();
+  expect(writes.find((write) => write.path.endsWith("/evaluate"))?.body).toMatchObject({
+    skill_ref: before.skill_ref,
+  });
+  expect(writes.find((write) => write.path.endsWith("/evaluate"))?.body).not.toHaveProperty("name");
+  await detail.getByRole("button", { name: "적합성 근거", exact: true }).click();
+  await detail.getByRole("button", { name: "근거 기록", exact: true }).click();
+  const fitness = page.getByRole("dialog", { name: "스킬 적합성 근거 기록", exact: true });
+  await fitness.getByLabel("참조 ID", { exact: false }).fill("native-reference-proof");
+  await fitness.getByRole("checkbox", { name: /^통과/u }).check();
+  await fitness.getByRole("button", { name: "근거 기록 저장", exact: true }).click();
+  await expect(fitness).toHaveCount(0);
+  await expect(detail.getByRole("table", { name: "스킬 모델 적합성 근거", exact: true })).toContainText(
+    "native-reference-proof",
+  );
+  expect(writes.find((write) => write.path.endsWith("/fitness"))?.body).toMatchObject({
+    skill_ref: before.skill_ref,
+  });
+  expect(writes.find((write) => write.path.endsWith("/fitness"))?.body).not.toHaveProperty("skill");
+  await detail.getByRole("button", { name: "삭제", exact: true }).click();
+  const confirm = page.getByRole("dialog", { name: "스킬 삭제", exact: true });
+  await confirm.getByRole("button", { name: "삭제", exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(detail).toHaveCount(0);
+  expect(writes.filter((write) => write.path.includes("/by-name/"))).toHaveLength(0);
+  expect(writes.at(-1)).toMatchObject({ path: "/admin/skills", query: "?skill_ref=" + before.skill_ref });
+  expect(await nativeSkill(page, "/imported-skill/")).toEqual(aliasBefore);
 });

@@ -915,3 +915,12 @@ test('logout clears the displayed skill snapshot', async () => {
  h.skillCache={private:'PRIVATE_SKILL'};
  await h.logout();assert.equal(h.node('legacy-skill-detail').textContent,'');assert.equal(Object.keys(h.skillCache).length,0);
 });
+
+test('opaque skill reference survives native SSO return without a name',async()=>{
+ const hash='#/skills?skill_ref=skl_'+'A'.repeat(43);
+ const h=harness(call=>call.path==='/auth/sso/exchange'?response(200,tokens('SSO')):response(200,{auth_enabled:true,user:tokens('SSO').user}),hash);
+ h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+ h.location.hash='#kc_code=synthetic';await h.initAuth();
+ assert.equal(h.location.hash,hash);assert.equal(h.routes,1);
+ assert.equal(new URLSearchParams(h.location.hash.split('?')[1]).has('skill_name'),false);
+});

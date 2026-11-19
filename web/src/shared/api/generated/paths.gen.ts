@@ -906,6 +906,7 @@ export const openApiOperations = [
   { method: "POST", path: "/admin/skill-studio/adopt" },
   { method: "GET", path: "/admin/skill-studio/candidates" },
   { method: "GET", path: "/admin/skill-studio/readiness" },
+  { method: "DELETE", path: "/admin/skills" },
   { method: "GET", path: "/admin/skills" },
   { method: "POST", path: "/admin/skills" },
   { method: "GET", path: "/admin/skills/adoption" },

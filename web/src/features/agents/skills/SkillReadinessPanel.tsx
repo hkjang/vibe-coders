@@ -1,3 +1,4 @@
+import { skillIdentityKey, skillNameSelector } from "./skill-identity";
 import { legacyRoutes } from "@/config/legacy-route-map";
 import { useSkillRead } from "./skill-scope";
 
@@ -17,6 +18,7 @@ interface SkillReadinessPanelProps {
   canWrite: boolean;
   onPromote: (toStatus: string) => void;
   skillName: string;
+  skillRef?: string;
   writeDisabledReason: string;
 }
 
@@ -25,14 +27,15 @@ export function SkillReadinessPanel({
   canWrite,
   onPromote,
   skillName,
+  skillRef,
   writeDisabledReason,
 }: SkillReadinessPanelProps): React.JSX.Element {
   const readiness = useSkillRead({
-    queryKey: ["agents", "skills", skillName, "readiness"],
+    queryKey: ["agents", "skills", skillIdentityKey({ name: skillName, skill_ref: skillRef }), "readiness"],
     enabled: skillName !== "",
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.agents.skills.studioReadiness, {
-        query: { name: skillName },
+        query: skillNameSelector({ name: skillName, skill_ref: skillRef }),
         signal,
         routeId: "agents.skills",
       }),

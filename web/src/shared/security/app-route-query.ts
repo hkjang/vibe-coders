@@ -12,6 +12,7 @@ import {
 import { isAppRequestRef } from "@/shared/api/app-request-ref";
 import { validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
 import { isOpaqueAppRequestCursor, isValidRequestQueryField } from "@/shared/utils/request-query-filters";
+import { isSkillRef } from "@/shared/api/skill-ref";
 import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
 import { domainDecisionRequestIDError } from "@/shared/utils/domain-decision-filters";
@@ -81,6 +82,7 @@ function sensitiveParameter(
   // generic credential heuristics so a prefix such as `req_`, or an incidental
   // `sk-` substring, cannot break safe request-detail navigation.
   if (key === "selected_ref" && values.every(isAppRequestRef)) return false;
+  if (key === "skill_ref" && values.every(isSkillRef)) return false;
   // This bounded enum grammar contains only column ids and directions. The
   // registry column named key is not an assigned credential.
   if (key === "runs_sort" && values.length === 1 && validRunSort(values[0] ?? "")) return false;
@@ -155,6 +157,15 @@ export function sanitizeAppRouteSearch(
     for (const key of ["page_size", "offset"]) {
       if (parameters.has(key) && !validSessionPageValue(key, parameters.getAll(key)))
         invalidOperationalKeys.add(key);
+    }
+  }
+  // Refuse the entire selection before stripping credentials: removing only a
+  // competing name could otherwise turn an ambiguous URL into a valid ref.
+  if (route === "/agents/skills" && parameters.has("skill_ref")) {
+    const references = parameters.getAll("skill_ref");
+    if (references.length !== 1 || !isSkillRef(references[0]) || parameters.has("skill")) {
+      invalidOperationalKeys.add("skill_ref");
+      invalidOperationalKeys.add("skill");
     }
   }
   if (route === "/overview" && parameters.has("trend")) {

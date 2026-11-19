@@ -265,7 +265,7 @@ func (s *Server) handleSkillStudioAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.auditAdmin(r, "skill.studio_adopt", saved.Name, auditJSON(map[string]any{"source": p.Source}))
-	writeJSON(w, http.StatusCreated, map[string]any{"skill": saved})
+	writeJSON(w, http.StatusCreated, map[string]any{"skill": s.skillRefSnapshot().view(saved)})
 }
 
 // handleSkillStudioReadiness returns the production-readiness checklist for the wizard: the
@@ -277,7 +277,11 @@ func (s *Server) handleSkillStudioReadiness(w http.ResponseWriter, r *http.Reque
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	target, ok := s.adminSkillQueryTarget(w, r, "name")
+	if !ok {
+		return
+	}
+	name := target.name
 	if name == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name")
 		return

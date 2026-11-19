@@ -1,3 +1,4 @@
+import { skillNameSelector } from "./skill-identity";
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useSkillReadAction } from "./skill-scope";
@@ -13,14 +14,20 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 /** Dry-runs a skill's allowed_models/tools/teams policy without calling any provider. */
-export function SkillPolicyTester({ skillName }: { skillName: string }): React.JSX.Element {
+export function SkillPolicyTester({
+  skillName,
+  skillRef,
+}: {
+  skillName: string;
+  skillRef?: string;
+}): React.JSX.Element {
   const fieldId = useId();
   const [model, setModel] = useState("");
   const [tools, setTools] = useState("");
   const [team, setTeam] = useState("");
   const readAction = useSkillReadAction();
   const body = {
-    name: skillName,
+    ...skillNameSelector({ name: skillName, skill_ref: skillRef }),
     model: model.trim(),
     tools: tools
       .split(",")

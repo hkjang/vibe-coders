@@ -1,3 +1,10 @@
+import {
+  skillIdentityKey,
+  skillNameSelector,
+  skillReference,
+  skillSelection,
+  validSkillReference,
+} from "./skill-identity";
 import { skillLegacyHandoff, validSkillHandoffName } from "./legacy-skill-handoff";
 import { skillsKey, useSkillRead, useSkillOperationAccess } from "./skill-scope";
 import { Plus, RefreshCw } from "lucide-react";
@@ -26,9 +33,14 @@ import {
 } from "@/features/agents/skills/skill-form";
 import { displayColumn } from "@/features/agents/table-columns";
 import { apiClient } from "@/shared/api/client";
-import type { Skill, SkillAdoptBody, SkillCandidate } from "@/shared/api/domains/agents.schemas";
+import type {
+  Skill,
+  SkillAdoptBody,
+  SkillCandidate,
+  SkillPromoteBody,
+} from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
-import { isAppError } from "@/shared/api/error";
+import { AppError, isAppError } from "@/shared/api/error";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -80,14 +92,28 @@ function SkillPageContent(): React.JSX.Element {
   const query = containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? "" : rawQuery;
   const status = params.get("status") ?? "all";
   const selectedName = params.get("skill") ?? "";
+  const hasSelection = params.has("skill") || params.has("skill_ref");
   const selectedNameValid =
-    params.getAll("skill").length === 1 && validSkillHandoffName(selectedName, auth.credentialPrefixes);
-  const legacyHandoff = skillLegacyHandoff(
-    auth.features.find((feature) => feature.featureId === "agents.skills")?.legacyPath,
-    selectedNameValid ? selectedName : undefined,
-    auth.capabilities?.legacy_skill_detail === true,
-    auth.credentialPrefixes,
+    !params.has("skill_ref") &&
+    params.getAll("skill").length === 1 &&
+    validSkillHandoffName(selectedName, auth.credentialPrefixes);
+  const rawReference = params.get("skill_ref");
+  const selectedReference =
+    !params.has("skill") && params.getAll("skill_ref").length === 1 && validSkillReference(rawReference)
+      ? rawReference
+      : undefined;
+  const [localSelectedName, setLocalSelectedName] = useState<string>();
+  const chooseSkill = useCallback(
+    (skill: Skill | undefined) => {
+      const selection = skill
+        ? skillSelection(skill, auth.credentialPrefixes)
+        : { skill: undefined, skill_ref: undefined };
+      setLocalSelectedName(skill && !selection.skill && !selection.skill_ref ? skill.name : undefined);
+      updateSearch(selection);
+    },
+    [auth.credentialPrefixes, updateSearch],
   );
+
   const [searchError, setSearchError] = useState<string | undefined>(
     containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? secretSearchMessage : undefined,
   );
@@ -111,6 +137,23 @@ function SkillPageContent(): React.JSX.Element {
         signal,
         routeId: "agents.skills",
       }),
+    refetchInterval: refreshInterval,
+  });
+
+  const exactDetail = useSkillRead({
+    queryKey: [...skillsKey, "detail", selectedReference],
+    enabled: selectedReference !== undefined,
+    queryFn: async ({ signal }) => {
+      if (!selectedReference) throw new AppError("스킬 식별자를 확인하세요.", { kind: "contract" });
+      const result = await apiClient.request(endpoints.domains.agents.skills.detail, {
+        query: { view: "detail", skill_ref: selectedReference },
+        signal,
+        routeId: "agents.skills",
+      });
+      if (result.skill && result.skill.skill_ref !== selectedReference)
+        throw new AppError("선택한 스킬을 확인할 수 없습니다.", { kind: "contract" });
+      return result;
+    },
     refetchInterval: refreshInterval,
   });
 
@@ -145,12 +188,26 @@ function SkillPageContent(): React.JSX.Element {
       }),
   });
 
-  const skills = useMemo(() => list.data?.skills ?? [], [list.data?.skills]);
-  const rows = useMemo(() => skills.filter((skill) => matchesSkillQuery(skill, query)), [query, skills]);
-  const selected =
-    params.getAll("skill").length === 1 ? skills.find((skill) => skill.name === selectedName) : undefined;
+  const skills = list.data?.skills ?? [];
+  const rows = skills.filter((skill) => matchesSkillQuery(skill, query));
+  const selected = selectedReference
+    ? (exactDetail.data?.skill ?? undefined)
+    : selectedNameValid
+      ? skills.find((skill) => skill.name === selectedName)
+      : !hasSelection
+        ? skills.find((skill) => skill.name === localSelectedName)
+        : undefined;
 
-  const closeSheet = useCallback((): void => updateSearch({ skill: undefined }), [updateSearch]);
+  const legacyHandoff = skillLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "agents.skills")?.legacyPath,
+    selected?.name ?? (selectedNameValid ? selectedName : undefined),
+    auth.capabilities?.legacy_skill_detail === true,
+    auth.credentialPrefixes,
+    skillReference(selected) ?? selectedReference,
+    auth.capabilities?.legacy_skill_reference_detail === true,
+  );
+
+  const closeSheet = useCallback((): void => chooseSkill(undefined), [chooseSkill]);
 
   const save = useMutationFeedback({
     gcTime: 0,
@@ -159,7 +216,7 @@ function SkillPageContent(): React.JSX.Element {
       mutationAccess.assertCurrent();
       return apiClient
         .request(endpoints.domains.agents.skills.upsert, {
-          body: skillWriteBody(values),
+          body: skillWriteBody(values, editing),
           routeId: "agents.skills",
           retryUnauthorized: false,
         })
@@ -172,7 +229,7 @@ function SkillPageContent(): React.JSX.Element {
   const promote = useMutationFeedback({
     gcTime: 0,
     ownsResult: mutationAccess.ownsResult,
-    mutate: (variables: { name: string; to_status: string; note: string }) => {
+    mutate: (variables: SkillPromoteBody) => {
       mutationAccess.assertCurrent();
       return apiClient
         .request(endpoints.domains.agents.skills.promote, {
@@ -190,14 +247,21 @@ function SkillPageContent(): React.JSX.Element {
   const remove = useMutationFeedback({
     gcTime: 0,
     ownsResult: mutationAccess.ownsResult,
-    mutate: (name: string) => {
+    mutate: (target: Skill | string) => {
       mutationAccess.assertCurrent();
-      return apiClient
-        .request(withPathParams(endpoints.domains.agents.skills.remove, { name }), {
-          routeId: "agents.skills",
-          retryUnauthorized: false,
-        })
-        .then(mutationAccess.refreshReads);
+      const name = typeof target === "string" ? target : target.name;
+      const reference = typeof target === "string" ? undefined : skillReference(target);
+      const request = reference
+        ? apiClient.request(endpoints.domains.agents.skills.removeByRef, {
+            query: { skill_ref: reference },
+            routeId: "agents.skills",
+            retryUnauthorized: false,
+          })
+        : apiClient.request(withPathParams(endpoints.domains.agents.skills.remove, { name }), {
+            routeId: "agents.skills",
+            retryUnauthorized: false,
+          });
+      return request.then(mutationAccess.refreshReads);
     },
     successMessage: "스킬을 삭제했습니다.",
     errorMessage: "스킬을 삭제하지 못했습니다.",
@@ -219,7 +283,7 @@ function SkillPageContent(): React.JSX.Element {
     },
     successMessage: "후보를 초안 스킬로 채택했습니다.",
     errorMessage: "후보를 채택하지 못했습니다.",
-    onSuccess: (_result, body) => updateSearch({ skill: body.name }),
+    onSuccess: (result) => chooseSkill(result.skill ?? undefined),
   });
 
   const columns = useMemo<ReadonlyArray<DataTableColumn<Skill>>>(
@@ -455,7 +519,7 @@ function SkillPageContent(): React.JSX.Element {
                 const trigger = document.activeElement as HTMLElement | null;
                 fitnessEditor.requestLeave(() => {
                   rowTriggerRef.current = trigger;
-                  updateSearch({ skill: row.name });
+                  chooseSkill(row);
                 });
               }}
             />
@@ -503,12 +567,14 @@ function SkillPageContent(): React.JSX.Element {
               <span>스킬 선택</span>
               <Select
                 id="studio-skill"
-                value={selectedName}
-                onChange={(event) => updateSearch({ skill: event.target.value || undefined })}
+                value={selected ? skillIdentityKey(selected) : ""}
+                onChange={(event) =>
+                  chooseSkill(skills.find((skill) => skillIdentityKey(skill) === event.target.value))
+                }
               >
                 <option value="">선택하세요</option>
                 {skills.map((skill) => (
-                  <option key={skill.name} value={skill.name}>
+                  <option key={skillIdentityKey(skill)} value={skillIdentityKey(skill)}>
                     {skill.name} ({skillStatusLabels[skill.status ?? ""] ?? skill.status ?? ""})
                   </option>
                 ))}
@@ -522,7 +588,8 @@ function SkillPageContent(): React.JSX.Element {
               setPromoteTarget(selected);
               setPromoteStatus(toStatus);
             }}
-            skillName={selected ? selectedName : ""}
+            skillName={selected?.name ?? ""}
+            skillRef={skillReference(selected)}
             writeDisabledReason={writeDisabledReason}
           />
         </TabPanel>
@@ -556,6 +623,12 @@ function SkillPageContent(): React.JSX.Element {
 
       <SkillDetailSheet
         selectedName={selectedNameValid ? selectedName : undefined}
+        selectedReference={selectedReference}
+        loading={Boolean(selectedReference) && exactDetail.isPending}
+        detailError={selectedReference ? exactDetail.error : undefined}
+        onRetry={() => {
+          void exactDetail.refetch();
+        }}
         canWrite={canWrite}
         onDelete={() => setDeleteTarget(selected)}
         onEdit={() => {
@@ -569,7 +642,7 @@ function SkillPageContent(): React.JSX.Element {
           setPromoteTarget(selected);
           setPromoteStatus(allowedSkillTransitions(selected?.status)[0] ?? "staging");
         }}
-        open={tab === "catalog" && selectedName !== ""}
+        open={tab === "catalog" && (hasSelection || localSelectedName !== undefined)}
         returnFocusRef={rowTriggerRef}
         skill={selected}
         writeDisabledReason={writeDisabledReason}
@@ -612,7 +685,7 @@ function SkillPageContent(): React.JSX.Element {
         onConfirm={async (reason) => {
           if (promoteTarget) {
             await promote.mutateAsync({
-              name: promoteTarget.name,
+              ...skillNameSelector(promoteTarget),
               to_status: promoteStatus,
               note: reason,
             });
@@ -647,7 +720,7 @@ function SkillPageContent(): React.JSX.Element {
           if (!open) setDeleteTarget(undefined);
         }}
         onConfirm={async () => {
-          if (deleteTarget) await remove.mutateAsync(deleteTarget.name);
+          if (deleteTarget) await remove.mutateAsync(deleteTarget);
         }}
         returnFocusRef={rowTriggerRef}
       >
