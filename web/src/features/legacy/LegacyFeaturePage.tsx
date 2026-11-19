@@ -1,5 +1,5 @@
 import { useAuth } from "@/app/auth/AuthProvider";
-import { canOpenLegacyFeature } from "@/shared/permissions/legacy-feature";
+import { resolveLegacyFeatureHref } from "@/shared/permissions/legacy-feature";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { ArrowUpRight, Construction } from "lucide-react";
@@ -10,7 +10,7 @@ import { Badge } from "@/shared/components/ui/Badge";
 
 export function LegacyFeaturePage({ feature }: { feature: MigrationFeature }): React.JSX.Element {
   const auth = useAuth();
-  const canOpen = canOpenLegacyFeature(auth, feature.featureId);
+  const canOpen = resolveLegacyFeatureHref(auth, feature.featureId, feature.legacyPath) !== undefined;
   return (
     <div className="page-stack">
       <header className="page-header">

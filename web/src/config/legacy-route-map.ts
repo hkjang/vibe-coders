@@ -60,3 +60,28 @@ export function legacyRemediationTarget(link: string | undefined): LegacyFeature
 export function legacyIpHref(ip?: string): `/admin${string}` {
   return ip ? `${legacyRoutes.ips}/${encodeURIComponent(ip)}` : legacyRoutes.ips;
 }
+
+/** Keep runtime destinations inside the local Legacy route boundary without rewriting their state. */
+export function isLegacyAdminHref(value: unknown): value is `/admin${string}` {
+  if (typeof value !== "string" || !/^\/admin(?:[/?#]|$)/u.test(value)) return false;
+  const unsafeCharacter = (text: string, raw: boolean) =>
+    [...text].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || (raw && code === 32) || code === 127 || code === 92;
+    });
+  if (unsafeCharacter(value, true)) return false;
+  try {
+    encodeURI(value);
+    const decoded = decodeURIComponent(value);
+    if (unsafeCharacter(decoded, false)) return false;
+    return [value, decoded].every((candidate) => {
+      const url = new URL(candidate, "https://legacy.invalid");
+      return (
+        url.origin === "https://legacy.invalid" &&
+        (url.pathname === "/admin" || url.pathname.startsWith("/admin/"))
+      );
+    });
+  } catch {
+    return false;
+  }
+}

@@ -1,5 +1,7 @@
+import { isLegacyAdminHref } from "@/config/legacy-route-map";
+import { containsPotentialSecret } from "@/shared/security/secrets";
 import type { AuthContextValue } from "@/app/auth/AuthProvider";
-import { resolveFeature } from "@/config/migration-registry";
+import { migrationRegistry, resolveFeature } from "@/config/migration-registry";
 import { canOpenLegacyAdmin } from "./legacy-admin";
 
 type LegacyFeatureAccess = Pick<
@@ -30,4 +32,25 @@ export function canOpenLegacyFeature(auth: LegacyFeatureAccess, featureId: strin
     legacyFallback: auth.legacyFallback,
   });
   return effective.permitted && effective.status !== "hidden" && effective.status !== "retired";
+}
+
+/** Compiled defaults follow the current target; explicit supported subroutes keep their own state. */
+export function resolveLegacyFeatureHref(
+  auth: LegacyFeatureAccess & Pick<AuthContextValue, "credentialPrefixes">,
+  featureId: string,
+  requestedHref: string | undefined,
+): `/admin${string}` | undefined {
+  if (!requestedHref || !canOpenLegacyFeature(auth, featureId)) return undefined;
+  const target = auth.features.find((feature) => feature.featureId === featureId);
+  if (
+    !target ||
+    !isLegacyAdminHref(target.legacyPath) ||
+    containsPotentialSecret(target.legacyPath, auth.credentialPrefixes)
+  )
+    return undefined;
+  const compiled = migrationRegistry.find((feature) => feature.featureId === featureId);
+  const href = requestedHref === compiled?.legacyPath ? target.legacyPath : requestedHref;
+  return isLegacyAdminHref(href) && !containsPotentialSecret(href, auth.credentialPrefixes)
+    ? href
+    : undefined;
 }

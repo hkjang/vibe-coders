@@ -25,23 +25,26 @@ describe("Legacy destinations across feature boundaries", () => {
     ["#/billing", "finops.overview", "/admin#/billing"],
     ["#/safety", "governance.policies", "/admin#/safety"],
   ])("checks the actual %s target independently of a retired remediation owner", (link, target, href) => {
-    const tree = (
+    const tree = () => (
       <FeatureAccessContext.Provider
         value={{ featureId: "governance.remediation", permitted: true, readOnly: false, status: "retired" }}
       >
         <RemediationLegacyLink link={link} />
       </FeatureAccessContext.Provider>
     );
-    const view = render(tree);
+    const view = render(tree());
     expect(screen.getByRole("link")).toHaveAttribute("href", href);
+    patch(target, { legacyPath: "/admin#/settings?view=public-target" });
+    view.rerender(tree());
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/admin#/settings?view=public-target");
     patch(target, { status: "retired" });
-    view.rerender(<RemediationLegacyLink link={link} />);
+    view.rerender(tree());
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     patch(target, { status: "deprecated" });
-    view.rerender(<RemediationLegacyLink link={link} />);
+    view.rerender(tree());
     expect(screen.getByRole("link")).toBeVisible();
     patch(target, { fallbackEnabled: false });
-    view.rerender(<RemediationLegacyLink link={link} />);
+    view.rerender(tree());
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
   it.each(["#/billing", "#/safety"])("does not borrow admin scope for %s target permissions", (link) => {
@@ -106,6 +109,14 @@ describe("Legacy destinations across feature boundaries", () => {
     runtime.auth = testAuth({ scopes: ["routing:read"] });
     const feature = runtime.auth.features.find((entry) => entry.featureId === "routing.rules");
     if (!feature) throw new Error("Missing routing fixture");
+    render(<LegacyFeaturePage feature={feature} />);
+    expect(screen.getByText(/기존 화면을 열 수 없습니다/)).toBeVisible();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+  it("explains a bridge with a malformed runtime destination instead of offering an unusable link", () => {
+    const feature = runtime.auth.features.find((entry) => entry.featureId === "routing.rules");
+    if (!feature) throw new Error("Missing routing fixture");
+    patch("routing.rules", { legacyPath: "/admin/../app" });
     render(<LegacyFeaturePage feature={feature} />);
     expect(screen.getByText(/기존 화면을 열 수 없습니다/)).toBeVisible();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();

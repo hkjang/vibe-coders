@@ -135,12 +135,14 @@ async function install(context: BrowserContext) {
       fallbackEnabled?: boolean;
       globalFallback?: boolean;
       backendVersion?: string;
+      legacyPath?: string;
     }) {
       const feature = currentBootstrap.migration_registry.find(
         (item) => item.feature_id === "gateway.providers",
       );
       if (!feature) throw new Error("Fixture must register its destination");
       if (policy.status !== undefined) feature.status = policy.status;
+      if (policy.legacyPath !== undefined) feature.legacy_path = policy.legacyPath;
       if (policy.fallbackEnabled !== undefined) feature.fallback_enabled = policy.fallbackEnabled;
       if (policy.globalFallback !== undefined) currentBootstrap.ui.legacy_fallback = policy.globalFallback;
       if (policy.backendVersion !== undefined) currentBootstrap.backend_version = policy.backendVersion;

@@ -142,3 +142,64 @@ test("구형 서버의 폐기된 공급자 기능은 Legacy로 돌아가지 않�
   await expect(page.getByRole("link", { name: "기존 화면에서 열기", exact: true })).toBeVisible();
   expect(providerGateway.writes).toEqual([]);
 });
+
+test("열린 공급자 상세의 기본 링크는 서버 주소 갱신을 따르고 키보드·가운데 클릭을 유지한다", async ({
+  page,
+  context,
+  providerGateway,
+}) => {
+  const first = "/admin#/settings?view=public-first";
+  const next = "/admin#/settings/runtime?view=public-current";
+  providerGateway.legacyPolicy({
+    status: "preview",
+    globalFallback: true,
+    fallbackEnabled: true,
+    legacyPath: first,
+  });
+  await ready(page);
+  await page.getByRole("link", { name: "provider-00", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const detailLink = () => dialog.getByRole("link", { name: "기존 설정 화면 열기", exact: true });
+  const headerLink = () =>
+    // The modal hides the background from accessibility queries; only inspect its href.
+    page.locator("header.page-header").getByRole("link", {
+      name: "기존 화면에서 열기",
+      exact: true,
+      includeHidden: true,
+    });
+  await expect(detailLink()).toHaveAttribute("href", first);
+  await expect(headerLink()).toHaveAttribute("href", first);
+  providerGateway.legacyPolicy({ legacyPath: next });
+  await refreshIdentity(page);
+  await expect(dialog).toBeVisible();
+  await expect(detailLink()).toHaveAttribute("href", next);
+  await expect(headerLink()).toHaveAttribute("href", next);
+  providerGateway.legacyPolicy({ legacyPath: "/admin/../app" });
+  await refreshIdentity(page);
+  await expect(dialog).toBeVisible();
+  await expect(detailLink()).toHaveCount(0);
+  await expect(headerLink()).toHaveCount(0);
+  providerGateway.legacyPolicy({ legacyPath: next });
+  await refreshIdentity(page);
+  await expect(detailLink()).toHaveAttribute("href", next);
+  const origin = new URL(page.url()).origin;
+  await context.route("**/admin", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: '<!doctype html><html lang="ko"><meta charset="utf-8"><title>공개 Legacy 테스트</title><h1>공개 Legacy 테스트 화면</h1></html>',
+    }),
+  );
+  const popupReady = context.waitForEvent("page");
+  await detailLink().click({ button: "middle" });
+  const popup = await popupReady;
+  await expect(popup).toHaveURL(origin + next);
+  await expect(popup.getByRole("heading", { name: "공개 Legacy 테스트 화면" })).toBeVisible();
+  await popup.close();
+  await detailLink().focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(origin + next);
+  await expect(page.getByRole("heading", { name: "공개 Legacy 테스트 화면" })).toBeVisible();
+  expect(providerGateway.writes).toEqual([]);
+  expect(providerGateway.unexpected).toEqual([]);
+});
