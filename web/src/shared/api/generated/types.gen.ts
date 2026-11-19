@@ -1960,6 +1960,10 @@ export type ModelUsageTagsResponse = {
 
 export type NavigationResponse = {
     allowed_tabs: Array<string>;
+    /**
+     * Optional Legacy-to-App entry flag. Absent means disabled; true requires explicit opt-in, enabled App UI and the current caller authentication.
+     */
+    app_entry_enabled?: boolean;
     default_home: string;
     features: {
         [key: string]: boolean;

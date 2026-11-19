@@ -199,14 +199,16 @@ func resolveHome(role string, scopes []string) string {
 // navigationFor builds the full navigation payload for a caller's scopes/features.
 func (s *Server) navigationFor(scopes []string, role string) map[string]any {
 	features := s.featureFlags()
+	ui := s.appUIConf()
 	return map[string]any{
-		"menus":        accessibleMenus(scopes, features),
-		"allowed_tabs": allowedTabs(scopes, features),
-		"default_home": resolveHome(role, scopes),
-		"role":         role,
-		"scopes":       scopes,
-		"features":     features,
-		"menu_version": menuVersion,
+		"app_entry_enabled": ui.Enabled && ui.LegacyEntryLink,
+		"menus":             accessibleMenus(scopes, features),
+		"allowed_tabs":      allowedTabs(scopes, features),
+		"default_home":      resolveHome(role, scopes),
+		"role":              role,
+		"scopes":            scopes,
+		"features":          features,
+		"menu_version":      menuVersion,
 	}
 }
 
@@ -215,12 +217,19 @@ func (s *Server) navigationFor(scopes []string, role string) map[string]any {
 // route blocking share one policy. In legacy mode (auth disabled) the full operator menu
 // is returned, matching the admin-token surface.
 func (s *Server) handleMeNavigation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
 	if !s.cfg.Auth.Enabled {
-		writeJSON(w, http.StatusOK, s.navigationFor(append([]string{}, allScopes...), "admin"))
+		nav := s.navigationFor(append([]string{}, allScopes...), "admin")
+		// Preserve the existing Legacy menu response; only the new opt-in link
+		// requires any configured admin token to have been supplied correctly.
+		if !s.authorizeAdmin(r) {
+			nav["app_entry_enabled"] = false
+		}
+		writeJSON(w, http.StatusOK, nav)
 		return
 	}
 	claims, ok := s.currentAccessClaims(r)

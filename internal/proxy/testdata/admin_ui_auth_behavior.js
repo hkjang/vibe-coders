@@ -50,7 +50,10 @@ function harness(transport) {
         id, value: '', style: {}, textContent: '', title: '', disabled: false, listeners: {},
         classList: { add: x => classes.add(x), remove: x => classes.delete(x), contains: x => classes.has(x) },
         addEventListener(type, callback) { this.listeners[type] = callback; },
-        focus() {}, appendChild() {}, getAttribute() { return null; },
+        focus() {}, appendChild() {}, attributes: {},
+        setAttribute(key, value) { this.attributes[key] = String(value); },
+        removeAttribute(key) { delete this.attributes[key]; },
+        getAttribute(key) { return this.attributes[key] ?? null; },
       });
     }
     return nodes.get(id);
@@ -72,7 +75,7 @@ function harness(transport) {
     },
   });
   vm.runInContext('const tokenInput = document.getElementById("token");\n' + auth + '\n' + http +
-    '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment };', context);
+    '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry };', context);
   const client = context.client;
   return {
     ...client, calls, storage, toasts, node, location,
@@ -444,4 +447,64 @@ test('malformed SSO code returns to a usable login without dispatching exchange'
   assert.equal(h.storage.get('authAccess'), 'recovered-access');
   assert.equal(h.loginVisible(), false);
   assert.equal(h.routes, 1);
+});
+
+
+test('Legacy entry requires a strict current opt-in and always uses the fixed App root', async () => {
+  let flag;
+  const transport = () => response(200, { ...nav('current'), app_entry_enabled: flag, app_entry_url: 'https://untrusted.invalid/' });
+  transport.navigation = true;
+  const h = harness(transport);
+  for (flag of [undefined, false, 'true', 1, true, null]) {
+    await h.loadNavigation();
+    assert.equal(h.node('legacy-app-entry').getAttribute('href'), flag === true ? '/app/' : null);
+    assert.equal(h.node('legacy-app-entry').style.display, flag === true ? '' : 'none');
+  }
+});
+
+test('a late opt-in cannot replace a newer disabled navigation response', async () => {
+  const gate = deferred(); let calls = 0;
+  const transport = () => ++calls === 1 ? gate.promise : response(200, { ...nav('new'), app_entry_enabled: false });
+  transport.navigation = true;
+  const h = harness(transport);
+  const older = h.loadNavigation();
+  await until(() => calls === 1);
+  await h.loadNavigation();
+  gate.resolve(response(200, { ...nav('old'), app_entry_enabled: true }));
+  assert.equal(await older, false);
+  assert.equal(h.authState.nav.marker, 'new');
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+});
+
+test('logout immediately retires the entry and pending navigation cannot restore it', async () => {
+  const navGate = deferred(), logoutGate = deferred(); let calls = 0;
+  const transport = call => call.path === '/auth/logout' ? logoutGate.promise
+    : ++calls === 1 ? response(200, { ...nav('initial'), app_entry_enabled: true }) : navGate.promise;
+  transport.navigation = true;
+  const h = harness(transport); h.seed();
+  await h.loadNavigation();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), '/app/');
+  const pending = h.loadNavigation();
+  await until(() => calls === 2);
+  const logout = h.logout();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+  navGate.resolve(response(200, { ...nav('late'), app_entry_enabled: true }));
+  assert.equal(await pending, false);
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+  logoutGate.resolve(response(200));
+  await logout;
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+});
+
+test('navigation failure hides the entry and a later focus refresh recovers', async () => {
+  let failed = false;
+  const transport = () => response(failed ? 503 : 200, { ...nav('current'), app_entry_enabled: true });
+  transport.navigation = true;
+  const h = harness(transport);
+  await h.loadNavigation();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), '/app/');
+  failed = true; await h.refreshLegacyAppEntry();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+  failed = false; await h.refreshLegacyAppEntry();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), '/app/');
 });

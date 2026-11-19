@@ -106,6 +106,7 @@ const adminHTML = `<!doctype html>
     .subtabs a:hover { background: var(--line); }
     .subtabs a.active { background: var(--ink); color: var(--bg); }
     .header-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .legacy-app-entry { color: var(--ink); font-size: 13px; white-space: nowrap; text-underline-offset: 3px; }
     main { width: min(1440px, 100%); margin: 0 auto; padding: 18px 28px 60px; }
     section {
       margin-top: 16px; background: var(--panel);
@@ -724,6 +725,7 @@ const adminHTML = `<!doctype html>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
+      <a id="legacy-app-entry" class="legacy-app-entry" style="display:none">새 콘솔 열기</a>
       <button id="xview-launcher" class="xview-launcher" type="button" title="어디서나 요청의 처리 근거 탐색 (Shift+X)">✦ XView</button>
       <div class="user-menu-wrap">
         <span id="auth-user" class="user-chip" title="개인 메뉴 열기"></span>
@@ -821,6 +823,7 @@ const adminHTML = `<!doctype html>
     tokenInput.value = sessionStorage.getItem('adminToken') || '';
     tokenInput.addEventListener('change', () => {
       sessionStorage.setItem('adminToken', tokenInput.value);
+      void loadNavigation();
       route();
     });
 
@@ -833,12 +836,17 @@ const adminHTML = `<!doctype html>
     };
     // A login/logout retires the old session immediately. Refresh only advances
     // credentials inside that session, even if two access JWT strings are equal.
+    let navigationRevision = 0;
+    let navigationReady = false;
     let authEpoch = 0;
     let authRevision = 0;
     let authChanging = false;
     let authRefreshFlight = null;
     function retireAuth(changing = false) {
       authEpoch++;
+      navigationRevision++;
+      navigationReady = false;
+      setLegacyAppEntry(false);
       authChanging = changing;
       authRefreshFlight = null;
       return authEpoch;
@@ -1030,16 +1038,32 @@ const adminHTML = `<!doctype html>
     // loadNavigation fetches the server-computed accessible menu set and stores it. The
     // SPA renders only these menus and guards routes against allowed_tabs — the same
     // policy the server applies — so a hidden menu can never be reached by URL.
+    function setLegacyAppEntry(enabled) {
+      const link = document.getElementById('legacy-app-entry');
+      if (!link) return;
+      if (enabled === true) link.setAttribute('href', '/app/');
+      else link.removeAttribute('href');
+      link.style.display = enabled === true ? '' : 'none';
+    }
+
+    function refreshLegacyAppEntry() {
+      if (!navigationReady || document.hidden || authChanging) return;
+      return loadNavigation();
+    }
+
     async function loadNavigation(epoch = authEpoch) {
       if (!authCurrent(epoch)) return false;
+      const revision = ++navigationRevision;
+      setLegacyAppEntry(false);
       try {
         const nav = await api('/me/navigation');
-        if (!authCurrent(epoch)) return false;
+        if (!authCurrent(epoch) || revision !== navigationRevision) return false;
         authState.nav = nav;
       } catch {
-        if (!authCurrent(epoch)) return false;
+        if (!authCurrent(epoch) || revision !== navigationRevision) return false;
         authState.nav = null; // fall back to showing everything (legacy/no policy)
       }
+      navigationReady = true;
       applyNavPermissions();
       return true;
     }
@@ -1047,6 +1071,7 @@ const adminHTML = `<!doctype html>
     // applyNavPermissions hides nav anchors whose tab is not in the caller's allowed_tabs.
     function applyNavPermissions() {
       const nav = authState.nav;
+      setLegacyAppEntry(nav && nav.app_entry_enabled === true);
       const allowed = nav && Array.isArray(nav.allowed_tabs) ? new Set(nav.allowed_tabs) : null;
       document.querySelectorAll('#tabs a[data-tab], #user-menu a[data-tab]').forEach(a => {
         const tab = a.getAttribute('data-tab');
@@ -2152,6 +2177,8 @@ const adminHTML = `<!doctype html>
       routeProgressTimer = setTimeout(() => bar.classList.remove('done'), 220);
     }
     window.addEventListener('hashchange', route);
+    window.addEventListener('focus', refreshLegacyAppEntry);
+    document.addEventListener('visibilitychange', refreshLegacyAppEntry);
 
     // ---------- nav dropdown hover intent ----------
     // Keep a grouped menu open briefly when the pointer crosses the gap between the parent

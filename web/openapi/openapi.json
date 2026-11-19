@@ -6987,6 +6987,10 @@
             },
             "type": "array"
           },
+          "app_entry_enabled": {
+            "description": "Optional Legacy-to-App entry flag. Absent means disabled; true requires explicit opt-in, enabled App UI and the current caller authentication.",
+            "type": "boolean"
+          },
           "default_home": {
             "type": "string"
           },

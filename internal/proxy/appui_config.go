@@ -20,6 +20,7 @@ const (
 	appUIEnabledKey          = "ui.app.enabled"
 	appUIDefaultEntryKey     = "ui.app.default_entry"
 	appUILegacyFallbackKey   = "ui.app.legacy_fallback"
+	appUILegacyEntryKey      = "ui.app.legacy_entry_link"
 	appUIFeedbackEnabledKey  = "ui.app.feedback_enabled"
 	appUITelemetryEnabledKey = "ui.app.telemetry_enabled"
 )
@@ -28,6 +29,7 @@ type appUIRuntimeConfig struct {
 	Enabled          bool   `json:"enabled"`
 	DefaultEntry     string `json:"default_entry"`
 	LegacyFallback   bool   `json:"legacy_fallback"`
+	LegacyEntryLink  bool   `json:"-"` // Consumed by Legacy navigation, not the React bootstrap.
 	FeedbackEnabled  bool   `json:"feedback_enabled"`
 	TelemetryEnabled bool   `json:"telemetry_enabled"`
 }
@@ -282,6 +284,7 @@ func (s *Server) reloadAppUIRuntime(stored map[string]store.AdminSetting) {
 		Enabled:          boolValue(appUIEnabledKey, true),
 		DefaultEntry:     entry,
 		LegacyFallback:   boolValue(appUILegacyFallbackKey, true),
+		LegacyEntryLink:  boolValue(appUILegacyEntryKey, false),
 		FeedbackEnabled:  boolValue(appUIFeedbackEnabledKey, false),
 		TelemetryEnabled: boolValue(appUITelemetryEnabledKey, false),
 	}
