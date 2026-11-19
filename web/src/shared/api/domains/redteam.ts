@@ -1,3 +1,4 @@
+import { probeCsvReviewedEndpoints } from "./redteam-probe-csv-review";
 import { runPageEndpoint } from "./redteam-run-page";
 import { evidenceReadEndpoint, resultsReadEndpoint } from "./redteam-evidence-read";
 import { redTeamRecordingSchema } from "./redteam-recording";
@@ -471,6 +472,7 @@ export const redteamEndpoints = {
     ),
   },
   probePacks: {
+    reviewed: probeCsvReviewedEndpoints,
     import: textOperation<PostAdminRedteamProbePacksImportData, unknown>()(
       "POST",
       "/admin/redteam/probe-packs/import",

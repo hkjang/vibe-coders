@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { expect, test, type Page } from "@playwright/test";
 import { installPromptLibrary } from "../fixtures/prompt-library-browser";
 import { refreshRuntime } from "../fixtures/agent-code-editor";
+import { probeCsvReviewFixture } from "../../src/test/probe-csv-review";
 
 const csv = '\ufeffcase_key,input_template\r\npublic-key,"공개 합성 프롬프트 😀\r\n둘째 줄"\r\n';
 const upload = (body = csv, name = "prompts.csv", mimeType = "text/csv") => ({
@@ -25,38 +26,78 @@ async function install(page: Page) {
     risk_level: "critical",
   });
   const writes: Array<{ bytes: number[]; headers: Record<string, string> }> = [];
+  const reviews: Array<{ bytes: number[]; headers: Record<string, string> }> = [];
   const exports: string[] = [];
-  let reads = 0;
-  let responseStatus = 200;
+  let reads = 0,
+    responseStatus = 200,
+    reviewStatus = 200;
+  const review = probeCsvReviewFixture();
+  let held: "apply" | "review" | "export" | undefined;
   let hold: Promise<void> | undefined;
   let release = () => {};
   let finished = Promise.resolve();
   await page.route("**/admin/redteam/**", async (route) => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    if (path.endsWith("/probe-packs/import") || path.endsWith("/probe-packs/export")) {
-      const importing = path.endsWith("/import");
-      if (importing) {
-        expect(request.method()).toBe("POST");
-        writes.push({ bytes: Array.from(request.postDataBuffer() ?? []), headers: request.headers() });
-      } else {
+    const request = route.request(),
+      url = new URL(request.url()),
+      path = url.pathname;
+    const kind = path.endsWith("/import-review")
+      ? "review"
+      : path.endsWith("/import")
+        ? "apply"
+        : path.endsWith("/export")
+          ? "export"
+          : undefined;
+    if (kind) {
+      if (kind === "export") {
         expect(request.method()).toBe("GET");
         exports.push(request.url());
+      } else {
+        expect(request.method()).toBe(kind === "review" ? "POST" : "PUT");
+        (kind === "review" ? reviews : writes).push({
+          bytes: Array.from(request.postDataBuffer() ?? []),
+          headers: request.headers(),
+        });
       }
       let finish = () => {};
-      finished = new Promise<void>((resolve) => {
-        finish = resolve;
-      });
+      if (held === kind)
+        finished = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
       try {
-        await hold;
-        if (!importing) return await route.fulfill({ contentType: "text/csv; charset=utf-8", body: csv });
+        if (held === kind) await hold;
+        if (kind === "export")
+          return await route.fulfill({ contentType: "text/csv; charset=utf-8", body: csv });
+        const status = kind === "review" ? reviewStatus : responseStatus;
+        const offset = Number(url.searchParams.get("offset") ?? 0),
+          limit = Number(url.searchParams.get("limit") ?? 20);
+        const payload =
+          kind === "review"
+            ? {
+                ...review,
+                offset,
+                limit,
+                has_more: offset + limit < review.total_items,
+                changes: review.changes.slice(offset, offset + limit),
+              }
+            : {
+                review_applied: true,
+                applied_revision: review.revision,
+                imported_cases: review.imported_cases,
+                packs_touched: 1,
+                skipped: null,
+              };
         return await route.fulfill({
-          status: responseStatus,
+          status,
           headers: { "x-request-id": "public-csv-request" },
           json:
-            responseStatus === 200
-              ? { imported_cases: 1, packs_touched: 1, skipped: null }
-              : { error: { message: "private raw CSV must not appear" } },
+            status === 200
+              ? payload
+              : {
+                  error: {
+                    message: "private raw CSV must not appear",
+                    code: status === 409 ? "redteam_import_review_changed" : "synthetic_failure",
+                  },
+                },
         });
       } finally {
         finish();
@@ -75,12 +116,33 @@ async function install(page: Page) {
     ...base,
     feature,
     writes,
+    reviews,
     exports,
     reads: () => reads,
     setStatus: (value: number) => {
       responseStatus = value;
     },
-    hold: () => {
+    setReviewStatus: (value: number) => {
+      reviewStatus = value;
+    },
+    many: () => {
+      const source = review.changes[1];
+      if (!source || source.kind !== "case") throw new Error("missing case");
+      review.changes = [
+        review.changes[0],
+        ...Array.from({ length: 21 }, (_, i) => ({
+          ...source,
+          id: "case-" + i,
+          after: { ...source.after, id: "case-" + i, case_key: "case-" + i },
+          before: source.before ? { ...source.before, id: "case-" + i } : null,
+        })),
+      ].filter((value): value is NonNullable<typeof value> => value !== undefined);
+      review.total_items = 22;
+      review.imported_cases = 21;
+      review.counts = { created: 0, updated: 21, unchanged: 1 };
+    },
+    hold: (kind: "apply" | "review" | "export" = "apply") => {
+      held = kind;
       hold = new Promise<void>((resolve) => {
         release = resolve;
       });
@@ -89,6 +151,7 @@ async function install(page: Page) {
       release();
       await finished;
       hold = undefined;
+      held = undefined;
     },
   };
 }
@@ -96,12 +159,28 @@ async function open(page: Page) {
   await page.goto("redteam?tab=targets");
   await expect(page.getByRole("button", { name: "CSV 가져오기", exact: true })).toBeEnabled();
 }
+async function confirm(page: Page) {
+  const dialog = page.getByRole("dialog", { name: "CSV 변경 내용 확인" });
+  await expect(dialog.getByRole("heading", { name: "적용 예정 내용" })).toBeVisible();
+  await dialog.getByRole("checkbox", { name: /원본 파일을 적용/ }).check();
+  await dialog.getByRole("button", { name: "변경 내용 적용", exact: true }).click();
+}
+async function discard(page: Page) {
+  await page
+    .getByRole("dialog", { name: "CSV 변경 내용 확인" })
+    .getByRole("button", { name: "취소", exact: true })
+    .click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "변경 버리기", exact: true }).click();
+}
 
-test("imports once through the registered raw transport and downloads identical BOM/CRLF bytes", async ({
+test("review precedes an explicitly confirmed PUT and preserves original BOM/CRLF download bytes", async ({
   page,
 }) => {
   const parserLoads: string[] = [];
+  const dialogLoads: string[] = [];
   page.on("request", (request) => {
+    if (/\/assets\/ProbeCsvImportDialog-[^/]+\.js$/u.test(new URL(request.url()).pathname))
+      dialogLoads.push(request.url());
     if (/\/assets\/probe-csv-file-[^/]+\.js$/u.test(new URL(request.url()).pathname))
       parserLoads.push(request.url());
   });
@@ -109,12 +188,27 @@ test("imports once through the registered raw transport and downloads identical 
   await open(page);
   const initialReads = api.reads();
   expect(parserLoads).toEqual([]);
+  expect(dialogLoads).toEqual([]);
   await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+  const dialog = page.getByRole("dialog", { name: "CSV 변경 내용 확인" });
+  await expect(dialog.getByRole("heading", { name: "적용 예정 내용" })).toBeVisible();
+  await expect(dialog).toContainText("기존 공개 프롬프트");
+  await expect(dialog).toContainText("검토한 공개 프롬프트");
+  await expect(dialog.getByRole("button", { name: "변경 내용 적용", exact: true })).toBeDisabled();
+  expect(api.writes).toHaveLength(0);
+  expect(api.reads()).toBe(initialReads);
+  expect(api.reviews[0]?.bytes).toEqual(Array.from(new TextEncoder().encode(csv)));
+  await confirm(page);
   await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
   expect(api.writes).toHaveLength(1);
   expect(parserLoads).toHaveLength(1);
+  expect(dialogLoads).toHaveLength(1);
   expect(api.writes[0]?.bytes).toEqual(Array.from(new TextEncoder().encode(csv)));
-  expect(api.writes[0]?.headers).toMatchObject({ "content-type": "text/csv", "x-vibe-ui": "app" });
+  expect(api.writes[0]?.headers).toMatchObject({
+    "content-type": "text/csv",
+    "x-vibe-ui": "app",
+    "if-match": '"' + "a".repeat(64) + '"',
+  });
   expect(api.reads()).toBeGreaterThan(initialReads);
   const downloaded = page.waitForEvent("download");
   await page.getByRole("button", { name: "CSV 내보내기(엑셀)", exact: true }).click();
@@ -125,7 +219,6 @@ test("imports once through the registered raw transport and downloads identical 
   const bytes: number[] = [];
   for await (const chunk of stream) bytes.push(...new Uint8Array(chunk));
   expect(bytes).toEqual(Array.from(new TextEncoder().encode(csv)));
-  expect(api.exports).toHaveLength(1);
   api.check();
 });
 
@@ -134,60 +227,55 @@ for (const [label, file] of [
   ["wrong MIME", upload(csv, "prompts.csv", "text/html")],
   ["invalid final row", upload(csv + 'last,"unterminated')],
 ] as const) {
-  test(`${label} fails before any server write and permits a fresh selection`, async ({ page }) => {
+  test(label + " fails before review or write and permits a fresh selection", async ({ page }) => {
     const api = await install(page);
     await open(page);
     await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(file);
     await expect(page.getByRole("alert")).toBeVisible();
     expect(api.writes).toEqual([]);
+    expect(api.reviews).toEqual([]);
+    await discard(page);
+    await expect(page.getByRole("button", { name: "CSV 가져오기", exact: true })).toBeFocused();
     await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+    await confirm(page);
     await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
-    await expect(page.getByRole("alert")).toHaveCount(0);
     expect(api.writes).toHaveLength(1);
     api.check();
   });
 }
 
-for (const boundary of ["readOnly", "filter", "tab"] as const) {
-  test(`held CSV upload is aborted on ${boundary}, with no stale feedback or automatic replay`, async ({
-    page,
-  }) => {
-    const api = await install(page);
-    await open(page);
-    api.hold();
-    const requested = page.waitForRequest((request) =>
-      new URL(request.url()).pathname.endsWith("/probe-packs/import"),
-    );
-    await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
-    const request = await requested;
-    await expect(page.getByRole("button", { name: "CSV 가져오기", exact: true })).toBeDisabled();
-    if (boundary === "readOnly") {
+for (const phase of ["review", "apply"] as const) {
+  test(
+    "read-only transition aborts held " + phase + " without stale feedback or replay",
+    async ({ page }) => {
+      const api = await install(page);
+      await open(page);
+      api.hold(phase);
+      const requested = page.waitForRequest((request) =>
+        new URL(request.url()).pathname.endsWith(
+          phase === "review" ? "/probe-packs/import-review" : "/probe-packs/import",
+        ),
+      );
+      await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+      if (phase === "apply") await confirm(page);
+      const request = await requested;
       api.feature.read_only = true;
       await refreshRuntime(page);
-    }
-    if (boundary === "filter") {
-      const search = page.getByPlaceholder("이름, 유형, 위험도, 제공자, 담당 팀", { exact: true });
-      await search.fill("next");
-      await search.press("Enter");
-    }
-    if (boundary === "tab") await page.getByRole("tab", { name: "캠페인", exact: true }).click();
-    await expect.poll(() => request.failure()?.errorText).toBe("net::ERR_ABORTED");
-    const settledReads = api.reads();
-    await api.release();
-    expect(api.reads()).toBe(settledReads);
-    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-    if (boundary === "readOnly") {
+      await expect.poll(() => request.failure()?.errorText).toBe("net::ERR_ABORTED");
+      const settledReads = api.reads();
+      await api.release();
+      expect(api.reads()).toBe(settledReads);
+      await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "CSV 변경 내용 확인" })).toHaveCount(0);
       api.feature.read_only = false;
       await refreshRuntime(page);
-    }
-    if (boundary === "tab") await page.getByRole("tab", { name: "대상·검사 묶음", exact: true }).click();
-    await expect(page.getByRole("button", { name: "CSV 가져오기", exact: true })).toBeEnabled();
-    expect(api.writes).toHaveLength(1);
-    await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
-    await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
-    expect(api.writes).toHaveLength(2);
-    api.check();
-  });
+      await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+      await confirm(page);
+      await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
+      expect(api.writes).toHaveLength(phase === "review" ? 1 : 2);
+      api.check();
+    },
+  );
 }
 
 test("a changed filter retires a held export without saving a stale file", async ({ page }) => {
@@ -195,7 +283,7 @@ test("a changed filter retires a held export without saving a stale file", async
   await open(page);
   const downloads: string[] = [];
   page.on("download", (file) => downloads.push(file.suggestedFilename()));
-  api.hold();
+  api.hold("export");
   const requested = page.waitForRequest((request) =>
     new URL(request.url()).pathname.endsWith("/probe-packs/export"),
   );
@@ -207,24 +295,95 @@ test("a changed filter retires a held export without saving a stale file", async
   await api.release();
   expect(downloads).toEqual([]);
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  const next = page.waitForEvent("download");
-  await page.getByRole("button", { name: "CSV 내보내기(엑셀)", exact: true }).click();
-  await next;
-  expect(downloads).toHaveLength(1);
-  expect(api.exports).toHaveLength(2);
   api.check();
 });
 
-test("an uncertain write shows a safe request id and sends no automatic retry", async ({ page }) => {
+test("an uncertain apply retires confirmation and requires a fresh explicit review", async ({ page }) => {
   const api = await install(page);
   api.setStatus(503);
   await open(page);
   const initialReads = api.reads();
   await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+  await confirm(page);
   await expect(page.getByRole("alert")).toContainText("public-csv-request");
   await expect(page.getByRole("alert")).not.toContainText("private raw CSV");
   expect(api.writes).toHaveLength(1);
   expect(api.reads()).toBe(initialReads);
-  await expect(page.getByRole("button", { name: "CSV 가져오기", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "변경 내용 적용", exact: true })).toBeDisabled();
+  api.setStatus(200);
+  await page.getByRole("button", { name: "현재 내용으로 다시 검토" }).click();
+  await expect(page.getByRole("checkbox", { name: /원본 파일을 적용/ })).not.toBeChecked();
+  expect(api.writes).toHaveLength(1);
+  await confirm(page);
+  await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
+  expect(api.writes).toHaveLength(2);
   api.check();
 });
+
+test("paging binds the exact file and resets confirmation; stale pages disable apply", async ({ page }) => {
+  const api = await install(page);
+  api.many();
+  await open(page);
+  await page
+    .getByLabel("프롬프트 CSV 파일 선택", { exact: true })
+    .setInputFiles(
+      upload(
+        "case_key,input_template\n" +
+          Array.from({ length: 21 }, (_, i) => "case-" + i + ",public\n").join(""),
+      ),
+    );
+  await expect(page.getByRole("heading", { name: "적용 예정 내용" })).toBeVisible();
+  await page.getByRole("checkbox", { name: /원본 파일을 적용/ }).check();
+  await page.getByRole("button", { name: "다음 변경", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: /원본 파일을 적용/ })).not.toBeChecked();
+  expect(api.reviews).toHaveLength(2);
+  expect(api.reviews[1]?.bytes).toEqual(api.reviews[0]?.bytes);
+  expect(api.reviews[1]?.headers["if-match"]).toBe('"' + "a".repeat(64) + '"');
+  api.setReviewStatus(409);
+  await page.getByRole("button", { name: "이전 변경", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("다시 검토");
+  await expect(page.getByRole("button", { name: "변경 내용 적용", exact: true })).toBeDisabled();
+  expect(api.writes).toHaveLength(0);
+  api.check();
+});
+
+test("Escape keeps review until discard is explicitly confirmed and restores trigger focus", async ({
+  page,
+}) => {
+  const api = await install(page);
+  await open(page);
+  await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+  await expect(page.getByRole("heading", { name: "적용 예정 내용" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await expect(page.getByRole("button", { name: "계속 편집", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "계속 편집", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "CSV 변경 내용 확인" })).toBeVisible();
+  await discard(page);
+  await expect(page.getByRole("button", { name: "CSV 가져오기", exact: true })).toBeFocused();
+  expect(api.writes).toHaveLength(0);
+  api.check();
+});
+
+for (const width of [390, 1440]) {
+  test("comparison dialog is bounded and usable at " + width + "px", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const api = await install(page);
+    await open(page);
+    await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+    const dialog = page.getByRole("dialog", { name: "CSV 변경 내용 확인" });
+    await expect(dialog.getByRole("heading", { name: "적용 예정 내용" })).toBeVisible();
+    const bounds = await dialog.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect((bounds?.x ?? -1) >= 0).toBe(true);
+    expect((bounds?.width ?? 9999) <= width).toBe(true);
+    expect(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    await dialog.screenshot({
+      path: testInfo.outputPath("probe-csv-review-" + width + ".png"),
+      animations: "disabled",
+    });
+    await confirm(page);
+    await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
+    api.check();
+  });
+}

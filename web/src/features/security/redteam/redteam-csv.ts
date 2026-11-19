@@ -28,3 +28,29 @@ export function importProbePrompts(csv: string, context: ProbeCsvContext = {}): 
     retryUnauthorized: false,
   });
 }
+
+/** Every page and apply sends the original file; never retry or fall back to legacy import. */
+export function reviewProbePrompts(
+  csv: string,
+  offset = 0,
+  revision?: string,
+  context: ProbeCsvContext = {},
+) {
+  return apiClient.request(endpoints.domains.redteam.probePacks.reviewed.review, {
+    ...context,
+    body: csv,
+    query: { offset, limit: 20 },
+    ...(revision ? { headers: { "If-Match": '"' + revision + '"' } } : {}),
+    routeId: "security.redteam",
+    retryUnauthorized: false,
+  });
+}
+export function applyReviewedProbePrompts(csv: string, revision: string, context: ProbeCsvContext = {}) {
+  return apiClient.request(endpoints.domains.redteam.probePacks.reviewed.apply, {
+    ...context,
+    body: csv,
+    headers: { "If-Match": '"' + revision + '"' },
+    routeId: "security.redteam",
+    retryUnauthorized: false,
+  });
+}

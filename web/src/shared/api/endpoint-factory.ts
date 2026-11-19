@@ -104,12 +104,14 @@ export function textOperation<Data extends OperationData, Response>() {
     path: Data["url"],
     schema: Schema,
     textRequest: TextRequestContract,
+    querySchema?: z.ZodType<object>,
   ): ApiEndpoint<WithBody<Data, string>, Method, Schema> => ({
     [endpointBrand]: true,
     method,
     path,
     schema,
     textRequest,
+    ...(querySchema ? { querySchema } : {}),
   });
 }
 

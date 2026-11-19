@@ -4,7 +4,7 @@ import { riskLabel, expectedPolicyLabel, targetTypeLabel, probeCategoryLabel } f
 import { matchesTarget, targetLabel } from "./target-search";
 import { useQuery } from "@tanstack/react-query";
 import { Download, Plus, Upload } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 
 import { ProbeCaseDialog } from "@/features/security/redteam/ProbeCaseDialog";
 import {
@@ -44,6 +44,7 @@ import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 const redteam = endpoints.domains.redteam;
+const ProbeCsvImportDialog = lazy(() => import("./ProbeCsvImportDialog"));
 
 function targetColumns(): ReadonlyArray<DataTableColumn<RedTeamTarget>> {
   const column = createDataTableColumnHelper<RedTeamTarget>();
@@ -110,6 +111,7 @@ export function RedTeamTargetsTab({
   const { remember: rememberCase, returnFocusRef: caseReturnFocusRef } = useReturnFocus();
   const caseFocus = usePreflightReturnFocus(caseReturnFocusRef);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const csvImportButton = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const focusAfterClear = useRef(false);
   useLayoutEffect(() => {
@@ -210,8 +212,9 @@ export function RedTeamTargetsTab({
           <Download aria-hidden="true" /> CSV 내보내기(엑셀)
         </Button>
         <Button
-          disabled={!importCsv.available || importCsv.pending}
+          disabled={!importCsv.available || importCsv.open}
           title={writeTitle}
+          ref={csvImportButton}
           onClick={() => fileInputRef.current?.click()}
         >
           <Upload aria-hidden="true" /> CSV 가져오기
@@ -222,7 +225,7 @@ export function RedTeamTargetsTab({
           accept=".csv,text/csv"
           className="sr-only"
           aria-label="프롬프트 CSV 파일 선택"
-          disabled={!importCsv.available || importCsv.pending}
+          disabled={!importCsv.available || importCsv.open}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
@@ -231,23 +234,10 @@ export function RedTeamTargetsTab({
           }}
         />
       </Toolbar>
-      {importCsv.pending ? (
-        <p role="status">
-          {importCsv.stage === "reading"
-            ? "CSV 파일을 확인하고 있습니다."
-            : "CSV 가져오기 결과를 기다리고 있습니다."}
-        </p>
-      ) : null}
-      {importCsv.error ? (
-        <p className="field-error" role="alert">
-          {importCsv.error.message}
-          {importCsv.error.requestId ? (
-            <span>
-              {" "}
-              · 요청 ID: <code>{importCsv.error.requestId}</code>
-            </span>
-          ) : null}
-        </p>
+      {importCsv.open ? (
+        <Suspense fallback={<p role="status">CSV 검토 화면을 불러오고 있습니다.</p>}>
+          <ProbeCsvImportDialog operation={importCsv} returnFocusRef={csvImportButton} />
+        </Suspense>
       ) : null}
       <p className="rt-muted">
         레드팀이 보낼 요청 프롬프트를 직접 추가하거나 엑셀로 일괄 편집할 수 있습니다.

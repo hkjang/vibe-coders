@@ -1,3 +1,4 @@
+import { probeCsvReviewFixture } from "@/test/probe-csv-review";
 import { useState } from "react";
 import { executionReviewFixture } from "./reviewed-execution-fixture";
 import { replayReviewFixture, replayOutcomeFixture } from "./reviewed-replay-fixture";
@@ -662,22 +663,40 @@ describe("RedTeamPage", () => {
     finishRun?.(undefined);
   });
 
-  it("프롬프트 CSV 가져오기는 등록된 공통 API에 원문을 전달한다", async () => {
-    const imported = { imported_cases: 2, packs_touched: 1, skipped: [] };
+  it("프롬프트 CSV는 변경 비교 후 확인해야 원문을 적용한다", async () => {
+    const review = probeCsvReviewFixture();
     const api = mockApi(
       listHandlers({
-        "POST /admin/redteam/probe-packs/import": (_options, endpoint) => {
+        "POST /admin/redteam/probe-packs/import-review": (_options, endpoint) => {
           expect(endpoint.textRequest).toEqual({ contentType: "text/csv", maxBytes: 8 * 1024 * 1024 });
-          return imported;
+          return review;
         },
+        "PUT /admin/redteam/probe-packs/import": () => ({
+          review_applied: true,
+          applied_revision: review.revision,
+          imported_cases: 1,
+          packs_touched: 1,
+          skipped: [],
+        }),
       }),
     );
     const user = userEvent.setup();
     renderPage("/redteam?tab=targets");
-    await screen.findByRole("button", { name: /CSV 가져오기/ });
+    await screen.findByRole("button", { name: "CSV 가져오기" });
     const csv = "case_key,input_template\nk,t\n";
-    const file = new File([csv], "prompts.csv", { type: "text/csv" });
-    await user.upload(screen.getByLabelText("프롬프트 CSV 파일 선택"), file);
-    await waitFor(() => expect(api.bodies("POST /admin/redteam/probe-packs/import")).toEqual([csv]));
+    await user.upload(
+      screen.getByLabelText("프롬프트 CSV 파일 선택"),
+      new File([csv], "prompts.csv", { type: "text/csv" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "CSV 변경 내용 확인" });
+    expect(dialog).toHaveTextContent("기존 공개 프롬프트");
+    expect(dialog).toHaveTextContent("검토한 공개 프롬프트");
+    expect(api.bodies("POST /admin/redteam/probe-packs/import-review")).toEqual([csv]);
+    expect(api.bodies("PUT /admin/redteam/probe-packs/import")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "변경 내용 적용" })).toBeDisabled();
+    await user.click(screen.getByRole("checkbox", { name: /원본 파일을 적용/ }));
+    await user.click(screen.getByRole("button", { name: "변경 내용 적용" }));
+    await waitFor(() => expect(api.bodies("PUT /admin/redteam/probe-packs/import")).toEqual([csv]));
+    expect(api.bodies("POST /admin/redteam/probe-packs/import")).toHaveLength(0);
   });
 });
