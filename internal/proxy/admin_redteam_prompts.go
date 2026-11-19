@@ -21,7 +21,8 @@ import (
 // Prompts are still stored as cases under a probe pack; import/export uses one row per case.
 
 // redTeamProbeCSVHeader is the column order for probe-case CSV export/import. target_types and
-// risk_tags are pipe(|)-separated inside their cell so the file stays valid CSV and easy to edit.
+// risk_tags normally use pipe-separated cells; the marked format preserves literal
+// separators and text escapes. See docs/REDTEAM_PROBE_CSV.md.
 var redTeamProbeCSVHeader = []string{
 	"pack_id", "pack_name", "category", "pack_severity", "requires_approval",
 	"case_id", "case_key", "expected_policy", "evaluator_type", "severity",
@@ -59,14 +60,18 @@ func (s *Server) redTeamExportProbeCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="redteam-probe-prompts.csv"`)
 	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF}) // UTF-8 BOM so Excel renders Korean correctly
 	cw := csv.NewWriter(w)
-	_ = cw.Write(redTeamProbeCSVHeader)
+	_ = cw.Write(append(append([]string{}, redTeamProbeCSVHeader...), redTeamProbeCSVFormatColumn))
 	for _, p := range packs {
 		for _, c := range p.Cases {
-			_ = cw.Write([]string{
+			cells := []string{
 				p.ID, p.Name, p.Category, p.Severity, boolStr(p.RequiresApproval),
 				c.ID, c.CaseKey, c.ExpectedPolicy, c.EvaluatorType, c.Severity,
-				strings.Join(c.TargetTypes, "|"), strings.Join(c.RiskTags, "|"), c.InputTemplate,
-			})
+				redTeamProbeCSVList(c.TargetTypes), redTeamProbeCSVList(c.RiskTags), c.InputTemplate,
+			}
+			for i, cell := range cells {
+				cells[i] = redTeamProbeCSVText(cell)
+			}
+			_ = cw.Write(append(cells, redTeamProbeCSVFormat))
 		}
 	}
 	cw.Flush()
@@ -138,28 +143,38 @@ func (s *Server) redTeamImportProbeCSV(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "CSV has no data rows (need a header + at least one row)", "invalid_request_error", "empty_csv")
 		return
 	}
-	col := map[string]int{}
-	for i, name := range records[0] {
-		col[strings.TrimSpace(strings.ToLower(name))] = i
+	table, err := redTeamProbeCSVRows(records)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_csv_format")
+		return
 	}
-	get := func(row []string, name string) string {
-		if i, ok := col[name]; ok && i < len(row) {
-			return strings.TrimSpace(row[i])
+	get := table.value
+	packNameValue := func(value string) string {
+		if table.versioned && strings.TrimSpace(value) != "" {
+			return value
 		}
-		return ""
+		return redTeamDefault(value, "사용자 정의 프롬프트")
 	}
 
 	packsSeen := map[string]bool{}
 	packCount, caseCount := 0, 0
 	var skipped []string
-	for n, row := range records[1:] {
+	for n, row := range table.rows {
 		caseKey := get(row, "case_key")
 		tmpl := get(row, "input_template")
-		if caseKey == "" || tmpl == "" {
+		if caseKey == "" || strings.TrimSpace(tmpl) == "" {
 			skipped = append(skipped, fmt.Sprintf("row %d: case_key/input_template 필수", n+2))
 			continue
 		}
-		packName := redTeamDefault(get(row, "pack_name"), "사용자 정의 프롬프트")
+		targetTypes, targetErr := redTeamProbeCSVReadList(get(row, "target_types"), table.versioned)
+		riskTags, riskErr := redTeamProbeCSVReadList(get(row, "risk_tags"), table.versioned)
+		if targetErr != nil || riskErr != nil {
+			// The complete marked file was validated above; never continue if that
+			// invariant changes when this parser is extended.
+			writeOpenAIError(w, http.StatusBadRequest, "invalid probe CSV list", "invalid_request_error", "invalid_csv_format")
+			return
+		}
+		packName := packNameValue(get(row, "pack_name"))
 		packID := get(row, "pack_id")
 		if packID == "" {
 			packID = redTeamCustomPackID(packName)
@@ -187,8 +202,8 @@ func (s *Server) redTeamImportProbeCSV(w http.ResponseWriter, r *http.Request) {
 			ExpectedPolicy: redTeamDefault(get(row, "expected_policy"), "safe_completion"),
 			EvaluatorType:  redTeamDefault(get(row, "evaluator_type"), "rule"),
 			Severity:       normalizeRedTeamSeverity(get(row, "severity")),
-			TargetTypes:    redTeamSplitPipe(get(row, "target_types")),
-			RiskTags:       redTeamSplitPipe(get(row, "risk_tags")),
+			TargetTypes:    targetTypes,
+			RiskTags:       riskTags,
 		}
 		if err := s.db.UpsertRedTeamProbeCase(r.Context(), c); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_case_save_failed")
