@@ -76,6 +76,9 @@ export class RequestLifetime {
 
   private cancel(error: AppError): void {
     if (this.failure || this.disposed) return;
+    if (!error.requestId && this.requestId) {
+      error = new AppError(error.message, { ...error, requestId: this.requestId, cause: error });
+    }
     this.failure = error;
     this.controller.abort(error);
     if (this.response) discardResponse(this.response);

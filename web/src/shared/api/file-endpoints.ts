@@ -4,6 +4,7 @@ import { fileOperation, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
   GetAdminCostChargebackPackData,
   GetAdminChatTestMultiRunRunsIdExportData,
+  GetAdminRedteamProbePacksExportData,
   GetAdminPoliciesExportData,
   GetAdminTeamsScorecardData,
   GetAdminReportsNarrativeData,
@@ -43,7 +44,15 @@ const multiRunCsvQuery = z.object({ format: z.literal("csv") }).strict();
 const multiRunMarkdownQuery = z.object({ format: z.literal("md") }).strict();
 const multiRunJsonQuery = z.object({ format: z.literal("json") }).strict();
 
+const probeCsvQuery = z.object({ format: z.literal("csv") }).strict();
+
 export const fileEndpoints = {
+  probeCsv: fileOperation<WithQuery<GetAdminRedteamProbePacksExportData, z.infer<typeof probeCsvQuery>>>()(
+    "GET",
+    "/admin/redteam/probe-packs/export",
+    { contentTypes: ["text/csv"] },
+    probeCsvQuery,
+  ),
   multiRunCsv: fileOperation<
     WithQuery<GetAdminChatTestMultiRunRunsIdExportData, z.infer<typeof multiRunCsvQuery>>
   >()("GET", "/admin/chat-test/multi-run/runs/{id}/export", { contentTypes: ["text/csv"] }, multiRunCsvQuery),

@@ -662,26 +662,22 @@ describe("RedTeamPage", () => {
     finishRun?.(undefined);
   });
 
-  it("프롬프트 CSV 가져오기는 text/csv 본문으로 직접 업로드한다", async () => {
-    const api = mockApi(listHandlers());
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ imported_cases: 2, packs_touched: 1, skipped: [] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
+  it("프롬프트 CSV 가져오기는 등록된 공통 API에 원문을 전달한다", async () => {
+    const imported = { imported_cases: 2, packs_touched: 1, skipped: [] };
+    const api = mockApi(
+      listHandlers({
+        "POST /admin/redteam/probe-packs/import": (_options, endpoint) => {
+          expect(endpoint.textRequest).toEqual({ contentType: "text/csv", maxBytes: 8 * 1024 * 1024 });
+          return imported;
+        },
       }),
     );
     const user = userEvent.setup();
     renderPage("/redteam?tab=targets");
-
     await screen.findByRole("button", { name: /CSV 가져오기/ });
-    const file = new File(["case_key,input_template\nk,t\n"], "prompts.csv", { type: "text/csv" });
+    const csv = "case_key,input_template\nk,t\n";
+    const file = new File([csv], "prompts.csv", { type: "text/csv" });
     await user.upload(screen.getByLabelText("프롬프트 CSV 파일 선택"), file);
-
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const [url, init] = fetchSpy.mock.calls[0] ?? [];
-    expect(url).toBe("/admin/redteam/probe-packs/import");
-    expect((init as RequestInit).method).toBe("POST");
-    expect((init as RequestInit).headers).toMatchObject({ "Content-Type": "text/csv" });
-    expect(api.calls.length).toBeGreaterThan(0);
+    await waitFor(() => expect(api.bodies("POST /admin/redteam/probe-packs/import")).toEqual([csv]));
   });
 });
