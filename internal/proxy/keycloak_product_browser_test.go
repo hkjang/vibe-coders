@@ -215,6 +215,36 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	}
 	accessBefore := accessSnapshot()
 
+	schemaName := "SSO 스키마 +%2F?&#/exact"
+	schemaTables := make([]string, 51)
+	for i := range schemaTables {
+		schemaTables[i] = fmt.Sprintf("schema_private_table_%03d", i)
+	}
+	for i, fixture := range []struct{ name, team string }{
+		{schemaName, "shared-access-id"},
+		{"public-schema", ""},
+		{"schema-shared-by-name", "Shared access"},
+		{"foreign-schema", "other-access-id"},
+		{strings.Repeat("😀", 512), "shared-access-id"},
+	} {
+		text := "schema private approved text"
+		if i == 4 {
+			text = strings.Repeat("가", 16383) + "😀schema-final-tail"
+		}
+		if err := db.UpsertText2SQLSchema(t.Context(), store.Text2SQLSchema{Name: fixture.name, Team: fixture.team, Dialect: "postgres",
+			SchemaText: text, AllowedTables: schemaTables, Enabled: i != 0, IsDefault: i == 0}); err != nil {
+			t.Fatal("schema fixture unavailable")
+		}
+	}
+	schemasBefore, err := db.ListText2SQLSchemas(t.Context())
+	if err != nil {
+		t.Fatal("schema baseline unavailable")
+	}
+	schemaBytesBefore, err := json.Marshal(schemasBefore)
+	if err != nil {
+		t.Fatal("schema baseline invalid")
+	}
+
 	rulesBefore, err := db.ListRoutingRules(t.Context())
 	if err != nil {
 		t.Fatal("routing baseline unavailable")
@@ -280,12 +310,12 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 20 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 24 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true
@@ -315,6 +345,14 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if accessBefore != accessSnapshot() {
 		t.Fatal("read-only handoff changed accounts, teams, memberships or credentials")
 	}
+	schemasAfter, err := db.ListText2SQLSchemas(t.Context())
+	if err != nil {
+		t.Fatal("schema verification unavailable")
+	}
+	schemaBytesAfter, err := json.Marshal(schemasAfter)
+	if err != nil || string(schemaBytesBefore) != string(schemaBytesAfter) {
+		t.Fatal("read-only handoff changed stored schemas")
+	}
 	rulesAfter, err := db.ListRoutingRules(t.Context())
 	if err != nil {
 		t.Fatal("routing verification unavailable")
@@ -342,5 +380,5 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if modelUpstreamMutations.Load() != 0 {
 		t.Fatal("model navigation mutated an upstream")
 	}
-	t.Log("twenty real Keycloak HTTPS browser scenarios, scoped access and persisted data preservation checks passed")
+	t.Log("twenty-four real Keycloak HTTPS browser scenarios, scoped schema/access and persisted data preservation checks passed")
 }

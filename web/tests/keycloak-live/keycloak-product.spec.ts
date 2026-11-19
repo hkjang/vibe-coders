@@ -737,3 +737,151 @@ test("KEYCLOAK-LIVE-020 실제 팀 관리자 SSO는 각 종류에서 자기 팀�
   await expect(page.locator("#view")).not.toContainText("access-0@example.invalid");
   expect(writes).toBe(0);
 });
+
+const schemaHandoffName = "SSO 스키마 +%2F?&#/exact";
+function watchSchemaReads(page: Page) {
+  let writes = 0,
+    broadReads = 0,
+    exactReads = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+    if (url.pathname.startsWith("/admin/text2sql")) {
+      if (
+        url.pathname === "/admin/text2sql" &&
+        url.searchParams.get("view") === "schema" &&
+        url.searchParams.has("name")
+      )
+        exactReads++;
+      else broadReads++;
+    }
+  });
+  return () => ({ writes, broadReads, exactReads });
+}
+async function openSchemaBridge(page: Page, username: string, name = schemaHandoffName) {
+  await signIn(page, username);
+  const reads = watchSchemaReads(page);
+  await page.goto("/app/text2sql/schemas/detail?" + new URLSearchParams({ schema_name: name }));
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  const href = "/admin#/text2sql?" + new URLSearchParams({ schema_name: name });
+  const link = page.getByRole("link", { name: "기존 화면에서 열기", exact: true });
+  await expect(link).toHaveAttribute("href", href);
+  await link.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-text2sql-schema-detail");
+  await expect(detail).toContainText(name);
+  await expect(page).toHaveURL(gateway + href);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  return { detail, reads };
+}
+test("KEYCLOAK-LIVE-021 선택한 스키마의 원문과 테이블을 실제 SSO 후 읽기 전용으로 탐색한다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSchemaBridge(page, "new-operator");
+  await expect(detail).toContainText("중지됨");
+  await expect(detail).not.toContainText("schema private approved text");
+  const toggle = detail.getByRole("button", { name: "설명 보기", exact: true });
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(detail.getByLabel("스키마 설명 본문")).toHaveText("schema private approved text");
+  await expect(detail.getByRole("list", { name: "허용 테이블" }).locator("li")).toHaveCount(50);
+  await detail.getByRole("button", { name: "다음 테이블", exact: true }).click();
+  await expect(detail.getByRole("list", { name: "허용 테이블" }).locator("li")).toHaveCount(1);
+  await expect(detail).toContainText("schema_private_table_050");
+  await expect(detail.locator("input,select,textarea,form")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: /저장|삭제|실행|연결 테스트/ })).toHaveCount(0);
+  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const detail = document.querySelector("#legacy-text2sql-schema-detail");
+        if (!detail) throw Error("Schema detail unavailable");
+        return (await axe.run(detail, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("#auth-user").click();
+  await page.locator("#auth-logout").click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(detail).toBeEmpty();
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+  expect(reads().exactReads).toBeGreaterThanOrEqual(2);
+});
+test("KEYCLOAK-LIVE-022 원문 권한이 없는 실제 SSO 역할은 스키마 등록 정보만 읽는다", async ({ page }) => {
+  const { detail, reads } = await openSchemaBridge(page, "reader");
+  await expect(detail).toContainText("스키마 설명과 허용 테이블은 비공개");
+  await expect(detail).not.toContainText("schema private approved text");
+  await expect(detail).not.toContainText("schema_private_table");
+  await expect(detail.getByRole("button", { name: "설명 보기", exact: true })).toHaveCount(0);
+  await expect(detail.getByRole("list", { name: "허용 테이블" })).toHaveCount(0);
+  await expect(detail).not.toContainText("별도 테이블 제한이 없습니다");
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+});
+test("KEYCLOAK-LIVE-023 실제 팀 범위와 공용 스키마만 유지하며 없는 항목은 대체하지 않는다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSchemaBridge(page, "routing-reader");
+  await expect(detail).toContainText("스키마 설명과 허용 테이블은 비공개");
+  for (const name of ["public-schema", "schema-shared-by-name"]) {
+    await page.goto("/admin#/text2sql?" + new URLSearchParams({ schema_name: name }));
+    await expect(detail).toContainText(name);
+    await expect(detail).toContainText("스키마 설명과 허용 테이블은 비공개");
+  }
+  for (const name of ["foreign-schema", "missing-schema"]) {
+    const unavailable = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/admin/text2sql" &&
+        url.searchParams.get("name") === name &&
+        response.status() === 404
+      );
+    });
+    await page.goto("/admin#/text2sql?" + new URLSearchParams({ schema_name: name }));
+    expect((await unavailable).status()).toBe(404);
+    await expect(detail).toContainText("선택한 스키마를 불러오지 못했습니다");
+    await expect(detail).not.toContainText("schema private approved text");
+    await expect(detail).not.toContainText("schema_private_table");
+  }
+  const before = reads().exactReads;
+  await page.goto("/admin#/text2sql?schema_name=%ED%A0%80");
+  await expect(detail).toContainText("스키마 상세 주소가 올바르지 않습니다");
+  expect(reads().exactReads).toBe(before);
+  await page.goto("/admin#/users");
+  await expect(detail).toHaveCount(0);
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+});
+test("KEYCLOAK-LIVE-024 최대 Unicode 이름과 긴 원문은 SSO와 페이지 경계에서 손실되지 않는다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSchemaBridge(page, "new-operator", "😀".repeat(512));
+  await detail.getByRole("button", { name: "설명 보기", exact: true }).click();
+  const context = detail.getByLabel("스키마 설명 본문");
+  await expect(context).toHaveText("가".repeat(16383));
+  await detail.getByRole("button", { name: "다음 설명", exact: true }).click();
+  await expect(context).toHaveText("😀schema-final-tail");
+  await expect(context).toBeFocused();
+  await detail.getByRole("button", { name: "이전 설명", exact: true }).click();
+  await expect(context).toHaveText("가".repeat(16383));
+  const before = reads().exactReads;
+  await detail.getByRole("button", { name: "설명 접기", exact: true }).click();
+  await expect(context).toHaveCount(0);
+  expect(reads().exactReads).toBe(before);
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+  await detail.getByRole("link", { name: "Text2SQL 전체 화면 열기", exact: true }).click();
+  await expect(page.locator("#t2s-schema-form")).toBeVisible();
+  await expect(detail).toHaveCount(0);
+  expect(reads().writes).toBe(0);
+});

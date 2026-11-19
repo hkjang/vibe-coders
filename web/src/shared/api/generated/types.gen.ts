@@ -4388,6 +4388,10 @@ export type UiBootstrapResponse = {
          * Opens the exact stored routing rule in a read-only Legacy detail using the existing authorized configuration GET. Does not execute routing preview or mutations.
          */
         legacy_routing_rule_detail?: boolean;
+        /**
+         * Opens one exact stored Text2SQL schema in read-only Legacy detail using existing team scope and raw-content permissions. Never executes SQL or changes configuration.
+         */
+        legacy_text2sql_schema_detail?: boolean;
         raw_prompt_view: boolean;
     };
     legacy_route_map: {

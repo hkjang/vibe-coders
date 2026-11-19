@@ -1,4 +1,4 @@
-import { legacyRoutes } from "@/config/legacy-route-map";
+import { schemaLegacyHandoff } from "./legacy-schema-handoff";
 import { Link, useSearchParams } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
@@ -18,13 +18,19 @@ export function SchemaDetailPage() {
   const valid = names.length === 1 && validSchemaDetailName(name, auth.credentialPrefixes);
   const supported = versionAtLeast(auth.backendVersion, "v0.86.107");
   const owner = useFeatureReadOwner("text2sql.overview", "text2sql-schema-detail");
+  const handoff = schemaLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "text2sql.overview")?.legacyPath,
+    valid && supported && owner.readable && !owner.denied ? name : undefined,
+    auth.capabilities?.legacy_text2sql_schema_detail === true,
+    auth.credentialPrefixes,
+  );
   return (
     <div className="page-stack schema-detail-page">
       <PageHeader
         title="Text2SQL 스키마 상세"
         description="선택한 스키마의 등록 상태와 현재 허용된 설명을 읽기 전용으로 확인합니다."
         readOnly
-        legacyHref={owner.readable ? legacyRoutes.text2sql : undefined}
+        legacyHref={owner.readable && !owner.denied ? handoff.href : undefined}
         actions={
           owner.readable ? (
             <Link className="button button-secondary button-default" to="/text2sql?tab=schemas">

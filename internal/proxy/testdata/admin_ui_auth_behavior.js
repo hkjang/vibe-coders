@@ -16,6 +16,7 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
+const schemaTarget = block('function legacyText2SQLSchemaTarget(', 'function legacySchemaTextPages(');
 const accessTarget = block('function legacyAccessTarget(', 'function legacyAccessKeyLifecycle(');
 const routingTarget = block('function legacyRoutingRuleTarget(', 'async function renderLegacyRoutingRuleDetail(');
  const modelTarget = block('function legacyModelTarget(', 'async function renderLegacyModelDetail(') + block('function legacyProviderRefValid(', '// Reuse the safe app projection;');
@@ -78,7 +79,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -697,4 +698,26 @@ for(const hash of ['#/users?resource=team&id=%zz','#/users?resource=account&id=%
 test('logout clears displayed access detail',async()=>{
  const h=harness(ssoTransport);h.seed();h.node('legacy-access-detail').textContent='PRIVATE_ACCESS_DETAIL';
  await h.logout();assert.equal(h.node('legacy-access-detail').textContent,'');
+});
+
+for(const name of ['스키마 +%2F?&#/정확','😀'.repeat(512)]){
+ test('exact schema survives local login and independent SSO '+name.slice(0,20),async()=>{
+  const hash='#/text2sql?'+new URLSearchParams({schema_name:name});
+  const local=harness(ssoTransport,hash);await local.login();assert.equal(local.location.hash,hash);
+  const departure=harness(ssoTransport,hash);await departure.startSSO();assert.equal(departure.location.href,'/auth/keycloak/login');
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,hash);assert.equal(callback.storage.has(ssoReturnKey),false);
+ });
+}
+for(const hash of ['#/text2sql?schema_name=%zz','#/text2sql?schema_name=%ED%A0%80','#/text2sql?schema_name=a&schema_name=b',
+ '#/text2sql?schema_name=a&run=true','#/text2sql?schema_name= padded ','#/text2sql?schema_name=',
+ '#/text2sql?schema_name='+('x'.repeat(513)),'#/text2sql?schema_name=%E2%80%8B','#/text2sql?schema_name=x&window=7d']){
+ test('invalid schema target is not staged '+hash.slice(0,80),async()=>{
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,'');
+ });
+}
+test('logout clears displayed schema details including expanded source',async()=>{
+ const h=harness(ssoTransport);h.seed();h.node('legacy-text2sql-schema-detail').textContent='PRIVATE_SCHEMA_CONTEXT';
+ await h.logout();assert.equal(h.node('legacy-text2sql-schema-detail').textContent,'');
 });

@@ -851,6 +851,7 @@ const adminHTML = `<!doctype html>
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
       if (/^#\/(?:requests|prompts|prompt-assets|prompt-debt)(?:\?|$)/.test(hash)) return hash;
+      if (hash.startsWith('#/text2sql?') && legacyText2SQLSchemaTarget(hash)) return hash;
       if (hash.startsWith('#/routing?') && legacyRoutingRuleTarget(undefined, hash)) return hash;
       if (hash.startsWith('#/model-contracts?') && legacyModelTarget(new URLSearchParams(hash.slice(hash.indexOf('?') + 1)))) return hash;
       return '';
@@ -892,6 +893,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const schemaDetail = document.getElementById('legacy-text2sql-schema-detail');
+      if (schemaDetail) schemaDetail.textContent = '';
       const accessDetail = document.getElementById('legacy-access-detail');
       if (accessDetail) accessDetail.textContent = '';
       const routingDetail = document.getElementById('legacy-routing-rule-detail');
@@ -2113,6 +2116,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const schemaDetail = document.getElementById('legacy-text2sql-schema-detail');
+      if (schemaDetail) schemaDetail.textContent = '';
       const accessDetail = document.getElementById('legacy-access-detail');
       if (accessDetail) accessDetail.textContent = '';
       const routingDetail = document.getElementById('legacy-routing-rule-detail');
@@ -2207,7 +2212,10 @@ const adminHTML = `<!doctype html>
           case 'agents':    await renderAgents(params); break;
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
-          case 'text2sql':  await renderText2SQL(); break;
+          case 'text2sql':
+            if (!rest.length && params.has('schema_name')) await renderLegacyText2SQLSchemaDetail();
+            else await renderText2SQL();
+            break;
           case 'skills':    await renderSkills(); break;
           case 'skill-studio': await renderSkillStudio(params); break;
           case 'modeldeprecations': await renderModelDeprecations(); break;
@@ -16969,6 +16977,103 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- settings ----------
+
+    function legacyText2SQLSchemaTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 8192 || !rawHash.startsWith('#/text2sql?')) return null;
+      const query = rawHash.slice('#/text2sql?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('schema_name').length !== 1 || Array.from(params.keys()).some(key => key !== 'schema_name')) return null;
+      const name = params.get('schema_name');
+      if (!name || name.trim() !== name || Array.from(name).length > 512 || new TextEncoder().encode(name).length > 2048 || /\p{C}/u.test(name)) return null;
+      return name;
+    }
+    function legacySchemaTextPages(text) {
+      const pages = [];
+      for (let start = 0; start < text.length;) {
+        let end = Math.min(start + 16384, text.length);
+        // A page boundary must not split a Unicode surrogate pair.
+        if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]) && /[\uDC00-\uDFFF]/.test(text[end])) end--;
+        pages.push([start, end]);
+        start = end;
+      }
+      return pages.length ? pages : [[0, 0]];
+    }
+    async function renderLegacyText2SQLSchemaDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const name = legacyText2SQLSchemaTarget(hash);
+      const retry = '<button type="button" id="legacy-schema-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-text2sql-schema-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('Text2SQL 스키마 상세',
+          '<div id="legacy-text2sql-schema-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/text2sql">Text2SQL 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (id, action) => {
+        if (current()) document.getElementById(id)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!name) { render('<p role="alert">스키마 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 스키마를 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/text2sql?' + new URLSearchParams({ view:'schema', name }), { cache:'no-store' });
+        if (!current()) return;
+        const row = data?.schema;
+        if (!row || row.name !== name || typeof data.raw_content_available !== 'boolean' ||
+            ['name','team','dialect','schema_text','collected_at','source_fingerprint','updated_at'].some(key => typeof row[key] !== 'string') ||
+            typeof row.enabled !== 'boolean' || typeof row.is_default !== 'boolean' || !Number.isSafeInteger(row.version) ||
+            !Array.isArray(row.allowed_tables) || row.allowed_tables.some(value => typeof value !== 'string') ||
+            (!data.raw_content_available && (row.schema_text !== '[sensitive-content-omitted]' || row.allowed_tables.length !== 0))) throw new Error('Invalid selected schema');
+        const fields = [['스키마 이름',row.name],['소속 팀',row.team || '공용'],['SQL 문법',row.dialect || '미지정'],
+          ['상태',row.enabled ? '사용 중' : '중지됨'],['기본 스키마',row.is_default ? '예' : '아니요'],['스키마 버전',row.version],
+          ['수집 시각',row.collected_at || '미수집'],['수정 시각',row.updated_at || '미확인'],['원본 지문',row.source_fingerprint || '미지정']];
+        const metadata = '<p>현재 저장된 등록 정보입니다. 이 화면은 SQL을 실행하거나 연결·설정을 변경하지 않습니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1])) + '</dd>').join('') + '</dl>';
+        let expanded = false, textPage = 0, tablePage = 0;
+        const textPages = data.raw_content_available ? legacySchemaTextPages(row.schema_text) : [];
+        const tableCount = Math.max(1, Math.ceil(row.allowed_tables.length / 50));
+        const button = (id, label, disabled) => '<button type="button" id="' + id + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+        const paint = focusId => {
+          if (!current()) return;
+          let content = '<p role="status">스키마 설명과 허용 테이블은 비공개입니다. 현재 계정은 등록 정보만 조회할 수 있습니다.</p>';
+          if (data.raw_content_available) {
+            content = '<h3>스키마 설명</h3><button type="button" id="legacy-schema-toggle" aria-expanded="' + expanded +
+              '" aria-controls="legacy-schema-context-section">' + (expanded ? '설명 접기' : '설명 보기') + '</button><div id="legacy-schema-context-section">';
+            if (expanded) {
+              const [start, end] = textPages[textPage];
+              content += '<pre id="legacy-schema-context" tabindex="0" aria-label="스키마 설명 본문" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto">' +
+                escapeHTML(row.schema_text.slice(start, end) || '등록된 설명이 없습니다.') + '</pre>';
+              if (textPages.length > 1) content += '<nav aria-label="스키마 설명 페이지"><span role="status">' + (textPage + 1) + ' / ' + textPages.length +
+                '페이지 · 전체 설명을 나누어 표시합니다.</span>' + button('legacy-schema-text-prev','이전 설명',textPage === 0) +
+                button('legacy-schema-text-next','다음 설명',textPage + 1 === textPages.length) + '</nav>';
+            }
+            content += '</div><h3>허용 테이블</h3><p>실제 실행 권한은 별도로 적용됩니다.</p>';
+            if (row.allowed_tables.length) {
+              content += '<ul aria-label="허용 테이블">' + row.allowed_tables.slice(tablePage * 50, (tablePage + 1) * 50).map(value => '<li>' + escapeHTML(value) + '</li>').join('') +
+                '</ul><nav aria-label="허용 테이블 페이지"><span id="legacy-schema-tables-status" role="status" tabindex="-1">' + row.allowed_tables.length + '개 · ' + (tablePage + 1) + ' / ' + tableCount + '페이지</span>' +
+                button('legacy-schema-table-prev','이전 테이블',tablePage === 0) + button('legacy-schema-table-next','다음 테이블',tablePage + 1 === tableCount) + '</nav>';
+            } else content += '<p>스키마에 별도 테이블 제한이 없습니다.</p>';
+          }
+          render(metadata + content + retry, focusId);
+          bind('legacy-schema-retry', () => { void route(); });
+          if (!data.raw_content_available) return;
+          bind('legacy-schema-toggle', () => { expanded = !expanded; paint('legacy-schema-toggle'); });
+          bind('legacy-schema-text-prev', () => { if (textPage > 0) { textPage--; paint('legacy-schema-context'); } });
+          bind('legacy-schema-text-next', () => { if (textPage + 1 < textPages.length) { textPage++; paint('legacy-schema-context'); } });
+          bind('legacy-schema-table-prev', () => { if (tablePage > 0) { tablePage--; paint('legacy-schema-tables-status'); } });
+          bind('legacy-schema-table-next', () => { if (tablePage + 1 < tableCount) { tablePage++; paint('legacy-schema-tables-status'); } });
+        };
+        paint();
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 스키마를 불러오지 못했습니다. 삭제되었거나 조회 범위 밖일 수 있습니다. 주소·로그인 상태·조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+        bind('legacy-schema-retry', () => { void route(); });
+      }
+    }
+
     async function renderText2SQL() {
       const d = await api('/admin/text2sql?window=7d').catch(() => ({ logs: [], profiles: [], stats: {} }));
       const st = d.stats || {};

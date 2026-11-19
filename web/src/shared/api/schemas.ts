@@ -174,6 +174,7 @@ export const uiBootstrapSchema = z.object({
       legacy_provider_detail: z.boolean().optional(),
       legacy_prompt_library: z.boolean().optional(),
       legacy_model_detail: z.boolean().optional(),
+      legacy_text2sql_schema_detail: z.boolean().optional(),
       legacy_access_detail: z.boolean().optional(),
       legacy_routing_rule_detail: z.boolean().optional(),
       legacy_request_filters: z.boolean().optional(),

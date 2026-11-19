@@ -14919,6 +14919,10 @@
                 "description": "Opens the exact stored routing rule in a read-only Legacy detail using the existing authorized configuration GET. Does not execute routing preview or mutations.",
                 "type": "boolean"
               },
+              "legacy_text2sql_schema_detail": {
+                "description": "Opens one exact stored Text2SQL schema in read-only Legacy detail using existing team scope and raw-content permissions. Never executes SQL or changes configuration.",
+                "type": "boolean"
+              },
               "raw_prompt_view": {
                 "type": "boolean"
               }

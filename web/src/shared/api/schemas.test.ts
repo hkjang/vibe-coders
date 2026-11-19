@@ -488,3 +488,19 @@ it("accepts only an optional boolean access handoff capability", () => {
     }).success,
   ).toBe(false);
 });
+
+it("accepts only an optional boolean schema handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_text2sql_schema_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_text2sql_schema_detail: true },
+    }).capabilities.legacy_text2sql_schema_detail,
+  ).toBe(true);
+  expect(
+    uiBootstrapSchema.safeParse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_text2sql_schema_detail: "true" },
+    }).success,
+  ).toBe(false);
+});
