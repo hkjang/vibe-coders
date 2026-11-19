@@ -18,14 +18,18 @@ import { usePreferences } from "@/shared/stores/preferences";
 
 // The UI and ApiClient are real; observed authentication and every HTTP response
 // are synthetic. This is not an actual Go/auth integration or permission test.
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    legacyFallback: false,
-    mode: "authenticated",
-    user: { id: "public-reader", role: "viewer", roles: ["viewer"], scopes: ["admin:read"] },
-  }),
-}));
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () =>
+      testAuth({
+        role: "viewer",
+        scopes: ["admin:read"],
+        legacyFallback: false,
+        user: { id: "public-reader" },
+      }),
+  };
+});
 
 const providerRef = `prv_${"a".repeat(43)}`;
 const timestamp = "2026-10-08T03:00:00Z";

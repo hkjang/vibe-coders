@@ -11,16 +11,19 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"vibe-coders/internal/appui"
 	"vibe-coders/internal/config"
+	"vibe-coders/internal/secret"
 	"vibe-coders/internal/store"
 )
 
@@ -77,6 +80,42 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 		Scopes:      []string{"openid", "profile", "email"}, DefaultRole: "viewer",
 		RoleClaim: "realm_access.roles", GroupClaim: "groups", AllowLocalLogin: true,
 	}
+
+	var modelUpstreamMutations atomic.Int64
+	modelUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			modelUpstreamMutations.Add(1)
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+			return
+		}
+		owner := "other model owner"
+		if strings.HasPrefix(r.URL.Path, "/model-b/") {
+			owner = "selected model owner"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": []map[string]any{{
+			"id": "catalog +%2F?&#/공유", "object": "model", "owned_by": owner, "created": 1700000000,
+		}}})
+	}))
+	t.Cleanup(modelUpstream.Close)
+	modelCipher, err := secret.New(cfg.Secret.GatewaySecret)
+	if err != nil {
+		t.Fatal("synthetic model cipher unavailable")
+	}
+	modelKey, err := modelCipher.Encrypt("isolated-model-read-key")
+	if err != nil {
+		t.Fatal("synthetic model key unavailable")
+	}
+	for i, suffix := range []string{"a", "b"} {
+		// Two synthetic credential-shaped names deliberately collide after safe projection.
+		if err := db.UpsertProvider(t.Context(), store.ProviderConfig{
+			Name: "vc_sk_" + strings.Repeat(suffix, 40), BaseURL: modelUpstream.URL + "/model-" + suffix,
+			TimeoutMS: 1000, Enabled: true, Priority: 101 + i, EncryptedAPIKey: modelKey,
+		}); err != nil {
+			t.Fatal("synthetic model provider unavailable")
+		}
+	}
+
 	providerFixture := store.ProviderConfig{Name: "SSO +%2F?&# 공급자", BaseURL: "http://127.0.0.1:9", TimeoutMS: 1000, Enabled: false, Priority: 100}
 	if err := db.UpsertProvider(t.Context(), providerFixture); err != nil {
 		t.Fatal("synthetic provider unavailable")
@@ -160,12 +199,12 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 9 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 11 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true
@@ -208,5 +247,8 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if err != nil || string(assetBytesBefore) != string(assetBytesAfter) {
 		t.Fatal("read-only handoff changed prompt asset data")
 	}
-	t.Log("nine real Keycloak HTTPS browser scenarios, persisted provisioning and provider/asset data preservation checks passed")
+	if modelUpstreamMutations.Load() != 0 {
+		t.Fatal("model navigation mutated an upstream")
+	}
+	t.Log("eleven real Keycloak HTTPS browser scenarios, persisted provisioning and provider/asset data preservation checks passed")
 }

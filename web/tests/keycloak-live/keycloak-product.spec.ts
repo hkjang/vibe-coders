@@ -368,3 +368,124 @@ test("KEYCLOAK-LIVE-009 검색 시각과 지문 및 부채 기간이 실제 API�
     .toBe(true);
   await expect(page.locator("#view")).toContainText("최근 7일");
 });
+
+async function selectedModelTarget(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    const response = await fetch("/admin/models", {
+      headers: {
+        Authorization: "Bearer " + sessionStorage.getItem("vibe.app.auth.access"),
+        "X-Vibe-UI": "app",
+      },
+    });
+    const body: {
+      models: { id: string; provider: string; provider_ref: string; source: string; owned_by: string }[];
+    } = await response.json();
+    const matches = body.models.filter((row) => row.id === "catalog +%2F?&#/공유");
+    if (
+      matches.length !== 2 ||
+      new Set(matches.map((row) => row.provider_ref)).size !== 2 ||
+      matches[0]?.provider !== matches[1]?.provider
+    )
+      throw Error("Synthetic colliding models missing");
+    const selected = matches.find((row) => row.owned_by === "selected model owner");
+    if (!selected) throw Error("Synthetic selected model missing");
+    return new URLSearchParams({
+      model: selected.id,
+      provider_ref: selected.provider_ref,
+      source: selected.source,
+    }).toString();
+  });
+}
+
+test("KEYCLOAK-LIVE-010 같은 이름의 공급자 모델이 실제 SSO 뒤에도 구분된다", async ({ page }) => {
+  await signIn(page, "new-operator");
+  const target = await selectedModelTarget(page);
+  const selected = new URLSearchParams(target);
+  await page.goto(
+    "/app/gateway/models?" +
+      new URLSearchParams({
+        model: selected.get("model") ?? "",
+        model_provider: selected.get("provider_ref") ?? "",
+      }),
+  );
+  const link = page.getByRole("link", { name: "기존 화면에서 같은 모델 열기", exact: true });
+  await expect(link).toHaveAttribute("href", /^\/admin#\/model-contracts\?/);
+  const href = await link.getAttribute("href");
+  if (!href) throw Error("Model handoff missing");
+  const actualTarget = new URLSearchParams(href.split("?")[1]);
+  expect(actualTarget.get("model")).toBe(selected.get("model"));
+  expect(actualTarget.get("provider_ref")).toBe(selected.get("provider_ref"));
+  expect(["live", "cache"]).toContain(actualTarget.get("source"));
+  let writes = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+  });
+  await link.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-model-detail");
+  await expect(detail).toContainText("selected model owner");
+  await expect(detail).toContainText(selected.get("provider_ref") ?? "missing");
+  await expect(detail).not.toContainText("other model owner");
+  await expect(page).toHaveURL(gateway + href);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  await expect(page.locator("#mcon-run-model")).toHaveCount(0);
+  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const detail = document.querySelector("#legacy-model-detail");
+        if (!detail) throw Error("Detail unavailable");
+        return (await axe.run(detail, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("#auth-user").click();
+  await expect(page.locator("#user-menu")).toBeVisible();
+  await page.locator("#auth-logout").click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(detail).toBeEmpty();
+  expect(writes).toBe(0);
+});
+
+test("KEYCLOAK-LIVE-011 읽기 전용 모델 상세는 다른 출처를 대신 열거나 계약을 실행하지 않는다", async ({
+  page,
+}) => {
+  await signIn(page, "reader");
+  const target = await selectedModelTarget(page);
+  let writes = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+  });
+  const originalSource = new URLSearchParams(target);
+  originalSource.set("source", "live");
+  await page.goto("/admin#/model-contracts?" + originalSource);
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  await expect(page.locator("#legacy-model-detail")).toContainText("selected model owner");
+  await expect(page.locator("#legacy-model-detail")).toContainText("조회 출처가");
+  await expect(
+    page.locator("#legacy-model-detail dt").filter({ hasText: "공급자 상태" }).locator("+ dd"),
+  ).toHaveText("ok");
+  const changed = new URLSearchParams(target);
+  changed.set("source", "agent_route");
+  await page.goto("/admin#/model-contracts?" + changed);
+  await expect(page.locator("#legacy-model-detail")).toContainText("다른 모델은 자동 선택하지 않습니다");
+  await expect(page.locator("#legacy-model-detail")).not.toContainText("selected model owner");
+  await page.goto("/admin#/model-contracts?" + target);
+  await expect(page.locator("#legacy-model-detail")).toContainText("selected model owner");
+  await page.evaluate(() => {
+    location.hash = "#/prompt-debt?window=7d";
+  });
+  await expect(page.locator("#view")).toContainText("최근 7일");
+  await expect(page.locator("#legacy-model-detail")).toHaveCount(0);
+  expect(writes).toBe(0);
+});

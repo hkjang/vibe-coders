@@ -4361,6 +4361,10 @@ export type UiBootstrapResponse = {
     backend_version: string;
     capabilities: {
         /**
+         * Opens a read-only model catalogue detail in Legacy with exact model/provider identity and explicit source provenance. Does not execute model contracts.
+         */
+        legacy_model_detail?: boolean;
+        /**
          * Preserves supported prompt library tabs, filters and selected asset in Legacy. Does not grant access or execute mutations.
          */
         legacy_prompt_library?: boolean;

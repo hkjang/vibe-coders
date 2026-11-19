@@ -849,6 +849,7 @@ const adminHTML = `<!doctype html>
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
       if (/^#\/(?:requests|prompts|prompt-assets|prompt-debt)(?:\?|$)/.test(hash)) return hash;
+      if (hash.startsWith('#/model-contracts?') && legacyModelTarget(new URLSearchParams(hash.slice(hash.indexOf('?') + 1)))) return hash;
       return '';
     }
     let initialLegacyHandoff = initialLegacyReadHandoff(location.hash);
@@ -886,6 +887,8 @@ const adminHTML = `<!doctype html>
       window.__assetHistory = [];
       const providerDetail = document.getElementById('legacy-provider-detail');
       if (providerDetail) providerDetail.textContent = '';
+      const modelDetail = document.getElementById('legacy-model-detail');
+      if (modelDetail) modelDetail.textContent = '';
       authEpoch++;
       navigationRevision++;
       navigationReady = false;
@@ -2101,6 +2104,8 @@ const adminHTML = `<!doctype html>
       retireAssetDetailModal();
       const providerDetail = document.getElementById('legacy-provider-detail');
       if (providerDetail) providerDetail.textContent = '';
+      const modelDetail = document.getElementById('legacy-model-detail');
+      if (modelDetail) modelDetail.textContent = '';
       const generation = ++legacyRouteGeneration;
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
@@ -2135,7 +2140,10 @@ const adminHTML = `<!doctype html>
           case 'data-products': await renderDataProducts(); break;
           case 'remediation': await renderRemediation(); break;
           case 'scorecard': await renderTeamScorecard(); break;
-          case 'model-contracts': await renderModelContracts(); break;
+          case 'model-contracts':
+            if (['model','provider_ref','source'].some(key => params.has(key))) await renderLegacyModelDetail(params);
+            else await renderModelContracts();
+            break;
           case 'policy-advisor': await renderPolicyAdvisor(); break;
           case 'narrative': await renderNarrativeReport(); break;
           case 'skill-graph': await renderSkillGraph(); break;
@@ -14190,6 +14198,75 @@ const adminHTML = `<!doctype html>
         URL.revokeObjectURL(a.href);
       } catch (e) { openModal('CSV 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
+
+
+    function legacyModelTarget(params) {
+      const keys = ['model','provider_ref','source'];
+      if (params.toString().length > 8192 || keys.some(key => params.getAll(key).length !== 1) ||
+          Array.from(params.keys()).some(key => !keys.includes(key))) return null;
+      const id = params.get('model'), ref = params.get('provider_ref'), source = params.get('source');
+      if (!id || id.length > 4096 || id.trim() !== id || /[\u0000-\u001f\u007f]/.test(id) ||
+          !legacyProviderRefValid(ref) || !['live','cache','agent_route'].includes(source)) return null;
+      return { id, ref, source };
+    }
+    async function renderLegacyModelDetail(initial) {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && hash === location.hash && authCurrent(epoch);
+      const target = legacyModelTarget(initial);
+      const back = '<p><a href="#/model-contracts">모델 계약 목록 열기</a></p>';
+      const render = (body) => {
+        if (!current()) return;
+        view.innerHTML = section('모델 상세', '<div id="legacy-model-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' + body + back + '</div>');
+        document.getElementById('legacy-model-detail').focus();
+      };
+      if (!target) { render('<p role="alert">모델 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 모델을 확인하고 있습니다.</p>');
+      try {
+        // The provider query uses raw names, not opaque refs. Keep it unset and match the
+        // exact reference/source locally in the existing safe, normalized catalogue.
+        const data = await api('/admin/models?' + new URLSearchParams({ model: target.id }), { appProjection: true, cache: 'no-store' });
+        if (!current()) return;
+        if (!data || !Array.isArray(data.models) || !Array.isArray(data.providers) || !Array.isArray(data.partial_failures)) throw new Error('Invalid catalogue');
+        // live/cache describe the freshness of one physical catalogue, not different models.
+        // An agent route is a different resource and must never replace a physical model.
+        const sources = target.source === 'agent_route' ? ['agent_route'] : ['live','cache'];
+        const matches = data.models.filter(m => m && m.id === target.id && m.provider_ref === target.ref && sources.includes(m.source));
+        const retry = '<button type="button" id="legacy-model-retry">다시 조회</button>';
+        if (matches.length !== 1) {
+          render('<p role="alert">선택한 모델을 확인할 수 없습니다. 삭제되었거나 공급자·모델 유형이 변경되었을 수 있습니다. 같은 이름의 다른 모델은 자동 선택하지 않습니다.</p>' + retry);
+        } else {
+          const model = matches[0];
+          const provider = data.providers.find(p => p && p.provider_ref === target.ref && p.source === model.source);
+          const deprecation = model.deprecation;
+          const labels = { live: '실시간', cache: '저장된 카탈로그', agent_route: '에이전트 경로' };
+          const status = deprecation && deprecation.retired ? '지원 종료' : model.shadowed || model.shadowed_by ? '우선 경로 존재' :
+            deprecation ? '지원 종료 예정' : model.stale ? '마지막 정상 카탈로그' : model.virtual ? '가상 모델' : '사용 가능';
+          const created = typeof model.created === 'number' && Number.isFinite(model.created) && !isNaN(new Date(model.created * 1000).getTime()) ? new Date(model.created * 1000).toISOString() : '—';
+          const fields = [
+            ['모델 ID', model.id], ['공급자', model.provider], ['공급자 참조', model.provider_ref],
+            ['조회 출처', labels[model.source]], ['상태', status], ['공급자 상태', provider && provider.status],
+            ['소유자', model.owned_by], ['객체 유형', model.object], ['생성 시각 (UTC)', created], ['조회 시각', model.fetched_at],
+            ['마지막 정상 데이터', model.stale ? '예' : '아니오'], ['가상 모델', model.virtual ? '예' : '아니오'],
+            ['우선 에이전트 경로', model.shadowed_by],
+          ];
+          if (deprecation) fields.push(['지원 종료 조치', deprecation.action], ['종료 예정일', deprecation.sunset_date],
+            ['대체 모델', deprecation.replacement], ['안내', deprecation.message]);
+          const partial = data.partial_failures.some(p => p && (p.provider_ref === target.ref ||
+            ['models_provider_limit_exceeded','models_response_limit_exceeded'].includes(p.code)));
+          render('<p role="status">선택한 공급자의 모델 카탈로그 정보입니다.</p>' +
+            (model.source !== target.source ? '<p role="status">조회 출처가 ' + escapeHTML(labels[target.source]) + '에서 ' + escapeHTML(labels[model.source]) + '로 변경되었습니다. 같은 공급자의 같은 모델 ID를 확인했습니다.</p>' : '') +
+            (model.stale || partial ? '<p role="alert">최신 카탈로그를 모두 확인하지 못했습니다. 조회 시각과 공급자 상태를 확인하세요.</p>' : '') +
+            '<dl>' + fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+              '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1] == null || pair[1] === '' ? '—' : pair[1])) + '</dd>').join('') + '</dl>' + retry);
+        }
+        document.getElementById('legacy-model-retry').addEventListener('click', () => { if (current()) void route(); });
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">모델 정보를 확인하지 못했습니다. 로그인 상태와 접근 권한을 확인한 뒤 다시 시도하세요.</p><button type="button" id="legacy-model-retry">다시 조회</button>');
+        document.getElementById('legacy-model-retry').addEventListener('click', () => { if (current()) void route(); });
+      }
+    }
 
     // renderModelContracts manages per-task-type model quality contracts and runs a model
     // against them before adoption (model swap / auto-routing / MCP agentic model).

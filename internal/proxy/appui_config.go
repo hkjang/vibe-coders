@@ -510,6 +510,7 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 			"legacy_request_detail":  true,
 			"legacy_provider_detail": true,
 			"legacy_prompt_library":  true,
+			"legacy_model_detail":    true,
 			"legacy_request_filters": true,
 		},
 		"permissions":        scopes,

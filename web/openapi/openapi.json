@@ -14891,6 +14891,10 @@
           "capabilities": {
             "additionalProperties": false,
             "properties": {
+              "legacy_model_detail": {
+                "description": "Opens a read-only model catalogue detail in Legacy with exact model/provider identity and explicit source provenance. Does not execute model contracts.",
+                "type": "boolean"
+              },
               "legacy_prompt_library": {
                 "description": "Preserves supported prompt library tabs, filters and selected asset in Legacy. Does not grant access or execute mutations.",
                 "type": "boolean"

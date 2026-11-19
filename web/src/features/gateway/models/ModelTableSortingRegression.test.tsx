@@ -17,14 +17,18 @@ import type {
 } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    legacyFallback: false,
-    mode: "authenticated",
-    user: { id: "public-reader", role: "viewer", roles: ["viewer"], scopes: ["admin:read"] },
-  }),
-}));
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () =>
+      testAuth({
+        role: "viewer",
+        scopes: ["admin:read"],
+        legacyFallback: false,
+        user: { id: "public-reader" },
+      }),
+  };
+});
 
 const alphaRef = `prv_${"a".repeat(43)}`;
 const betaRef = `prv_${"b".repeat(43)}`;

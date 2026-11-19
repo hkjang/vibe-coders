@@ -16,6 +16,7 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
+const modelTarget = block('function legacyModelTarget(', 'async function renderLegacyModelDetail(') + block('function legacyProviderRefValid(', '// Reuse the safe app projection;');
 const http = block('// ---------- HTTP ----------', '// ---------- formatting ----------');
 const nav = (name) => ({ allowed_tabs: ['settings'], default_home: '#/dashboard', marker: name });
 const tokens = (name, access = name + '-access') => ({
@@ -60,6 +61,7 @@ function harness(transport, initialHash = '', initialStorage) {
   }
   const location = { hash: initialHash, pathname: '/admin', search: '' };
   const context = vm.createContext({
+    URLSearchParams,
     document: { getElementById: id => id === 'sso-login-btn' ? nodes.get(id) : node(id), querySelectorAll: () => [], createElement: () => node('created-button') },
     sessionStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) },
     location, history: { replaceState(_state, _title, url) { const next = new URL(url, 'https://gateway.invalid'); Object.assign(location, { pathname: next.pathname, search: next.search, hash: next.hash }); } },
@@ -74,7 +76,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + modelTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -626,3 +628,24 @@ for (const target of ['#/prompts?q=public&since=2026-11-20T00%3A00%3A00.123Z&fp_
   const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,target);
  });
 }
+
+
+for(const source of ['live','cache','agent_route']){
+ test('exact model resource survives local login and SSO '+source,async()=>{
+  const hash='#/model-contracts?'+new URLSearchParams({model:'public +%2F?&#',provider_ref:'prv_'+'A'.repeat(43),source});
+  const h=harness(ssoTransport,hash);await h.login();assert.equal(h.location.hash,hash);
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,hash);assert.equal(callback.count('/admin/models/contracts/run'),0);
+ });
+}
+for(const hash of ['#/model-contracts','#/model-contracts?model=missing','#/model-contracts?'+new URLSearchParams({model:'public',provider_ref:'name',source:'live'}),'#/model-contracts?'+new URLSearchParams({model:'public',provider_ref:'prv_'+'A'.repeat(43),source:'live'})+'&run=true']){
+ test('unvalidated model workflow is not staged across SSO '+hash,async()=>{
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,'');
+ });
+}
+test('retiring auth clears the displayed model detail',async()=>{
+ const h=harness(ssoTransport);h.seed();h.node('legacy-model-detail').textContent='PRIVATE_MODEL_DETAIL';
+ await h.logout();assert.equal(h.node('legacy-model-detail').textContent,'');
+});
