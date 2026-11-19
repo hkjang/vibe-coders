@@ -1,5 +1,6 @@
 import { RequestLegacyLink } from "../request-insight/RequestLegacyLink";
 import type { RequestLegacyFeature } from "../request-insight/use-request-legacy-handoff";
+import type { RequestLegacyListContext } from "@/config/legacy-request-handoff";
 import { useQuery } from "@tanstack/react-query";
 import { Eye, EyeOff } from "lucide-react";
 import { useId, useRef, useState } from "react";
@@ -333,16 +334,19 @@ export function RequestIOPanel({
   requestId,
   readScope,
   legacyFeatureId = "observability.requests",
+  legacyList,
 }: {
   requestId: string;
   readScope?: RequestDetailReadScope;
   legacyFeatureId?: RequestLegacyFeature;
+  legacyList?: RequestLegacyListContext;
 }): React.JSX.Element {
   return (
     <RequestIOPanelContent
       key={JSON.stringify([requestId, readScope?.id])}
       requestId={requestId}
       legacyFeatureId={legacyFeatureId}
+      {...(legacyList ? { legacyList } : {})}
       {...(readScope ? { readScope } : {})}
     />
   );
@@ -352,12 +356,20 @@ function RequestIOPanelContent({
   requestId,
   readScope,
   legacyFeatureId = "observability.requests",
+  legacyList,
 }: {
   requestId: string;
   readScope?: RequestDetailReadScope;
   legacyFeatureId?: RequestLegacyFeature;
+  legacyList?: RequestLegacyListContext;
 }): React.JSX.Element {
-  const legacyAction = <RequestLegacyLink requestId={requestId} featureId={legacyFeatureId} />;
+  const legacyAction = (
+    <RequestLegacyLink
+      requestId={requestId}
+      featureId={legacyFeatureId}
+      {...(legacyList ? { list: legacyList } : {})}
+    />
+  );
   const inputTitleId = useId();
   const outputTitleId = useId();
   const [revealed, setRevealed] = useState<RequestIODetail>();

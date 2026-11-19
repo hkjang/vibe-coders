@@ -267,7 +267,8 @@ function RequestIOPageContent({
   const firstFilterable = rows.find((row) => row.request_filterable)?.request_id;
   if (wide && firstRow === undefined && firstFilterable) setFirstRow(firstFilterable);
   const selectedId = requested.present ? requested.id : wide ? (firstRow ?? "") : "";
-  const legacyHandoff = useRequestLegacyHandoff(selectedId, routeId);
+  const legacyList = { query, localSearch: Boolean(term) };
+  const legacyHandoff = useRequestLegacyHandoff(selectedId, routeId, legacyList);
   const select = (id: string): void => updateParams({ request_id: id }, { replace: true });
 
   const listRefs = useRef<HTMLUListElement>(null);
@@ -307,6 +308,11 @@ function RequestIOPageContent({
         }
       />
 
+      {legacyHandoff.notice ? (
+        <InlineNotice tone="info" title="기존 화면으로 이동할 때 조회 조건을 확인하세요.">
+          {legacyHandoff.notice}
+        </InlineNotice>
+      ) : null}
       {requested.present && !requested.id ? (
         <InlineNotice tone="warning" title="요청 주소를 확인하세요.">
           요청 ID가 올바르지 않거나 여러 번 지정되어 있습니다. 목록에서 요청을 다시 선택하세요.
@@ -432,7 +438,12 @@ function RequestIOPageContent({
           <div className="io-detail-pane" aria-label="선택한 요청의 입력과 출력" role="region">
             <h2 className="sr-only">선택한 요청의 입력과 출력</h2>
             {selectedId && !denied ? (
-              <RequestIOPanel requestId={selectedId} readScope={scope} legacyFeatureId={routeId} />
+              <RequestIOPanel
+                requestId={selectedId}
+                readScope={scope}
+                legacyFeatureId={routeId}
+                legacyList={legacyList}
+              />
             ) : (
               <EmptyState
                 title="요청을 선택하세요."
@@ -455,7 +466,12 @@ function RequestIOPageContent({
           description="목록의 미리보기와 달리 메시지 전체를 보여 줍니다."
         >
           {selectedId ? (
-            <RequestIOPanel requestId={selectedId} readScope={scope} legacyFeatureId={routeId} />
+            <RequestIOPanel
+              requestId={selectedId}
+              readScope={scope}
+              legacyFeatureId={routeId}
+              legacyList={legacyList}
+            />
           ) : null}
         </Sheet>
       ) : null}

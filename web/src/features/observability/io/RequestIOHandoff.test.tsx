@@ -6,11 +6,14 @@ import { comparisonRequest, comparisonResponse } from "../requests/request-compa
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 import { FeatureAccessHarness } from "@/test/feature-access";
+import userEvent from "@testing-library/user-event";
 const runtime = vi.hoisted(() => ({
   path: "/admin#/requests",
   fallback: true,
   detail: true,
   extended: true,
+  filters: false,
+  empty: false,
   wide: true,
   status: 200,
 }));
@@ -25,6 +28,7 @@ vi.mock("@/app/auth/AuthProvider", async () => {
           raw_prompt_view: false,
           legacy_request_detail: runtime.detail,
           legacy_request_direct_detail: runtime.extended,
+          legacy_request_filters: runtime.filters,
         },
         features: auth.features.map((f) =>
           f.featureId === "observability.io"
@@ -41,6 +45,8 @@ beforeEach(() => {
     fallback: true,
     detail: true,
     extended: true,
+    filters: false,
+    empty: false,
     wide: true,
     status: 200,
   });
@@ -53,7 +59,7 @@ afterEach(() => vi.unstubAllGlobals());
 function setup(search: string, id = "outside-list", filterable = true) {
   const row = { ...comparisonRequest("listed-other"), request_filterable: filterable };
   const api = mockApi({
-    "GET /admin/requests": () => comparisonResponse(row),
+    "GET /admin/requests": () => (runtime.empty ? comparisonResponse() : comparisonResponse(row)),
     "GET /admin/requests/io": () => ({ previews: [], capture: {} }),
     ["GET /admin/requests/" + encodeURIComponent(id) + "/io"]: () => {
       if (runtime.status !== 200) throw apiFailure("request unavailable", runtime.status);
@@ -140,4 +146,49 @@ it("honors disabled destination fallback", async () => {
   setup("request_id=outside-list");
   await screen.findByText("MASKED_SELECTED_REQUEST");
   expect(screen.queryByRole("link", { name: /기존 화면에서/u })).toBeNull();
+  expect(screen.queryByText("기존 화면으로 이동할 때 조회 조건을 확인하세요.")).toBeNull();
+});
+
+it.each([true, false])(
+  "preserves filtered empty list and selected detail independently: wide=%s",
+  async (wide) => {
+    Object.assign(runtime, { filters: true, empty: true, wide });
+    const id = " original 한글 +%2F?&# ";
+    const model = "model 한글 +%2F?&#";
+    const api = setup(
+      new URLSearchParams({ request_id: id, model, status: "error", cursor: "opaque" }).toString(),
+      id,
+    );
+    await screen.findByText("MASKED_SELECTED_REQUEST");
+    const link = screen.getByRole("link", { name: "기존 화면에서 같은 요청 열기" });
+    expect(Object.fromEntries(new URLSearchParams(link.getAttribute("href")?.split("?")[1]))).toEqual({
+      request_id: id,
+      model,
+      limit: "30",
+    });
+    expect(link).toHaveAccessibleDescription(/상태.*페이지 위치/u);
+    expect(api.calls.find((c) => c.key === "GET /admin/requests")?.options.query).toEqual({
+      model,
+      limit: 30,
+      status: "error",
+      cursor: "opaque",
+    });
+    expect(api.calls.every((c) => c.key.startsWith("GET "))).toBe(true);
+  },
+);
+
+it("describes local content search without leaking text into the destination or clearing selection", async () => {
+  runtime.filters = true;
+  setup("request_id=outside-list&model=public-model");
+  await screen.findByText("MASKED_SELECTED_REQUEST");
+  await userEvent
+    .setup()
+    .type(screen.getByRole("searchbox", { name: "표시된 요청에서 찾기" }), "PRIVATE_SEARCH_TEXT");
+  const link = screen.getByRole("link", { name: "기존 화면에서 같은 요청 열기" });
+  expect(link).toHaveAccessibleDescription(/검색 조건/u);
+  expect(link.getAttribute("href")).not.toContain("PRIVATE_SEARCH_TEXT");
+  expect(new URLSearchParams(link.getAttribute("href")?.split("?")[1]).get("request_id")).toBe(
+    "outside-list",
+  );
+  expect(screen.getByText("MASKED_SELECTED_REQUEST")).toBeVisible();
 });

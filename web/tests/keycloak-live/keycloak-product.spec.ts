@@ -1469,11 +1469,25 @@ async function openSkillBridge(page: Page, username: string, name = skillHandoff
   const href = "/admin#/skills?" + new URLSearchParams({ skill_ref: selected.skill_ref });
   const link = sheet.getByRole("link", { name: "기존 화면에서 열기", exact: true });
   await expect(link).toHaveAttribute("href", href);
+  const legacyDetailResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname === "/admin/skills" &&
+      url.searchParams.get("view") === "detail" &&
+      response.request().headers()["x-vibe-ui"] !== "app" &&
+      url.searchParams.get("skill_ref") === selected.skill_ref
+    );
+  });
   await link.focus();
   legacy = true;
   await page.keyboard.press("Enter");
   await expect(page.locator("#login-backdrop.open")).toBeVisible();
   await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const legacyResponse = await legacyDetailResponse;
+  expect(legacyResponse.status()).toBe(200);
+  const legacyData = (await legacyResponse.json()) as { skill?: { skill_ref?: string; owner?: string } };
+  expect(legacyData.skill?.skill_ref === selected.skill_ref).toBe(true);
+  expect(legacyData.skill?.owner === "skill-owner").toBe(true);
   const detail = page.locator("#legacy-skill-detail");
   await expect(detail).toContainText("skill-owner");
   await expect(page).toHaveURL(gateway + href);
@@ -1917,7 +1931,12 @@ for (const fixture of [
     );
     await page.goto(
       "/app/observability/io?" +
-        new URLSearchParams({ request_id: fixture.id, live: "off", model: "no-matching-list-row" }),
+        new URLSearchParams({
+          request_id: fixture.id,
+          live: "off",
+          model: "no-matching-list-row",
+          status: "error",
+        }),
     );
     const response = await responsePromise;
     const detail = (await response.json()) as { request_id: string };
@@ -1926,8 +1945,15 @@ for (const fixture of [
     const link = page.getByRole("link", { name: "기존 화면에서 같은 요청 열기", exact: true });
     await expect(link).toHaveAttribute(
       "href",
-      "/admin#/requests?" + new URLSearchParams({ request_id: fixture.id }),
+      "/admin#/requests?" +
+        new URLSearchParams(
+          fixture.width === 1440
+            ? { model: "no-matching-list-row", limit: "30", request_id: fixture.id }
+            : { request_id: fixture.id },
+        ),
     );
+    await expect(link).toHaveAccessibleDescription(/상태/u);
+    if (fixture.width === 390) await expect(link).toHaveAccessibleDescription(/모델.*표시 건수/u);
     expect(await page.evaluate(() => sessionStorage.getItem("authAccess"))).toBeNull();
     await link.focus();
     await page.keyboard.press("Enter");
@@ -1935,6 +1961,11 @@ for (const fixture of [
     await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
     await expect(page.locator("#modal-backdrop.open")).toBeVisible();
     await expect(page.locator("#modal-body")).toContainText(fixture.marker);
+    if (fixture.width === 1440) {
+      await expect(page.locator("#f-model")).toHaveValue("no-matching-list-row");
+      await expect(page.locator("#f-limit")).toHaveValue("30");
+      await expect(page.locator("#req-results tr[data-request-id]")).toHaveCount(0);
+    }
     expect(new URLSearchParams(new URL(page.url()).hash.split("?")[1]).get("request_id")).toBe(fixture.id);
     expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
     await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
@@ -1950,6 +1981,34 @@ for (const fixture of [
         return (await axe.run(modal, { rules: { "color-contrast": { enabled: true } } })).violations.length;
       }),
     ).toBe(0);
+    if (fixture.width === 1440) {
+      // Compare real SQLite-backed list results without the App-only status predicate.
+      const isList = (response: { url: () => string; status: () => number }) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/admin/requests" &&
+          url.searchParams.get("model") === "session-model" &&
+          response.status() === 200
+        );
+      };
+      const appListResponse = page.waitForResponse(isList);
+      await page.goto("/app/observability/io?model=session-model&live=off&request_id=session-own-current");
+      const appList = (await (await appListResponse).json()) as { requests: { request_id: string }[] };
+      expect(appList.requests.length).toBeGreaterThan(0);
+      const sameRequest = page.getByRole("link", { name: "기존 화면에서 같은 요청 열기", exact: true });
+      await expect(sameRequest).toHaveAttribute(
+        "href",
+        "/admin#/requests?model=session-model&limit=30&request_id=session-own-current",
+      );
+      const legacyListResponse = page.waitForResponse(isList);
+      await sameRequest.click();
+      const legacyResponse = await legacyListResponse;
+      const legacyList = (await legacyResponse.json()) as { requests: { id: string }[] };
+      expect(new URL(legacyResponse.url()).searchParams.get("limit")).toBe("30");
+      expect(new URL(legacyResponse.url()).searchParams.has("request_id")).toBe(false);
+      expect(legacyList.requests.map((row) => row.id)).toEqual(appList.requests.map((row) => row.request_id));
+      await expect(page.locator("#modal-body")).toContainText("OWN_SESSION_CURRENT");
+    }
     expect(writes).toBe(0);
     expect(rawReads).toBe(0);
   });
