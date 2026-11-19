@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -130,93 +129,32 @@ func (s *Server) redTeamImportProbeCSV(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	body := string(raw)
-	body = strings.TrimPrefix(body, "\uFEFF") // strip UTF-8 BOM if present
-	cr := csv.NewReader(strings.NewReader(body))
-	cr.FieldsPerRecord = -1
-	records, err := cr.ReadAll()
+	plan, err := prepareRedTeamProbeCSV(raw, adminID(r))
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadRequest, "invalid CSV: "+err.Error(), "invalid_request_error", "invalid_csv")
-		return
-	}
-	if len(records) < 2 {
-		writeOpenAIError(w, http.StatusBadRequest, "CSV has no data rows (need a header + at least one row)", "invalid_request_error", "empty_csv")
-		return
-	}
-	table, err := redTeamProbeCSVRows(records)
-	if err != nil {
-		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_csv_format")
-		return
-	}
-	get := table.value
-	packNameValue := func(value string) string {
-		if table.versioned && strings.TrimSpace(value) != "" {
-			return value
+		var invalid *redTeamProbeCSVPlanError
+		if errors.As(err, &invalid) {
+			writeOpenAIError(w, http.StatusBadRequest, invalid.message, "invalid_request_error", invalid.code)
+		} else {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid probe CSV", "invalid_request_error", "invalid_csv_format")
 		}
-		return redTeamDefault(value, "사용자 정의 프롬프트")
+		return
 	}
+	summary := auditJSON(map[string]any{"packs": len(plan.Content.Packs), "cases": len(plan.Content.Cases), "skipped": len(plan.Skipped)})
+	audit := store.AdminAuditLog{ID: newID("audit"), AdminID: adminID(r), Action: "redteam.probe.import", AfterValue: summary}
+	if err := s.db.ImportRedTeamProbeContent(r.Context(), plan.Content, audit); err != nil {
 
-	packsSeen := map[string]bool{}
-	packCount, caseCount := 0, 0
-	var skipped []string
-	for n, row := range table.rows {
-		caseKey := get(row, "case_key")
-		tmpl := get(row, "input_template")
-		if caseKey == "" || strings.TrimSpace(tmpl) == "" {
-			skipped = append(skipped, fmt.Sprintf("row %d: case_key/input_template 필수", n+2))
-			continue
+		code := "redteam_import_save_failed"
+		switch {
+		case errors.Is(err, store.ErrRedTeamProbeImportPack):
+			code = "redteam_pack_save_failed"
+		case errors.Is(err, store.ErrRedTeamProbeImportCase):
+			code = "redteam_case_save_failed"
 		}
-		targetTypes, targetErr := redTeamProbeCSVReadList(get(row, "target_types"), table.versioned)
-		riskTags, riskErr := redTeamProbeCSVReadList(get(row, "risk_tags"), table.versioned)
-		if targetErr != nil || riskErr != nil {
-			// The complete marked file was validated above; never continue if that
-			// invariant changes when this parser is extended.
-			writeOpenAIError(w, http.StatusBadRequest, "invalid probe CSV list", "invalid_request_error", "invalid_csv_format")
-			return
-		}
-		packName := packNameValue(get(row, "pack_name"))
-		packID := get(row, "pack_id")
-		if packID == "" {
-			packID = redTeamCustomPackID(packName)
-		}
-		if !packsSeen[packID] {
-			sev := normalizeRedTeamSeverity(get(row, "pack_severity"))
-			approval := redTeamTruthy(get(row, "requires_approval")) || redTeamSeverityRank(sev) >= redTeamSeverityRank("high")
-			pack := store.RedTeamProbePack{
-				ID: packID, Name: packName, Category: redTeamDefault(get(row, "category"), "custom"),
-				Severity: sev, Version: "v1", Enabled: true, RequiresApproval: approval, CreatedBy: adminID(r),
-			}
-			savePack := s.db.UpsertRedTeamProbePackContent
-			if approvalColumn, exists := table.columns["requires_approval"]; !exists || approvalColumn >= len(row) {
-				savePack = s.db.UpsertRedTeamProbePackContentPreservingApproval
-			}
-			if err := savePack(r.Context(), pack); err != nil {
-				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_pack_save_failed")
-				return
-			}
-			packsSeen[packID] = true
-			packCount++
-		}
-		caseID := get(row, "case_id")
-		if caseID == "" {
-			caseID = redTeamCaseID(packID, caseKey)
-		}
-		c := store.RedTeamProbeCase{
-			ID: caseID, PackID: packID, CaseKey: caseKey, InputTemplate: tmpl,
-			ExpectedPolicy: redTeamDefault(get(row, "expected_policy"), "safe_completion"),
-			EvaluatorType:  redTeamDefault(get(row, "evaluator_type"), "rule"),
-			Severity:       normalizeRedTeamSeverity(get(row, "severity")),
-			TargetTypes:    targetTypes,
-			RiskTags:       riskTags,
-		}
-		if err := s.db.UpsertRedTeamProbeCaseContent(r.Context(), c); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_case_save_failed")
-			return
-		}
-		caseCount++
+		writeOpenAIError(w, http.StatusInternalServerError, "CSV import could not be confirmed; check the current catalogue before retrying", "server_error", code)
+		return
 	}
-	s.auditAdmin(r, "redteam.probe.import", "", auditJSON(map[string]any{"packs": packCount, "cases": caseCount, "skipped": len(skipped)}))
-	writeJSON(w, http.StatusOK, map[string]any{"imported_cases": caseCount, "packs_touched": packCount, "skipped": skipped})
+	s.runAdminPostChange(r, audit.Action, "", summary, "")
+	writeJSON(w, http.StatusOK, map[string]any{"imported_cases": len(plan.Content.Cases), "packs_touched": len(plan.Content.Packs), "skipped": plan.Skipped})
 }
 
 // handleRedTeamProbeCases manages a single manually-authored probe case.
