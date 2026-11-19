@@ -1225,3 +1225,188 @@ test("KEYCLOAK-LIVE-033 팀 관리자의 기존 전체 앱 조회 정책을 변�
   expect(reads().writes).toBe(0);
   expect(reads().broadReads).toBe(0);
 });
+
+const workflowHandoffID = " 워크플로 +%2F?&#/ ";
+async function openWorkflowBridge(page: Page, username: string, id = workflowHandoffID) {
+  await signIn(page, username);
+  let writes = 0,
+    broadReads = 0,
+    exactReads = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      (url.pathname.startsWith("/admin/") || url.pathname.startsWith("/v1/workflows/")) &&
+      request.method() !== "GET"
+    )
+      writes++;
+    if (url.pathname === "/admin/workflows") {
+      if (url.searchParams.get("view") === "detail") exactReads++;
+      else if (url.searchParams.get("view") !== "page") broadReads++;
+    }
+  });
+  await page.goto("/app/agents/workflows?" + new URLSearchParams({ workflow: id }));
+  const sheet = page.getByRole("dialog", { name: /같은 워크플로 제목/u });
+  await expect(sheet).toBeVisible();
+  const href = "/admin#/workflows?" + new URLSearchParams({ workflow_id: id });
+  const link = sheet.getByRole("link", { name: "기존 화면에서 열기", exact: true });
+  await expect(link).toHaveAttribute("href", href);
+  await link.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-workflow-detail");
+  await expect(detail).toContainText("workflow-owner");
+  await expect(page).toHaveURL(gateway + href);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  return { detail, reads: () => ({ writes, broadReads, exactReads }) };
+}
+test("KEYCLOAK-LIVE-034 같은 이름의 워크플로 중 선택한 분기 정의를 실제 SSO로 연다", async ({ page }) => {
+  const { detail, reads } = await openWorkflowBridge(page, "new-operator");
+  await expect(detail).toContainText("선택한 워크플로 설명");
+  await expect(detail).not.toContainText("다른 워크플로 설명");
+  await expect(detail).toContainText("중지");
+  const definition = JSON.parse(await detail.getByLabel("단계와 흐름 정의", { exact: true }).innerText()) as {
+    steps: { condition?: { operator: string; value: string } }[];
+    flow: { entry: string; edges: { from: string; to: string; when: string }[] };
+  };
+  expect(definition.steps[0]?.condition).toEqual({ operator: "equals", value: "exact-input" });
+  expect(definition.flow.entry).toBe("choose");
+  expect(definition.flow.edges).toEqual([
+    { from: "choose", to: "finish", when: "true" },
+    { from: "choose", to: "$end", when: "false" },
+    { from: "finish", to: "$end", when: "next" },
+  ]);
+  await expect(detail.locator("input,select,textarea,form")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: /발행|게시|삭제|검증|실행|드라이런/ })).toHaveCount(0);
+  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const detail = document.querySelector("#legacy-workflow-detail");
+        if (!detail) throw Error("Workflow detail missing");
+        return (await axe.run(detail, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("#auth-user").click();
+  await page.locator("#auth-logout").click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(detail).toBeEmpty();
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+  expect(reads().exactReads).toBeGreaterThanOrEqual(2);
+});
+test("KEYCLOAK-LIVE-035 읽기 전용 관리자는 기존 관리자 조회 규칙으로 워크플로를 읽는다", async ({ page }) => {
+  const { detail, reads } = await openWorkflowBridge(page, "reader");
+  await expect(detail).toContainText("중지");
+  await expect(detail).toContainText("other-access-id");
+  await expect(detail).toContainText("선택한 워크플로 설명");
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+});
+test("KEYCLOAK-LIVE-036 최대 UTF8 워크플로 ID와 모든 단계를 보존하고 오래된 목록 응답을 폐기한다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openWorkflowBridge(page, "new-operator", "😀".repeat(1024));
+  const description = detail.getByLabel("워크플로 설명", { exact: true });
+  await expect(description).toHaveText("가".repeat(16383));
+  await detail.getByRole("button", { name: "다음 워크플로 설명", exact: true }).click();
+  await expect(description).toHaveText("😀workflow-final-tail");
+  await expect(description).toBeFocused();
+  let savedDefinition = "";
+  for (let i = 0; i < 20; i++) {
+    savedDefinition += await detail.getByLabel("단계와 흐름 정의", { exact: true }).innerText();
+    const next = detail.getByRole("button", { name: "다음 단계와 흐름 정의", exact: true });
+    if ((await next.count()) === 0 || (await next.isDisabled())) break;
+    await next.click();
+  }
+  const steps = (
+    JSON.parse(savedDefinition) as {
+      steps: {
+        name: string;
+        ref: string;
+        timeout_ms: number;
+        max_cost_krw: number;
+        max_tokens: number;
+        allowed_tools: string[];
+        allowed_tables: string[];
+        note: string;
+      }[];
+    }
+  ).steps;
+  expect(steps).toHaveLength(51);
+  expect(steps[50]).toMatchObject({
+    name: "저장된 단계 050",
+    ref: "workflow-ref-050",
+    timeout_ms: 1200,
+    max_cost_krw: 3.5,
+    max_tokens: 100,
+    allowed_tools: ["saved-tool"],
+    allowed_tables: ["saved-table"],
+    note: "가".repeat(100) + "😀note-tail",
+  });
+  await page.goto("/admin#/workflows?workflow_id=empty-workflow");
+  await expect(detail).toContainText("등록된 단계 순서");
+  expect(JSON.parse(await detail.getByLabel("단계와 흐름 정의", { exact: true }).innerText())).toEqual({
+    steps: [],
+  });
+
+  await page.goto("/admin#/workflows?workflow_id=missing-workflow");
+  await expect(detail).toContainText("선택한 워크플로를 불러오지 못했습니다");
+  await expect(detail).not.toContainText("workflow-owner");
+  const before = reads().exactReads;
+  await page.goto("/admin#/workflows?workflow_id=%ED%A0%80");
+  await expect(detail).toContainText("워크플로 상세 주소가 올바르지 않습니다");
+  expect(reads().exactReads).toBe(before);
+  // An old list response must not replace the current exact detail.
+  let captured = false,
+    release: () => void = () => {};
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  let completed = false;
+  await page.route("**/admin/workflows", async (route) => {
+    if (captured) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    captured = true;
+    await gate;
+    await route.fulfill({ response }).catch(() => {});
+    completed = true;
+  });
+  await detail.getByRole("link", { name: "워크플로 전체 화면 열기", exact: true }).click();
+  await expect.poll(() => captured).toBe(true);
+  await page.goto("/admin#/workflows?" + new URLSearchParams({ workflow_id: workflowHandoffID }));
+  await expect(detail).toContainText("선택한 워크플로 설명");
+  release();
+  await expect.poll(() => completed).toBe(true);
+  await page.evaluate(
+    () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+  );
+  await expect(detail).toContainText("선택한 워크플로 설명");
+  await expect(page.locator("#wf-form")).toHaveCount(0);
+  await detail.getByRole("link", { name: "워크플로 전체 화면 열기", exact: true }).click();
+  await expect(page.locator("#wf-form")).toBeAttached();
+  await expect(detail).toHaveCount(0);
+  await page.goto("/admin#/workflows?view=all");
+  await expect(page.locator("#wf-form")).toBeAttached();
+  await expect(detail).toHaveCount(0);
+  expect(reads().writes).toBe(0);
+});
+test("KEYCLOAK-LIVE-037 팀 관리자의 기존 전체 워크플로 조회 정책을 변경하지 않는다", async ({ page }) => {
+  const { detail, reads } = await openWorkflowBridge(page, "routing-reader");
+  await expect(detail).toContainText("other-access-id");
+  await expect(detail).toContainText("선택한 워크플로 설명");
+  await expect(page.locator("#auth-user")).toContainText("team_admin");
+  expect(reads().writes).toBe(0);
+  expect(reads().broadReads).toBe(0);
+});

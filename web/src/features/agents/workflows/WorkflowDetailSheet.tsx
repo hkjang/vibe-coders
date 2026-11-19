@@ -1,4 +1,5 @@
-import { legacyRoutes } from "@/config/legacy-route-map";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
+import { workflowLegacyHandoff } from "./legacy-workflow-handoff";
 import { WorkflowVersionHistory } from "./WorkflowVersionHistory";
 import { WorkflowGraphRead } from "./WorkflowGraphRead";
 import { useId, useRef, useState, type RefObject } from "react";
@@ -26,6 +27,7 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 interface WorkflowDetailSheetProps {
+  selectedId?: string;
   owner: FeatureReadOwner;
   loading?: boolean;
   detailError?: unknown;
@@ -87,6 +89,7 @@ function StepTable({ steps }: { steps: readonly WorkflowStep[] }): React.JSX.Ele
 }
 
 export function WorkflowDetailSheet({
+  selectedId,
   owner,
   loading,
   detailError,
@@ -145,6 +148,12 @@ export function WorkflowDetailSheet({
       }),
   );
   const steps = workflow?.steps ?? [];
+  const legacyHandoff = workflowLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "agents.workflows")?.legacyPath,
+    workflow?.id ?? selectedId,
+    auth.capabilities?.legacy_workflow_detail === true,
+    auth.credentialPrefixes,
+  );
 
   return (
     <Sheet
@@ -184,7 +193,7 @@ export function WorkflowDetailSheet({
           message={safeAppErrorMessage(detailError, "워크플로 정의를 불러오지 못했습니다.")}
           requestId={isAppError(detailError) ? detailError.requestId : undefined}
           onRetry={onRetry}
-          legacyHref={legacyRoutes.workflows}
+          legacyHref={legacyHandoff.href}
         />
       ) : !workflow ? (
         <EmptyState title="워크플로를 찾을 수 없습니다." description="목록에서 다시 선택하세요." />
@@ -210,6 +219,13 @@ export function WorkflowDetailSheet({
           />
 
           <div className="agents-detail-actions">
+            <FeatureLegacyLink
+              featureId="agents.workflows"
+              href={legacyHandoff.href}
+              className="button button-secondary button-default"
+            >
+              기존 화면에서 열기
+            </FeatureLegacyLink>
             <Button variant="primary" onClick={() => void simulation.refetch()} disabled={dryRunPending}>
               {dryRunPending ? "검증 중" : "드라이런"}
             </Button>

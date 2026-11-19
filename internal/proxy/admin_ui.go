@@ -849,6 +849,7 @@ const adminHTML = `<!doctype html>
       if (typeof hash !== 'string' || hash.length > 16384 || /[\u0000-\u001f\u007f]/.test(hash)) return '';
       if (hash.startsWith('#/users?') && legacyAccessTarget(hash)) return hash;
       if (hash.startsWith('#/apps?') && legacyWorkAppTarget(hash)) return hash;
+      if (hash.startsWith('#/workflows?') && legacyWorkflowTarget(hash)) return hash;
       if (hash.length > 8192) return '';
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
@@ -895,6 +896,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const workflowDetail = document.getElementById('legacy-workflow-detail');
+      if (workflowDetail) workflowDetail.textContent = '';
       const appDetail = document.getElementById('legacy-work-app-detail');
       if (appDetail) appDetail.textContent = '';
       const schemaDetail = document.getElementById('legacy-text2sql-schema-detail');
@@ -2224,6 +2227,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const workflowDetail = document.getElementById('legacy-workflow-detail');
+      if (workflowDetail) workflowDetail.textContent = '';
       const appDetail = document.getElementById('legacy-work-app-detail');
       if (appDetail) appDetail.textContent = '';
       const schemaDetail = document.getElementById('legacy-text2sql-schema-detail');
@@ -2277,7 +2282,7 @@ const adminHTML = `<!doctype html>
           case 'prompt-debt': await renderPromptDebt(params); break;
           case 'app-templates': await renderAppTemplates(); break;
           case 'gateway-mcp': await renderGatewayMCP(); break;
-          case 'workflows': await renderWorkflows(); break;
+          case 'workflows': if (params.has('workflow_id')) await renderLegacyWorkflowDetail(); else await renderWorkflows(); break;
           case 'sandbox': renderSandbox(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
@@ -15079,12 +15084,129 @@ const adminHTML = `<!doctype html>
     }
 
     // renderWorkflows manages workflow chain definitions (list / create via JSON / dry-run / delete).
+    function legacyWorkflowTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/workflows?')) return null;
+      const query = rawHash.slice('#/workflows?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('workflow_id').length !== 1 || Array.from(params.keys()).some(key => key !== 'workflow_id')) return null;
+      const id = params.get('workflow_id');
+      if (!id || new TextEncoder().encode(id).length > 4096 || /\p{C}/u.test(id)) return null;
+      return id;
+    }
+
+    // Project only the persisted definition contract. Unknown response fields must
+    // never become visible through a generic object/JSON dump.
+    function legacyWorkflowDefinition(row) {
+      const object = value => value && typeof value === 'object' && !Array.isArray(value);
+      const fail = () => { throw new Error('Invalid selected workflow'); };
+      if (!object(row) || ['id','name','description','allowed_teams','created_by','created_at','updated_at'].some(key => typeof row[key] !== 'string') || typeof row.enabled !== 'boolean') fail();
+      const pick = (value, required, optional) => {
+        if (!object(value)) fail();
+        const result = {};
+        for (const key of required) { if (typeof value[key] !== 'string') fail(); result[key] = value[key]; }
+        for (const key of optional) if (Object.hasOwn(value,key)) { if (typeof value[key] !== 'string') fail(); result[key] = value[key]; }
+        return result;
+      };
+      if (row.steps != null && !Array.isArray(row.steps)) fail();
+      const steps = (row.steps || []).map(step => {
+        const result = pick(step,['name','type'],['id','ref','note']);
+        for (const key of ['timeout_ms','max_cost_krw','max_tokens']) if (Object.hasOwn(step,key)) {
+          if (typeof step[key] !== 'number' || !Number.isFinite(step[key])) fail();
+          result[key] = step[key];
+        }
+        for (const key of ['allowed_tools','allowed_tables']) if (Object.hasOwn(step,key)) {
+          if (!Array.isArray(step[key]) || step[key].some(item => typeof item !== 'string')) fail();
+          result[key] = step[key];
+        }
+        if (Object.hasOwn(step,'condition')) result.condition = pick(step.condition,['operator'],['value']);
+        return result;
+      });
+      let flow;
+      if (Object.hasOwn(row,'flow')) {
+        flow = pick(row.flow,['entry'],[]);
+        if (!Number.isSafeInteger(row.flow.version) || !Array.isArray(row.flow.edges)) fail();
+        flow.version = row.flow.version;
+        flow.edges = row.flow.edges.map(edge => pick(edge,['from','to','when'],[]));
+      }
+      return { steps, ...(flow ? { flow } : {}) };
+    }
+    async function renderLegacyWorkflowDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const id = legacyWorkflowTarget(hash);
+      const retry = '<button type="button" id="legacy-workflow-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-workflow-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('워크플로 상세',
+          '<div id="legacy-workflow-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/workflows">워크플로 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (key, action) => {
+        if (current()) document.getElementById(key)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!id) { render('<p role="alert">워크플로 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 워크플로를 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/workflows?' + new URLSearchParams({ view:'detail', id }), { cache:'no-store' });
+        if (!current()) return;
+        const row = data?.workflow;
+        if (!row || row.id !== id) throw new Error('Invalid selected workflow');
+        const definition = legacyWorkflowDefinition(row);
+        const fields = [['워크플로 ID',row.id],['이름',row.name || '미지정'],['상태',row.enabled ? '사용' : '중지'],
+          ['허용 팀',row.allowed_teams || '전체'],['만든 사람',row.created_by || '미지정'],
+          ['생성 시각',row.created_at || '미확인'],['수정 시각',row.updated_at || '미확인'],
+          ['단계 수',String(definition.steps.length)],['실행 흐름',definition.flow ? '분기 흐름 v' + definition.flow.version + ' · 시작: ' + definition.flow.entry : '등록된 단계 순서']];
+        const metadata = '<p>현재 저장된 워크플로 정의입니다. 허용 팀은 실행 범위이며 관리자 조회 권한과는 별도로 적용됩니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl>';
+        // Full text paging keeps long notes, all steps and every graph edge
+        // reachable without silently truncating or splitting a surrogate pair.
+        const text = JSON.stringify(definition,null,2);
+        const sections = [
+          { key:'description', title:'워크플로 설명', text:row.description, empty:'등록된 설명이 없습니다.', page:0 },
+          { key:'definition', title:'단계와 흐름 정의', text, empty:'', page:0 }
+        ];
+        for (const item of sections) item.pages = legacyDetailTextPages(item.text);
+        const button = (key,label,disabled) => '<button type="button" id="' + key + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+        const paint = focusId => {
+          if (!current()) return;
+          let body = metadata + '<p>단계·조건·제한과 연결선을 저장된 형식으로 조회합니다. 드라이런·게시·실행은 수행하지 않습니다.</p>';
+          for (const item of sections) {
+            const [start,end] = item.pages[item.page], key = 'legacy-workflow-' + item.key;
+            body += '<h3>' + item.title + '</h3><pre id="' + key + '" tabindex="0" aria-label="' + item.title + '" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px;overflow:auto">' +
+              escapeHTML(item.text.slice(start,end) || item.empty) + '</pre>';
+            if (item.pages.length > 1) body += '<nav aria-label="' + item.title + ' 페이지"><span role="status">' + (item.page + 1) + ' / ' + item.pages.length +
+              '페이지</span>' + button(key+'-prev','이전 '+item.title,item.page === 0) + button(key+'-next','다음 '+item.title,item.page + 1 === item.pages.length) + '</nav>';
+          }
+          render(body + retry,focusId);
+          bind('legacy-workflow-retry',() => { void route(); });
+          for (const item of sections) {
+            const key = 'legacy-workflow-' + item.key;
+            bind(key+'-prev',() => { if (item.page > 0) { item.page--; paint(key); } });
+            bind(key+'-next',() => { if (item.page + 1 < item.pages.length) { item.page++; paint(key); } });
+          }
+        };
+        paint();
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 워크플로를 불러오지 못했습니다. 삭제되었거나 조회할 수 없는 워크플로일 수 있습니다. 주소·로그인 상태·조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+        bind('legacy-workflow-retry',() => { void route(); });
+      }
+    }
+
     async function renderWorkflows() {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      if (!current()) return;
       view.innerHTML = section('워크플로', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/workflows'); }
-      catch (e) { view.innerHTML = section('워크플로', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      catch (e) { if (!current()) return; view.innerHTML = section('워크플로', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      if (!current()) return;
       window.wfCreate = async (event) => {
         event.preventDefault();
         const name = document.getElementById('wf-name').value.trim();

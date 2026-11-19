@@ -16,6 +16,7 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
+const workflowTarget = block('function legacyWorkflowTarget(', '// Project only the persisted definition contract.');
 const workAppTarget = block('function legacyWorkAppTarget(', 'async function renderLegacyWorkAppDetail(');
 const schemaTarget = block('function legacyText2SQLSchemaTarget(', 'function legacyDetailTextPages(');
 const accessTarget = block('function legacyAccessTarget(', 'function legacyAccessKeyLifecycle(');
@@ -84,7 +85,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -877,4 +878,20 @@ test('logout clears the displayed work app snapshot', async () => {
  const h=harness(()=>response(200));h.seed();
  h.node('legacy-work-app-detail').textContent='PRIVATE_APP';
  await h.logout();assert.equal(h.node('legacy-work-app-detail').textContent,'');
+});
+
+for (const id of [' 워크플로 +%2F?&#/ ', ' 앱 ' + '가'.repeat(1300) + ' ']) {
+ test('exact workflow handoff survives stored SSO return restoration with long identity ' + id.slice(0,15), async () => {
+  const hash = '#/workflows?' + new URLSearchParams({workflow_id:id});
+  const h = harness(call => call.path === '/auth/sso/exchange' ? response(200,tokens('SSO')) : response(200,{auth_enabled:true,user:tokens('SSO').user}), hash);
+  h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+  h.location.hash='#kc_code=synthetic';
+  await h.initAuth();
+  assert.equal(h.location.hash,hash); assert.equal(h.routes,1);
+ });
+}
+test('logout clears the displayed workflow snapshot', async () => {
+ const h=harness(()=>response(200));h.seed();
+ h.node('legacy-workflow-detail').textContent='PRIVATE_WORKFLOW';
+ await h.logout();assert.equal(h.node('legacy-workflow-detail').textContent,'');
 });

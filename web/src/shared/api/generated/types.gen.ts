@@ -4396,6 +4396,10 @@ export type UiBootstrapResponse = {
          * Opens one exact stored work app in Legacy using the existing administrator read policy. Shows saved metadata and component references without executing or changing the app.
          */
         legacy_work_app_detail?: boolean;
+        /**
+         * Opens one exact stored workflow in read-only Legacy using the existing administrator read policy. Preserves steps, conditions and graph edges without validation, execution, publishing or changes.
+         */
+        legacy_workflow_detail?: boolean;
         raw_prompt_view: boolean;
     };
     legacy_route_map: {

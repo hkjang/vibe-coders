@@ -520,3 +520,19 @@ it("keeps exact work-app Legacy capability optional and boolean", () => {
     }).success,
   ).toBe(false);
 });
+
+it("accepts only the optional boolean workflow handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_workflow_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_workflow_detail: true },
+    }).capabilities.legacy_workflow_detail,
+  ).toBe(true);
+  expect(() =>
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_workflow_detail: "true" },
+    }),
+  ).toThrow();
+});
