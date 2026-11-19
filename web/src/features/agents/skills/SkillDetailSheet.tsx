@@ -1,3 +1,6 @@
+import { useAuth } from "@/app/auth/AuthProvider";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
+import { skillLegacyHandoff } from "./legacy-skill-handoff";
 import { useSkillRead } from "./skill-scope";
 import { useState, type RefObject } from "react";
 
@@ -26,6 +29,7 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
 
 interface SkillDetailSheetProps {
+  selectedName?: string;
   canWrite: boolean;
   onDelete: () => void;
   onEdit: () => void;
@@ -54,6 +58,7 @@ export function SkillDetailSheet(props: SkillDetailSheetProps): React.JSX.Elemen
   );
 }
 function SkillDetailContent({
+  selectedName,
   canWrite,
   onDelete,
   onEdit,
@@ -68,6 +73,22 @@ function SkillDetailContent({
   const skill = fitnessEditor.target?.skill ?? selectedSkill;
   const [panel, setPanel] = useState<DetailPanel | undefined>();
   const name = skill?.name ?? "";
+  const auth = useAuth();
+  const legacyHandoff = skillLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "agents.skills")?.legacyPath,
+    skill?.name ?? selectedName,
+    auth.capabilities?.legacy_skill_detail === true,
+    auth.credentialPrefixes,
+  );
+  const legacyLink = !fitnessEditor.target ? (
+    <FeatureLegacyLink
+      featureId="agents.skills"
+      href={legacyHandoff.href}
+      className="button button-secondary button-default"
+    >
+      기존 화면에서 열기
+    </FeatureLegacyLink>
+  ) : null;
 
   const runs = useSkillRead({
     queryKey: ["agents", "skills", name, "runs"],
@@ -106,7 +127,11 @@ function SkillDetailContent({
       title={skill?.name ?? "스킬"}
     >
       {!skill ? (
-        <EmptyState title="스킬을 찾을 수 없습니다." description="목록에서 다시 선택하세요." />
+        <EmptyState
+          title="스킬을 찾을 수 없습니다."
+          description="목록에서 다시 선택하세요."
+          actions={selectedName ? legacyLink : undefined}
+        />
       ) : (
         <div className="agents-detail-stack">
           <KeyValueList
@@ -142,6 +167,7 @@ function SkillDetailContent({
           />
 
           <div className="agents-detail-actions">
+            {legacyLink}
             <Button
               variant="primary"
               onClick={() => fitnessEditor.requestLeave(onPromote)}

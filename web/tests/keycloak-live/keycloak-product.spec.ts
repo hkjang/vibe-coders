@@ -1410,3 +1410,172 @@ test("KEYCLOAK-LIVE-037 팀 관리자의 기존 전체 워크플로 조회 정�
   expect(reads().writes).toBe(0);
   expect(reads().broadReads).toBe(0);
 });
+
+const skillHandoffName = "/스킬 +%2F?&#/";
+async function openSkillBridge(page: Page, username: string, name = skillHandoffName) {
+  await signIn(page, username);
+  let writes = 0,
+    legacyBroadReads = 0,
+    exactReads = 0,
+    legacyOtherReads = 0,
+    legacy = false;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      (url.pathname.startsWith("/admin/") || url.pathname.startsWith("/v1/skills")) &&
+      request.method() !== "GET"
+    )
+      writes++;
+    if (url.pathname === "/admin/skills") {
+      if (url.searchParams.get("view") === "detail") exactReads++;
+      else if (legacy) legacyBroadReads++;
+    } else if (legacy && url.pathname.startsWith("/admin/skills/")) legacyOtherReads++;
+  });
+  await page.goto("/app/agents/skills?" + new URLSearchParams({ skill: name }));
+  const sheet = page.getByRole("dialog", { name, exact: true });
+  await expect(sheet).toBeVisible();
+  const href = "/admin#/skills?" + new URLSearchParams({ skill_name: name });
+  const link = sheet.getByRole("link", { name: "기존 화면에서 열기", exact: true });
+  await expect(link).toHaveAttribute("href", href);
+  await link.focus();
+  legacy = true;
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-skill-detail");
+  await expect(detail).toContainText("skill-owner");
+  await expect(page).toHaveURL(gateway + href);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  return { detail, reads: () => ({ writes, legacyBroadReads, exactReads, legacyOtherReads }) };
+}
+test("KEYCLOAK-LIVE-038 슬래시가 있는 스킬 이름을 실제 SSO로 유지하고 모든 저장 정책을 읽는다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSkillBridge(page, "new-operator");
+  for (const value of [
+    "선택한 스킬 지침",
+    "2.3.4",
+    "지원 중단",
+    "높음",
+    "selected-model-*",
+    "selected-tool",
+    "other-access-id",
+    "skill-editor",
+  ])
+    await expect(detail).toContainText(value);
+  await expect(detail).not.toContainText("다른 스킬 지침");
+  await expect(detail.getByLabel("스킬 메타데이터", { exact: true })).toHaveText('{"selected":"metadata"}');
+  await expect(detail.locator("input,select,textarea,form")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: /승격|저장|삭제|스캔|평가|실행/ })).toHaveCount(0);
+  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const detail = document.querySelector("#legacy-skill-detail");
+        if (!detail) throw Error("Skill detail missing");
+        return (await axe.run(detail, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("#auth-user").click();
+  await page.locator("#auth-logout").click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(detail).toBeEmpty();
+  expect(reads()).toMatchObject({ writes: 0, legacyBroadReads: 0, legacyOtherReads: 0 });
+  expect(reads().exactReads).toBeGreaterThanOrEqual(1);
+});
+test("KEYCLOAK-LIVE-039 읽기 전용 관리자의 기존 스킬 지침 조회 범위를 유지한다", async ({ page }) => {
+  const { detail, reads } = await openSkillBridge(page, "reader");
+  await expect(detail).toContainText("선택한 스킬 지침");
+  await expect(detail).toContainText("other-access-id");
+  expect(reads()).toMatchObject({ writes: 0, legacyBroadReads: 0, legacyOtherReads: 0 });
+});
+test("KEYCLOAK-LIVE-040 최대 UTF8 스킬 이름과 긴 지침을 보존하고 목록 응답과 오류를 격리한다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSkillBridge(page, "new-operator", "😀".repeat(1024));
+  async function fullText(label: string) {
+    let text = "";
+    for (let i = 0; i < 20; i++) {
+      text += await detail.getByLabel(label, { exact: true }).innerText();
+      const next = detail.getByRole("button", { name: "다음 " + label, exact: true });
+      if ((await next.count()) === 0 || (await next.isDisabled())) break;
+      await next.click();
+      await expect(detail.getByLabel(label, { exact: true })).toBeFocused();
+    }
+    return text;
+  }
+  const expected = "가".repeat(16383) + "😀skill-final-tail";
+  expect(await fullText("스킬 설명")).toBe(expected);
+  expect(await fullText("스킬 지침")).toBe(expected);
+  expect((JSON.parse(await fullText("스킬 메타데이터")) as { text: string }).text).toBe(expected);
+  await page.goto("/admin#/skills?skill_name=missing-skill");
+  await expect(detail).toContainText("선택한 스킬을 불러오지 못했습니다");
+  await expect(detail).not.toContainText("skill-owner");
+  const before = reads().exactReads;
+  await page.goto("/admin#/skills?skill_name=%ED%A0%80");
+  await expect(detail).toContainText("스킬 상세 주소가 올바르지 않습니다");
+  expect(reads().exactReads).toBe(before);
+  // Hold an actual overview response at each asynchronous boundary.
+  for (const path of ["/admin/skills", "/admin/skills/stats"]) {
+    let captured = false,
+      completed = false,
+      release: () => void = () => {};
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    await page.route("**" + path, async (route) => {
+      if (captured) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      captured = true;
+      await gate;
+      await route.fulfill({ response }).catch(() => {});
+      completed = true;
+    });
+    await detail.getByRole("link", { name: "스킬 전체 화면 열기", exact: true }).click();
+    await expect.poll(() => captured).toBe(true);
+    await page.goto("/admin#/skills?" + new URLSearchParams({ skill_name: skillHandoffName }));
+    await expect(detail).toContainText("선택한 스킬 지침");
+    release();
+    await expect.poll(() => completed).toBe(true);
+    await page.evaluate(
+      () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+    );
+    await expect(detail).toContainText("선택한 스킬 지침");
+    await page.unroute("**" + path);
+  }
+  await page.goto("/admin#/skills?view=all");
+  await expect(page.locator("#skill-status-filter")).toBeAttached();
+  await expect(detail).toHaveCount(0);
+  expect(
+    await page.evaluate(() => {
+      const cache = (window as unknown as { _skillsByName: Record<string, { instructions: string }> })
+        ._skillsByName;
+      return (
+        Object.getPrototypeOf(cache) === null &&
+        Object.hasOwn(cache, "__proto__") &&
+        cache["__proto__"]?.instructions === "prototype-name skill instructions"
+      );
+    }),
+  ).toBe(true);
+  await page.goto("/admin#/skills?skill_name=__proto__");
+  await expect(detail).toContainText("prototype-name skill instructions");
+  expect(reads().writes).toBe(0);
+});
+test("KEYCLOAK-LIVE-041 팀 관리자의 기존 전체 스킬 카탈로그 조회 정책을 유지한다", async ({ page }) => {
+  const { detail, reads } = await openSkillBridge(page, "routing-reader");
+  await expect(detail).toContainText("선택한 스킬 지침");
+  await expect(detail).toContainText("other-access-id");
+  await expect(page.locator("#auth-user")).toContainText("team_admin");
+  expect(reads()).toMatchObject({ writes: 0, legacyBroadReads: 0, legacyOtherReads: 0 });
+});

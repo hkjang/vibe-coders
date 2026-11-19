@@ -1,4 +1,4 @@
-import { legacyRoutes } from "@/config/legacy-route-map";
+import { skillLegacyHandoff, validSkillHandoffName } from "./legacy-skill-handoff";
 import { skillsKey, useSkillRead, useSkillOperationAccess } from "./skill-scope";
 import { Plus, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -80,6 +80,14 @@ function SkillPageContent(): React.JSX.Element {
   const query = containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? "" : rawQuery;
   const status = params.get("status") ?? "all";
   const selectedName = params.get("skill") ?? "";
+  const selectedNameValid =
+    params.getAll("skill").length === 1 && validSkillHandoffName(selectedName, auth.credentialPrefixes);
+  const legacyHandoff = skillLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "agents.skills")?.legacyPath,
+    selectedNameValid ? selectedName : undefined,
+    auth.capabilities?.legacy_skill_detail === true,
+    auth.credentialPrefixes,
+  );
   const [searchError, setSearchError] = useState<string | undefined>(
     containsPotentialSecret(rawQuery, auth.credentialPrefixes) ? secretSearchMessage : undefined,
   );
@@ -139,7 +147,8 @@ function SkillPageContent(): React.JSX.Element {
 
   const skills = useMemo(() => list.data?.skills ?? [], [list.data?.skills]);
   const rows = useMemo(() => skills.filter((skill) => matchesSkillQuery(skill, query)), [query, skills]);
-  const selected = skills.find((skill) => skill.name === selectedName);
+  const selected =
+    params.getAll("skill").length === 1 ? skills.find((skill) => skill.name === selectedName) : undefined;
 
   const closeSheet = useCallback((): void => updateSearch({ skill: undefined }), [updateSearch]);
 
@@ -268,7 +277,7 @@ function SkillPageContent(): React.JSX.Element {
     <PageHeader
       title="스킬"
       description="스킬 카탈로그와 스튜디오, 의존성 그래프를 한 화면에서 관리합니다."
-      legacyHref={legacyRoutes.skills}
+      legacyHref={legacyHandoff.href}
       actions={
         <>
           <Button onClick={() => void list.refetch()} disabled={list.isFetching}>
@@ -310,7 +319,7 @@ function SkillPageContent(): React.JSX.Element {
           message={safeAppErrorMessage(list.error, "스킬 목록을 불러오지 못했습니다.")}
           requestId={isAppError(list.error) ? list.error.requestId : undefined}
           onRetry={() => void list.refetch()}
-          legacyHref={legacyRoutes.skills}
+          legacyHref={legacyHandoff.href}
         />
       </div>
     );
@@ -546,6 +555,7 @@ function SkillPageContent(): React.JSX.Element {
       )}
 
       <SkillDetailSheet
+        selectedName={selectedNameValid ? selectedName : undefined}
         canWrite={canWrite}
         onDelete={() => setDeleteTarget(selected)}
         onEdit={() => {

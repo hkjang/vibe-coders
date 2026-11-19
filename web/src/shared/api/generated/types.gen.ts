@@ -3803,6 +3803,32 @@ export type SettingsBatchResponse = {
     ok: boolean;
 };
 
+export type SkillCatalogList = {
+    skills: Array<SkillDefinition> | null;
+};
+
+export type SkillDefinition = {
+    allowed_models: string;
+    allowed_teams: string;
+    allowed_tools: string;
+    created_at: string;
+    daily_limit: number;
+    description: string;
+    instructions: string;
+    metadata: string;
+    name: string;
+    owner: string;
+    risk_level: string;
+    status: string;
+    updated_at: string;
+    updated_by: string;
+    version: string;
+};
+
+export type SkillExactDetail = {
+    skill: SkillDefinition | null;
+};
+
 export type SkillFitnessAppendRequest = {
     /**
      * multimodel, golden or testcase; omitted/null/unknown values normalize to multimodel, not an enum validation error.
@@ -4388,6 +4414,10 @@ export type UiBootstrapResponse = {
          * Opens the exact stored routing rule in a read-only Legacy detail using the existing authorized configuration GET. Does not execute routing preview or mutations.
          */
         legacy_routing_rule_detail?: boolean;
+        /**
+         * Opens one exact stored skill in read-only Legacy using the existing administrator read policy, including saved instructions and metadata. No evaluation, scan, promotion or execution.
+         */
+        legacy_skill_detail?: boolean;
         /**
          * Opens one exact stored Text2SQL schema in read-only Legacy detail using existing team scope and raw-content permissions. Never executes SQL or changes configuration.
          */
@@ -13954,16 +13984,49 @@ export type GetAdminSkillStudioReadinessResponses = {
 export type GetAdminSkillsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: '' | 'detail';
+        /**
+         * Required for view=detail. Exact nonempty valid UTF-8 name, at most 4096 bytes, without control characters. No trimming or path normalization. Detail rejects all other query fields.
+         */
+        name?: string;
+        /**
+         * Existing list-only status filter. Omit for all statuses.
+         */
+        status?: string;
+    };
     url: '/admin/skills';
 };
 
+export type GetAdminSkillsErrors = {
+    /**
+     * Invalid exact detail query
+     */
+    400: AppError;
+    /**
+     * Invalid authentication or missing admin read scope
+     */
+    401: AppError;
+    /**
+     * Skill read failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSkillsError = GetAdminSkillsErrors[keyof GetAdminSkillsErrors];
+
 export type GetAdminSkillsResponses = {
     /**
-     * OK
+     * Existing list or exact detail selected by view
      */
-    200: unknown;
+    200: SkillCatalogList | SkillExactDetail;
 };
+
+export type GetAdminSkillsResponse = GetAdminSkillsResponses[keyof GetAdminSkillsResponses];
 
 export type PostAdminSkillsData = {
     body?: never;

@@ -16,6 +16,7 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
+const skillTarget = block('function legacySkillTarget(', 'async function renderLegacySkillDetail(');
 const workflowTarget = block('function legacyWorkflowTarget(', '// Project only the persisted definition contract.');
 const workAppTarget = block('function legacyWorkAppTarget(', 'async function renderLegacyWorkAppDetail(');
 const schemaTarget = block('function legacyText2SQLSchemaTarget(', 'function legacyDetailTextPages(');
@@ -85,11 +86,13 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + skillTarget + '\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
     ...client, calls, storage, toasts, node, location, rootStyle,
+    set skillCache(value) { context._skillsByName = value; },
+    get skillCache() { return context._skillsByName; },
     get reloads() { return reloads; },
     expireIdentity() { for (const t of timers.values()) if (t.ms === 5000) t.fn(); },
     get routes() { return routes; },
@@ -894,4 +897,21 @@ test('logout clears the displayed workflow snapshot', async () => {
  const h=harness(()=>response(200));h.seed();
  h.node('legacy-workflow-detail').textContent='PRIVATE_WORKFLOW';
  await h.logout();assert.equal(h.node('legacy-workflow-detail').textContent,'');
+});
+
+for (const id of [' 스킬 +%2F?&#/ ', ' 앱 ' + '가'.repeat(1300) + ' ']) {
+ test('exact skill handoff survives stored SSO return restoration with long identity ' + id.slice(0,15), async () => {
+  const hash = '#/skills?' + new URLSearchParams({skill_name:id});
+  const h = harness(call => call.path === '/auth/sso/exchange' ? response(200,tokens('SSO')) : response(200,{auth_enabled:true,user:tokens('SSO').user}), hash);
+  h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+  h.location.hash='#kc_code=synthetic';
+  await h.initAuth();
+  assert.equal(h.location.hash,hash); assert.equal(h.routes,1);
+ });
+}
+test('logout clears the displayed skill snapshot', async () => {
+ const h=harness(()=>response(200));h.seed();
+ h.node('legacy-skill-detail').textContent='PRIVATE_SKILL';
+ h.skillCache={private:'PRIVATE_SKILL'};
+ await h.logout();assert.equal(h.node('legacy-skill-detail').textContent,'');assert.equal(Object.keys(h.skillCache).length,0);
 });

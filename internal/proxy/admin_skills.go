@@ -100,6 +100,9 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if s.handleSkillReadView(w, r) {
+			return
+		}
 		skills, err := s.db.ListSkills(r.Context(), strings.TrimSpace(r.URL.Query().Get("status")))
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skills_failed")

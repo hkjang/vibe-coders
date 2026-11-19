@@ -254,6 +254,54 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 		t.Fatal("routing baseline invalid")
 	}
 
+	skillName := "/스킬 +%2F?&#/"
+	skillNames := []string{skillName, strings.Repeat("😀", 1024), "스킬 +%2F?&#", "__proto__"}
+	for i, name := range skillNames {
+		description, instructions, metadata := "같은 스킬 설명", "선택한 스킬 지침", "{\"selected\":\"metadata\"}"
+		if i == 1 {
+			description = strings.Repeat("가", 16383) + "😀skill-final-tail"
+			instructions = description
+			metadata = "{\"text\":\"" + description + "\"}"
+		}
+		if i == 2 {
+			instructions = "다른 스킬 지침"
+		}
+		if i == 3 {
+			instructions = "prototype-name skill instructions"
+		}
+		if _, err := db.UpsertSkill(t.Context(), store.Skill{Name: name, Description: description, Version: "2.3.4", Owner: "skill-owner", Status: "deprecated", RiskLevel: "high", AllowedModels: "selected-model-*", AllowedTools: "selected-tool", AllowedTeams: "other-access-id", DailyLimit: 7, Instructions: instructions, Metadata: metadata}, "skill-editor"); err != nil {
+			t.Fatal("skill fixture unavailable")
+		}
+	}
+	skillsSnapshot := func() string {
+		skills, err := db.ListSkills(t.Context(), "")
+		if err != nil {
+			t.Fatal("skill snapshot unavailable")
+		}
+		rows := []any{skills}
+		for _, sk := range skills {
+			promotions, err := db.ListSkillPromotions(t.Context(), sk.Name, 200)
+			if err != nil {
+				t.Fatal("skill promotions unavailable")
+			}
+			fitness, err := db.ListSkillFitnessEvidence(t.Context(), sk.Name)
+			if err != nil {
+				t.Fatal("skill evidence unavailable")
+			}
+			runs, err := db.ListSkillRuns(t.Context(), sk.Name, 200)
+			if err != nil {
+				t.Fatal("skill runs unavailable")
+			}
+			rows = append(rows, promotions, fitness, runs)
+		}
+		raw, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatal("skill snapshot invalid")
+		}
+		return string(raw)
+	}
+	skillsBefore := skillsSnapshot()
+
 	workflowID := " 워크플로 +%2F?&#/ "
 	workflowIDs := []string{workflowID, strings.Repeat("😀", 1024), "other-workflow", "empty-workflow"}
 	for i, id := range workflowIDs {
@@ -392,6 +440,9 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if command.Run() != nil {
 		t.Fatal("Keycloak product browser checks failed; see the numeric-only summary")
 	}
+	if skillsSnapshot() != skillsBefore {
+		t.Fatal("skill definitions, promotions, fitness evidence or runs changed during read-only handoff")
+	}
 	if workflowsSnapshot() != workflowsBefore {
 		t.Fatal("workflow definitions or versions changed during read-only handoff")
 	}
@@ -409,12 +460,12 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 37 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 41 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024" && test.Scenario != "KEYCLOAK-LIVE-025" && test.Scenario != "KEYCLOAK-LIVE-026" && test.Scenario != "KEYCLOAK-LIVE-027" && test.Scenario != "KEYCLOAK-LIVE-028" && test.Scenario != "KEYCLOAK-LIVE-029" && test.Scenario != "KEYCLOAK-LIVE-030" && test.Scenario != "KEYCLOAK-LIVE-031" && test.Scenario != "KEYCLOAK-LIVE-032" && test.Scenario != "KEYCLOAK-LIVE-033" && test.Scenario != "KEYCLOAK-LIVE-034" && test.Scenario != "KEYCLOAK-LIVE-035" && test.Scenario != "KEYCLOAK-LIVE-036" && test.Scenario != "KEYCLOAK-LIVE-037") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024" && test.Scenario != "KEYCLOAK-LIVE-025" && test.Scenario != "KEYCLOAK-LIVE-026" && test.Scenario != "KEYCLOAK-LIVE-027" && test.Scenario != "KEYCLOAK-LIVE-028" && test.Scenario != "KEYCLOAK-LIVE-029" && test.Scenario != "KEYCLOAK-LIVE-030" && test.Scenario != "KEYCLOAK-LIVE-031" && test.Scenario != "KEYCLOAK-LIVE-032" && test.Scenario != "KEYCLOAK-LIVE-033" && test.Scenario != "KEYCLOAK-LIVE-034" && test.Scenario != "KEYCLOAK-LIVE-035" && test.Scenario != "KEYCLOAK-LIVE-036" && test.Scenario != "KEYCLOAK-LIVE-037" && test.Scenario != "KEYCLOAK-LIVE-038" && test.Scenario != "KEYCLOAK-LIVE-039" && test.Scenario != "KEYCLOAK-LIVE-040" && test.Scenario != "KEYCLOAK-LIVE-041") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true

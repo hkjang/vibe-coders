@@ -850,6 +850,7 @@ const adminHTML = `<!doctype html>
       if (hash.startsWith('#/users?') && legacyAccessTarget(hash)) return hash;
       if (hash.startsWith('#/apps?') && legacyWorkAppTarget(hash)) return hash;
       if (hash.startsWith('#/workflows?') && legacyWorkflowTarget(hash)) return hash;
+      if (hash.startsWith('#/skills?') && legacySkillTarget(hash)) return hash;
       if (hash.length > 8192) return '';
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
@@ -896,6 +897,9 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const skillDetail = document.getElementById('legacy-skill-detail');
+      if (skillDetail) skillDetail.textContent = '';
+      window._skillsByName = Object.create(null);
       const workflowDetail = document.getElementById('legacy-workflow-detail');
       if (workflowDetail) workflowDetail.textContent = '';
       const appDetail = document.getElementById('legacy-work-app-detail');
@@ -2227,6 +2231,9 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const skillDetail = document.getElementById('legacy-skill-detail');
+      if (skillDetail) skillDetail.textContent = '';
+      window._skillsByName = Object.create(null);
       const workflowDetail = document.getElementById('legacy-workflow-detail');
       if (workflowDetail) workflowDetail.textContent = '';
       const appDetail = document.getElementById('legacy-work-app-detail');
@@ -2331,7 +2338,7 @@ const adminHTML = `<!doctype html>
             if (!rest.length && params.has('schema_name')) await renderLegacyText2SQLSchemaDetail();
             else await renderText2SQL();
             break;
-          case 'skills':    await renderSkills(); break;
+          case 'skills': if (params.has('skill_name')) await renderLegacySkillDetail(); else await renderSkills(); break;
           case 'skill-studio': await renderSkillStudio(params); break;
           case 'modeldeprecations': await renderModelDeprecations(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
@@ -16477,10 +16484,95 @@ const adminHTML = `<!doctype html>
     };
     // ── Skill Studio 끝 ──────────────────────────────────────────────────
 
+    function legacySkillTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/skills?')) return null;
+      const query = rawHash.slice('#/skills?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('skill_name').length !== 1 || Array.from(params.keys()).some(key => key !== 'skill_name')) return null;
+      const id = params.get('skill_name');
+      if (!id || new TextEncoder().encode(id).length > 4096 || /\p{C}/u.test(id)) return null;
+      return id;
+    }
+
+
+    async function renderLegacySkillDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const name = legacySkillTarget(hash);
+      const retry = '<button type="button" id="legacy-skill-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-skill-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('스킬 상세',
+          '<div id="legacy-skill-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/skills">스킬 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (key, action) => {
+        if (current()) document.getElementById(key)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!name) { render('<p role="alert">스킬 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 스킬을 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/skills?' + new URLSearchParams({ view:'detail', name }), { cache:'no-store' });
+        if (!current()) return;
+        const row = data?.skill;
+        if (!row || row.name !== name ||
+            ['name','description','version','owner','status','risk_level','allowed_models','allowed_tools','allowed_teams','instructions','metadata','created_at','updated_at','updated_by'].some(key => typeof row[key] !== 'string') ||
+            !Number.isSafeInteger(row.daily_limit)) throw new Error('Invalid selected skill');
+        const statusLabels = {draft:'초안',staging:'검증 중',production:'운영',deprecated:'지원 중단'};
+        const riskLabels = {low:'낮음',medium:'보통',high:'높음'};
+        const fields = [['스킬 이름',row.name],['버전',row.version || '미지정'],['책임자',row.owner || '미지정'],
+          ['상태',Object.hasOwn(statusLabels,row.status) ? statusLabels[row.status] : row.status || '미지정'],
+          ['위험 등급',Object.hasOwn(riskLabels,row.risk_level) ? riskLabels[row.risk_level] : row.risk_level || '미지정'],
+          ['허용 모델',row.allowed_models || '제한 없음'],['허용 도구',row.allowed_tools || '제한 없음'],
+          ['허용 팀',row.allowed_teams || '전체'],['일일 한도',row.daily_limit === 0 ? '무제한' : String(row.daily_limit)],
+          ['생성 시각',row.created_at || '미확인'],['수정 시각',row.updated_at || '미확인'],['수정한 사람',row.updated_by || '미지정']];
+        const metadata = '<p>현재 저장된 스킬 지침과 정책입니다. 허용 팀·모델·도구는 실행 정책이며 관리자 조회 권한과는 별도로 적용됩니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl>';
+        const sections = [
+          {key:'description',title:'스킬 설명',text:row.description,empty:'등록된 설명이 없습니다.',page:0},
+          {key:'instructions',title:'스킬 지침',text:row.instructions,empty:'등록된 지침이 없습니다.',page:0},
+          {key:'metadata',title:'스킬 메타데이터',text:row.metadata,empty:'등록된 메타데이터가 없습니다.',page:0},
+        ];
+        for (const item of sections) item.pages = legacyDetailTextPages(item.text);
+        const button = (key,label,disabled) => '<button type="button" id="' + key + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+        const paint = focusId => {
+          if (!current()) return;
+          let body = metadata + '<p>저장된 내용을 읽기 전용으로 조회합니다. 스캔·평가·승격·실행은 수행하지 않습니다.</p>';
+          for (const item of sections) {
+            const [start,end] = item.pages[item.page], key = 'legacy-skill-' + item.key;
+            body += '<h3>' + item.title + '</h3><pre id="' + key + '" tabindex="0" aria-label="' + item.title + '" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px;overflow:auto">' +
+              escapeHTML(item.text.slice(start,end) || item.empty) + '</pre>';
+            if (item.pages.length > 1) body += '<nav aria-label="' + item.title + ' 페이지"><span role="status">' + (item.page + 1) + ' / ' + item.pages.length +
+              '페이지</span>' + button(key+'-prev','이전 '+item.title,item.page === 0) + button(key+'-next','다음 '+item.title,item.page + 1 === item.pages.length) + '</nav>';
+          }
+          render(body + retry,focusId);
+          bind('legacy-skill-retry',() => { void route(); });
+          for (const item of sections) {
+            const key = 'legacy-skill-' + item.key;
+            bind(key+'-prev',() => { if (item.page > 0) { item.page--; paint(key); } });
+            bind(key+'-next',() => { if (item.page + 1 < item.pages.length) { item.page++; paint(key); } });
+          }
+        };
+        paint();
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 스킬을 불러오지 못했습니다. 삭제되었거나 조회할 수 없는 스킬일 수 있습니다. 주소·로그인 상태·조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+        bind('legacy-skill-retry',() => { void route(); });
+      }
+    }
+
     async function renderSkills() {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      if (!current()) return;
       const statusFilter = sessionStorage.getItem('skillStatusFilter') || '';
       const d = await api('/admin/skills' + (statusFilter ? ('?status=' + encodeURIComponent(statusFilter)) : '')).catch(e => ({ skills: [], _err: e.message }));
+      if (!current()) return;
       const skills = d.skills || [];
       const badge = (st) => '<span class="status ' + (st === 'production' ? '' : (st === 'deprecated' ? 'error' : 'warn')) + '">' + escapeHTML(st || '') + '</span>';
       const riskBadge = (rk) => '<span class="status ' + (rk === 'high' ? 'error' : (rk === 'medium' ? 'warn' : '')) + '">' + escapeHTML(rk || '') + '</span>';
@@ -16502,6 +16594,7 @@ const adminHTML = `<!doctype html>
 
       // Observability/cost summary (last 30d by default).
       const stats = await api('/admin/skills/stats').catch(() => ({ stats: [] }));
+      if (!current()) return;
       const srows = stats.stats || [];
       if (srows.length) {
         const pct = (v) => (v * 100).toFixed(1) + '%';
@@ -16542,7 +16635,7 @@ const adminHTML = `<!doctype html>
       html += '<section id="skill-editor" style="display:none"></section>';
       html += '<section id="skill-runs" style="display:none"></section>';
       view.innerHTML = card('Skills', html);
-      window._skillsByName = {};
+      window._skillsByName = Object.create(null);
       skills.forEach(sk => { window._skillsByName[sk.name] = sk; });
     }
     window.skillFilter = (v) => { sessionStorage.setItem('skillStatusFilter', v || ''); renderSkills(); };

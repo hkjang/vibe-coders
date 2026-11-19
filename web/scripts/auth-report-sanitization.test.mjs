@@ -255,7 +255,7 @@ test("Keycloak product reporter preserves only fixed IDs and numeric failure loc
 });
 
 test("Keycloak product reporter rejects forged IDs and source filenames", async () => {
-  const fixtures = ["KEYCLOAK-LIVE-000", "KEYCLOAK-LIVE-038", "KEYCLOAK-LIVE-001suffix"].map((id) => {
+  const fixtures = ["KEYCLOAK-LIVE-000", "KEYCLOAK-LIVE-042", "KEYCLOAK-LIVE-001suffix"].map((id) => {
     const fixture = row(id);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (/private/not-keycloak-product.spec.ts:58:2)`;
     return fixture;

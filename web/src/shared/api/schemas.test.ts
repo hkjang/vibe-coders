@@ -536,3 +536,19 @@ it("accepts only the optional boolean workflow handoff capability", () => {
     }),
   ).toThrow();
 });
+
+it("accepts only the optional boolean skill handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_skill_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_skill_detail: true },
+    }).capabilities.legacy_skill_detail,
+  ).toBe(true);
+  expect(() =>
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_skill_detail: "true" },
+    }),
+  ).toThrow();
+});
