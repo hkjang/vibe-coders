@@ -81,7 +81,7 @@ for (const [id, role, account] of [
         value.status() === 200
       );
     });
-    await page.getByLabel("모델", { exact: true }).focus();
+    await page.getByRole("combobox", { name: "모델", exact: true }).focus();
     const payload: { values?: string[] | null } = await (await suggested).json();
     // Compare authenticated server values without exposing them in diagnostics.
     await expect
