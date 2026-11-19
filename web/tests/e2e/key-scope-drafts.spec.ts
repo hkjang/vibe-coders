@@ -969,26 +969,26 @@ test("이전 세션의 늦은 저장 응답은 새 권한 초안을 닫거나 �
   await scope(oldForm, "chat:completion").check();
   gateway.holdSaves();
   await confirmEdit(oldForm);
+  const pendingRequest = page.waitForRequest(
+    (response) =>
+      new URL(response.url()).pathname === `/admin/api-keys/${alpha.id}` && response.method() === "PATCH",
+  );
   await oldForm.getByRole("button", { name: "권한 저장", exact: true }).click();
+  const retiredRequest = await pendingRequest;
   await expect.poll(() => gateway.saves.length).toBe(1);
   const submitted = structuredClone(gateway.saves);
   await other.getByLabel("사용자 메뉴").click();
   await other.getByRole("button", { name: "로그아웃", exact: true }).click();
   await expect(page.getByRole("heading", { name: "관리자 로그인" })).toBeVisible();
   await expect(guard(page)).toBeHidden();
-  // Stay in the SPA so the old request completes after a new session opens its own form.
+  // Stay in the SPA so session retirement, rather than document navigation, aborts the request.
   await signIn(page);
   const fresh = await openForm(page);
   await expect(scope(fresh, "chat:completion")).not.toBeChecked();
   await scope(fresh, "embeddings:create").check();
   const freshReads = gateway.reads();
-  const oldResponse = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === `/admin/api-keys/${alpha.id}` &&
-      response.request().method() === "PATCH",
-  );
   gateway.releaseSaves();
-  await (await oldResponse).finished();
+  await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
   await expect(fresh).toBeVisible();
   await expect(fresh).toContainText(alpha.name);
   await expect(scope(fresh, "embeddings:create")).toBeChecked();

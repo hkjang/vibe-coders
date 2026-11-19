@@ -450,7 +450,11 @@ for (const outcome of ["성공", "실패"] as const) {
     await input(old).fill("111.25");
     if (outcome === "실패") gateway.failWrites();
     gateway.holdWrites();
+    const pendingRequest = page.waitForRequest(
+      (value) => new URL(value.url()).pathname === "/admin/cost" && value.method() === "POST",
+    );
     await save(old).click();
+    const retiredRequest = await pendingRequest;
     await expect.poll(() => gateway.writes.length).toBe(1);
     await other.getByLabel("사용자 메뉴").click();
     await other.getByRole("button", { name: "로그아웃", exact: true }).click();
@@ -458,11 +462,8 @@ for (const outcome of ["성공", "실패"] as const) {
     const fresh = await open(page);
     await input(fresh).fill("222.25");
     const reads = gateway.reads();
-    const response = page.waitForResponse(
-      (value) => new URL(value.url()).pathname === "/admin/cost" && value.request().method() === "POST",
-    );
     gateway.releaseWrites();
-    await (await response).finished();
+    await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
     await page.waitForTimeout(500);
     await expect(fresh).toBeVisible();
     await expect(input(fresh)).toHaveValue("222.25");

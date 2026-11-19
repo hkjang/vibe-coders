@@ -91,7 +91,11 @@ for (const status of [200, 503])
       await form
         .getByRole("checkbox", { name: "변경 내용과 적용 범위를 확인했습니다.", exact: true })
         .check();
+      const pendingRequest = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/admin/apps" && request.method() === "POST",
+      );
       await form.getByRole("button", { name: "앱 만들기", exact: true }).click();
+      const retiredRequest = await pendingRequest;
       await expect.poll(() => writes).toBe(1);
       await other.getByLabel("사용자 메뉴").click();
       await other.getByRole("button", { name: "로그아웃", exact: true }).click();
@@ -100,11 +104,8 @@ for (const status of [200, 503])
       await page.getByRole("button", { name: "새 업무 앱", exact: true }).click();
       await form.getByRole("textbox", { name: "제목", exact: true }).fill("새 계정 초안");
       const reads = gateway.listReads();
-      const response = page.waitForResponse(
-        (value) => new URL(value.url()).pathname === "/admin/apps" && value.request().method() === "POST",
-      );
       release();
-      await response;
+      await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
       await expect(form.getByRole("textbox", { name: "제목", exact: true })).toHaveValue("새 계정 초안");
       await expect(form.getByRole("button", { name: "앱 만들기", exact: true })).toBeDisabled();
       await expect(form.getByRole("textbox", { name: "제목", exact: true })).toBeEditable();

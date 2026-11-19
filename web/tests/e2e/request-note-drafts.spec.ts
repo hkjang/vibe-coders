@@ -711,7 +711,11 @@ for (const outcome of ["성공", "실패"] as const) {
     await editNote(old, "이전 세션 메모");
     if (outcome === "실패") gateway.failWrites();
     gateway.holdWrites();
+    const pendingRequest = page.waitForRequest(
+      (value) => value.url().endsWith(`/requests/${firstId}/note`) && value.method() === "PATCH",
+    );
     await save(old).click();
+    const retiredRequest = await pendingRequest;
     await expect.poll(() => gateway.writes.length).toBe(1);
     await other.getByLabel("사용자 메뉴").click();
     await other.getByRole("button", { name: "로그아웃", exact: true }).click();
@@ -720,11 +724,8 @@ for (const outcome of ["성공", "실패"] as const) {
     const fresh = await open(page);
     await editNote(fresh, "새 세션의 고정 초안");
     const reads = gateway.reads();
-    const response = page.waitForResponse(
-      (value) => value.url().endsWith(`/requests/${firstId}/note`) && value.request().method() === "PATCH",
-    );
     gateway.releaseWrites();
-    await (await response).finished();
+    await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
     await page.waitForTimeout(500);
     await expect(fresh).toBeVisible();
     await expect(fresh.getByLabel("새 메모", { exact: true })).toHaveValue("새 세션의 고정 초안");

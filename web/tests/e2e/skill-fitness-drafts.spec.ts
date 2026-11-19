@@ -654,7 +654,11 @@ for (const outcome of ["성공", "실패"] as const) {
     await edit(old, "old-session-reference");
     if (outcome === "실패") gateway.failWrites();
     gateway.holdWrites();
+    const pendingRequest = page.waitForRequest(
+      (value) => new URL(value.url()).pathname === "/admin/skills/fitness" && value.method() === "POST",
+    );
     await save(old).click();
+    const retiredRequest = await pendingRequest;
     await expect.poll(() => gateway.writes.length).toBe(1);
     await other.getByLabel("사용자 메뉴").click();
     await other.getByRole("button", { name: "로그아웃", exact: true }).click();
@@ -666,12 +670,8 @@ for (const outcome of ["성공", "실패"] as const) {
     const fresh = await open(page);
     await edit(fresh, "new-session-reference");
     const reads = gateway.reads();
-    const response = page.waitForResponse(
-      (value) =>
-        new URL(value.url()).pathname === "/admin/skills/fitness" && value.request().method() === "POST",
-    );
     gateway.releaseWrites();
-    await (await response).finished();
+    await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
     await page.waitForTimeout(500);
     await expect(fresh).toBeVisible();
     await expect(reference(fresh)).toHaveValue("new-session-reference");

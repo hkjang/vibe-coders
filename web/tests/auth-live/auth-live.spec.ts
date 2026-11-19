@@ -168,7 +168,11 @@ test("AUTH-LIVE-004 다른 탭 로그아웃·새 계정과 늦은 실제 응답 
     delivered = true;
   });
   await page.bringToFront();
+  const requested = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === "/admin/ui-bootstrap",
+  );
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  const retiredRequest = await requested;
   await expect.poll(() => ready).toBe(true);
   try {
     await signOut(other);
@@ -179,14 +183,12 @@ test("AUTH-LIVE-004 다른 탭 로그아웃·새 계정과 늦은 실제 응답 
     // Stay in the same document: a full navigation would cancel the old response.
     await signIn(page, reader);
     expect(await currentRole(page)).toBe("readonly_admin");
-    const deliveredResponse = page.waitForResponse(
-      (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
-    );
+    await expect.poll(() => retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
     release();
     await expect.poll(() => delivered).toBe(true);
-    // The client rejects the old session immediately after fetch resolves,
-    // before consuming its JSON body. Verify arrival, not body consumption.
-    expect((await deliveredResponse).status()).toBe(200);
+    // Go produced the old admin response, but its retired client request stays
+    // cancelled even after the route releases it into the unchanged document.
+    expect(retiredRequest.failure()?.errorText).toBe("net::ERR_ABORTED");
     await page.getByLabel("사용자 메뉴").click();
     await expect(page.getByText("역할: 읽기 전용 관리자", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "공급자 추가", exact: true })).toBeHidden();
