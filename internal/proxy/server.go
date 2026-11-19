@@ -812,17 +812,19 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// searchLocation resolves a timezone query parameter to a *time.Location, defaulting to
-// Asia/Seoul (KST) — the operational timezone of this gateway. Asia/Seoul and UTC are
-// resolved without the OS tzdata; any other IANA name falls back to LoadLocation, and an
-// unknown/unloadable zone falls back to Seoul rather than silently using UTC.
+// searchLocation resolves explicit IANA zones using their historical offset rules.
+// Omitted zones, the legacy KST alias, and unknown zones retain the fixed UTC+9
+// fallback. The gateway embeds tzdata for hosts without a timezone database.
 func searchLocation(tz string) *time.Location {
 	tz = strings.TrimSpace(tz)
 	switch {
-	case tz == "", strings.EqualFold(tz, "Asia/Seoul"), strings.EqualFold(tz, "KST"):
+	case tz == "", strings.EqualFold(tz, "KST"):
 		return seoulZone
 	case strings.EqualFold(tz, "UTC"):
 		return time.UTC
+	case strings.EqualFold(tz, "Asia/Seoul"):
+		// Preserve the Legacy spelling aliases while applying IANA history.
+		tz = "Asia/Seoul"
 	}
 	if loc, err := time.LoadLocation(tz); err == nil {
 		return loc
