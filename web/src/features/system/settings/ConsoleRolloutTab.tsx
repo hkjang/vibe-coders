@@ -1,16 +1,10 @@
-import { TableStateCell } from "@/shared/data-table/TableStateCell";
+import { ConsoleFeatureTable } from "./ConsoleFeatureTable";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { RuntimeSettingUnavailable } from "./RuntimeSettingUnavailable";
 
-import {
-  featureTitles,
-  statusTones,
-  statusDisplay,
-  roleDisplay,
-  readOnlyDisplay,
-} from "./console-rollout-display";
+import { featureTitles } from "./console-rollout-display";
 import {
   ConsoleFeatureDialog,
   type ConsoleFeatureEdit,
@@ -45,7 +39,6 @@ import { apiClient } from "@/shared/api/client";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
 import { pathWithParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
@@ -291,80 +284,17 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         )}
       </SectionCard>
 
-      <SectionCard
-        title="기능별 전환 상태"
-        headingLevel={2}
-        description="화면마다 기존 화면 유지·미리보기·정식 전환과 대상 역할, 배포 비율을 조정합니다."
-      >
-        <div className="data-table-scroll" role="region" aria-label="기능별 전환 상태 표" tabIndex={0}>
-          <table className="data-table">
-            <caption className="sr-only">기능별 콘솔 전환 상태</caption>
-            <thead>
-              <tr>
-                <th scope="col">기능</th>
-                <th scope="col">상태</th>
-                <th scope="col">미리보기 역할</th>
-                <th scope="col">배포 비율</th>
-                <th scope="col">읽기 전용</th>
-                <th scope="col">작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              {featureRows.length === 0 ? (
-                <tr>
-                  <TableStateCell colSpan={6}>
-                    {settingsQuery.isPending
-                      ? "콘솔 전환 설정을 불러오는 중입니다."
-                      : "전환 설정을 제공하는 기능이 없습니다."}
-                  </TableStateCell>
-                </tr>
-              ) : (
-                featureRows.map((row) => {
-                  const status = row.status?.value ?? "";
-                  return (
-                    <tr key={row.featureId}>
-                      <th scope="row">
-                        <span>{featureTitles.get(row.featureId) ?? row.featureId}</span>
-                        <small className="mono">{row.featureId}</small>
-                      </th>
-                      <td>
-                        {status ? (
-                          <span className="settings-key-cell">
-                            <Badge tone={statusTones[status] ?? "muted"}>{statusDisplay(status)}</Badge>
-                            <small className="mono">{status}</small>
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td>{roleDisplay(row.roles?.value)}</td>
-                      <td className="cell-number">
-                        {row.rollout?.value === undefined ? "—" : `${row.rollout.value}%`}
-                      </td>
-                      <td>{row.readonly ? readOnlyDisplay(row.readonly.value) : "—"}</td>
-                      <td>
-                        <Button
-                          size="small"
-                          variant="ghost"
-                          aria-label={`${featureTitles.get(row.featureId) ?? row.featureId} 전환 설정 편집`}
-                          onClick={(event) => {
-                            triggerRef.current = event.currentTarget;
-                            setConflictKey(undefined);
-                            const first = row.status ?? row.roles ?? row.rollout ?? row.readonly;
-                            if (first) updateParams({ setting: first.key }, { replace: false });
-                          }}
-                        >
-                          편집
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
+      <ConsoleFeatureTable
+        rows={featureRows}
+        pending={settingsQuery.isPending}
+        failed={settingsQuery.isError}
+        onEdit={(row, trigger) => {
+          triggerRef.current = trigger;
+          setConflictKey(undefined);
+          const first = row.status ?? row.roles ?? row.rollout ?? row.readonly;
+          if (first) updateParams({ setting: first.key }, { replace: false });
+        }}
+      />
 
       <UpdatedAt at={settingsQuery.dataUpdatedAt} />
 

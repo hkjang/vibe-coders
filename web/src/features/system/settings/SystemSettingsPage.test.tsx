@@ -262,7 +262,7 @@ describe("SystemSettingsPage — 콘솔 전환", () => {
     const rolloutHeading = await screen.findByRole("heading", { name: "기능별 전환 상태" });
     const rolloutSection = rolloutHeading.closest("section");
     expect(rolloutSection).not.toBeNull();
-    const rollout = within(rolloutSection as HTMLElement);
+    const rollout = within(screen.getByRole("table", { name: "기능별 콘솔 전환 상태" }));
     expect(await rollout.findByText("기존 화면")).toBeVisible();
     expect(rollout.getByText("legacy")).toBeVisible();
     expect(rollout.getByText("최고 관리자, 관리자")).toBeVisible();
