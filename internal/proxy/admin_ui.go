@@ -842,6 +842,7 @@ const adminHTML = `<!doctype html>
     let authRevision = 0;
     let authChanging = false;
     let authRefreshFlight = null;
+    const legacyGrantReviewKey = 'vibe.admin.auth.grant-review';
     // Preserve only an initial read-only handoff through the local login prompt.
     // A deliberate logout or a changed URL must not replay another session's intent.
     function initialLegacyReadHandoff(hash) {
@@ -899,6 +900,7 @@ const adminHTML = `<!doctype html>
       if (accessDetail) accessDetail.textContent = '';
       const routingDetail = document.getElementById('legacy-routing-rule-detail');
       if (routingDetail) routingDetail.textContent = '';
+      authRefreshFlight?.identityController?.abort();
       authEpoch++;
       navigationRevision++;
       navigationReady = false;
@@ -922,6 +924,7 @@ const adminHTML = `<!doctype html>
     }
     function clearAuth() {
       retireAuth();
+      sessionStorage.removeItem(legacyGrantReviewKey);
       authState.access = ''; authState.refresh = ''; authState.user = null;
       sessionStorage.removeItem('authAccess');
       sessionStorage.removeItem('authRefresh');
@@ -1017,22 +1020,109 @@ const adminHTML = `<!doctype html>
     function hideLogin() {
       document.getElementById('login-backdrop').classList.remove('open');
     }
+    function legacyGrantKey(user, fallbackScopes) {
+      const scopes = user?.scopes === undefined ? fallbackScopes : user.scopes;
+      if (!user || typeof user.id !== 'string' || !user.id || typeof user.role !== 'string' || !user.role ||
+          typeof user.team_id !== 'string' || !Array.isArray(scopes) || scopes.some(scope => typeof scope !== 'string')) return null;
+      return JSON.stringify([user.id, user.role, user.team_id, Array.from(new Set(scopes)).sort()]);
+    }
+    async function readLegacyRefreshUser(access, flight) {
+      const controller = new AbortController();
+      flight.identityController = controller;
+      const aborted = new Promise((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Identity verification interrupted')), { once:true }));
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        return await Promise.race([(async () => {
+          const res = await fetch('/auth/me', { headers:{ Authorization:'Bearer ' + access }, signal:controller.signal, cache:'no-store' });
+          if (!res.ok) throw new Error('Identity verification failed');
+          const me = await res.json();
+          if (me?.auth_enabled !== true || legacyGrantKey(me.user) === null) throw new Error('Invalid identity response');
+          return me.user;
+        })(), aborted]);
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+        if (flight.identityController === controller) flight.identityController = null;
+      }
+    }
+    function reloadLegacyGrant() {
+      // A full document boundary also discards older renderers, modal closures and
+      // mutation controls that predate the read-owner guards. Never replay them
+      // under the new grant. Keep the rotated credentials for the verified boot.
+      sessionStorage.setItem(legacyGrantReviewKey, '1');
+      retireAuth(true);
+      authState.user = null;
+      authState.nav = { allowed_tabs:[], scopes:[], app_entry_enabled:false };
+      sessionStorage.removeItem('authUser');
+      document.documentElement.style.setProperty('visibility', 'hidden', 'important');
+      location.reload();
+    }
+    function showLegacyAuthRecovery() {
+      retireAuth(true);
+      sessionStorage.setItem(legacyGrantReviewKey, '1');
+      authState.user = null;
+      authState.nav = { allowed_tabs:[], scopes:[], app_entry_enabled:false };
+      sessionStorage.removeItem('authUser');
+      applyNavPermissions();
+      renderAuthHeader();
+      const view = document.getElementById('view');
+      view.innerHTML = '<section role="alert" class="card" style="padding:24px"><h2>로그인 권한을 확인하지 못했습니다.</h2>' +
+        '<p>이전 화면 정보는 표시하지 않습니다. 연결을 확인한 뒤 다시 확인하거나 로그인하세요.</p>' +
+        '<button type="button" id="legacy-auth-retry">권한 다시 확인</button> ' +
+        '<button type="button" id="legacy-auth-signin">다시 로그인</button></section>';
+      const epoch = authEpoch;
+      document.getElementById('legacy-auth-retry').addEventListener('click', () => {
+        if (epoch !== authEpoch) return;
+        document.getElementById('legacy-auth-retry').disabled = true;
+        authChanging = false;
+        void initAuth();
+      });
+      document.getElementById('legacy-auth-signin').addEventListener('click', () => {
+        if (epoch !== authEpoch) return;
+        clearAuth(); showLogin();
+      });
+    }
+    async function waitLegacyRefresh(epoch) {
+      const flight = authRefreshFlight;
+      if (flight && flight.epoch === epoch && !await flight.promise) throw new Error('인증 세션을 다시 확인하세요.');
+      assertAuthCurrent(epoch);
+    }
     async function tryRefresh(epoch = authEpoch) {
       if (!authCurrent(epoch) || !authState.refresh) return false;
       if (authRefreshFlight && authRefreshFlight.epoch === epoch) return authRefreshFlight.promise;
       const refreshToken = authState.refresh;
-      const flight = { epoch, promise: null };
+      const previousGrant = legacyGrantKey(authState.user, authState.nav?.scopes);
+      const flight = { epoch, promise:null, identityController:null };
       flight.promise = (async () => {
         try {
           const res = await fetch('/auth/refresh', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshToken }),
+            method:'POST', headers:{ 'Content-Type':'application/json' },
+            body:JSON.stringify({ refresh_token:refreshToken }),
           });
           if (!authCurrent(epoch) || !res.ok) return false;
           const tokens = await res.json();
           if (!authCurrent(epoch)) return false;
-          saveAuth(tokens); // rotation: 새 access + 새 refresh 저장
+          if (!tokens || typeof tokens.access_token !== 'string' || !tokens.access_token ||
+              typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) return false;
+          // Persist rotation before optional older-server identity lookup. A lookup
+          // failure must not restore a consumed refresh token or drop the new pair.
+          saveAuth({ access_token:tokens.access_token, refresh_token:tokens.refresh_token });
+          const revision = authRevision;
+          let user;
+          try {
+            user = legacyGrantKey(tokens.user) !== null ? tokens.user : await readLegacyRefreshUser(tokens.access_token, flight);
+          } catch {
+            if (authCurrent(epoch) && revision === authRevision) reloadLegacyGrant();
+            return false;
+          }
+          if (!authCurrent(epoch) || revision !== authRevision) return false;
+          if (previousGrant === null || previousGrant !== legacyGrantKey(user)) {
+            reloadLegacyGrant();
+            return false;
+          }
+          authState.user = user;
+          sessionStorage.setItem('authUser', JSON.stringify(user));
+          renderAuthHeader();
           return true;
         } catch { return false; }
       })().finally(() => {
@@ -1044,6 +1134,7 @@ const adminHTML = `<!doctype html>
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       clearLegacySsoHandoff();
+      sessionStorage.removeItem(legacyGrantReviewKey);
       const epoch = retireAuth(true);
       const btn = document.getElementById('login-submit');
       const err = document.getElementById('login-error');
@@ -1126,10 +1217,14 @@ const adminHTML = `<!doctype html>
       try {
         const nav = await api('/me/navigation');
         if (!authCurrent(epoch) || revision !== navigationRevision) return false;
+        if (authState.enabled && (!nav || !Array.isArray(nav.allowed_tabs) || !Array.isArray(nav.scopes))) {
+          showLegacyAuthRecovery(); return false;
+        }
         authState.nav = nav;
       } catch {
         if (!authCurrent(epoch) || revision !== navigationRevision) return false;
-        authState.nav = null; // fall back to showing everything (legacy/no policy)
+        if (authState.enabled) { showLegacyAuthRecovery(); return false; }
+        authState.nav = null; // unauthenticated legacy/admin-token compatibility
       }
       navigationReady = true;
       applyNavPermissions();
@@ -1247,13 +1342,19 @@ const adminHTML = `<!doctype html>
         if (res.ok) {
           const me = await res.json();
           if (!authCurrent(epoch)) return;
-          authState.enabled = !!me.auth_enabled;
+          if (typeof me?.auth_enabled !== 'boolean' || (me.auth_enabled && legacyGrantKey(me.user) === null)) {
+            showLegacyAuthRecovery(); return;
+          }
+          if (!me.auth_enabled && (authState.access || authState.refresh)) { clearAuth(); epoch = authEpoch; }
+          authState.enabled = me.auth_enabled;
           if (me.user) { authState.user = me.user; sessionStorage.setItem('authUser', JSON.stringify(me.user)); }
+          sessionStorage.removeItem(legacyGrantReviewKey);
           await bootAfterAuth(me, epoch);
           return;
         }
         if (res.status === 401) { // 인증 모드인데 access 만료/없음 → 조용히 refresh 시도
           authState.enabled = true;
+          if (sessionStorage.getItem(legacyGrantReviewKey)) { showLegacyAuthRecovery(); return; }
           const refreshed = await tryRefresh(epoch);
           if (!authCurrent(epoch)) return;
           if (refreshed) { await bootAfterAuth(null, epoch); return; }
@@ -1263,7 +1364,10 @@ const adminHTML = `<!doctype html>
         }
       } catch {}
       if (!authCurrent(epoch)) return;
-      // /auth/me 자체가 실패해도 화면은 띄움 (레거시 모드 가정)
+      if (authState.access || authState.refresh || authState.enabled || sessionStorage.getItem(legacyGrantReviewKey)) {
+        showLegacyAuthRecovery(); return;
+      }
+      // Without JWT credentials, preserve the original legacy/admin-token fallback.
       renderAuthHeader();
       if (await loadNavigation(epoch) && authCurrent(epoch)) route();
     }
@@ -1589,6 +1693,7 @@ const adminHTML = `<!doctype html>
       const epoch = authEpoch;
       const revision = authRevision;
       assertAuthCurrent(epoch);
+      if (authRefreshFlight) await waitLegacyRefresh(epoch);
       const successMessage = options.success;
       const doFetch = () => {
         assertAuthCurrent(epoch);
@@ -1599,14 +1704,14 @@ const adminHTML = `<!doctype html>
         return fetch(path, { ...init, headers: requestHeaders });
       };
       let res = await doFetch();
-      assertAuthCurrent(epoch);
+      await waitLegacyRefresh(epoch);
       // JWT 모드: access 만료 시 refresh 회전 후 1회 재시도, 실패하면 재로그인 유도
       if (res.status === 401 && authState.enabled) {
         const refreshed = (authRevision !== revision && !!authState.access) || await tryRefresh(epoch);
         assertAuthCurrent(epoch);
         if (refreshed) {
           res = await doFetch();
-          assertAuthCurrent(epoch);
+          await waitLegacyRefresh(epoch);
         } else {
           clearAuth();
           showLogin('세션이 만료되었습니다. 다시 로그인해주세요.');
@@ -1615,11 +1720,11 @@ const adminHTML = `<!doctype html>
       }
       if (!res.ok) {
         const text = await res.text();
-        assertAuthCurrent(epoch);
+        await waitLegacyRefresh(epoch);
         throw new Error(text || res.statusText);
       }
       const data = res.status === 204 ? null : await res.json();
-      assertAuthCurrent(epoch);
+      await waitLegacyRefresh(epoch);
       if (successMessage) toast(successMessage, 'ok');
       return data;
     }

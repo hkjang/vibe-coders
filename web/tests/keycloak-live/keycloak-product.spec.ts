@@ -885,3 +885,202 @@ test("KEYCLOAK-LIVE-024 최대 Unicode 이름과 긴 원문은 SSO와 페이지 
   await expect(detail).toHaveCount(0);
   expect(reads().writes).toBe(0);
 });
+
+// The private fixture changes stored grants and signs an expired copy of the
+// current token. The actual background refresh performs HTTP 401 -> /auth/refresh
+// while the previous private view is still open.
+type LegacyGrantClient = {
+  saveAuth: (pair: { access_token: string; refresh_token: string }) => void;
+  refreshLegacyAppEntry: () => Promise<unknown>;
+  api: (path: string) => Promise<unknown>;
+};
+async function expireLegacyGrant(page: Page, operation: string) {
+  const control = process.env.VIBE_GRANT_CONTROL;
+  if (!control) throw Error("Private grant control missing");
+  const access = await page.evaluate(() => sessionStorage.getItem("authAccess") ?? "");
+  const result = await page.request.post("/__fixture/grants", {
+    headers: { "X-Fixture-Control": control, Authorization: "Bearer " + access },
+    data: { operation },
+  });
+  expect(result.status()).toBe(200);
+  const body = (await result.json()) as { expired_access: string };
+  expect(typeof body.expired_access).toBe("string");
+  await page.evaluate((expired) => {
+    const client = window as unknown as LegacyGrantClient;
+    client.saveAuth({ access_token: expired, refresh_token: sessionStorage.getItem("authRefresh") ?? "" });
+    setTimeout(() => void client.refreshLegacyAppEntry(), 0);
+  }, body.expired_access);
+}
+async function restoreGrantFixture(page: Page) {
+  const result = await page.request.post("/__fixture/grants", {
+    headers: { "X-Fixture-Control": process.env.VIBE_GRANT_CONTROL ?? "" },
+    data: { operation: "restore" },
+  });
+  expect(result.status()).toBe(204);
+}
+
+test("KEYCLOAK-LIVE-025 역할 강등 갱신은 열린 비공개 원문과 이전 응답을 폐기한다", async ({ page }) => {
+  const { detail, reads } = await openSchemaBridge(page, "new-operator");
+  await detail.getByRole("button", { name: "설명 보기", exact: true }).click();
+  await expect(detail.getByLabel("스키마 설명 본문")).toHaveText("schema private approved text");
+  const originalURL = page.url();
+  let oldCaptured = false,
+    held = false,
+    documents = 0;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  await page.route("**/admin/text2sql?*", async (route) => {
+    if (held) {
+      await route.continue();
+      return;
+    }
+    held = true;
+    const response = await route.fetch();
+    oldCaptured = true;
+    await gate;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) documents++;
+  });
+  await page.evaluate((name) => {
+    void (window as unknown as LegacyGrantClient)
+      .api("/admin/text2sql?" + new URLSearchParams({ view: "schema", name }))
+      .then(
+        () => sessionStorage.setItem("grant-test-old-returned", "1"),
+        () => {},
+      );
+  }, schemaHandoffName);
+  await expect.poll(() => oldCaptured).toBe(true);
+  try {
+    await expireLegacyGrant(page, "role");
+    await expect(detail).toContainText("스키마 설명과 허용 테이블은 비공개");
+    await expect(page.locator("#auth-user")).toContainText("readonly_admin");
+    release();
+    await expect(detail).not.toContainText("schema private approved text");
+    expect(await page.evaluate(() => sessionStorage.getItem("grant-test-old-returned"))).toBeNull();
+    expect(page.url()).toBe(originalURL);
+    expect(documents).toBe(1);
+    expect(reads().writes).toBe(0);
+  } finally {
+    release();
+    await restoreGrantFixture(page);
+  }
+});
+
+test("KEYCLOAK-LIVE-026 팀 변경 갱신은 이전 팀 상세를 같은 주소에서 다시 검증한다", async ({ page }) => {
+  const { detail, reads } = await openSchemaBridge(page, "routing-reader");
+  await expect(detail).toContainText(schemaHandoffName);
+  const originalURL = page.url();
+  try {
+    await expireLegacyGrant(page, "team");
+    await expect(detail).toContainText("선택한 스키마를 불러오지 못했습니다");
+    await expect(detail).not.toContainText(schemaHandoffName);
+    expect(page.url()).toBe(originalURL);
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("authUser") ?? "{}").team_id)).toBe(
+      "other-access-id",
+    );
+    expect(reads().writes).toBe(0);
+  } finally {
+    await restoreGrantFixture(page);
+  }
+});
+
+test("KEYCLOAK-LIVE-027 동일 역할의 권한 축소도 이전 화면과 메뉴를 폐기한다", async ({ page }) => {
+  const { detail, reads } = await openSchemaBridge(page, "new-operator");
+  await detail.getByRole("button", { name: "설명 보기", exact: true }).click();
+  await expect(detail).toContainText("schema private approved text");
+  try {
+    await expireLegacyGrant(page, "scopes");
+    await expect(page.getByRole("heading", { name: "접근 권한이 필요합니다", exact: true })).toBeVisible();
+    await expect(page.locator("#view")).not.toContainText("schema private approved text");
+    await expect(page.locator("#tabs a[data-tab=text2sql]")).toBeHidden();
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("authUser") ?? "{}").role)).toBe(
+      "admin",
+    );
+    expect(reads().writes).toBe(0);
+  } finally {
+    await restoreGrantFixture(page);
+  }
+});
+
+test("KEYCLOAK-LIVE-028 동일 권한 갱신은 열린 원문과 현재 문서를 유지한다", async ({ page }) => {
+  const { detail, reads } = await openSchemaBridge(page, "new-operator");
+  await detail.getByRole("button", { name: "설명 보기", exact: true }).click();
+  await expect(detail).toContainText("schema private approved text");
+  let documents = 0,
+    refreshes = 0,
+    navigation = 0;
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) documents++;
+  });
+  page.on("response", (response) => {
+    const path = new URL(response.url()).pathname;
+    if (path === "/auth/refresh") refreshes++;
+    if (path === "/me/navigation" && response.status() === 200) navigation++;
+  });
+  try {
+    await expireLegacyGrant(page, "same");
+    await expect.poll(() => navigation).toBe(1);
+    expect(refreshes).toBe(1);
+    expect(documents).toBe(0);
+    await expect(detail.getByLabel("스키마 설명 본문")).toHaveText("schema private approved text");
+    expect(reads().writes).toBe(0);
+  } finally {
+    await restoreGrantFixture(page);
+  }
+});
+
+test("KEYCLOAK-LIVE-029 이전 서버 형식의 갱신 검증 실패는 자격 증명을 보존하고 복구한다", async ({
+  page,
+}) => {
+  const { detail, reads } = await openSchemaBridge(page, "new-operator");
+  await detail.getByRole("button", { name: "설명 보기", exact: true }).click();
+  await expect(detail).toContainText("schema private approved text");
+  // Fault injection removes optional metadata and makes identity reads fail.
+  // The rotated credentials are still issued by the actual gateway.
+  await page.route("**/auth/refresh", async (route) => {
+    const result = await route.fetch();
+    const body: Record<string, unknown> = await result.json();
+    delete body.user;
+    await route.fulfill({ response: result, json: body });
+  });
+  await page.route("**/auth/me", (route) => route.fulfill({ status: 503, json: {} }));
+  let refreshes = 0,
+    documents = 0;
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname === "/auth/refresh") refreshes++;
+  });
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) documents++;
+  });
+  const before = await page.evaluate(() => sessionStorage.getItem("authRefresh"));
+  try {
+    await expireLegacyGrant(page, "same");
+    await expect(
+      page.getByRole("heading", { name: "로그인 권한을 확인하지 못했습니다.", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("#view")).not.toContainText("schema private approved text");
+    expect(
+      await page.evaluate(
+        (previous) =>
+          Boolean(sessionStorage.getItem("authRefresh")) &&
+          sessionStorage.getItem("authRefresh") !== previous,
+        before,
+      ),
+    ).toBe(true);
+    expect(refreshes).toBe(1);
+    expect(documents).toBe(1);
+    await page.unroute("**/auth/me");
+    await page.getByRole("button", { name: "권한 다시 확인", exact: true }).click();
+    await expect(detail).toContainText(schemaHandoffName);
+    await expect(detail.getByRole("button", { name: "설명 보기", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.grant-review"))).toBeNull();
+    expect(refreshes).toBe(1);
+    expect(reads().writes).toBe(0);
+  } finally {
+    await restoreGrantFixture(page);
+  }
+});

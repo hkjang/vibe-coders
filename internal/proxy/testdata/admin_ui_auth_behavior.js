@@ -21,9 +21,9 @@ const accessTarget = block('function legacyAccessTarget(', 'function legacyAcces
 const routingTarget = block('function legacyRoutingRuleTarget(', 'async function renderLegacyRoutingRuleDetail(');
  const modelTarget = block('function legacyModelTarget(', 'async function renderLegacyModelDetail(') + block('function legacyProviderRefValid(', '// Reuse the safe app projection;');
 const http = block('// ---------- HTTP ----------', '// ---------- formatting ----------');
-const nav = (name) => ({ allowed_tabs: ['settings'], default_home: '#/dashboard', marker: name });
+const nav = (name) => ({ scopes: ['admin:read', 'admin:write'], allowed_tabs: ['settings'], default_home: '#/dashboard', marker: name });
 const tokens = (name, access = name + '-access') => ({
-  access_token: access, refresh_token: name + '-refresh', user: { email: name, role: 'super_admin' },
+  access_token: access, refresh_token: name + '-refresh', user: { id: 'same-subject', email: name, role: 'super_admin', team_id: '', scopes: ['admin:read', 'admin:write'] },
 });
 const response = (status, data = {}) => ({
   status, ok: status >= 200 && status < 300, statusText: 'synthetic',
@@ -47,6 +47,9 @@ function harness(transport, initialHash = '', initialStorage) {
   const calls = [];
   const toasts = [];
   let routes = 0;
+  let reloads = 0;
+  const timers = new Map();
+  const rootStyle = {};
   function node(id) {
     if (!nodes.has(id)) {
       const classes = new Set();
@@ -62,13 +65,14 @@ function harness(transport, initialHash = '', initialStorage) {
     }
     return nodes.get(id);
   }
-  const location = { hash: initialHash, pathname: '/admin', search: '' };
+  const location = { hash: initialHash, pathname: '/admin', search: '', reload() { reloads++; } };
   const context = vm.createContext({
-    URLSearchParams, TextEncoder,
-    document: { getElementById: id => id === 'sso-login-btn' ? nodes.get(id) : node(id), querySelectorAll: () => [], createElement: () => node('created-button') },
+    URLSearchParams, TextEncoder, AbortController,
+    document: { documentElement: { style: { setProperty(k, v) { rootStyle[k] = v; } } }, getElementById: id => id === 'sso-login-btn' ? nodes.get(id) : node(id), querySelectorAll: () => [], createElement: () => node('created-button') },
     sessionStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) },
     location, history: { replaceState(_state, _title, url) { const next = new URL(url, 'https://gateway.invalid'); Object.assign(location, { pathname: next.pathname, search: next.search, hash: next.hash }); } },
-    setTimeout: () => 0,
+    setTimeout: (fn, ms) => { const id = {}; timers.set(id, { fn, ms }); return id; },
+    clearTimeout: id => timers.delete(id),
     route: () => { routes++; },
     toast: message => toasts.push(message),
     fetch: async (path, options = {}) => {
@@ -83,7 +87,9 @@ function harness(transport, initialHash = '', initialStorage) {
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
-    ...client, calls, storage, toasts, node, location,
+    ...client, calls, storage, toasts, node, location, rootStyle,
+    get reloads() { return reloads; },
+    expireIdentity() { for (const t of timers.values()) if (t.ms === 5000) t.fn(); },
     get routes() { return routes; },
     seed(name = 'A') { client.authState.enabled = true; client.saveAuth(tokens(name)); },
     async login(name = 'B') {
@@ -353,13 +359,14 @@ test('old refresh finally does not clear a new session refresh flight', async ()
     if (call.path === '/auth/login') return response(200, tokens('B'));
     if (call.path === '/auth/refresh') return JSON.parse(call.body).refresh_token === 'A-refresh' ? oldGate.promise : newGate.promise;
     const count = (attempts.get(call.path) || 0) + 1; attempts.set(call.path, count);
-    return response(count === 1 ? 401 : 200, { current: true });
+    return response(count === 1 && call.headers.Authorization !== 'Bearer B-rotated-access' ? 401 : 200, { current: true });
   }); h.seed();
   const old = outcome(h.api('/old')); await until(() => h.count('/auth/refresh') === 1);
   await h.login();
   const current = outcome(h.api('/current')); await until(() => h.count('/auth/refresh') === 2);
   oldGate.resolve(response(200, tokens('old-rotated'))); await old;
-  const next = outcome(h.api('/next')); await until(() => h.count('/next') === 1); await turn();
+  const next = outcome(h.api('/next')); await turn();
+  assert.equal(h.count('/next'), 0, 'new calls wait until refreshed grants are verified');
   const refreshCount = h.count('/auth/refresh');
   newGate.resolve(response(200, tokens('B-rotated')));
   assert.equal((await current).ok, true); assert.equal((await next).ok, true);
@@ -720,4 +727,137 @@ for(const hash of ['#/text2sql?schema_name=%zz','#/text2sql?schema_name=%ED%A0%8
 test('logout clears displayed schema details including expanded source',async()=>{
  const h=harness(ssoTransport);h.seed();h.node('legacy-text2sql-schema-detail').textContent='PRIVATE_SCHEMA_CONTEXT';
  await h.logout();assert.equal(h.node('legacy-text2sql-schema-detail').textContent,'');
+});
+
+// Refresh rotates credentials, but role/team/scope changes retire the document.
+// The fixture transports do not perform that retirement on behalf of the client.
+for (const [field, value] of [
+  ['role', 'readonly_admin'], ['team_id', 'other-team'],
+  ['scopes', ['admin:read']], ['id', 'other-subject'],
+]) test('changed refresh grant retires private views and prevents replay: ' + field, async () => {
+  const rotated = tokens('rotated'); rotated.user[field] = value;
+  const h = harness(call => call.path === '/auth/refresh' ? response(200, rotated) : response(401));
+  h.seed(); h.node('legacy-text2sql-schema-detail').textContent = 'private old text';
+  h.node('modal-body').textContent = 'private modal';
+  const result = await outcome(h.api('/mutation', { method: 'POST', success: 'saved' }));
+  assert.equal(result.ok, false);
+  assert.equal(h.reloads, 1);
+  assert.equal(h.rootStyle.visibility, 'hidden');
+  assert.equal(h.node('legacy-text2sql-schema-detail').textContent, '');
+  assert.equal(h.node('modal-body').textContent, '');
+  assert.equal(h.count('/mutation'), 1);
+  assert.equal(h.toasts.length, 0);
+  assert.equal(h.storage.get('authAccess'), 'rotated-access');
+  assert.equal(h.storage.get('authRefresh'), 'rotated-refresh');
+  assert.equal(h.storage.has('authUser'), false);
+  assert.equal(h.storage.get('vibe.admin.auth.grant-review'), '1');
+  assert.equal(h.loginVisible(), false);
+  assert.equal((await outcome(h.api('/after'))).ok, false);
+  assert.equal(h.count('/after'), 0);
+});
+
+test('equal normalized scopes preserve the document and current form', async () => {
+  const rotated = tokens('rotated');
+  rotated.user.scopes = ['admin:write', 'admin:read', 'admin:read'];
+  const h = harness(() => response(200, rotated)); h.seed();
+  h.node('unsaved').value = 'work in progress';
+  h.node('legacy-text2sql-schema-detail').textContent = 'authorized source';
+  assert.equal(await h.tryRefresh(), true);
+  assert.equal(h.reloads, 0);
+  assert.equal(h.node('unsaved').value, 'work in progress');
+  assert.equal(h.node('legacy-text2sql-schema-detail').textContent, 'authorized source');
+  assert.equal(h.count('/auth/me'), 0);
+});
+
+for (const changed of [false, true]) test('older refresh wire verifies actual auth/me before replay, changed=' + changed, async () => {
+  const identity = deferred();
+  const pair = tokens('rotated'); delete pair.user;
+  const h = harness(call => {
+    if (call.path === '/auth/refresh') return response(200, pair);
+    if (call.path === '/auth/me') return identity.promise;
+    return response(call.headers.Authorization === 'Bearer A-access' ? 401 : 200, { current: true });
+  }); h.seed();
+  const pending = outcome(h.api('/business'));
+  await until(() => h.count('/auth/me') === 1);
+  const waiting = outcome(h.api('/during', { method: 'POST' }));
+  await turn();
+  assert.equal(h.count('/during'), 0);
+  assert.equal(h.storage.get('authRefresh'), 'rotated-refresh');
+  const user = tokens('rotated').user;
+  if (changed) user.team_id = 'other-team';
+  identity.resolve(response(200, { auth_enabled: true, user }));
+  assert.equal((await pending).ok, !changed);
+  assert.equal((await waiting).ok, !changed);
+  assert.equal(h.count('/business'), changed ? 1 : 2);
+  assert.equal(h.count('/during'), changed ? 0 : 1);
+  assert.equal(h.reloads, changed ? 1 : 0);
+});
+
+for (const stage of ['headers', 'body']) test('older-wire verification timeout preserves rotation and retires views: ' + stage, async () => {
+  const never = deferred();
+  const pair = tokens('rotated'); delete pair.user;
+  let bodyStarted = false;
+  const h = harness(call => call.path === '/auth/refresh' ? response(200, pair)
+    : stage === 'headers' ? never.promise : { ...response(200), json() { bodyStarted = true; return never.promise; } });
+  h.seed(); const pending = h.tryRefresh();
+  await until(() => h.count('/auth/me') === 1 && (stage === 'headers' || bodyStarted));
+  h.expireIdentity();
+  assert.equal(await pending, false);
+  assert.equal(h.calls.find(c => c.path === '/auth/me').signal.aborted, true);
+  assert.equal(h.reloads, 1);
+  assert.equal(h.storage.get('authRefresh'), 'rotated-refresh');
+  never.resolve(stage === 'headers' ? response(200) : { auth_enabled: true, user: tokens('late').user });
+  await turn();
+  assert.equal(h.storage.has('authUser'), false);
+});
+
+test('logout aborts pending identity lookup without reviving rotated credentials', async () => {
+  const identity = deferred(); const pair = tokens('rotated'); delete pair.user;
+  const h = harness(call => call.path === '/auth/refresh' ? response(200, pair)
+    : call.path === '/auth/me' ? identity.promise : response(200));
+  h.seed(); const pending = h.tryRefresh();
+  await until(() => h.count('/auth/me') === 1);
+  await h.logout();
+  assert.equal(await pending, false);
+  assert.equal(h.reloads, 0);
+  assert.equal(h.storage.has('authAccess'), false);
+  assert.equal(h.calls.find(c => c.path === '/auth/me').signal.aborted, true);
+});
+
+test('old response body completing after a grant transition cannot paint or toast', async () => {
+  const body = deferred(); const rotated = tokens('rotated'); rotated.user.role = 'readonly_admin';
+  const h = harness(call => call.path === '/auth/refresh' ? response(200, rotated)
+    : { ...response(200), json: () => body.promise });
+  h.seed(); const old = outcome(h.api('/old', { success: 'old saved' }));
+  await turn(); assert.equal(await h.tryRefresh(), false);
+  body.resolve({ private: 'old secret' });
+  assert.equal((await old).ok, false);
+  assert.equal(h.toasts.length, 0);
+});
+
+for (const status of [401, 503]) test('grant review boot fails closed and permits explicit recovery, status=' + status, async () => {
+  let recovered = false;
+  const h = harness(() => recovered ? response(200, { auth_enabled: true, user: tokens('rotated').user }) : response(status));
+  h.seed('rotated'); h.storage.set('vibe.admin.auth.grant-review', '1');
+  await h.initAuth();
+  assert.equal(h.routes, 0);
+  assert.equal(h.count('/auth/refresh'), 0);
+  assert.match(h.node('view').innerHTML, /권한 다시 확인/);
+  assert.equal(h.storage.get('authRefresh'), 'rotated-refresh');
+  assert.equal(h.authState.nav.allowed_tabs.length, 0);
+  recovered = true; h.node('legacy-auth-retry').listeners.click();
+  await until(() => h.routes === 1);
+  assert.equal(h.storage.has('vibe.admin.auth.grant-review'), false);
+  assert.equal(h.authState.user.email, 'rotated');
+});
+
+for (const invalid of [false, true]) test('authenticated navigation outage cannot reopen all menus, invalid=' + invalid, async () => {
+  const transport = call => call.path === '/auth/me' ? response(200, { auth_enabled: true, user: tokens('A').user })
+    : invalid ? response(200, { allowed_tabs: ['settings'] }) : response(503);
+  transport.navigation = true;
+  const h = harness(transport); h.seed(); await h.initAuth();
+  assert.equal(h.routes, 0);
+  assert.equal(h.authState.nav.allowed_tabs.length, 0);
+  assert.match(h.node('view').innerHTML, /권한 다시 확인/);
+  assert.equal(h.storage.get('authRefresh'), 'A-refresh');
 });
