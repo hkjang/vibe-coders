@@ -501,6 +501,24 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if err != nil || len(mutationRuns) != 0 {
 		t.Fatal("unexpected mutation skill execution")
 	}
+	audits, err := db.ListAdminAudit(t.Context(), 1000)
+	if err != nil {
+		t.Fatal("raw-view audit verification unavailable")
+	}
+	rawViews := 0
+	for _, entry := range audits {
+		if entry.Action != "request.raw_view" {
+			continue
+		}
+		var after map[string]string
+		if json.Unmarshal([]byte(entry.AfterValue), &after) != nil || after["request_id"] != "session-own-current" {
+			t.Fatal("unexpected raw-view audit target")
+		}
+		rawViews++
+	}
+	if rawViews != 1 {
+		t.Fatal("raw reveal must be explicitly confirmed and audited exactly once")
+	}
 	if sessionSnapshot() != sessionsBefore {
 		t.Fatal("session records changed during read-only handoff")
 	}
@@ -524,12 +542,12 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 48 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 49 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024" && test.Scenario != "KEYCLOAK-LIVE-025" && test.Scenario != "KEYCLOAK-LIVE-026" && test.Scenario != "KEYCLOAK-LIVE-027" && test.Scenario != "KEYCLOAK-LIVE-028" && test.Scenario != "KEYCLOAK-LIVE-029" && test.Scenario != "KEYCLOAK-LIVE-030" && test.Scenario != "KEYCLOAK-LIVE-031" && test.Scenario != "KEYCLOAK-LIVE-032" && test.Scenario != "KEYCLOAK-LIVE-033" && test.Scenario != "KEYCLOAK-LIVE-034" && test.Scenario != "KEYCLOAK-LIVE-035" && test.Scenario != "KEYCLOAK-LIVE-036" && test.Scenario != "KEYCLOAK-LIVE-037" && test.Scenario != "KEYCLOAK-LIVE-038" && test.Scenario != "KEYCLOAK-LIVE-039" && test.Scenario != "KEYCLOAK-LIVE-040" && test.Scenario != "KEYCLOAK-LIVE-041" && test.Scenario != "KEYCLOAK-LIVE-042" && test.Scenario != "KEYCLOAK-LIVE-043" && test.Scenario != "KEYCLOAK-LIVE-044" && test.Scenario != "KEYCLOAK-LIVE-045" && test.Scenario != "KEYCLOAK-LIVE-046" && test.Scenario != "KEYCLOAK-LIVE-047" && test.Scenario != "KEYCLOAK-LIVE-048") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024" && test.Scenario != "KEYCLOAK-LIVE-025" && test.Scenario != "KEYCLOAK-LIVE-026" && test.Scenario != "KEYCLOAK-LIVE-027" && test.Scenario != "KEYCLOAK-LIVE-028" && test.Scenario != "KEYCLOAK-LIVE-029" && test.Scenario != "KEYCLOAK-LIVE-030" && test.Scenario != "KEYCLOAK-LIVE-031" && test.Scenario != "KEYCLOAK-LIVE-032" && test.Scenario != "KEYCLOAK-LIVE-033" && test.Scenario != "KEYCLOAK-LIVE-034" && test.Scenario != "KEYCLOAK-LIVE-035" && test.Scenario != "KEYCLOAK-LIVE-036" && test.Scenario != "KEYCLOAK-LIVE-037" && test.Scenario != "KEYCLOAK-LIVE-038" && test.Scenario != "KEYCLOAK-LIVE-039" && test.Scenario != "KEYCLOAK-LIVE-040" && test.Scenario != "KEYCLOAK-LIVE-041" && test.Scenario != "KEYCLOAK-LIVE-042" && test.Scenario != "KEYCLOAK-LIVE-043" && test.Scenario != "KEYCLOAK-LIVE-044" && test.Scenario != "KEYCLOAK-LIVE-045" && test.Scenario != "KEYCLOAK-LIVE-046" && test.Scenario != "KEYCLOAK-LIVE-047" && test.Scenario != "KEYCLOAK-LIVE-048" && test.Scenario != "KEYCLOAK-LIVE-049") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true

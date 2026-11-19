@@ -326,7 +326,7 @@ function FactStrip({ detail }: { detail: RequestIODetail }): React.JSX.Element {
   );
 }
 
-/** Keyed on the request id, so switching requests discards revealed originals. */
+/** A request or read-owner change retires revealed originals and pending confirmation. */
 export function RequestIOPanel({
   requestId,
   readScope,
@@ -335,7 +335,11 @@ export function RequestIOPanel({
   readScope?: RequestDetailReadScope;
 }): React.JSX.Element {
   return (
-    <RequestIOPanelContent key={requestId} requestId={requestId} {...(readScope ? { readScope } : {})} />
+    <RequestIOPanelContent
+      key={JSON.stringify([requestId, readScope?.id])}
+      requestId={requestId}
+      {...(readScope ? { readScope } : {})}
+    />
   );
 }
 

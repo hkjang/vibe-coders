@@ -4,8 +4,16 @@ import { RefreshCw } from "lucide-react";
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 
-import { useRequestDetailReadScope } from "@/features/observability/request-insight/request-detail-read-scope";
-import { useXViewReadOwner } from "@/features/observability/xview/xview-live-access";
+import {
+  useRequestDetailReadScope,
+  type RequestDetailReadScope,
+} from "@/features/observability/request-insight/request-detail-read-scope";
+import {
+  useFeatureReadOwner,
+  featureOwnedKey,
+  assertFeatureRead,
+  type FeatureReadOwner,
+} from "@/shared/hooks/use-feature-read-owner";
 import { apiClient } from "@/shared/api/client";
 import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
 import type { RequestIOCapture, RequestIOPreview } from "@/shared/api/domains/observability.schemas";
@@ -136,8 +144,29 @@ function CaptureNotice({ capture }: { capture: RequestIOCapture | undefined }): 
 }
 
 export function RequestIOPage(): React.JSX.Element {
-  const owner = useXViewReadOwner(routeId);
+  const owner = useFeatureReadOwner(routeId, "request-io");
   const scope = useRequestDetailReadScope(owner, owner.isCurrent);
+  if (!owner.readable || owner.denied) {
+    return (
+      <InlineNotice
+        tone="warning"
+        title="입출력 조회 권한을 확인하세요."
+        actions={owner.readable ? <Button onClick={owner.restart}>다시 조회</Button> : undefined}
+      >
+        이전 조회 내용을 지웠습니다. 현재 계정의 권한을 확인한 뒤 다시 조회하세요.
+      </InlineNotice>
+    );
+  }
+  return <RequestIOPageContent key={scope.id} owner={owner} scope={scope} />;
+}
+
+function RequestIOPageContent({
+  owner,
+  scope,
+}: {
+  owner: FeatureReadOwner;
+  scope: RequestDetailReadScope;
+}): React.JSX.Element {
   const wide = useWideLayout();
   const [params, updateParams] = useSearchState();
   const live = params.get("live") !== "off";
@@ -158,20 +187,29 @@ export function RequestIOPage(): React.JSX.Element {
     [cursor, model, status],
   );
   const list = useQuery<AppRequestsResponse>({
-    queryKey: ["observability", "io", "list", scope.id, query],
+    queryKey: featureOwnedKey(["observability", "io", "list", scope.id, query], owner),
     enabled: owner.readable,
     gcTime: 0,
     refetchInterval: live && !cursor ? liveIntervalMs : false,
     refetchIntervalInBackground: false,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[3] === scope.id ? previous : undefined,
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.requests, {
-        headers: appRequestsContractHeaders,
-        query,
-        signal,
-        routeId,
-      }),
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      try {
+        const result = await apiClient.request(endpoints.admin.requests, {
+          headers: appRequestsContractHeaders,
+          query,
+          signal,
+          routeId,
+        });
+        assertFeatureRead(owner, signal);
+        return result;
+      } catch (error) {
+        assertFeatureRead(owner, signal);
+        throw error;
+      }
+    },
   });
   const denied = isAppError(list.error) && (list.error.kind === "permission" || list.error.kind === "auth");
   const received = useMemo(() => (denied ? [] : (list.data?.requests ?? [])), [denied, list.data]);

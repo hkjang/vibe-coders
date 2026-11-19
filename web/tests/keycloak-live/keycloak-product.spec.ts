@@ -1833,3 +1833,64 @@ test("KEYCLOAK-LIVE-048 잘못된 세션 주소와 늦은 전체 목록이 현�
   await expect(page.locator("#sess-days")).toHaveCount(0);
   expect(reads().writes).toBe(0);
 });
+
+test("KEYCLOAK-LIVE-049 같은 요청을 연 상태에서 권한이 갱신되면 확인한 원문을 지운다", async ({ page }) => {
+  await signIn(page, "new-operator");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  let authorization = "",
+    rawReads = 0,
+    refreshes = 0,
+    expiredOnce = false;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin !== gateway) return;
+    if (url.pathname === "/admin/requests/session-own-current/io") {
+      authorization = request.headers()["authorization"] ?? authorization;
+      if (url.searchParams.get("reveal") === "raw") rawReads++;
+    }
+    if (url.pathname === "/auth/refresh") refreshes++;
+  });
+  await page.goto("/app/observability/io?request_id=session-own-current&live=off");
+  const panel = page.getByRole("region", { name: "선택한 요청의 입력과 출력", exact: true });
+  await expect(panel.getByText("OWN_SESSION_CURRENT", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "원문 보기", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "이 요청의 원문을 볼까요?", exact: true });
+  expect(rawReads).toBe(0);
+  await dialog.getByRole("button", { name: "원문 보기", exact: true }).click();
+  await expect(panel.getByText("RAW_SESSION_PRIVATE", { exact: true })).toBeVisible();
+  expect(rawReads).toBe(1);
+  const control = process.env.VIBE_GRANT_CONTROL;
+  if (!control || !authorization) throw Error("Private fixture state missing");
+  try {
+    const changed = await page.request.post("/__fixture/grants", {
+      headers: { "X-Fixture-Control": control, Authorization: authorization },
+      data: { operation: "role" },
+    });
+    expect(changed.status()).toBe(200);
+    const body = (await changed.json()) as { expired_access: string };
+    await page.route("**/admin/ui-bootstrap", async (route) => {
+      if (!expiredOnce) {
+        expiredOnce = true;
+        await route.continue({
+          headers: { ...route.request().headers(), authorization: "Bearer " + body.expired_access },
+        });
+      } else await route.continue();
+    });
+    // Credential rotation alone does not refresh AuthProvider's grant metadata.
+    // Exercise the actual visibility bootstrap, including its expired-token retry.
+    const bootstrapResponse = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap" && response.status() === 200,
+    );
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    const refreshed = (await (await bootstrapResponse).json()) as { user: { role: string } };
+    expect(refreshed.user.role).toBe("readonly_admin");
+    await expect.poll(() => refreshes).toBe(1);
+    await expect(panel.getByText("OWN_SESSION_CURRENT", { exact: true })).toBeVisible();
+    await expect(page.getByText("RAW_SESSION_PRIVATE", { exact: true })).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "원문 보기", exact: true })).toHaveCount(0);
+    expect(rawReads).toBe(1);
+    expect(new URL(page.url()).searchParams.get("request_id")).toBe("session-own-current");
+  } finally {
+    await restoreGrantFixture(page);
+  }
+});

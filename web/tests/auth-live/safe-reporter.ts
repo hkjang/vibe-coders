@@ -63,6 +63,7 @@ const scenarios = new Set([
   "KEYCLOAK-LIVE-046",
   "KEYCLOAK-LIVE-047",
   "KEYCLOAK-LIVE-048",
+  "KEYCLOAK-LIVE-049",
   "AUTH-LIVE-001",
   "AUTH-LIVE-002",
   "AUTH-LIVE-003",
