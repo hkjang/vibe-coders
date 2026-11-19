@@ -16,7 +16,8 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
-const modelTarget = block('function legacyModelTarget(', 'async function renderLegacyModelDetail(') + block('function legacyProviderRefValid(', '// Reuse the safe app projection;');
+const routingTarget = block('function legacyRoutingRuleTarget(', 'async function renderLegacyRoutingRuleDetail(');
+ const modelTarget = block('function legacyModelTarget(', 'async function renderLegacyModelDetail(') + block('function legacyProviderRefValid(', '// Reuse the safe app projection;');
 const http = block('// ---------- HTTP ----------', '// ---------- formatting ----------');
 const nav = (name) => ({ allowed_tabs: ['settings'], default_home: '#/dashboard', marker: name });
 const tokens = (name, access = name + '-access') => ({
@@ -76,7 +77,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + modelTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -648,4 +649,28 @@ for(const hash of ['#/model-contracts','#/model-contracts?model=missing','#/mode
 test('retiring auth clears the displayed model detail',async()=>{
  const h=harness(ssoTransport);h.seed();h.node('legacy-model-detail').textContent='PRIVATE_MODEL_DETAIL';
  await h.logout();assert.equal(h.node('legacy-model-detail').textContent,'');
+});
+
+test('exact routing rule survives local login and independent SSO',async()=>{
+ const hash='#/routing?'+new URLSearchParams({rule_id:'규칙 +%2F?&#/exact'});
+ const local=harness(ssoTransport,hash);await local.login();assert.equal(local.location.hash,hash);
+ const departure=harness(ssoTransport,hash);await departure.startSSO();
+ const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+ assert.equal(callback.location.hash,hash);assert.equal(callback.count('/admin/routing/preview'),0);
+});
+for(const hash of ['#/routing','#/routing/health?rule_id=public','#/routing?rule_id=','#/routing?rule_id=a&rule_id=b','#/routing?rule_id=a&run=true','#/routing?rule_id=%E2%80%8B','#/routing?rule_id=%ED%A0%80','#/routing?rule_id=%zz']){
+ test('unvalidated routing workflow is not staged across SSO '+hash,async()=>{
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,'');
+ });
+}
+test('retiring auth clears displayed routing detail',async()=>{
+ const h=harness(ssoTransport);h.seed();h.node('legacy-routing-rule-detail').textContent='PRIVATE_ROUTING_DETAIL';
+ await h.logout();assert.equal(h.node('legacy-routing-rule-detail').textContent,'');
+});
+
+test('a literal question mark in an exact routing ID survives SSO',async()=>{
+ const hash='#/routing?rule_id=public?tail';
+ const departure=harness(ssoTransport,hash);await departure.startSSO();
+ const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,hash);
 });

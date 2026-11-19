@@ -68,6 +68,19 @@ describe("OpenAPI runtime schemas", () => {
   });
 
   it("enables Legacy request handoff only through an explicit optional server capability", () => {
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_routing_rule_detail).toBeUndefined();
+    expect(
+      uiBootstrapSchema.parse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_routing_rule_detail: true },
+      }).capabilities.legacy_routing_rule_detail,
+    ).toBe(true);
+    expect(
+      uiBootstrapSchema.safeParse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_routing_rule_detail: "true" },
+      }).success,
+    ).toBe(false);
     expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_model_detail).toBeUndefined();
     expect(
       uiBootstrapSchema.parse({

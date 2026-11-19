@@ -849,6 +849,7 @@ const adminHTML = `<!doctype html>
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
       if (/^#\/(?:requests|prompts|prompt-assets|prompt-debt)(?:\?|$)/.test(hash)) return hash;
+      if (hash.startsWith('#/routing?') && legacyRoutingRuleTarget(undefined, hash)) return hash;
       if (hash.startsWith('#/model-contracts?') && legacyModelTarget(new URLSearchParams(hash.slice(hash.indexOf('?') + 1)))) return hash;
       return '';
     }
@@ -889,6 +890,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const routingDetail = document.getElementById('legacy-routing-rule-detail');
+      if (routingDetail) routingDetail.textContent = '';
       authEpoch++;
       navigationRevision++;
       navigationReady = false;
@@ -2106,6 +2109,8 @@ const adminHTML = `<!doctype html>
       if (providerDetail) providerDetail.textContent = '';
       const modelDetail = document.getElementById('legacy-model-detail');
       if (modelDetail) modelDetail.textContent = '';
+      const routingDetail = document.getElementById('legacy-routing-rule-detail');
+      if (routingDetail) routingDetail.textContent = '';
       const generation = ++legacyRouteGeneration;
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
@@ -2182,7 +2187,11 @@ const adminHTML = `<!doctype html>
           case 'mcp-upstreams': await renderMCP(params, 'upstreams'); break;
           case 'mcp-tools': await renderMCP(params, 'tools'); break;
           case 'mcp-policy': await renderMCP(params, 'policy'); break;
-          case 'routing':   rest[0] === 'health' ? await renderRoutingHealth(params) : await renderRoutingLearning(params); break;
+          case 'routing':
+            if (rest[0] === 'health') await renderRoutingHealth(params);
+            else if (!rest.length && params.has('rule_id')) await renderLegacyRoutingRuleDetail(params);
+            else await renderRoutingLearning(params);
+            break;
           case 'chat-test': await renderChatTest(params); break;
           case 'prompt-lab': await renderPromptLab(params); break;
           case 'agents':    await renderAgents(params); break;
@@ -9194,6 +9203,67 @@ const adminHTML = `<!doctype html>
       p.set('limit', defaults.limit || '80');
       return p;
     }
+
+    function legacyRoutingRuleTarget(params, rawHash) {
+      if (rawHash !== undefined) {
+        if (typeof rawHash !== 'string' || rawHash.length > 8192 || !rawHash.startsWith('#/routing?')) return null;
+        const query = rawHash.slice('#/routing?'.length);
+        // Validate before URLSearchParams can replace invalid UTF-8 in an ID.
+        // Preserve all text after the first ?, including a literal ? in a value.
+        try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+        params = new URLSearchParams(query);
+      }
+      if (!params || params.toString().length > 8192 || params.getAll('rule_id').length !== 1 ||
+          Array.from(params.keys()).some(key => key !== 'rule_id')) return null;
+      const id = params.get('rule_id');
+      if (!id || id.trim() !== id || Array.from(id).length > 512 || /\p{C}/u.test(id)) return null;
+      return id;
+    }
+    async function renderLegacyRoutingRuleDetail(params) {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const id = legacyRoutingRuleTarget(params, hash);
+      const back = '<p><a href="#/routing">라우팅 학습 화면 열기</a></p>';
+      const render = body => {
+        if (!current()) return;
+        view.innerHTML = section('라우팅 규칙 상세', '<div id="legacy-routing-rule-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' + body + back + '</div>');
+        document.getElementById('legacy-routing-rule-detail').focus();
+      };
+      if (!id) { render('<p role="alert">라우팅 규칙 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 라우팅 규칙을 확인하고 있습니다.</p>');
+      const retry = '<button type="button" id="legacy-routing-rule-retry">다시 조회</button>';
+      try {
+        // Preserve the existing authorized raw configuration contract. This read does
+        // not preview traffic, optimize, open an editor, or change the routing cache.
+        const data = await api('/admin/routing-rules?' + new URLSearchParams({ id }), { cache: 'no-store' });
+        if (!current()) return;
+        if (!data || !Array.isArray(data.rules)) throw new Error('Invalid rule response');
+        if (data.rules.length === 0) {
+          render('<p role="status">해당 라우팅 규칙이 없습니다. 삭제되었거나 주소가 변경되었습니다.</p>' + retry);
+        } else {
+          const rule = data.rules[0];
+          if (data.rules.length !== 1 || !rule || rule.id !== id || typeof rule.enabled !== 'boolean' ||
+              ['priority','min_complexity','max_complexity'].some(key => !Number.isSafeInteger(rule[key])) ||
+              ['match_pattern','target_model','target_provider','note','created_at'].some(key => typeof rule[key] !== 'string')) throw new Error('Invalid selected rule');
+          const fields = [
+            ['규칙 ID', rule.id], ['상태', rule.enabled ? '사용 중' : '중지됨'], ['우선순위', rule.priority],
+            ['모델 패턴', rule.match_pattern || '*'], ['복잡도 범위', rule.min_complexity + '–' + rule.max_complexity],
+            ['대상 모델', rule.target_model], ['대상 공급자', rule.target_provider || '자동 선택'],
+            ['메모', rule.note.slice(0,10000) || '없음'], ['생성 시각', rule.created_at],
+          ];
+          render('<p role="status">현재 저장된 규칙입니다. 실제 요청의 라우팅 결과를 실행한 것은 아닙니다.</p>' +
+            '<dl>' + fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+              '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1])) + '</dd>').join('') + '</dl>' +
+            (rule.note.length > 10000 ? '<p>메모는 앞의 10,000자까지 표시합니다.</p>' : '') + retry);
+        }
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 규칙을 확인하지 못했습니다. 로그인 상태와 조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+      }
+      if (current()) document.getElementById('legacy-routing-rule-retry').addEventListener('click', () => { if (current()) void route(); });
+    }
+
     async function renderRoutingLearning(initial) {
       const route = initial ? (initial.get('route') || '') : '';
       const windowValue = initial ? (initial.get('window') || '7d') : '7d';

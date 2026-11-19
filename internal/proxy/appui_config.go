@@ -507,11 +507,12 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 		"capabilities": map[string]any{
 			"raw_prompt_view": s.canViewRawPrompts(r),
 			// Navigation support only; existing request APIs still enforce authentication and scope.
-			"legacy_request_detail":  true,
-			"legacy_provider_detail": true,
-			"legacy_prompt_library":  true,
-			"legacy_model_detail":    true,
-			"legacy_request_filters": true,
+			"legacy_request_detail":      true,
+			"legacy_provider_detail":     true,
+			"legacy_prompt_library":      true,
+			"legacy_model_detail":        true,
+			"legacy_routing_rule_detail": true,
+			"legacy_request_filters":     true,
 		},
 		"permissions":        scopes,
 		"allowed_features":   allowedFeatures,

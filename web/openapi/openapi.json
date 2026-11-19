@@ -14911,6 +14911,10 @@
                 "description": "Preserves supported request list filters and exact time bounds in the Legacy requests hash route. Does not grant request access.",
                 "type": "boolean"
               },
+              "legacy_routing_rule_detail": {
+                "description": "Opens the exact stored routing rule in a read-only Legacy detail using the existing authorized configuration GET. Does not execute routing preview or mutations.",
+                "type": "boolean"
+              },
               "raw_prompt_view": {
                 "type": "boolean"
               }

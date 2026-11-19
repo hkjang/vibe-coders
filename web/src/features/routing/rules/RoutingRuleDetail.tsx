@@ -1,4 +1,4 @@
-import { legacyRoutes } from "@/config/legacy-route-map";
+import { routingRuleLegacyHandoff } from "./legacy-routing-handoff";
 import { RoutingRuleDetailData } from "./RoutingRuleDetailData";
 import type { RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -26,6 +26,12 @@ export function RoutingRuleDetail({
   const valid = values.length === 1 && validRoutingRuleDetailId(id, auth.credentialPrefixes);
   const supported = versionAtLeast(auth.backendVersion, "v0.86.103");
   const readable = owner.readable && !owner.denied;
+  const handoff = routingRuleLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "routing.rules")?.legacyPath,
+    valid && supported && readable ? id : undefined,
+    auth.capabilities?.legacy_routing_rule_detail === true,
+    auth.credentialPrefixes,
+  );
   return (
     <Sheet
       open
@@ -38,13 +44,13 @@ export function RoutingRuleDetail({
       }}
       footer={
         <>
-          {canOpenLegacyAdmin(auth) ? (
+          {canOpenLegacyAdmin(auth) && handoff.href ? (
             <FeatureLegacyLink
               featureId="routing.rules"
               className="button button-secondary button-default"
-              href={legacyRoutes.routing}
+              href={handoff.href}
             >
-              기존 라우팅 화면
+              {handoff.sameRule ? "기존 화면에서 같은 규칙 열기" : "기존 라우팅 화면"}
             </FeatureLegacyLink>
           ) : null}
           <Button onClick={onClose}>닫기</Button>

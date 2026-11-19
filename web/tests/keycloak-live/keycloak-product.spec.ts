@@ -489,3 +489,104 @@ test("KEYCLOAK-LIVE-011 읽기 전용 모델 상세는 다른 출처를 대신 �
   await expect(page.locator("#legacy-model-detail")).toHaveCount(0);
   expect(writes).toBe(0);
 });
+
+const routingHandoffId = "SSO 규칙 +%2F?&#/exact";
+test("KEYCLOAK-LIVE-012 선택한 저장 규칙이 실제 Legacy SSO 뒤에도 유지된다", async ({ page }) => {
+  await signIn(page, "new-operator");
+  await page.goto("/app/routing/rules?" + new URLSearchParams({ rule_id: routingHandoffId }));
+  const panel = page.getByRole("dialog", { name: "라우팅 규칙 상세" });
+  await expect(panel).toContainText("selected routing note");
+  const link = panel.getByRole("link", { name: "기존 화면에서 같은 규칙 열기", exact: true });
+  const href = "/admin#/routing?" + new URLSearchParams({ rule_id: routingHandoffId });
+  await expect(link).toHaveAttribute("href", href);
+  let writes = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+  });
+  await link.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-routing-rule-detail");
+  await expect(detail).toContainText(routingHandoffId);
+  await expect(detail).toContainText("selected routing note");
+  await expect(detail).not.toContainText("other routing note");
+  await expect(detail).toContainText("중지됨");
+  await expect(detail).toContainText("10–90");
+  await expect(detail.locator("input, select, textarea, form")).toHaveCount(0);
+  await expect(page).toHaveURL(gateway + href);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const detail = document.querySelector("#legacy-routing-rule-detail");
+        if (!detail) throw Error("Routing detail unavailable");
+        return (await axe.run(detail, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("#auth-user").click();
+  await expect(page.locator("#user-menu")).toBeVisible();
+  await page.locator("#auth-logout").click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(detail).toBeEmpty();
+  expect(writes).toBe(0);
+});
+test("KEYCLOAK-LIVE-013 라우팅 조회 계정의 규칙 조회와 없는 규칙·화면 전환을 구분한다", async ({ page }) => {
+  await signIn(page, "routing-reader");
+  expect((await currentUser(page)).role).toBe("team_admin");
+  let writes = 0,
+    ruleReads = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/admin/routing-rules") ruleReads++;
+    if (new URL(request.url()).pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+  });
+  await page.goto("/admin#/routing?" + new URLSearchParams({ rule_id: routingHandoffId }));
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-routing-rule-detail");
+  await expect(detail).toContainText("selected routing note");
+  await expect(detail.getByRole("button", { name: /저장|삭제|미리보기|최적화/ })).toHaveCount(0);
+  await page.goto("/admin#/routing?" + new URLSearchParams({ rule_id: "missing-routing-rule" }));
+  await expect(detail).toContainText("해당 라우팅 규칙이 없습니다");
+  await expect(detail).not.toContainText("selected routing note");
+  const beforeInvalid = ruleReads;
+  await page.goto("/admin#/routing?rule_id=%ED%A0%80");
+  await expect(detail).toContainText("상세 주소가 올바르지 않습니다");
+  expect(ruleReads).toBe(beforeInvalid);
+  await page.goto("/admin#/routing?" + new URLSearchParams({ rule_id: routingHandoffId }));
+  await expect(detail).toContainText("selected routing note");
+  await page.goto("/admin#/routing/health");
+  await expect(detail).toHaveCount(0);
+  await expect(page.locator("#view")).toContainText("Provider Health");
+  await expect(page.locator("#view")).not.toContainText("selected routing note");
+  expect(writes).toBe(0);
+});
+
+test("KEYCLOAK-LIVE-014 라우팅 조회 권한이 없는 기존 역할은 규칙 내용을 읽지 못한다", async ({ page }) => {
+  await signIn(page, "reader");
+  expect((await currentUser(page)).role).toBe("readonly_admin");
+  let writes = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/admin/") && request.method() !== "GET") writes++;
+  });
+  await page.goto("/admin#/routing?" + new URLSearchParams({ rule_id: routingHandoffId }));
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  const rejected = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/routing-rules" && response.status() === 401,
+  );
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  expect((await rejected).status()).toBe(401);
+  await expect(page.locator("#legacy-routing-rule-detail")).toContainText("조회 권한을 확인");
+  await expect(page.locator("#login-backdrop.open")).toHaveCount(0);
+  await expect(page.locator("#view")).not.toContainText("selected routing note");
+  expect(writes).toBe(0);
+});

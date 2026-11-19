@@ -142,6 +142,25 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			t.Fatal("synthetic prompt boundary unavailable")
 		}
 	}
+	for i, id := range []string{"SSO 규칙 +%2F?&#/exact", "other-routing-rule"} {
+		rule := store.RoutingRule{ID: id, Enabled: false, Priority: 17 + i, MatchPattern: "billing-*",
+			MinComplexity: 10, MaxComplexity: 90, TargetModel: "shared routing model", TargetProvider: "public-routing-provider",
+			Note: "selected routing note", CreatedAt: time.Date(2026, time.November, 18, 1, 2, 3, 456000000, time.UTC)}
+		if i == 1 {
+			rule.Note = "other routing note"
+		}
+		if err := db.UpsertRoutingRule(t.Context(), rule); err != nil {
+			t.Fatal("synthetic routing rule unavailable")
+		}
+	}
+	rulesBefore, err := db.ListRoutingRules(t.Context())
+	if err != nil {
+		t.Fatal("routing baseline unavailable")
+	}
+	ruleBytesBefore, err := json.Marshal(rulesBefore)
+	if err != nil {
+		t.Fatal("routing baseline invalid")
+	}
 	assetsBefore, err := db.ListPromptTemplates(t.Context(), false)
 	if err != nil {
 		t.Fatal("asset baseline unavailable")
@@ -199,17 +218,17 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 11 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 14 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true
 	}
-	for _, expected := range []struct{ email, role string }{{"existing@example.invalid", "admin"}, {"new@example.invalid", "admin"}, {"reader@example.invalid", "readonly_admin"}} {
+	for _, expected := range []struct{ email, role string }{{"existing@example.invalid", "admin"}, {"new@example.invalid", "admin"}, {"reader@example.invalid", "readonly_admin"}, {"routing-reader@example.invalid", "team_admin"}} {
 		user, found, err := db.AuthUserByEmail(t.Context(), expected.email)
 		if err != nil || !found || user.Role != expected.role || user.Status != "active" {
 			t.Fatal("real IdP provisioning did not persist the expected account and role")
@@ -219,7 +238,7 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 		}
 	}
 	users, err := db.ListAuthUsers(t.Context())
-	if err != nil || len(users) != 4 {
+	if err != nil || len(users) != 5 {
 		t.Fatal("real IdP provisioning duplicated or lost a local/SSO account")
 	}
 	conflictAccounts := 0
@@ -230,6 +249,14 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	}
 	if conflictAccounts != 1 {
 		t.Fatal("email collision did not produce exactly one separate SSO-only account")
+	}
+	rulesAfter, err := db.ListRoutingRules(t.Context())
+	if err != nil {
+		t.Fatal("routing verification unavailable")
+	}
+	ruleBytesAfter, err := json.Marshal(rulesAfter)
+	if err != nil || string(ruleBytesBefore) != string(ruleBytesAfter) {
+		t.Fatal("read-only handoff changed routing rules")
 	}
 	providersAfter, err := db.ListProviderConfigs(t.Context())
 	if err != nil {

@@ -110,3 +110,22 @@ func TestAdminUIModelHandoffBehaviour(t *testing.T) {
 	}
 	t.Logf("\n%s", out)
 }
+
+func TestAdminUIRoutingHandoffBehaviour(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; skipping routing handoff checks")
+	}
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve routing handoff test path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, "--test", filepath.Join(packageDir, "testdata", "admin_ui_routing_handoff.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("routing handoff checks failed: %v\n%s", err, out)
+	}
+	t.Logf("\n%s", out)
+}

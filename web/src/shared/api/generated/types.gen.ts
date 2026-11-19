@@ -4380,6 +4380,10 @@ export type UiBootstrapResponse = {
          * Preserves supported request list filters and exact time bounds in the Legacy requests hash route. Does not grant request access.
          */
         legacy_request_filters?: boolean;
+        /**
+         * Opens the exact stored routing rule in a read-only Legacy detail using the existing authorized configuration GET. Does not execute routing preview or mutations.
+         */
+        legacy_routing_rule_detail?: boolean;
         raw_prompt_view: boolean;
     };
     legacy_route_map: {
