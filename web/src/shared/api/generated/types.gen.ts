@@ -4360,6 +4360,10 @@ export type UiBootstrapResponse = {
          * Supports opening an existing request detail from the Legacy requests hash route. Does not grant request access.
          */
         legacy_request_detail?: boolean;
+        /**
+         * Preserves supported request list filters and exact time bounds in the Legacy requests hash route. Does not grant request access.
+         */
+        legacy_request_filters?: boolean;
         raw_prompt_view: boolean;
     };
     legacy_route_map: {

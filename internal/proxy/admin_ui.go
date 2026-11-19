@@ -7634,6 +7634,52 @@ const adminHTML = `<!doctype html>
       });
     }
 
+    // Native datetime-local controls can erase dates, offsets and nanoseconds.
+    // Retain the exact accepted query text when their normalized value differs.
+    function restoreRequestTimeInput(input, value) {
+      input.type = 'datetime-local';
+      input.step = 'any';
+      input.value = value;
+      if (input.value === value) return;
+      input.type = /^\d{4}-\d{2}-\d{2}$/.test(value) ? 'date' : 'text';
+      input.value = value;
+      if (input.value !== value) { input.type = 'text'; input.value = value; }
+      input.placeholder = 'YYYY-MM-DD 또는 RFC3339';
+    }
+    function legacyRequestTimeValid(value) {
+      if (!value) return true;
+      const match = /^(\d{4})-(\d{2})-(\d{2})(?:([T ])(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})?)?$/.exec(value);
+      if (!match) return false;
+      const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+      const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+      const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      if (month < 1 || month > 12 || day < 1 || day > days[month - 1]) return false;
+      if (Number(match[5] || 0) > 23 || Number(match[6] || 0) > 59 || Number(match[7] || 0) > 59) return false;
+      if (match[8] && !match[9]) return false;
+      if (match[9]) {
+        if (match[4] !== 'T' || !match[7]) return false;
+        if (match[9] !== 'Z') {
+          const offset = match[9].slice(1).split(':').map(Number);
+          if (offset[0] > 23 || offset[1] > 59) return false;
+        }
+      }
+      return true;
+    }
+    function legacyRequestTimeZoneValid(value) {
+      if (!value || value.length > 64) return false;
+      try { new Intl.DateTimeFormat('en', { timeZone: value }).format(0); return true; }
+      catch (_) { return false; }
+    }
+    function restoreRequestTimeZone(select, value) {
+      if (!Array.from(select.options).some(option => option.value === value)) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      }
+      select.value = value;
+    }
+
     async function renderRequestsView(initial) {
       const view = document.getElementById('view');
       const generation = legacyRouteGeneration;
@@ -7658,9 +7704,9 @@ const adminHTML = `<!doctype html>
           '<input id="f-model" placeholder="모델 필터" list="dl-model">' +
           '<input id="f-language" placeholder="언어 필터" list="dl-lang">' +
           '<label class="muted" style="font-size:12px" for="f-from">기간</label>' +
-          '<input id="f-from" type="datetime-local" title="조회 시작 일시">' +
+          '<input id="f-from" type="datetime-local" step="any" title="조회 시작 일시" aria-describedby="req-filter-error">' +
           '<span class="muted" style="font-size:12px">~</span>' +
-          '<input id="f-to" type="datetime-local" title="조회 종료 일시">' +
+          '<input id="f-to" type="datetime-local" step="any" title="조회 종료 일시" aria-describedby="req-filter-error">' +
           '<select id="f-tz" title="검색 기준 시간대">' +
             '<option value="Asia/Seoul" selected>서울 (KST, UTC+9)</option>' +
             '<option value="UTC">UTC</option>' +
@@ -7676,6 +7722,7 @@ const adminHTML = `<!doctype html>
           '<span id="diff-count" class="muted" style="font-size:12px"></span>' +
           datalist('dl-ip', ips) + datalist('dl-model', models) + datalist('dl-lang', langs) +
         '</form>' +
+        '<p id="req-filter-error" class="banner error" role="alert" hidden></p>' +
         '<div id="req-results"></div>'
       );
       // restore from hash query if provided
@@ -7683,7 +7730,11 @@ const adminHTML = `<!doctype html>
         const map = { ip: 'f-ip', model: 'f-model', language: 'f-language', limit: 'f-limit', from: 'f-from', to: 'f-to', tz: 'f-tz' };
         Object.entries(map).forEach(([k, id]) => {
           const v = initial.get(k);
-          if (v !== null && v !== undefined) document.getElementById(id).value = v;
+          if (v === null || v === undefined) return;
+          const input = document.getElementById(id);
+          if (k === 'from' || k === 'to') restoreRequestTimeInput(input, v);
+          else if (k === 'tz') restoreRequestTimeZone(input, v);
+          else input.value = v;
         });
       }
       document.getElementById('req-filter').addEventListener('submit', async (e) => {
@@ -7694,6 +7745,7 @@ const adminHTML = `<!doctype html>
       document.getElementById('req-reset').addEventListener('click', async () => {
         selectedID = '';
         ['f-ip', 'f-model', 'f-language', 'f-from', 'f-to'].forEach(id => { document.getElementById(id).value = ''; });
+        ['f-from', 'f-to'].forEach(id => restoreRequestTimeInput(document.getElementById(id), ''));
         document.getElementById('f-limit').value = '100';
         document.getElementById('f-tz').value = 'Asia/Seoul';
         await loadRequests();
@@ -7718,6 +7770,20 @@ const adminHTML = `<!doctype html>
         const to = document.getElementById('f-to').value.trim();
         const tz = document.getElementById('f-tz').value;
         const limit = document.getElementById('f-limit').value.trim() || '100';
+        const error = document.getElementById('req-filter-error');
+        const invalidTime = !legacyRequestTimeValid(from) || !legacyRequestTimeValid(to);
+        const invalidZone = (from || to) && !legacyRequestTimeZoneValid(tz);
+        if (invalidTime || invalidZone) {
+          error.textContent = invalidTime
+            ? '날짜와 시각을 YYYY-MM-DD, 로컬 시각 또는 RFC3339 형식으로 입력하세요.'
+            : '올바른 IANA 시간대를 선택하세요.';
+          error.hidden = false;
+          results.innerHTML = '';
+          return false;
+        }
+        error.hidden = true;
+        error.textContent = '';
+
         if (ip) params.set('ip', ip);
         if (model) params.set('model', model);
         if (language) params.set('language', language);

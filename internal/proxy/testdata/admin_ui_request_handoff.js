@@ -34,6 +34,7 @@ function harness(hash = '#/requests') {
     const classes = new Set();
     return nodes[id] = {
       innerHTML: '', textContent: '', value: id === 'f-limit' ? '100' : id === 'f-tz' ? 'Asia/Seoul' : '',
+      options: [{value:'Asia/Seoul'}, {value:'UTC'}], appendChild(option) { this.options.push(option); },
       events: {}, classList: { contains: x => classes.has(x), add: x => classes.add(x), remove: x => classes.delete(x) },
       addEventListener(name, fn) { this.events[name] = fn; }, focus() {},
     };
@@ -41,7 +42,7 @@ function harness(hash = '#/requests') {
   const calls = [], opened = [], wired = [], feedback = [];
   const ctx = {
     URLSearchParams, TextEncoder, console, nodes, calls, opened, wired, feedback,
-    document: { getElementById: node, querySelectorAll: () => ctx.rows || [] }, location: { hash },
+    document: { getElementById: node, querySelectorAll: () => ctx.rows || [], createElement: () => ({}) }, location: { hash },
     history: { replaceState(_state, _title, next) { ctx.location.hash = next; } },
     suggest: async () => [],
     request: async url => {
@@ -68,6 +69,7 @@ function harness(hash = '#/requests') {
   ].join('\n');
   vm.runInNewContext(prelude + '\n' + [
     'parseHash', 'updateHashParams', 'openModal', 'modalBack', 'closeModal',
+    'restoreRequestTimeInput', 'legacyRequestTimeValid', 'legacyRequestTimeZoneValid', 'restoreRequestTimeZone',
     'legacyRequestDetailIDValid', 'renderRequestsView', 'attachRequestRowHandlers',
   ].map(grab).join('\n') + '\n' + detailCode, ctx);
   return ctx;
@@ -181,6 +183,31 @@ async function main() {
     assert.equal(h.opened.length,0);assert.equal(h.calls.length,2);
     assert.match(h.nodes['req-results'].innerHTML,/new/);
     assert.equal(new URLSearchParams(h.location.hash.split('?')[1]).has('request_id'),false);
+  });
+
+  for (const from of ['2026-11-19', '2026-11-19 01:02:03', '2026-11-19T01:02:03.123456789+05:45']) {
+    await test('handoff preserves exact time and an additional IANA zone: '+from, async()=>{
+      const params=new URLSearchParams({from,to:'2026-11-20',tz:'Asia/Kathmandu',limit:'37',ip:'2001:0db8::1',model:'public %2F+#?',language:'한국어'});
+      const h=harness('#/requests?'+params);await h.renderRequestsView(params);
+      assert.equal(h.calls.length,1);
+      assert.deepEqual([...new URLSearchParams(h.calls[0].split('?')[1])].sort(),[...params].sort());
+      assert.equal(h.nodes['f-from'].value,from);assert.equal(h.nodes['f-tz'].value,'Asia/Kathmandu');
+    });
+  }
+  for (const from of ['2026-02-30','2025-02-29','2026-01-01T24:00','2026-01-01T01:02:03+24:00','2026-01-01T01:02:03.1','2026-01-01T01:02Z']) {
+    await test('invalid time does not silently remove the bound: '+from, async()=>{
+      const h=harness();await h.renderRequestsView(new URLSearchParams({from,request_id:'a'}));
+      assert.equal(h.calls.length,0);assert.equal(h.opened.length,0);
+      assert.equal(h.nodes['req-filter-error'].hidden,false);assert.match(h.nodes['req-filter-error'].textContent,/날짜/);
+      await h.nodes['req-reset'].events.click();assert.equal(h.calls.length,1);
+      assert.equal(h.nodes['req-filter-error'].hidden,true);assert.equal(h.nodes['f-from'].type,'datetime-local');
+    });
+  }
+  await test('invalid timezone blocks the list and initial detail until corrected', async()=>{
+    const h=harness();await h.renderRequestsView(new URLSearchParams({from:'2026-11-19',tz:'Not/AZone',request_id:'a'}));
+    assert.equal(h.calls.length,0);assert.equal(h.opened.length,0);
+    h.nodes['f-tz'].value='UTC';await h.nodes['req-filter'].events.submit({preventDefault(){}});
+    assert.equal(h.calls.length,1);assert.equal(h.nodes['req-filter-error'].hidden,true);
   });
   console.log('All '+count+' Legacy request handoff checks passed.');
 }

@@ -14891,6 +14891,10 @@
                 "description": "Supports opening an existing request detail from the Legacy requests hash route. Does not grant request access.",
                 "type": "boolean"
               },
+              "legacy_request_filters": {
+                "description": "Preserves supported request list filters and exact time bounds in the Legacy requests hash route. Does not grant request access.",
+                "type": "boolean"
+              },
               "raw_prompt_view": {
                 "type": "boolean"
               }

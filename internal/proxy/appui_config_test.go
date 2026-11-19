@@ -35,6 +35,9 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		t.Fatalf("bootstrap credential prefixes = %#v", prefixes)
 	}
 	capabilities, _ := body["capabilities"].(map[string]any)
+	if supported, _ := capabilities["legacy_request_filters"].(bool); !supported {
+		t.Fatal("expected support for exact Legacy request filter handoff")
+	}
 	if supported, _ := capabilities["legacy_request_detail"].(bool); !supported {
 		t.Fatal("bootstrap must advertise the implemented Legacy request detail handoff")
 	}

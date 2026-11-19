@@ -1,5 +1,3 @@
-import { containsPotentialSecret } from "@/shared/security/secrets";
-import { fitsUTF8Bytes } from "@/shared/utils/utf8";
 import type { FeatureId } from "./migration-registry";
 
 /** Canonical Legacy hash routes. Feature ownership remains in the migration registry. */
@@ -85,33 +83,5 @@ export function isLegacyAdminHref(value: unknown): value is `/admin${string}` {
     });
   } catch {
     return false;
-  }
-}
-
-/** Only the known requests screen supports this ID handoff; opaque refs are never raw IDs. */
-export function legacyRequestDetailHref(
-  baseHref: string | undefined,
-  request: { request_id: string; request_filterable: boolean } | undefined,
-  credentialPrefixes: readonly string[],
-): `/admin${string}` | undefined {
-  if (baseHref !== legacyRoutes.requests || request?.request_filterable !== true) return undefined;
-  const id = request.request_id;
-  if (
-    !id ||
-    id.trim() !== id ||
-    !fitsUTF8Bytes(id, 512) ||
-    [".", "..", "diff", "io"].includes(id) ||
-    /[/\\\p{Cc}]/u.test(id) ||
-    containsPotentialSecret(id, credentialPrefixes)
-  )
-    return undefined;
-  try {
-    // URI encoding rejects lone surrogates rather than silently changing the identity.
-    encodeURIComponent(id);
-    return (legacyRoutes.requests +
-      "?" +
-      new URLSearchParams({ request_id: id }).toString()) as `/admin${string}`;
-  } catch {
-    return undefined;
   }
 }

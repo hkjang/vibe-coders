@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
@@ -27,6 +28,7 @@ interface ErrorStateBaseProps {
   resetButtonRef?: React.Ref<HTMLButtonElement>;
   resetLabel?: string;
   showLegacy?: boolean;
+  legacyNotice?: string;
 }
 
 /** Custom recovery destinations must name their feature; home recovery is explicit. */
@@ -50,7 +52,9 @@ export function ErrorState({
   showLegacy = true,
   legacyHref,
   legacyFeatureId,
+  legacyNotice,
 }: ErrorStateProps): React.JSX.Element {
+  const legacyNoticeId = useId();
   return (
     <section className="page-state page-state-error" role="alert">
       <AlertTriangle aria-hidden="true" />
@@ -77,6 +81,7 @@ export function ErrorState({
               featureId={legacyFeatureId}
               className="button button-secondary button-default"
               href={legacyHref}
+              aria-describedby={legacyNotice ? legacyNoticeId : undefined}
             >
               기존 관리자 화면 열기
             </FeatureLegacyLink>
@@ -87,6 +92,7 @@ export function ErrorState({
           )
         ) : null}
       </div>
+      {showLegacy && legacyNotice ? <p id={legacyNoticeId}>{legacyNotice}</p> : null}
     </section>
   );
 }

@@ -168,7 +168,11 @@ export const uiBootstrapSchema = z.object({
   roles: z.array(z.string()),
   // Server role decisions and optional Legacy navigation support. Missing support stays off.
   capabilities: z
-    .object({ raw_prompt_view: z.boolean(), legacy_request_detail: z.boolean().optional() })
+    .object({
+      raw_prompt_view: z.boolean(),
+      legacy_request_detail: z.boolean().optional(),
+      legacy_request_filters: z.boolean().optional(),
+    })
     .default({ raw_prompt_view: false }),
   permissions: z.array(z.string()),
   allowed_features: z.array(z.string()),

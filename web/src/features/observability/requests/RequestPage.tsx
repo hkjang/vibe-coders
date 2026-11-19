@@ -1,12 +1,12 @@
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { ExternalLink, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featureByPath } from "@/config/migration-registry";
-import { legacyRequestDetailHref } from "@/config/legacy-route-map";
+import { legacyRequestDetailHref, legacyRequestListDestination } from "@/config/legacy-request-map";
 import { RequestDetailDialog } from "@/features/observability/requests/RequestDetailDialog";
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
@@ -23,7 +23,7 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
 import { Button } from "@/shared/components/ui/Button";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { resolveLegacyFeatureHref } from "@/shared/permissions/legacy-feature";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { usePreferences } from "@/shared/stores/preferences";
 import { isValidIPAddress } from "@/shared/utils/ip-address";
@@ -40,14 +40,20 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
   const auth = useAuth();
   const location = useLocation();
   const runtimeFeature = featureByPath(location.pathname, auth.features) ?? featureByPath(location.pathname);
-  const legacyPath = runtimeFeature?.legacyPath;
-  const showLegacyAdmin =
-    canOpenLegacyAdmin(auth) && runtimeFeature?.fallbackEnabled === true && legacyPath !== undefined;
+  const legacyPath = resolveLegacyFeatureHref(auth, "observability.requests", runtimeFeature?.legacyPath);
+  const showLegacyAdmin = legacyPath !== undefined;
+  const legacyNoticeId = useId();
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const [searchParams, setSearchParams] = useSearchParams();
   const searchKey = searchParams.toString();
   const query = useMemo(() => queryFromSearch(searchParams), [searchParams]);
+  const legacyList = legacyRequestListDestination(
+    legacyPath,
+    query,
+    auth.capabilities?.legacy_request_filters === true,
+    auth.credentialPrefixes,
+  );
   const selectedTimeZone = query.tz ?? defaultTimeZone;
   const [selecting, setSelecting] = useState(false);
   const selection = useRequestSafeFlowSelection(query, access, interval, selecting);
@@ -201,7 +207,8 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
         resetButtonRef={errorResetButtonRef}
         resetLabel="필터 초기화"
         showLegacy={showLegacyAdmin}
-        legacyHref={legacyPath}
+        legacyHref={legacyList.href}
+        legacyNotice={legacyList.notice}
       />
     );
   }
@@ -225,13 +232,19 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
             <FeatureLegacyLink
               featureId="observability.requests"
               className="button button-secondary button-default"
-              href={legacyPath}
+              href={legacyList.href}
+              aria-describedby={legacyList.notice ? legacyNoticeId : undefined}
             >
               <ExternalLink aria-hidden="true" /> 기존 화면 보기
             </FeatureLegacyLink>
           ) : null}
         </div>
       </header>
+      {showLegacyAdmin && legacyList.notice ? (
+        <p id={legacyNoticeId} className="muted">
+          {legacyList.notice}
+        </p>
+      ) : null}
 
       <RequestSavedFilters
         query={query}
@@ -332,12 +345,18 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
           if (!open) selection.close();
         }}
         returnFocusRef={returnFocusRef}
-        legacyHref={showLegacyAdmin ? legacyPath : undefined}
+        legacyHref={legacyList.href}
+        legacyNotice={legacyList.notice}
         legacyDetailHref={
           showLegacyAdmin &&
           data?.request_contract_version === 2 &&
           auth.capabilities?.legacy_request_detail === true
-            ? legacyRequestDetailHref(legacyPath, activeSelected?.request, auth.credentialPrefixes)
+            ? legacyRequestDetailHref(
+                legacyPath,
+                activeSelected?.request,
+                auth.credentialPrefixes,
+                legacyList,
+              )
             : undefined
         }
         timeZone={selectedTimeZone}

@@ -1,6 +1,6 @@
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
-import type { RefObject } from "react";
+import { useId, type RefObject } from "react";
 import { Link } from "react-router";
 
 import type { AppRequestSummary } from "@/shared/api/schemas";
@@ -13,6 +13,7 @@ import { RequestSafeFlowPanel } from "./RequestSafeFlowPanel";
 
 interface RequestDetailDialogProps {
   legacyHref?: `/admin${string}`;
+  legacyNotice?: string;
   legacyDetailHref?: `/admin${string}`;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -30,6 +31,7 @@ interface RequestDetailDialogProps {
 export function RequestDetailDialog({
   legacyHref,
   legacyDetailHref,
+  legacyNotice,
   onOpenChange,
   open,
   request,
@@ -42,6 +44,7 @@ export function RequestDetailDialog({
   flowSelection,
   assertFlowSelection,
 }: RequestDetailDialogProps): React.JSX.Element {
+  const legacyNoticeId = useId();
   let traceSearch: string | undefined;
   if (traceHandoffEnabled && request?.trace_filterable === true && request.trace_id) {
     const parameters = new URLSearchParams({ trace_id: request.trace_id });
@@ -82,6 +85,7 @@ export function RequestDetailDialog({
               featureId="observability.requests"
               className="button button-secondary button-default"
               href={legacyDetailHref ?? legacyHref}
+              aria-describedby={legacyNotice ? legacyNoticeId : undefined}
             >
               {legacyDetailHref ? "기존 화면에서 이 요청 열기" : "기존 요청 화면 열기"}
             </FeatureLegacyLink>
@@ -96,6 +100,7 @@ export function RequestDetailDialog({
       returnFocusRef={returnFocusRef}
       title={request ? `${requestOrdinal ?? 1}번째 요청 ${request.request_id}` : "요청 상세"}
     >
+      {legacyHref && legacyNotice ? <p id={legacyNoticeId}>{legacyNotice}</p> : null}
       {request ? (
         <dl className="request-detail-grid">
           <div>
