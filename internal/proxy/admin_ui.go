@@ -852,6 +852,7 @@ const adminHTML = `<!doctype html>
       if (hash.startsWith('#/workflows?') && legacyWorkflowTarget(hash)) return hash;
       if (hash.startsWith('#/skills?') && legacySkillTarget(hash)) return hash;
       if (hash.startsWith('#/sessions?') && legacySessionTarget(hash)) return hash;
+      if (hash.startsWith('#/requests?') && legacyDirectRequestTarget(hash)) return hash;
       if (hash.length > 8192) return '';
       const providerPrefix = '#/settings?provider_ref=';
       if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
@@ -2406,6 +2407,9 @@ const adminHTML = `<!doctype html>
         if (!parent || parent.classList.contains('table-scroll')) return;
         const box = document.createElement('div');
         box.className = 'table-scroll';
+        box.tabIndex = 0;
+        box.role = 'group';
+        box.ariaLabel = '표 스크롤 영역';
         parent.insertBefore(box, table);
         box.appendChild(table);
       });
@@ -4741,6 +4745,17 @@ const adminHTML = `<!doctype html>
         !/[/\p{Cc}]/u.test(id) && new TextEncoder().encode(id).length <= 4096 &&
         !Array.from(id).some(c => c.length === 1 && c.charCodeAt(0) >= 0xd800 && c.charCodeAt(0) <= 0xdfff);
     }
+    function legacyDirectRequestTarget(hash) {
+      if (typeof hash !== 'string' || hash.length > 16384 || !hash.startsWith('#/requests?')) return '';
+      try {
+        const query = hash.slice('#/requests?'.length);
+        decodeURIComponent(query.replace(/\+/g, ' '));
+        const params = new URLSearchParams(query);
+        if (params.size !== 1 || !params.has('request_id')) return '';
+        const id = params.get('request_id');
+        return legacyRequestDetailIDValid(id) && !id.includes('\\') ? id : '';
+      } catch { return ''; }
+    }
     window.openRequestDetail = async (id, options = {}) => {
       const fromRow = options.fromRow === true;
       const selection = ++requestDetailGeneration;
@@ -6253,9 +6268,9 @@ const adminHTML = `<!doctype html>
     function noteEditor(id, note) {
       const tags = (note.tags || []).join(', ');
       return '<section style="margin-top:18px"><h2>태그 · 메모 · 재실행</h2><div style="padding:14px">' +
-        '<label class="muted" style="font-size:12px; font-weight:700">태그 (콤마 구분, # 없이)</label>' +
+        '<label for="note-tags" class="muted" style="font-size:12px; font-weight:700">태그 (콤마 구분, # 없이)</label>' +
         '<input id="note-tags" value="' + escapeHTML(tags) + '" placeholder="예: 의심,재현필요,검토대기">' +
-        '<label class="muted" style="font-size:12px; font-weight:700; margin-top:10px; display:block">메모</label>' +
+        '<label for="note-text" class="muted" style="font-size:12px; font-weight:700; margin-top:10px; display:block">메모</label>' +
         '<textarea id="note-text" rows="4" style="width:100%; height:auto; padding:8px 10px">' + escapeHTML(note.note || '') + '</textarea>' +
         '<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' +
           '<button id="note-save" type="button" data-id="' + escapeHTML(id) + '">저장</button>' +

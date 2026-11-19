@@ -4429,6 +4429,10 @@ export type UiBootstrapResponse = {
          */
         legacy_request_detail?: boolean;
         /**
+         * Preserves a pure original request selection through Legacy login and SSO for existing UTF-8 path IDs up to 4096 bytes and hash URLs up to 16384 characters. Does not grant access or reveal raw content.
+         */
+        legacy_request_direct_detail?: boolean;
+        /**
          * Preserves supported request list filters and exact time bounds in the Legacy requests hash route. Does not grant request access.
          */
         legacy_request_filters?: boolean;

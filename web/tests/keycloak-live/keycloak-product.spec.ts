@@ -1894,3 +1894,93 @@ test("KEYCLOAK-LIVE-049 같은 요청을 연 상태에서 권한이 갱신되면
     await restoreGrantFixture(page);
   }
 });
+
+for (const fixture of [
+  { scenario: "KEYCLOAK-LIVE-050", id: " original +%2F?&# 한글 ", marker: "IO_DIRECT_PUBLIC_0", width: 1440 },
+  { scenario: "KEYCLOAK-LIVE-051", id: "한".repeat(1365) + "x", marker: "IO_DIRECT_PUBLIC_1", width: 390 },
+]) {
+  test(fixture.scenario + " 입출력의 원래 요청이 독립된 Legacy SSO 뒤에도 유지된다", async ({ page }) => {
+    await signIn(page, "reader");
+    await page.setViewportSize({ width: fixture.width, height: 900 });
+    let writes = 0,
+      rawReads = 0;
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.origin !== gateway || !url.pathname.startsWith("/admin/requests")) return;
+      if (request.method() !== "GET") writes++;
+      if (url.searchParams.get("reveal") === "raw") rawReads++;
+    });
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/admin/requests/" + encodeURIComponent(fixture.id) + "/io" &&
+        response.status() === 200,
+    );
+    await page.goto(
+      "/app/observability/io?" +
+        new URLSearchParams({ request_id: fixture.id, live: "off", model: "no-matching-list-row" }),
+    );
+    const response = await responsePromise;
+    const detail = (await response.json()) as { request_id: string };
+    if (fixture.width === 390) expect(detail.request_id).not.toBe(fixture.id);
+    await expect(page.getByText(fixture.marker, { exact: true })).toBeVisible();
+    const link = page.getByRole("link", { name: "기존 화면에서 같은 요청 열기", exact: true });
+    await expect(link).toHaveAttribute(
+      "href",
+      "/admin#/requests?" + new URLSearchParams({ request_id: fixture.id }),
+    );
+    expect(await page.evaluate(() => sessionStorage.getItem("authAccess"))).toBeNull();
+    await link.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#login-backdrop.open")).toBeVisible();
+    await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+    await expect(page.locator("#modal-backdrop.open")).toBeVisible();
+    await expect(page.locator("#modal-body")).toContainText(fixture.marker);
+    expect(new URLSearchParams(new URL(page.url()).hash.split("?")[1]).get("request_id")).toBe(fixture.id);
+    expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+    await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const modal = document.querySelector("#modal-body");
+        if (!modal) throw Error("Request modal missing");
+        return (await axe.run(modal, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+    expect(writes).toBe(0);
+    expect(rawReads).toBe(0);
+  });
+}
+
+test("KEYCLOAK-LIVE-052 잘못된 입출력 요청 주소는 다른 요청을 대신 조회하지 않는다", async ({ page }) => {
+  await signIn(page, "reader");
+  let details = 0,
+    rawReads = 0,
+    writes = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin !== gateway || !url.pathname.startsWith("/admin/requests")) return;
+    if (/^\/admin\/requests\/.+\/io$/u.test(url.pathname)) details++;
+    if (url.searchParams.get("reveal") === "raw") rawReads++;
+    if (request.method() !== "GET") writes++;
+  });
+  for (const query of [
+    "request_id=session-own-current&request_id=session-own-old",
+    "request_id=%ED%A0%80",
+    "request_id=vc_sk_abcdefghijk",
+    "request_id=",
+  ]) {
+    await page.goto("/app/observability/io?live=off&" + query);
+    await expect(page.getByText("요청 주소를 확인하세요.", { exact: true })).toBeVisible();
+    expect(new URL(page.url()).searchParams.getAll("request_id")).toEqual([""]);
+    await expect(page.getByRole("link", { name: "기존 화면에서 같은 요청 열기", exact: true })).toHaveCount(
+      0,
+    );
+  }
+  expect(details).toBe(0);
+  expect(rawReads).toBe(0);
+  expect(writes).toBe(0);
+});

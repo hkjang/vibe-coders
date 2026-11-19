@@ -16,6 +16,7 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
+const directRequestTarget = block('function legacyRequestDetailIDValid(', 'window.openRequestDetail =');
 const sessionTarget = block('function legacySessionTarget(', 'function validLegacySessionRecorder(');
 const skillTarget = block('function legacySkillTarget(', 'async function renderLegacySkillDetail(');
 const workflowTarget = block('function legacyWorkflowTarget(', '// Project only the persisted definition contract.');
@@ -87,7 +88,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + sessionTarget + skillTarget + '\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + directRequestTarget + sessionTarget + skillTarget + '\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -935,3 +936,27 @@ test('exact session selection survives SSO and is cleared on logout',async()=>{
  h.node('legacy-session-detail').innerHTML='PRIVATE_SESSION';await h.logout();
  assert.equal(h.node('legacy-session-detail').innerHTML,'');
 });
+
+for (const id of [' original +%2F?&# ', 'a'.repeat(4096), '한'.repeat(1365)+'x']) {
+ test('original request path identity survives local login and independent SSO: '+id.length, async()=>{
+  const hash='#/requests?'+new URLSearchParams({request_id:id});
+  const local=harness(ssoTransport,hash);await local.login();assert.equal(local.location.hash,hash);
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,hash);
+  assert.equal([...callback.storage.keys()].some(key=>key==='vibe.admin.auth.sso-return-to'),false);
+ });
+}
+for (const query of [
+ 'request_id='+encodeURIComponent('한'.repeat(1366)),
+ 'request_id='+encodeURIComponent('한'.repeat(1000))+'&request_id=other',
+ 'request_id='+encodeURIComponent('한'.repeat(1000))+'&reveal=raw',
+ 'request_id='+encodeURIComponent('한'.repeat(1000))+'%ED%A0%80',
+ 'request_id='+encodeURIComponent('한'.repeat(1000))+'%5C',
+]) {
+ test('invalid extended request selection is not staged across SSO: '+query.slice(-12),async()=>{
+  const departure=harness(ssoTransport,'#/requests?'+query);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,'');
+ });
+}

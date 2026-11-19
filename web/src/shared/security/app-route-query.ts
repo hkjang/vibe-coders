@@ -1,3 +1,4 @@
+import { directRequestSelection } from "@/config/legacy-request-map";
 import { validTraceTimelineView } from "@/shared/utils/trace-timeline-query";
 import { validSessionPageValue } from "@/shared/utils/session-page-query";
 import { traceRelatedQueryKeys, validTraceRelatedQueryValue } from "@/shared/utils/trace-related-query";
@@ -124,6 +125,10 @@ export function sanitizeAppRouteSearch(
   const rejectedValues = new Map<string, boolean>();
   const route = routerPath(pathname);
   const invalidOperationalKeys = new Set<string>();
+  const ioSelection =
+    route === "/observability/io" ? directRequestSelection(search, credentialPrefixes) : undefined;
+  if (ioSelection?.present && !ioSelection.id) invalidOperationalKeys.add("request_id");
+
   // These are gateway-owned refusal markers, not arbitrary provider errors.
   // Keep one bounded outcome through both startup and client-side navigation.
   if (route === "/login" && parameters.has("sso")) {
@@ -279,6 +284,9 @@ export function sanitizeAppRouteSearch(
   for (const [key, value] of parameters) {
     if (allowed.has(key) && !rejectedValues.get(key)) sanitized.append(key, value);
   }
+  // Keep only an empty refusal marker: dropping an explicit invalid/secret ID
+  // would let the IO page silently select a different first-row request.
+  if (ioSelection?.present && !ioSelection.id) sanitized.set("request_id", "");
   const serialized = sanitized.toString();
   return {
     rejectedKeys: [...rejectedKeys],

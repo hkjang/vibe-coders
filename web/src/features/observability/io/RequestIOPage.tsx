@@ -1,8 +1,10 @@
-import { legacyRoutes } from "@/config/legacy-route-map";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { directRequestSelection } from "@/config/legacy-request-map";
+import { useRequestLegacyHandoff } from "../request-insight/use-request-legacy-handoff";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import {
   useRequestDetailReadScope,
@@ -173,7 +175,9 @@ function RequestIOPageContent({
   const cursor = params.get("cursor") ?? "";
   const status = params.get("status") ?? "";
   const model = params.get("model") ?? "";
-  const requestedId = params.get("request_id") ?? "";
+  const auth = useAuth();
+  const location = useLocation();
+  const requested = directRequestSelection(location.search, auth.credentialPrefixes);
   const [modelDraft, setModelDraft] = useState(model);
   const [search, setSearch] = useState("");
 
@@ -262,7 +266,8 @@ function RequestIOPageContent({
   const [firstRow, setFirstRow] = useState<string>();
   const firstFilterable = rows.find((row) => row.request_filterable)?.request_id;
   if (wide && firstRow === undefined && firstFilterable) setFirstRow(firstFilterable);
-  const selectedId = requestedId || (wide ? (firstRow ?? "") : "");
+  const selectedId = requested.present ? requested.id : wide ? (firstRow ?? "") : "";
+  const legacyHandoff = useRequestLegacyHandoff(selectedId, routeId);
   const select = (id: string): void => updateParams({ request_id: id }, { replace: true });
 
   const listRefs = useRef<HTMLUListElement>(null);
@@ -287,7 +292,7 @@ function RequestIOPageContent({
       <PageHeader
         title="입출력 모니터"
         description="게이트웨이를 지난 요청의 입력과 출력을 한눈에 봅니다. 목록의 내용은 역할과 관계없이 마스킹됩니다."
-        legacyHref={legacyRoutes.requests}
+        legacyHref={legacyHandoff.href}
         actions={
           <>
             <Switch
@@ -302,6 +307,11 @@ function RequestIOPageContent({
         }
       />
 
+      {requested.present && !requested.id ? (
+        <InlineNotice tone="warning" title="요청 주소를 확인하세요.">
+          요청 ID가 올바르지 않거나 여러 번 지정되어 있습니다. 목록에서 요청을 다시 선택하세요.
+        </InlineNotice>
+      ) : null}
       <CaptureNotice capture={capture} />
 
       <form
@@ -422,7 +432,7 @@ function RequestIOPageContent({
           <div className="io-detail-pane" aria-label="선택한 요청의 입력과 출력" role="region">
             <h2 className="sr-only">선택한 요청의 입력과 출력</h2>
             {selectedId && !denied ? (
-              <RequestIOPanel requestId={selectedId} readScope={scope} />
+              <RequestIOPanel requestId={selectedId} readScope={scope} legacyFeatureId={routeId} />
             ) : (
               <EmptyState
                 title="요청을 선택하세요."
@@ -444,7 +454,9 @@ function RequestIOPageContent({
           title="요청 입력과 출력"
           description="목록의 미리보기와 달리 메시지 전체를 보여 줍니다."
         >
-          {selectedId ? <RequestIOPanel requestId={selectedId} readScope={scope} /> : null}
+          {selectedId ? (
+            <RequestIOPanel requestId={selectedId} readScope={scope} legacyFeatureId={routeId} />
+          ) : null}
         </Sheet>
       ) : null}
 

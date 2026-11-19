@@ -121,6 +121,7 @@ describe("OpenAPI runtime schemas", () => {
       }).success,
     ).toBe(false);
     expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_request_detail).toBeUndefined();
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_request_direct_detail).toBeUndefined();
     expect(
       uiBootstrapSchema.parse({
         ...validBootstrap,

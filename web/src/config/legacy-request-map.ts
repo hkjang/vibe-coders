@@ -103,3 +103,58 @@ export function legacyRequestDetailHref(
     return undefined;
   }
 }
+
+/** An original API path identity, not a projected list ID or opaque reference. */
+export function validDirectRequestID(id: string, prefixes: readonly string[]): boolean {
+  if (
+    !id ||
+    !fitsUTF8Bytes(id, 4096) ||
+    [".", "..", "diff", "io"].includes(id) ||
+    /[/\\\p{Cc}]/u.test(id) ||
+    containsPotentialSecret(id, prefixes)
+  )
+    return false;
+  try {
+    encodeURIComponent(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** An invalid explicit selection must never become an automatic first-row selection. */
+export function directRequestSelection(
+  search: string,
+  prefixes: readonly string[],
+): { present: boolean; id: string } {
+  const params = new URLSearchParams(search);
+  const values = params.getAll("request_id");
+  if (!values.length) return { present: false, id: "" };
+  try {
+    // URLSearchParams otherwise replaces malformed UTF-8, changing the target.
+    decodeURIComponent(search.replace(/\+/gu, " "));
+    const id = values[0] ?? "";
+    return { present: true, id: values.length === 1 && validDirectRequestID(id, prefixes) ? id : "" };
+  } catch {
+    return { present: true, id: "" };
+  }
+}
+
+export function legacyDirectRequestDestination(
+  base: string | undefined,
+  id: string,
+  supported: boolean,
+  extendedSupported: boolean,
+  prefixes: readonly string[],
+): { href?: LegacyRequestListDestination["href"]; sameRequest: boolean } {
+  if (!isLegacyAdminHref(base) || containsPotentialSecret(base, prefixes)) return { sameRequest: false };
+  const fallback = { href: base, sameRequest: false };
+  if (base !== legacyRoutes.requests || !supported || !validDirectRequestID(id, prefixes)) return fallback;
+  const href = base + "?" + new URLSearchParams({ request_id: id });
+  const hashLength = href.slice("/admin".length).length;
+  return hashLength <= (extendedSupported ? 16384 : 8192) &&
+    isLegacyAdminHref(href) &&
+    !containsPotentialSecret(href, prefixes)
+    ? { href, sameRequest: true }
+    : fallback;
+}

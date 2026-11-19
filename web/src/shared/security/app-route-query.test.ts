@@ -535,3 +535,27 @@ it("preserves canonical skill references even when their prefix resembles creden
     expect(result.rejectedKeys).toContain("skill_ref");
   }
 });
+
+describe("IO original target rejection boundary", () => {
+  it.each([
+    "?request_id=%ED%A0%80",
+    "?request_id=%zz",
+    "?request_id=a&request_id=b",
+    "?request_id=diff",
+    "?request_id=corp_" + "x".repeat(32),
+    "?request_id=corp_" + "x".repeat(32) + "&request_id=public",
+  ])("keeps a value-free refusal instead of retargeting an invalid or secret selection", (query) => {
+    const first = sanitizeAppRouteSearch("/app/observability/io", query, ["corp_"]);
+    expect(first.search).toBe("?request_id=");
+    expect(first.rejectedKeys).toContain("request_id");
+    expect(sanitizeAppRouteSearch("/app/observability/io", first.search, ["corp_"]).search).toBe(
+      first.search,
+    );
+  });
+  it("preserves the full direct path contract while keeping list filter limits unchanged", () => {
+    const id = " " + "한".repeat(1364) + " x ";
+    const query = "?" + new URLSearchParams({ request_id: id });
+    expect(sanitizeAppRouteSearch("/app/observability/io", query).search).toBe(query);
+    expect(sanitizeAppRouteSearch("/app/observability/requests", query).search).toBe("");
+  });
+});

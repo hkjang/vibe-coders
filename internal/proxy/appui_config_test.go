@@ -65,6 +65,9 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if supported, _ := capabilities["legacy_provider_detail"].(bool); !supported {
 		t.Fatal("provider Legacy detail capability missing")
 	}
+	if supported, _ := capabilities["legacy_request_direct_detail"].(bool); !supported {
+		t.Fatal("original request path handoff capability missing")
+	}
 	if supported, _ := capabilities["legacy_request_detail"].(bool); !supported {
 		t.Fatal("bootstrap must advertise the implemented Legacy request detail handoff")
 	}

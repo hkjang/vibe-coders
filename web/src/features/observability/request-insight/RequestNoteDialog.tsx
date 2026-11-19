@@ -140,7 +140,7 @@ export function RequestNoteDialog({
       }}
     >
       <p className="request-note-value">요청 ID: {target.requestId}</p>
-      <RequestNoteNotices supported={editor.supported} current={current} />
+      <RequestNoteNotices requestId={target.requestId} supported={editor.supported} current={current} />
       {recovery ? (
         <InlineNotice tone="info" title="미저장 초안을 복구했습니다.">
           사용자 입력은 유지했습니다. 현재 메모를 새로 확인하기 전에는 이전 서버 자료를 표시하거나 저장하지
