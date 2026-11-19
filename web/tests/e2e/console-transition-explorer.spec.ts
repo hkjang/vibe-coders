@@ -153,7 +153,8 @@ test("빠른 검색·상태·쓰기 조건 변경을 모두 주소에 보존한�
   await search.fill("시스템");
   // Dispatch adjacent native form events before React commits the router render.
   await page.getByRole("button", { name: "검색", exact: true }).evaluate((button) => {
-    const form = (button as HTMLButtonElement).form;
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing search button");
+    const form = button.form;
     if (!form) throw new Error("Missing search form");
     form.requestSubmit(button);
     for (const [label, value] of [
