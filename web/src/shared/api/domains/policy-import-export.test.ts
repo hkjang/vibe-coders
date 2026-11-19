@@ -11,7 +11,9 @@ describe("생성 경로에 결속된 원문 내보내기 transport", () => {
   it("JSON 숫자/공백 bytes를 변환하지 않고 인증·UI 경로/no-store로 한 번 요청한다", async () => {
     const raw = ' {"future":9007199254740993}\n';
     tokenStore.setLegacyToken("public-synthetic-token");
-    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(raw));
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(raw, { headers: { "Content-Type": "application/json" } }));
     const input = options();
     const result = await readPolicyExport(input);
     expect(new TextDecoder().decode(result)).toBe(raw);
@@ -21,12 +23,13 @@ describe("생성 경로에 결속된 원문 내보내기 transport", () => {
       expect.objectContaining({
         method: "GET",
         cache: "no-store",
-        headers: expect.objectContaining({
-          Authorization: "Bearer public-synthetic-token",
-          "X-Vibe-Route": "governance.policies",
-        }),
+        headers: expect.any(Headers),
       }),
     );
+    expect(Object.fromEntries(new Headers(fetch.mock.calls[0]?.[1]?.headers))).toMatchObject({
+      authorization: "Bearer public-synthetic-token",
+      "x-vibe-route": "governance.policies",
+    });
     expect(input.assertCurrent.mock.calls.length).toBeGreaterThan(1);
   });
   it("401은 raw error본문을 읽거나 refresh/retry하지 않고 안전한 Request ID만 전달한다", async () => {
@@ -50,7 +53,12 @@ describe("생성 경로에 결속된 원문 내보내기 transport", () => {
     const body = new ReadableStream<Uint8Array>();
     const getReader = vi.spyOn(body, "getReader");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(body, { headers: { "Content-Length": String(policyImportLimits.bytes + 1) } }),
+      new Response(body, {
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": String(policyImportLimits.bytes + 1),
+        },
+      }),
     );
     await expect(readPolicyExport(options())).rejects.toMatchObject({
       kind: "contract",
@@ -70,14 +78,20 @@ describe("생성 경로에 결속된 원문 내보내기 transport", () => {
         cancel: canceled,
       });
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(stream, { headers: length ? { "Content-Length": length } : {} }),
+        new Response(stream, {
+          headers: { "Content-Type": "application/json", ...(length ? { "Content-Length": length } : {}) },
+        }),
       );
       await expect(readPolicyExport(options())).rejects.toMatchObject({ kind: "contract" });
       expect(canceled).toHaveBeenCalledOnce();
     },
   );
   it("한도와 정확히 같은 bytes는 허용한다", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array(policyImportLimits.bytes)));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Uint8Array(policyImportLimits.bytes), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     expect((await readPolicyExport(options())).byteLength).toBe(policyImportLimits.bytes);
   });
   it("현재 read 검사가 실패하면 네트워크를 시작하지 않는다", async () => {

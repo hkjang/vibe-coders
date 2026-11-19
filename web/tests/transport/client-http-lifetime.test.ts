@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
+import { fileEndpoints } from "@/shared/api/file-endpoints";
 import { tokenStore } from "@/shared/auth/token-store";
 
 function deferred() {
@@ -18,7 +19,7 @@ afterEach(() => {
   tokenStore.clearAll();
 });
 
-describe("ApiClient native HTTP body cancellation", () => {
+describe.each(["JSON", "CSV"] as const)("ApiClient native %s body cancellation", (format) => {
   it.each(["deadline", "caller", "logout"])("closes a real incomplete response on %s", async (reason) => {
     const bodyStarted = deferred();
     let connectionClosed = false;
@@ -30,7 +31,10 @@ describe("ApiClient native HTTP body cancellation", () => {
         normallyEnded = response.writableEnded;
         connectionClosed = true;
       });
-      response.writeHead(200, { "Content-Type": "application/json", "X-Request-ID": "native-body" });
+      response.writeHead(200, {
+        "Content-Type": format === "JSON" ? "application/json" : "text/csv",
+        "X-Request-ID": "native-body",
+      });
       response.write('{"status":');
       // Intentionally never end: native fetch must cancel its body and socket.
     });
@@ -43,21 +47,30 @@ describe("ApiClient native HTTP body cancellation", () => {
     const client = new ApiClient({
       fetch: async (input, init) => {
         const response = await fetch(new URL(String(input), origin), init);
-        const text = response.text.bind(response);
-        vi.spyOn(response, "text").mockImplementation(() => {
-          bodyStarted.resolve();
-          return text();
-        });
+        if (format === "JSON") {
+          const text = response.text.bind(response);
+          vi.spyOn(response, "text").mockImplementation(() => {
+            bodyStarted.resolve();
+            return text();
+          });
+        } else {
+          if (!response.body) throw new Error("missing native body");
+          const getReader = response.body.getReader.bind(response.body);
+          vi.spyOn(response.body, "getReader").mockImplementation(() => {
+            bodyStarted.resolve();
+            return getReader();
+          });
+        }
         return response;
       },
     });
     const caller = new AbortController();
-    const completion = client
-      .request(endpoints.health, {
-        timeoutMs: reason === "deadline" ? 1_000 : 4_000,
-        signal: caller.signal,
-      })
-      .catch((error: unknown) => error);
+    const options = { timeoutMs: reason === "deadline" ? 1_000 : 4_000, signal: caller.signal };
+    const completion = (
+      format === "JSON"
+        ? client.request(endpoints.health, options)
+        : client.file(fileEndpoints.chargeback, { ...options, query: { format: "csv", month: "2026-10" } })
+    ).catch((error: unknown) => error);
     try {
       await Promise.race([bodyStarted.promise, completion.then((error) => Promise.reject(error))]);
       if (reason === "caller") caller.abort();

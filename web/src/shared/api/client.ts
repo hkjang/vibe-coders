@@ -1,4 +1,7 @@
 import { AppError } from "@/shared/api/error";
+import type { ApiFile, ApiFileEndpoint, ApiFileEndpointData } from "@/shared/api/file-endpoint";
+import type { RegisteredFileEndpoint } from "@/shared/api/file-endpoints";
+import { readFileBody } from "@/shared/api/read-file-body";
 import {
   endpoints,
   type ApiEndpointBase,
@@ -51,6 +54,17 @@ type ApiRequestArguments<Endpoint extends ApiEndpointBase> =
     ? [options: ApiRequestOptions<Endpoint>]
     : [options?: ApiRequestOptions<Endpoint>];
 
+type ApiFileQuery<Endpoint extends ApiFileEndpoint> =
+  ApiFileEndpointData<Endpoint> extends { query?: infer Query } ? Exclude<Query, undefined> : never;
+
+export type ApiFileRequestOptions<Endpoint extends ApiFileEndpoint> = Omit<
+  RequestInit,
+  "body" | "method" | "signal" | "redirect" | "credentials"
+> &
+  ApiRequestMetadata & {
+    assertCurrent?: () => void;
+  } & ([ApiFileQuery<Endpoint>] extends [never] ? { query?: never } : { query?: ApiFileQuery<Endpoint> });
+
 interface InternalApiRequestOptions
   extends Omit<RequestInit, "body" | "method" | "signal">, ApiRequestMetadata {
   body?: unknown;
@@ -71,7 +85,7 @@ export interface ApiClientDependencies {
 
 function defaultDependencies(): ApiClientDependencies {
   return {
-    fetch: globalThis.fetch.bind(globalThis),
+    fetch: (input, init) => globalThis.fetch(input, init),
     getAccessToken: tokenStore.getAccessToken,
     getRefreshToken: tokenStore.getRefreshToken,
     getLegacyToken: tokenStore.getLegacyToken,
@@ -164,9 +178,82 @@ export class ApiClient {
     }
   }
 
-  private createLifetime(epoch: number, timeoutMs = defaultTimeoutMs, signal?: AbortSignal): RequestLifetime {
+  async file<Endpoint extends RegisteredFileEndpoint>(
+    endpoint: Endpoint,
+    options: ApiFileRequestOptions<Endpoint> = {},
+  ): Promise<ApiFile> {
+    if (!isInternalPath(endpoint.path))
+      throw new AppError("외부 API URL은 허용되지 않습니다.", { kind: "contract" });
+    const epoch = this.dependencies.getSessionEpoch();
+    const { assertCurrent: assertOwner, ...requestOptions } = options;
+    const assertCurrent = () => {
+      this.assertSession(epoch);
+      if (options.signal?.aborted) throw new AppError("이전 내보내기 요청입니다.", { kind: "aborted" });
+      assertOwner?.();
+    };
+    assertCurrent();
+    const lifetime = this.createLifetime(epoch, options.timeoutMs, options.signal, assertOwner);
+    let response: Response | undefined;
+    try {
+      const headers = new Headers(options.headers);
+      headers.set("Accept", endpoint.contentTypes.join(", "));
+      response = await this.authorizedResponse(
+        endpoint,
+        {
+          ...requestOptions,
+          headers,
+          query: options.query ?? (endpoint.querySchema ? {} : undefined),
+          redirect: "error",
+          credentials: "same-origin",
+          cache: options.cache ?? "no-store",
+        },
+        epoch,
+        lifetime,
+      );
+      const contentType = response.headers.get("Content-Type") ?? "";
+      const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+      if (!response.ok) {
+        let body: unknown;
+        // File errors may echo uploaded/private data. Only structured JSON errors
+        // are consumed, within a diagnostic cap; 401 bodies are never needed.
+        if (response.status !== 401 && mediaType === "application/json") {
+          const bytes = await readFileBody(response, lifetime, {
+            maxBytes: Math.min(endpoint.maxBytes ?? 65_536, 65_536),
+          });
+          try {
+            body = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+          } catch {
+            /* Use safe HTTP fallback. */
+          }
+        }
+        throw this.toAppError(response, body);
+      }
+      if (!endpoint.contentTypes.includes(mediaType))
+        throw new AppError("서버가 요청한 파일 형식으로 응답하지 않았습니다.", {
+          kind: "contract",
+          status: response.status,
+          requestId: lifetime.requestId,
+        });
+      const bytes = await readFileBody(response, lifetime, endpoint);
+      assertCurrent();
+      return { bytes, contentType, assertCurrent };
+    } finally {
+      if (response) discardResponse(response);
+      lifetime.dispose();
+    }
+  }
+
+  private createLifetime(
+    epoch: number,
+    timeoutMs = defaultTimeoutMs,
+    signal?: AbortSignal,
+    assertOwner?: () => void,
+  ): RequestLifetime {
     return new RequestLifetime(
-      () => this.assertSession(epoch),
+      () => {
+        this.assertSession(epoch);
+        assertOwner?.();
+      },
       this.dependencies.subscribeSession,
       timeoutMs,
       signal,
@@ -183,7 +270,7 @@ export class ApiClient {
   }
 
   private async authorizedResponse(
-    endpoint: ApiEndpointBase,
+    endpoint: ApiEndpointBase | ApiFileEndpoint,
     options: InternalApiRequestOptions,
     epoch: number,
     lifetime: RequestLifetime,
@@ -267,7 +354,7 @@ export class ApiClient {
   }
 
   private async perform(
-    endpoint: ApiEndpointBase,
+    endpoint: ApiEndpointBase | ApiFileEndpoint,
     options: InternalApiRequestOptions,
     lifetime: RequestLifetime,
   ): Promise<Response> {

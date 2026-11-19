@@ -5,6 +5,7 @@ import { tokenStore } from "@/shared/auth/token-store";
 
 beforeEach(() => tokenStore.clearTokens());
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   tokenStore.clearTokens();
 });
@@ -27,12 +28,13 @@ describe("정산 CSV 전송 계약", () => {
     expect(options).toMatchObject({
       redirect: "error",
       credentials: "same-origin",
-      headers: {
-        Accept: "text/csv",
-        Authorization: "Bearer public-test-access",
-        "X-Vibe-UI": "app",
-        "X-Vibe-Route": "finops.overview",
-      },
+      method: "GET",
+    });
+    expect(Object.fromEntries(new Headers(options?.headers))).toMatchObject({
+      accept: "text/csv",
+      authorization: "Bearer public-test-access",
+      "x-vibe-ui": "app",
+      "x-vibe-route": "finops.overview",
     });
     expect(new Headers(options?.headers).has("X-Vibe-UI-Version")).toBe(true);
   });
@@ -64,29 +66,34 @@ describe("정산 CSV 전송 계약", () => {
     pending.resolve(new Response("fixture", { headers: { "Content-Type": "text/csv" } }));
     await assertion;
   });
-  it("취소 뒤 늦은 본문도 반환하지 않는다", async () => {
-    const pending = deferred<string>();
-    const response = new Response("", { headers: { "Content-Type": "text/csv" } });
-    vi.spyOn(response, "text").mockReturnValue(pending.promise);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+  it("취소 뒤 진행 중인 본문 reader를 취소하고 반환하지 않는다", async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({ cancel });
+    const read = vi.spyOn(stream, "getReader");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(stream, { headers: { "Content-Type": "text/csv" } }),
+    );
     const controller = new AbortController();
     const result = readChargebackCsv("2026-10", controller.signal);
     const assertion = expect(result).rejects.toMatchObject({ kind: "aborted" });
-    await vi.waitFor(() => expect(response.text).toHaveBeenCalled());
+    await vi.waitFor(() => expect(read).toHaveBeenCalled());
     controller.abort();
-    pending.resolve("fixture");
     await assertion;
+    expect(cancel).toHaveBeenCalledOnce();
   });
-  it("시간 제한 오류는 네트워크 오류와 구분한다", async () => {
-    const timeout = new AbortController();
-    vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      timeout.abort();
-      throw new Error("private");
-    });
-    await expect(readChargebackCsv("2026-10", new AbortController().signal)).rejects.toMatchObject({
-      kind: "timeout",
-    });
+  it("헤더 뒤 본문 시간 제한 오류는 네트워크 오류와 구분한다", async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new ReadableStream<Uint8Array>({ cancel }), {
+        headers: { "Content-Type": "text/csv", "X-Request-ID": "csv-deadline" },
+      }),
+    );
+    const result = readChargebackCsv("2026-10", new AbortController().signal);
+    const assertion = expect(result).rejects.toMatchObject({ kind: "timeout", requestId: "csv-deadline" });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await assertion;
+    expect(cancel).toHaveBeenCalledOnce();
   });
   it.each([401, 403, 500])("HTTP %i는 요청 ID를 유지하고 자동 재전송하지 않는다", async (status) => {
     const fetchSpy = vi
@@ -95,7 +102,7 @@ describe("정산 CSV 전송 계약", () => {
         new Response("private fixture", { status, headers: { "X-Request-ID": "csv-http" } }),
       );
     await expect(readChargebackCsv("2026-10", new AbortController().signal)).rejects.toMatchObject({
-      kind: "http",
+      kind: status === 401 ? "auth" : status === 403 ? "permission" : "http",
       status,
       requestId: "csv-http",
     });
