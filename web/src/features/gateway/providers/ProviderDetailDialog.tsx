@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
@@ -209,7 +210,7 @@ export function ProviderDetailDialog({
     <FeatureLegacyLink
       featureId="gateway.providers"
       className="button button-secondary button-default"
-      href="/admin#/settings"
+      href={legacyRoutes.settings}
     >
       기존 설정 화면 열기 <ExternalLink aria-hidden="true" />
     </FeatureLegacyLink>

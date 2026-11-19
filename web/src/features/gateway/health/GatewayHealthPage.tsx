@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { useQuery } from "@tanstack/react-query";
@@ -156,7 +157,7 @@ export function GatewayHealthPage(): React.JSX.Element {
             <FeatureLegacyLink
               featureId="gateway.health"
               className="button button-secondary button-default"
-              href="/admin#/routing/health"
+              href={legacyRoutes.routingHealth}
             >
               기존 상태 화면 열기 <ExternalLink aria-hidden="true" />
             </FeatureLegacyLink>

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { OverviewActivitySummary } from "./OverviewActivitySummary";
 import { useContext, useState } from "react";
 import { OverviewRefreshContext } from "./overview-refresh-context";
@@ -185,7 +186,7 @@ function OverviewContent(): React.JSX.Element {
             <FeatureLegacyLink
               featureId="overview"
               className="button button-secondary button-default"
-              href="/admin#/dashboard"
+              href={legacyRoutes.dashboard}
             >
               기존 화면에서 열기
             </FeatureLegacyLink>

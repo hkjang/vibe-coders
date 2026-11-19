@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, type RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -86,7 +87,7 @@ export function ApiKeyDetail({
             <FeatureLegacyLink
               featureId="access.users"
               className="button button-secondary button-default"
-              href="/admin#/users"
+              href={legacyRoutes.users}
             >
               기존 사용자·키 화면
             </FeatureLegacyLink>

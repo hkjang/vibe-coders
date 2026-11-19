@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import type { useRequestNoteQuery } from "./use-request-note-editor";
 import { requestNoteContractMessage } from "./request-note-state";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -20,7 +21,7 @@ export function RequestNoteNotices({
       <InlineNotice tone="warning" title="메모·태그 편집의 서버 버전을 확인하세요.">
         <p>{requestNoteContractMessage}</p>
         {canOpenLegacyAdmin(auth) ? (
-          <FeatureLegacyLink featureId="observability.requests" href="/admin#/requests">
+          <FeatureLegacyLink featureId="observability.requests" href={legacyRoutes.requests}>
             기존 관리자에서 요청 열기
           </FeatureLegacyLink>
         ) : null}

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { ExternalLink, LockKeyhole, Plus, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -241,7 +242,7 @@ function ProviderPageContent(): React.JSX.Element {
             <FeatureLegacyLink
               featureId="gateway.providers"
               className="button button-secondary button-default"
-              href="/admin#/settings"
+              href={legacyRoutes.settings}
             >
               기존 화면에서 열기 <ExternalLink aria-hidden="true" />
             </FeatureLegacyLink>

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { skillsKey, useSkillRead, useSkillOperationAccess } from "./skill-scope";
 import { Plus, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -267,7 +268,7 @@ function SkillPageContent(): React.JSX.Element {
     <PageHeader
       title="스킬"
       description="스킬 카탈로그와 스튜디오, 의존성 그래프를 한 화면에서 관리합니다."
-      legacyHref="/admin#/skills"
+      legacyHref={legacyRoutes.skills}
       actions={
         <>
           <Button onClick={() => void list.refetch()} disabled={list.isFetching}>
@@ -309,7 +310,7 @@ function SkillPageContent(): React.JSX.Element {
           message={safeAppErrorMessage(list.error, "스킬 목록을 불러오지 못했습니다.")}
           requestId={isAppError(list.error) ? list.error.requestId : undefined}
           onRetry={() => void list.refetch()}
-          legacyHref="/admin#/skills"
+          legacyHref={legacyRoutes.skills}
         />
       </div>
     );

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 
@@ -34,7 +35,7 @@ export function AgentRegistryPage(): React.JSX.Element {
       <PageHeader
         title="에이전트"
         description="가상 모델 경로(에이전트 라우트), 코딩 에이전트 성능과 VCS 연계 이벤트를 관리합니다."
-        legacyHref="/admin#/agents"
+        legacyHref={legacyRoutes.agents}
         actions={
           <Button
             variant="primary"

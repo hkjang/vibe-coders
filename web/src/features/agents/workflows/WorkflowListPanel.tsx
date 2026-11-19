@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { ErrorState } from "@/shared/components/state/PageStates";
@@ -170,7 +171,7 @@ export function WorkflowListPanel({
           message={safeAppErrorMessage(result.error, "워크플로 목록을 불러오지 못했습니다.")}
           requestId={isAppError(result.error) ? result.error.requestId : undefined}
           onRetry={() => void result.refetch()}
-          legacyHref="/admin#/workflows"
+          legacyHref={legacyRoutes.workflows}
         />
       ) : null}
       {total !== undefined && state.page >= pages ? (

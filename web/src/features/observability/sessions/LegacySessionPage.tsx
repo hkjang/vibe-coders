@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { RefreshCw, Search } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { FlightRecorderPanel } from "./FlightRecorderPanel";
@@ -100,7 +101,7 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
       <PageHeader
         title="세션 비행기록"
         description="코딩 세션 단위로 게이트웨이 요청을 시간순으로 재구성해 원인을 추적합니다."
-        legacyHref="/admin#/sessions"
+        legacyHref={legacyRoutes.sessions}
         actions={
           <Button onClick={refresh} disabled={sessions.isFetching}>
             <RefreshCw aria-hidden="true" /> 새로고침
@@ -174,7 +175,7 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
           requestId={safeRequestId}
           onRetry={refresh}
           onReset={resetFilters}
-          legacyHref="/admin#/sessions"
+          legacyHref={legacyRoutes.sessions}
         />
       ) : null}
       {!denied && (sessions.data || !sessions.isError) ? (

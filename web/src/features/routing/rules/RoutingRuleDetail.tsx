@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { RoutingRuleDetailData } from "./RoutingRuleDetailData";
 import type { RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -41,7 +42,7 @@ export function RoutingRuleDetail({
             <FeatureLegacyLink
               featureId="routing.rules"
               className="button button-secondary button-default"
-              href="/admin#/routing"
+              href={legacyRoutes.routing}
             >
               기존 라우팅 화면
             </FeatureLegacyLink>

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -41,7 +42,7 @@ export function UsersTab({ canWrite, writeDeniedReason }: UsersTabProps): React.
         title="사용자 조회 권한을 다시 확인하세요."
         message="이전 계정·사용량·상세와 열린 작업을 표시하지 않습니다."
         onRetry={owner.restart}
-        legacyHref="/admin#/users"
+        legacyHref={legacyRoutes.users}
       />
     );
   return (

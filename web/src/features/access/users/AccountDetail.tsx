@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQuery } from "@tanstack/react-query";
 import type { RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -91,7 +92,7 @@ export function AccountDetail({
             <FeatureLegacyLink
               featureId="access.users"
               className="button button-secondary button-default"
-              href="/admin#/users"
+              href={legacyRoutes.users}
             >
               기존 사용자·팀 화면
             </FeatureLegacyLink>

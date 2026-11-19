@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, PlayCircle, RefreshCw, Undo2 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -118,7 +119,7 @@ export function RemediationPage(): React.JSX.Element {
         title="자동 조치"
         status="preview"
         description="현재 운영 상황에서 실행 가능한 되돌릴 수 있는 조치 후보입니다. 적용 전에 영향을 미리 확인하세요."
-        legacyHref="/admin#/remediation"
+        legacyHref={legacyRoutes.remediation}
         actions={
           <div className="governance-actions">
             <label className="toolbar">

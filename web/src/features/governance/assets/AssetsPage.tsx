@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useCallback } from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -64,7 +65,7 @@ export function AssetsPage(): React.JSX.Element {
       <PageHeader
         title="AI 자산"
         description="게이트웨이가 관리하는 AI 자산의 소유권 명세(SBOM)와 사용자별 개인화 프로필을 확인합니다."
-        legacyHref="/admin#/sbom"
+        legacyHref={legacyRoutes.sbom}
         status="preview"
       />
 

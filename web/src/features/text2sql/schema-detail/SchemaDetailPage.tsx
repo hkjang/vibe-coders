@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { Link, useSearchParams } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
@@ -23,7 +24,7 @@ export function SchemaDetailPage() {
         title="Text2SQL 스키마 상세"
         description="선택한 스키마의 등록 상태와 현재 허용된 설명을 읽기 전용으로 확인합니다."
         readOnly
-        legacyHref={owner.readable ? "/admin#/text2sql" : undefined}
+        legacyHref={owner.readable ? legacyRoutes.text2sql : undefined}
         actions={
           owner.readable ? (
             <Link className="button button-secondary button-default" to="/text2sql?tab=schemas">

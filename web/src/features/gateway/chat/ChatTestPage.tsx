@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { ChatComparePanel } from "@/features/gateway/chat/ChatComparePanel";
 import { ChatInsightsPanel } from "@/features/gateway/chat/ChatInsightsPanel";
@@ -33,7 +34,7 @@ export function ChatTestPage(): React.JSX.Element {
         title="채팅 테스트"
         status="preview"
         description="게이트웨이를 통해 모델을 직접 호출하고, 여러 모델의 응답을 비교합니다."
-        legacyHref="/admin#/chat-test"
+        legacyHref={legacyRoutes.chatTest}
       />
 
       <InlineNotice tone="info" title="호출과 기록 안내">

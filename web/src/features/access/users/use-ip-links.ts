@@ -1,6 +1,6 @@
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featurePath, resolveFeature } from "@/config/migration-registry";
-import { legacySubroutes } from "@/config/legacy-route-map";
+import { legacyIpHref } from "@/config/legacy-route-map";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { isValidRequestQueryField } from "@/shared/utils/request-query-filters";
 import { validIpIdentity, validIpText } from "./ip-usage-model";
@@ -20,10 +20,7 @@ export function useIpLinks() {
   const legacy = canOpenLegacyAdmin(auth) && accessFeature?.fallbackEnabled;
   return {
     legacyHref: (ip?: string) =>
-      legacy
-        ? legacySubroutes["access.ips"] +
-          (ip && validIpIdentity(ip, auth.credentialPrefixes) ? "/" + encodeURIComponent(ip) : "")
-        : undefined,
+      legacy ? legacyIpHref(ip && validIpIdentity(ip, auth.credentialPrefixes) ? ip : undefined) : undefined,
     requestHref: (ip: string, id?: string) => {
       if (!feature || !canExplore || !validIpIdentity(ip, auth.credentialPrefixes)) return undefined;
       if (

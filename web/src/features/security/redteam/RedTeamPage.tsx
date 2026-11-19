@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { tokenStore } from "@/shared/auth/token-store";
@@ -152,7 +153,7 @@ function RedTeamWorkspace(): React.JSX.Element {
         <PageHeader
           title="레드팀 자동화"
           status="preview"
-          legacyHref="/admin#/redteam"
+          legacyHref={legacyRoutes.redteam}
           description="게이트웨이에 등록된 연결만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다."
         />
         <RedTeamEmergencyPanel canWrite={canWrite} />
@@ -167,7 +168,7 @@ function RedTeamWorkspace(): React.JSX.Element {
         <PageHeader
           title="레드팀 자동화"
           description="보안 회귀 테스트와 긴급 제어 상태를 확인합니다."
-          legacyHref="/admin#/redteam"
+          legacyHref={legacyRoutes.redteam}
         />
         <RedTeamEmergencyPanel canWrite={canWrite} />
         <ErrorState
@@ -175,7 +176,7 @@ function RedTeamWorkspace(): React.JSX.Element {
           message={safeAppErrorMessage(firstError, "레드팀 데이터를 불러오지 못했습니다.")}
           requestId={isAppError(firstError) ? firstError.requestId : undefined}
           onRetry={refreshAll}
-          legacyHref="/admin#/redteam"
+          legacyHref={legacyRoutes.redteam}
         />
       </div>
     );
@@ -186,7 +187,7 @@ function RedTeamWorkspace(): React.JSX.Element {
       <PageHeader
         title="레드팀 자동화"
         status="preview"
-        legacyHref="/admin#/redteam"
+        legacyHref={legacyRoutes.redteam}
         description="게이트웨이에 등록된 연결만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 드라이런이며, 고위험 묶음은 승인 없이 실제 실행되지 않습니다."
         actions={
           <>

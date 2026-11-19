@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { WorkflowVersionHistory } from "./WorkflowVersionHistory";
 import { WorkflowGraphRead } from "./WorkflowGraphRead";
 import { useId, useRef, useState, type RefObject } from "react";
@@ -183,7 +184,7 @@ export function WorkflowDetailSheet({
           message={safeAppErrorMessage(detailError, "워크플로 정의를 불러오지 못했습니다.")}
           requestId={isAppError(detailError) ? detailError.requestId : undefined}
           onRetry={onRetry}
-          legacyHref="/admin#/workflows"
+          legacyHref={legacyRoutes.workflows}
         />
       ) : !workflow ? (
         <EmptyState title="워크플로를 찾을 수 없습니다." description="목록에서 다시 선택하세요." />

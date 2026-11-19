@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
@@ -232,7 +233,7 @@ export function ModelDetailDialog({
     <FeatureLegacyLink
       featureId="gateway.models"
       className="button button-secondary button-default"
-      href="/admin#/model-contracts"
+      href={legacyRoutes.modelContracts}
     >
       기존 모델 계약 열기 <ExternalLink aria-hidden="true" />
     </FeatureLegacyLink>

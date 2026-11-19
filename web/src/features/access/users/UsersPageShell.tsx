@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useEffect, useRef, type ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -64,7 +65,7 @@ export function UsersPageShell({
         title="사용자와 팀"
         description="로그인 계정, 팀, API 키, IP 사용량, 할당량·예산과 역할을 한 곳에서 관리합니다."
         readOnly={!canWrite}
-        legacyHref="/admin#/users"
+        legacyHref={legacyRoutes.users}
         actions={
           <Button
             variant="primary"

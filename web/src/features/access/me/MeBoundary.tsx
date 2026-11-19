@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Button } from "@/shared/components/ui/Button";
 import { useFeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
@@ -35,7 +36,7 @@ export function MeBoundary({
         </p>
         {owner.readable ? <Button onClick={owner.restart}>권한 확인 후 다시 조회</Button> : null}
         {canOpenLegacyAdmin(auth) ? (
-          <FeatureLegacyLink featureId="me.home" href="/admin#/me">
+          <FeatureLegacyLink featureId="me.home" href={legacyRoutes.me}>
             기존 내 홈 열기
           </FeatureLegacyLink>
         ) : null}

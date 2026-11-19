@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQuery } from "@tanstack/react-query";
 import { PlayCircle, RefreshCw } from "lucide-react";
 import { useId, useState } from "react";
@@ -328,7 +329,7 @@ export function ProbePage(): React.JSX.Element {
       <ErrorState
         legacyFeatureId="observability.probes"
         message="인증 상태를 확인하지 못했습니다."
-        legacyHref="/admin#/journey-probe"
+        legacyHref={legacyRoutes.journeyProbe}
       />
     );
   }
@@ -338,7 +339,7 @@ export function ProbePage(): React.JSX.Element {
       <PageHeader
         title="진단 프로브"
         description="개발도구 연결 합성 점검과 게이트웨이 파드 운영 맵을 확인합니다."
-        legacyHref="/admin#/journey-probe"
+        legacyHref={legacyRoutes.journeyProbe}
         status="preview"
       />
       <Tabs

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { versionAtLeast } from "@/config/migration-registry";
 import { WorkflowGraphPublishDialog } from "./WorkflowGraphPublishDialog";
 import { WorkflowGraphDialog } from "./WorkflowGraphDialog";
@@ -145,7 +146,7 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
       <PageHeader
         title="워크플로"
         description="여러 단계를 묶어 업무를 자동화하는 워크플로 체인을 정의하고 검증·게시합니다."
-        legacyHref="/admin#/workflows"
+        legacyHref={legacyRoutes.workflows}
         actions={
           <>
             <Button onClick={() => void list.refetch()} disabled={list.isFetching}>

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { formatSignedRatio, severityTone } from "@/features/access/access-format";
@@ -40,7 +41,7 @@ export function QuotasTab(props: QuotasTabProps): React.JSX.Element {
         title="할당량·예산 조회 권한을 다시 확인하세요."
         message="이전 조회 결과와 열린 작업을 표시하지 않습니다."
         onRetry={owner.restart}
-        legacyHref="/admin#/users"
+        legacyHref={legacyRoutes.users}
       />
     );
   return <QuotaBudgetContent key={owner.id} {...props} owner={owner} />;

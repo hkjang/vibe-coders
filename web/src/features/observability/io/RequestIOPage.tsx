@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -248,7 +249,7 @@ export function RequestIOPage(): React.JSX.Element {
       <PageHeader
         title="입출력 모니터"
         description="게이트웨이를 지난 요청의 입력과 출력을 한눈에 봅니다. 목록의 내용은 역할과 관계없이 마스킹됩니다."
-        legacyHref="/admin#/requests"
+        legacyHref={legacyRoutes.requests}
         actions={
           <>
             <Switch

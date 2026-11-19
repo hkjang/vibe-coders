@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { isAppError } from "@/shared/api/error";
 import { workAppStatusLabel } from "./work-app-tables";
@@ -118,7 +119,7 @@ function AppDetailSheetContent({
             message={safeAppErrorMessage(detailError, "업무 앱 상세를 불러오지 못했습니다.")}
             requestId={isAppError(detailError) ? detailError.requestId : undefined}
             onRetry={onRetry}
-            legacyHref="/admin#/apps"
+            legacyHref={legacyRoutes.apps}
           />
         ) : (
           <EmptyState

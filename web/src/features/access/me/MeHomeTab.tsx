@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useRef, useState } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { severityTone } from "@/features/access/access-format";
@@ -109,7 +110,7 @@ export function MeHomeTab() {
                         <FeatureLegacyLink
                           featureId="me.home"
                           className="button button-secondary button-small"
-                          href="/admin#/me"
+                          href={legacyRoutes.me}
                         >
                           기존 내 홈에서 확인
                         </FeatureLegacyLink>

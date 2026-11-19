@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useMemo } from "react";
 import { useIsFetching } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
@@ -60,7 +61,7 @@ function SystemHealthWorkspace(): React.JSX.Element {
               <FeatureLegacyLink
                 featureId="system.health"
                 className="button button-secondary button-default"
-                href="/admin#/ops-home"
+                href={legacyRoutes.operations}
               >
                 기존 화면에서 열기
               </FeatureLegacyLink>

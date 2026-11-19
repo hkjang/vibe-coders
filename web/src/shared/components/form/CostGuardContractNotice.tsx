@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
@@ -12,7 +13,7 @@ export function CostGuardContractNotice(): React.JSX.Element | null {
     <InlineNotice tone="warning" title="비용 보호 설정의 서버 버전을 확인하세요.">
       <p>{costGuardContractMessage}</p>
       {canOpenLegacyAdmin(auth) ? (
-        <FeatureLegacyLink featureId="governance.policies" href="/admin#/safety">
+        <FeatureLegacyLink featureId="governance.policies" href={legacyRoutes.safety}>
           기존 관리자에서 비용 보호 설정 열기
         </FeatureLegacyLink>
       ) : null}

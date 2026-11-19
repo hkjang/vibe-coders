@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, RefreshCw } from "lucide-react";
 
@@ -66,7 +67,7 @@ const delegatedPanels: ReadonlyArray<{ title: string; where: string; href: strin
   },
   { title: "AI 코딩 작업 템플릿", where: "프롬프트 자산 화면", href: "/app/prompts/library", internal: true },
   { title: "게이트웨이 비밀키 교체", where: "비밀키 교체 화면", href: "/app/system/secrets", internal: true },
-  { title: "지식 캐시", where: "기존 관리자 화면", href: "/admin#/settings", internal: false },
+  { title: "지식 캐시", where: "기존 관리자 화면", href: legacyRoutes.settings, internal: false },
 ];
 
 export function SystemSettingsPage(): React.JSX.Element {
@@ -84,7 +85,7 @@ export function SystemSettingsPage(): React.JSX.Element {
         status="preview"
         readOnly={tab !== "runtime" && tab !== "console" && !access.allowed}
         description="게이트웨이 런타임 설정, 신규 콘솔 전환 상태, 변경 이력과 운영 작업을 한 곳에서 관리합니다."
-        legacyHref="/admin#/settings"
+        legacyHref={legacyRoutes.settings}
         actions={
           <>
             <Button

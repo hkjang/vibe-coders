@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -70,7 +71,7 @@ function LibraryContent(): React.JSX.Element {
                 ? contextMessages.description
                 : "프롬프트 검색과 지문, 재사용 자산, 프롬프트 부채를 한곳에서 관리합니다."
         }
-        legacyHref={metadataOnly || tab === "promotions" ? undefined : "/admin#/prompts"}
+        legacyHref={metadataOnly || tab === "promotions" ? undefined : legacyRoutes.prompts}
         actions={
           <Button
             variant="primary"

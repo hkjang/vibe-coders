@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { ExternalLink, RefreshCw } from "lucide-react";
@@ -46,7 +47,7 @@ export function ModelPageHeader({
             <FeatureLegacyLink
               featureId="gateway.models"
               className="button button-secondary button-default"
-              href="/admin#/model-contracts"
+              href={legacyRoutes.modelContracts}
             >
               기존 화면에서 열기 <ExternalLink aria-hidden="true" />
             </FeatureLegacyLink>
