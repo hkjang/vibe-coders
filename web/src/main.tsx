@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { RouterProvider } from "react-router";
+import { AppRouterProvider } from "@/app/router/AppRouterProvider";
 
 import { AppErrorBoundary } from "@/app/error-boundaries/AppErrorBoundary";
 import { AppProviders } from "@/app/providers/AppProviders";
@@ -20,7 +20,7 @@ createRoot(root).render(
   <StrictMode>
     <AppErrorBoundary>
       <AppProviders>
-        <RouterProvider router={router} />
+        <AppRouterProvider router={router} />
       </AppProviders>
     </AppErrorBoundary>
   </StrictMode>,
