@@ -24,7 +24,7 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	}
 	ui, _ := body["ui"].(map[string]any)
 	if enabled, _ := ui["enabled"].(bool); enabled {
-		t.Fatal("/app must be disabled by default")
+		t.Fatal("explicit UI_APP_ENABLED=false must disable /app")
 	}
 	auth, _ := body["authentication"].(map[string]any)
 	if authenticated, _ := auth["authenticated"].(bool); !authenticated {
@@ -668,5 +668,48 @@ func TestLegacyFallbackGateAppliesToImplementedFeatures(t *testing.T) {
 	features := effectiveAppUIFeatures(map[string]store.AdminSetting{}, server, "admin-1", "admin", []string{"admin:read"}, true)
 	if len(features) != 1 || features[0].Available || features[0].AvailabilityReason != "legacy_fallback_disabled" {
 		t.Fatalf("implemented Legacy feature bypassed the global fallback gate: %+v", features)
+	}
+}
+
+func TestAppUIRootFollowsDefaultAndRuntimeChoice(t *testing.T) {
+	t.Setenv("UI_APP_ENABLED", "")
+	ts, _ := settingsServer(t)
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	check := func(want string) {
+		t.Helper()
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			r, _ := http.NewRequest(method, ts.URL+"/?next=https://outside.invalid&token=discard", nil)
+			resp, err := client.Do(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != want || resp.Header.Get("Cache-Control") != "no-store" {
+				t.Fatalf("%s root = %d %q, want 302 %q with no-store", method, resp.StatusCode, resp.Header.Get("Location"), want)
+			}
+		}
+	}
+	_, body := req(t, http.MethodGet, ts.URL+"/admin/ui-bootstrap", "")
+	ui := body["ui"].(map[string]any)
+	if ui["enabled"] != true || ui["default_entry"] != "/app/overview" {
+		t.Fatalf("unexpected default console config: %#v", ui)
+	}
+	check("/app/")
+	for _, choice := range []struct{ value, entry string }{{"false", "/admin"}, {"true", "/app/"}} {
+		resp, _ := req(t, http.MethodPut, ts.URL+"/admin/settings/by-key/"+appUIEnabledKey, `{"value":"`+choice.value+`","reason":"choose default console"}`)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("console setting status = %d", resp.StatusCode)
+		}
+		check(choice.entry)
+	}
+	resp, err := client.Get(ts.URL + "/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("explicit legacy entry changed: %d", resp.StatusCode)
 	}
 }

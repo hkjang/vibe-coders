@@ -26,6 +26,7 @@ test("즐겨찾기 추가·정렬·해제·새로고침과 최근 화면 이동�
   await dialog.getByRole("button", { name: "AI 공급자 위로 이동" }).focus();
   await page.keyboard.press("Enter");
   await expect(dialog.getByText("AI 공급자", { exact: true })).toBeFocused();
+  await expect(dialog).not.toContainText("미리보기");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "즐겨찾기 관리" })).toBeFocused();
   await page.reload();
@@ -149,9 +150,9 @@ test("접힌 사이드바에서도 즐겨찾기 이름과 관리 작업을 사�
   await page.getByRole("button", { name: "사이드바 접기", exact: true }).click();
   const pinned = page
     .getByRole("list", { name: "즐겨찾기" })
-    .getByRole("link", { name: "통합 현황 읽기 전용 미리보기", exact: true });
+    .getByRole("link", { name: "통합 현황 읽기 전용", exact: true });
   await expect(pinned).toBeInViewport();
-  await expect(pinned).toHaveAttribute("title", "통합 현황 읽기 전용 미리보기");
+  await expect(pinned).toHaveAttribute("title", "통합 현황 읽기 전용");
   await page.getByRole("button", { name: "즐겨찾기 관리" }).click();
   await expect(page.getByRole("dialog", { name: "즐겨찾기 관리" })).toBeVisible();
   await page.getByRole("button", { name: "완료", exact: true }).click();
@@ -815,9 +816,8 @@ for (const [featureId, path, title] of [
     await expect(page.getByRole("status", { name: "화면 전환 상태", exact: true })).toHaveText(
       "읽기 전용 미리보기",
     );
-    await expect(page.locator(`.app-sidebar a[href="/app/${path}"]`).first()).toContainText(
-      "읽기 전용 미리보기",
-    );
+    await expect(page.locator(`.app-sidebar a[href="/app/${path}"]`).first()).toContainText("읽기 전용");
+    await expect(page.locator(".app-sidebar")).not.toContainText("미리보기");
     await page.reload();
     await expect(page.getByRole("status", { name: "화면 전환 상태", exact: true })).toHaveText(
       "읽기 전용 미리보기",
@@ -1342,7 +1342,7 @@ test("keeps the mobile Overview and navigation drawer stable", async ({ page }) 
   await expect(navigation).toBeVisible();
   // Gateway Health carries the circuit-breaker resets from v0.84.0, so it is a
   // full preview; System Health stays a read-only view of the same signals.
-  await expect(navigation.getByRole("link", { name: "게이트웨이 상태 미리보기" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "게이트웨이 상태", exact: true })).toBeVisible();
   await expect(navigation.getByRole("link", { name: "시스템 상태 읽기 전용" })).toBeVisible();
   await expect(page).toHaveScreenshot("navigation-mobile.png", {
     animations: "disabled",

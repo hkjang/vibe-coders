@@ -101,8 +101,10 @@ docker run -d --name proxy-gateway --restart=always \
 
 Dockerfile은 Node 24+pnpm frozen frontend builder → Go 1.26.11 embed builder → distroless
 nonroot의 3-stage 구조입니다. React 정적 에셋은 Go 바이너리에 포함되고 운영
-컨테이너에는 Node.js가 없습니다. `/app`은 기본 OFF이므로 Preview가 필요할 때만
-`UI_APP_ENABLED=true`를 지정합니다. `/admin`은 설정과 무관하게 계속 제공됩니다.
+컨테이너에는 Node.js가 없습니다. 현재 소스의 `/app`은 기본 활성화되며 `/`에서
+`/app/`으로 이동합니다. 이전 버전의 명시적인 `UI_APP_ENABLED=false` 또는 저장된
+`ui.app.enabled=false`는 유지되므로 전환하려는 배포에서는 해당 설정을 `true`로 변경합니다.
+`/admin`은 기존 주소에서 계속 제공됩니다.
 
 ### 2.4 docker compose
 
@@ -172,7 +174,8 @@ curl -fsS http://localhost:8080/app/providers >/dev/null
 curl -fsS http://localhost:8080/admin >/dev/null
 ```
 
-`/app`은 기본 OFF이며 위 Preview 확인에는 `UI_APP_ENABLED=true`가 필요합니다.
+현재 소스는 `/app`을 기본 콘솔로 사용합니다. 위에 예시로 남긴 과거 릴리즈는
+기본 비활성일 수 있으므로 해당 릴리즈의 배포 안내를 확인합니다.
 `ADMIN_TOKEN` 을 설정한 경우 UI 상단의 "관리자 토큰" 입력란에 그 값을 넣어야 데이터를 받아옵니다.
 릴리스 빌드 호스트에서는 `bash scripts/container-smoke.sh <image> <version>`으로 redirect,
 deep link, hashed asset cache, 버전 일치와 `/admin` fallback까지 검증합니다.

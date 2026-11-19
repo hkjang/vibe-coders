@@ -238,7 +238,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "logging.response_max_bytes", Category: "logging", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Logging.ResponseMaxBytes) }},
 
 		// ---- Next Admin UI (/app) ----
-		{Key: appUIEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_ENABLED", "false") }},
+		{Key: appUIEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_ENABLED", "true") }},
 		{Key: appUIDefaultEntryKey, Category: "ui.app", Type: stString, validate: validateAppUIPath, envValue: func(config.Config) string { return appUIEnv("UI_APP_DEFAULT_ENTRY", "/app/overview") }},
 		{Key: appUILegacyFallbackKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_LEGACY_FALLBACK", "true") }},
 		{Key: appUIFeedbackEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_FEEDBACK_ENABLED", "false") }},

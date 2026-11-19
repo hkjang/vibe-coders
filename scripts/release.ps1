@@ -266,7 +266,7 @@ $guideLines = @(
     "           echo 'GATEWAY_VERSION=$Version'"
     '           echo "ADMIN_TOKEN=${ADMIN_TOKEN_VALUE}"'
     '           echo "GATEWAY_SECRET=${GATEWAY_SECRET_VALUE}"'
-    "           echo 'UI_APP_ENABLED=false'"
+    "           echo 'UI_APP_ENABLED=true'"
     '           echo ''MODEL_PRICING_KRW_PER_1M={"gpt-4.1-mini":{"input_krw_per_1m":540,"output_krw_per_1m":2160}}'''
     '       } > "$ENV_TMP" || exit 1'
     '       chmod 0600 "$ENV_TMP" && mv -f -- "$ENV_TMP" "$ENV_FILE" || exit 1'
@@ -300,9 +300,9 @@ $guideLines = @(
     ""
     "4. Admin UI"
     ""
-    "   - Legacy Stable Console: http://<host>:8080/admin"
-    "   - Next Console Preview: http://<host>:8080/app/"
-    "   - /app is OFF by default. Set UI_APP_ENABLED=true to enable the Preview."
+    "   - Legacy admin: http://<host>:8080/admin"
+    "   - Admin console: http://<host>:8080/app/ (the root URL redirects here)"
+    "   - /app is enabled by default. Explicit UI_APP_ENABLED=false or stored ui.app.enabled=false keeps the root URL on /admin."
     "   - Token: ADMIN_TOKEN value"
     "   - React assets are embedded in the Go binary; Node.js is not present at runtime."
     ""

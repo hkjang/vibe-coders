@@ -95,3 +95,10 @@ export function roleLabel(role: string | undefined): string {
 export function managedRoleLabel(role: string): string {
   return translatedRoleLabel(role) ?? (role || "—");
 }
+
+/** Navigation shows useful restrictions, without a preview/release label on every menu. */
+export function navigationStatusLabel(status: keyof typeof migrationStatusLabels): string | undefined {
+  if (status === "preview" || status === "stable") return undefined;
+  if (status === "preview_read_only") return uiLabels.readOnly;
+  return migrationStatusLabels[status];
+}

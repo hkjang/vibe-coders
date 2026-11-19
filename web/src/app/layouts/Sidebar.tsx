@@ -5,7 +5,7 @@ import { NavLink } from "react-router";
 
 import { featurePath } from "@/config/migration-registry";
 import { navigationGroups } from "@/config/navigation";
-import { migrationStatusLabels, uiLabels } from "@/config/ui-labels";
+import { navigationStatusLabel, uiLabels } from "@/config/ui-labels";
 import { MigrationStatusBadge } from "@/shared/components/page/MigrationStatus";
 import { Button } from "@/shared/components/ui/Button";
 import { usePreferences } from "@/shared/stores/preferences";
@@ -37,9 +37,11 @@ export function Sidebar({ mobileTriggerRef, onManageFavorites }: SidebarProps): 
     <li key={feature.featureId}>
       <NavLink
         to={featurePath(feature)}
-        aria-label={`${feature.title} ${migrationStatusLabels[effective.status]}`}
+        aria-label={[feature.title, navigationStatusLabel(effective.status)].filter(Boolean).join(" ")}
         title={
-          !mobile && collapsed ? `${feature.title} ${migrationStatusLabels[effective.status]}` : undefined
+          !mobile && collapsed
+            ? [feature.title, navigationStatusLabel(effective.status)].filter(Boolean).join(" ")
+            : undefined
         }
         onClick={() => {
           if (mobile) setMobileOpen(false);
