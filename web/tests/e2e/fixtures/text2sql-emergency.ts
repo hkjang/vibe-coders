@@ -17,6 +17,8 @@ export const test = base.extend<{
     writes: unknown[];
     readonly: (value: boolean) => void;
     migrationStatus: (value: MigrationStatus) => void;
+    legacyFallback: (value: boolean) => void;
+    featureFallback: (value: boolean) => void;
     failOverview: (value: boolean) => void;
     failRead: (value: boolean) => void;
     denyWrite: () => void;
@@ -29,6 +31,8 @@ export const test = base.extend<{
     let authenticated = false;
     let readOnly = false;
     let migrationStatus: MigrationStatus = "preview";
+    let legacyFallback = true;
+    let featureFallback = true;
     let overviewUnavailable = false;
     let unavailable = false;
     let denied = false;
@@ -52,7 +56,7 @@ export const test = base.extend<{
       ui: {
         enabled: true,
         default_entry: "/app/text2sql",
-        legacy_fallback: true,
+        legacy_fallback: legacyFallback,
         feedback_enabled: false,
         telemetry_enabled: false,
       },
@@ -81,7 +85,7 @@ export const test = base.extend<{
           read_only: readOnly,
           enabled_roles: ["admin"],
           rollout_percent: 100,
-          fallback_enabled: true,
+          fallback_enabled: featureFallback,
           minimum_api_version: "v0.84.0",
           available: authenticated,
         },
@@ -166,6 +170,12 @@ export const test = base.extend<{
       },
       migrationStatus: (value) => {
         migrationStatus = value;
+      },
+      legacyFallback: (value) => {
+        legacyFallback = value;
+      },
+      featureFallback: (value) => {
+        featureFallback = value;
       },
       failOverview: (value) => {
         overviewUnavailable = value;

@@ -120,3 +120,29 @@ test("390px 다크 제목의 한글 상태·읽기 전용·기존 화면 링크�
   await page.screenshot({ path: info.outputPath("migration-heading-mobile-dark.png") });
   expect(emergency.writes).toEqual([]);
 });
+
+test("열린 화면의 Legacy 링크는 폐기·기능별 해제·전체 해제에 즉시 일치한다", async ({ page, emergency }) => {
+  await login(page);
+  const legacy = header(page).getByRole("link", { name: "기존 화면에서 열기", exact: true });
+  await expect(legacy).toBeVisible();
+  emergency.migrationStatus("retired");
+  await refreshRuntime(page);
+  await expect(heading(page)).toHaveText("종료");
+  await expect(legacy).toHaveCount(0);
+  // A retired feature does not remove the separate, authorized admin-home entry.
+  await expect(page.locator('a[href="/admin"]').first()).toBeVisible();
+  emergency.migrationStatus("deprecated");
+  await refreshRuntime(page);
+  await expect(legacy).toBeVisible();
+  emergency.featureFallback(false);
+  await refreshRuntime(page);
+  await expect(legacy).toHaveCount(0);
+  emergency.featureFallback(true);
+  await refreshRuntime(page);
+  await expect(legacy).toBeVisible();
+  emergency.legacyFallback(false);
+  await refreshRuntime(page);
+  await expect(legacy).toHaveCount(0);
+  await expect(page.locator('a[href="/admin"]')).toHaveCount(0);
+  expect(emergency.writes).toEqual([]);
+});

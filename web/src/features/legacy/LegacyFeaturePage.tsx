@@ -1,4 +1,4 @@
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { ArrowUpRight, Construction } from "lucide-react";
 
@@ -21,9 +21,13 @@ export function LegacyFeaturePage({ feature }: { feature: MigrationFeature }): R
         <Construction aria-hidden="true" />
         <h2>이 기능은 안정 운영 화면에서 제공됩니다.</h2>
         <p>신규 UI로 전환되기 전까지 동일한 데이터와 권한을 사용하는 기존 관리자 화면을 이용하세요.</p>
-        <LegacyLink className="button button-primary button-default" href={feature.legacyPath}>
+        <FeatureLegacyLink
+          featureId={feature.featureId}
+          className="button button-primary button-default"
+          href={feature.legacyPath}
+        >
           기존 화면에서 {feature.title} 열기 <ArrowUpRight aria-hidden="true" />
-        </LegacyLink>
+        </FeatureLegacyLink>
       </section>
     </div>
   );

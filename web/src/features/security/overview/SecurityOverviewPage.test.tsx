@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SecurityOverviewPage } from "@/features/security/overview/SecurityOverviewPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({
   scopes: ["admin:read", "admin:write", "security:read", "costs:read"] as string[],
@@ -171,7 +172,12 @@ function handlers(overrides: Record<string, () => unknown> = {}): Record<string,
 }
 
 function renderPage(route = "/security"): ReturnType<typeof renderScreen> {
-  return renderScreen(<SecurityOverviewPage />, { path: "/security/*", route });
+  return renderScreen(
+    <FeatureAccessHarness featureId="security.overview" readOnly>
+      <SecurityOverviewPage />
+    </FeatureAccessHarness>,
+    { path: "/security/*", route },
+  );
 }
 
 describe("SecurityOverviewPage", () => {

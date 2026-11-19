@@ -468,7 +468,7 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 	for _, feature := range features {
 		if feature.Available {
 			allowedFeatures = append(allowedFeatures, feature.FeatureID)
-			if uiConfig.LegacyFallback && feature.LegacyPath != "" && feature.FallbackEnabled {
+			if uiConfig.LegacyFallback && feature.Status != "retired" && feature.LegacyPath != "" && feature.FallbackEnabled {
 				legacyRouteMap[feature.AppPath] = feature.LegacyPath
 			}
 		}
