@@ -713,6 +713,13 @@ func (s *Server) Routes() http.Handler {
 			appHandler.ServeHTTP(w, r)
 			return
 		}
+		// A stored skill name may contain literal slashes or dot segments.
+		// Dispatch before ServeMux cleaning so neither reads nor deletes can be
+		// redirected to another identity. Authentication remains in the handler.
+		if strings.HasPrefix(r.URL.EscapedPath(), "/admin/skills/by-name/") {
+			s.handleSkillByName(w, r)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
 	return withTrace(withTrustedClientIP(router, s.trustedProxies))

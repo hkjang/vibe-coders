@@ -161,7 +161,8 @@ func (s *Server) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/skills/by-name/"), "/")
+	// The route prefix is structural; every byte after it belongs to the identity.
+	name := strings.TrimPrefix(r.URL.Path, "/admin/skills/by-name/")
 	if name == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "skill name required", "invalid_request_error", "missing_name")
 		return
