@@ -169,6 +169,7 @@ export function PagedSessionPage() {
         />
       ) : result.isError ? (
         <ErrorState
+          legacyFeatureId="observability.sessions"
           title="세션 목록을 불러오지 못했습니다."
           message="권한과 서버 상태를 확인한 뒤 다시 조회하세요. 전체 건수와 합계를 확인할 수 없습니다."
           requestId={

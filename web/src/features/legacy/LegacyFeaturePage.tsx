@@ -1,3 +1,5 @@
+import { useAuth } from "@/app/auth/AuthProvider";
+import { canOpenLegacyFeature } from "@/shared/permissions/legacy-feature";
 import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { ArrowUpRight, Construction } from "lucide-react";
@@ -7,6 +9,8 @@ import { uiLabels } from "@/config/ui-labels";
 import { Badge } from "@/shared/components/ui/Badge";
 
 export function LegacyFeaturePage({ feature }: { feature: MigrationFeature }): React.JSX.Element {
+  const auth = useAuth();
+  const canOpen = canOpenLegacyFeature(auth, feature.featureId);
   return (
     <div className="page-stack">
       <header className="page-header">
@@ -20,7 +24,11 @@ export function LegacyFeaturePage({ feature }: { feature: MigrationFeature }): R
       <section className="legacy-card">
         <Construction aria-hidden="true" />
         <h2>이 기능은 안정 운영 화면에서 제공됩니다.</h2>
-        <p>신규 UI로 전환되기 전까지 동일한 데이터와 권한을 사용하는 기존 관리자 화면을 이용하세요.</p>
+        <p>
+          {canOpen
+            ? "신규 UI로 전환되기 전까지 동일한 데이터와 권한을 사용하는 기존 관리자 화면을 이용하세요."
+            : "기존 화면을 열 수 없습니다. 대상 기능의 전환 설정과 기존 관리자 접근 권한을 확인하세요."}
+        </p>
         <FeatureLegacyLink
           featureId={feature.featureId}
           className="button button-primary button-default"

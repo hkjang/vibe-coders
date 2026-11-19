@@ -3,7 +3,7 @@ import { requestNoteContractMessage } from "./request-note-state";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { isAppError } from "@/shared/api/error";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
@@ -20,7 +20,9 @@ export function RequestNoteNotices({
       <InlineNotice tone="warning" title="메모·태그 편집의 서버 버전을 확인하세요.">
         <p>{requestNoteContractMessage}</p>
         {canOpenLegacyAdmin(auth) ? (
-          <LegacyLink href="/admin#/requests">기존 관리자에서 요청 열기</LegacyLink>
+          <FeatureLegacyLink featureId="observability.requests" href="/admin#/requests">
+            기존 관리자에서 요청 열기
+          </FeatureLegacyLink>
         ) : null}
       </InlineNotice>
     );

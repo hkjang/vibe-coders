@@ -17,7 +17,7 @@ import "@/features/system/settings/system-settings.css";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
@@ -144,9 +144,9 @@ export function SystemSettingsPage(): React.JSX.Element {
                   {panel.where} 열기 <ExternalLink aria-hidden="true" />
                 </a>
               ) : showLegacy ? (
-                <LegacyLink href={panel.href}>
+                <FeatureLegacyLink featureId="system.settings" href={panel.href}>
                   {panel.where} 열기 <ExternalLink aria-hidden="true" />
-                </LegacyLink>
+                </FeatureLegacyLink>
               ) : (
                 <span className="settings-permission-note">{panel.where}에서 관리합니다.</span>
               )}

@@ -1,4 +1,4 @@
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
@@ -229,9 +229,13 @@ export function ModelDetailDialog({
       failure.code === "models_response_limit_exceeded",
   );
   const footer = showLegacyAdmin ? (
-    <LegacyLink className="button button-secondary button-default" href="/admin#/model-contracts">
+    <FeatureLegacyLink
+      featureId="gateway.models"
+      className="button button-secondary button-default"
+      href="/admin#/model-contracts"
+    >
       기존 모델 계약 열기 <ExternalLink aria-hidden="true" />
-    </LegacyLink>
+    </FeatureLegacyLink>
   ) : undefined;
   const status = row ? modelStatusPresentation[row.status] : undefined;
 

@@ -324,7 +324,13 @@ export function ProbePage(): React.JSX.Element {
 
   if (auth.mode === "loading") return <LoadingState />;
   if (auth.mode === "error") {
-    return <ErrorState message="인증 상태를 확인하지 못했습니다." legacyHref="/admin#/journey-probe" />;
+    return (
+      <ErrorState
+        legacyFeatureId="observability.probes"
+        message="인증 상태를 확인하지 못했습니다."
+        legacyHref="/admin#/journey-probe"
+      />
+    );
   }
 
   return (

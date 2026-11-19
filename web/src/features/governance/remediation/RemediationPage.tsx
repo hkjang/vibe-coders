@@ -19,7 +19,7 @@ import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { JsonBlock } from "@/shared/components/ui/JsonBlock";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { RemediationLegacyLink } from "./RemediationLegacyLink";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { Sheet } from "@/shared/components/ui/Sheet";
@@ -232,14 +232,7 @@ export function RemediationPage(): React.JSX.Element {
                     >
                       <PlayCircle aria-hidden="true" /> 승인 후 적용
                     </Button>
-                    {action.link ? (
-                      <LegacyLink
-                        className="button button-secondary button-small"
-                        href={`/admin${action.link}`}
-                      >
-                        기존 화면에서 처리
-                      </LegacyLink>
-                    ) : null}
+                    <RemediationLegacyLink link={action.link} />
                   </div>
                 </article>
               ))}

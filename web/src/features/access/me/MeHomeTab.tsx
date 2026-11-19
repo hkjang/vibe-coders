@@ -8,7 +8,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
@@ -106,9 +106,13 @@ export function MeHomeTab() {
                           사용량 리포트 보기
                         </Button>
                       ) : canOpenLegacyAdmin(auth) ? (
-                        <LegacyLink className="button button-secondary button-small" href="/admin#/me">
+                        <FeatureLegacyLink
+                          featureId="me.home"
+                          className="button button-secondary button-small"
+                          href="/admin#/me"
+                        >
                           기존 내 홈에서 확인
-                        </LegacyLink>
+                        </FeatureLegacyLink>
                       ) : null}
                       <Button
                         size="small"

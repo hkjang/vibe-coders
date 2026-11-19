@@ -1,4 +1,4 @@
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -171,6 +171,7 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
   if (selection.denied || (result.error && !result.data)) {
     return (
       <ErrorState
+        legacyFeatureId="observability.requests"
         headingRef={errorHeadingRef}
         message={
           selection.denied
@@ -220,9 +221,13 @@ function RequestPageContent({ access }: { access: TraceSafeFlowAccess }): React.
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}
           </Button>
           {showLegacyAdmin && legacyPath ? (
-            <LegacyLink className="button button-secondary button-default" href={legacyPath}>
+            <FeatureLegacyLink
+              featureId="observability.requests"
+              className="button button-secondary button-default"
+              href={legacyPath}
+            >
               <ExternalLink aria-hidden="true" /> 기존 화면 보기
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
         </div>
       </header>

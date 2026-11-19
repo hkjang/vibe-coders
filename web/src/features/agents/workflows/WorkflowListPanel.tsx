@@ -166,6 +166,7 @@ export function WorkflowListPanel({
       </Toolbar>
       {result.isError ? (
         <ErrorState
+          legacyFeatureId="agents.workflows"
           message={safeAppErrorMessage(result.error, "워크플로 목록을 불러오지 못했습니다.")}
           requestId={isAppError(result.error) ? result.error.requestId : undefined}
           onRetry={() => void result.refetch()}

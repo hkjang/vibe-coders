@@ -1,4 +1,4 @@
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -153,9 +153,13 @@ export function GatewayHealthPage(): React.JSX.Element {
           ) : null}
           <Badge tone={pageStatusTone}>{pageStatus}</Badge>
           {showLegacyAdmin ? (
-            <LegacyLink className="button button-secondary button-default" href="/admin#/routing/health">
+            <FeatureLegacyLink
+              featureId="gateway.health"
+              className="button button-secondary button-default"
+              href="/admin#/routing/health"
+            >
               기존 상태 화면 열기 <ExternalLink aria-hidden="true" />
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
           <Button onClick={refreshAll} disabled={refreshing}>
             <RefreshCw aria-hidden="true" /> {refreshing ? "갱신 중" : "새로고침"}

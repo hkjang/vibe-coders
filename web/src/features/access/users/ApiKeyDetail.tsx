@@ -11,7 +11,7 @@ import { LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import {
   assertFeatureRead,
@@ -83,9 +83,13 @@ export function ApiKeyDetail({
       footer={
         <>
           {canOpenLegacyAdmin(auth) ? (
-            <LegacyLink className="button button-secondary button-default" href="/admin#/users">
+            <FeatureLegacyLink
+              featureId="access.users"
+              className="button button-secondary button-default"
+              href="/admin#/users"
+            >
               기존 사용자·키 화면
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
           <Button onClick={onClose}>닫기</Button>
         </>

@@ -101,6 +101,7 @@ export function TeamsTab({ canWrite, writeDeniedReason }: TeamsTabProps): React.
   if (owner.denied)
     return (
       <ErrorState
+        legacyFeatureId="access.users"
         title="팀 조회 권한을 다시 확인하세요."
         message="이전 팀 목록과 초안을 표시하지 않습니다."
         onRetry={owner.restart}

@@ -114,6 +114,7 @@ function AppDetailSheetContent({
           <LoadingState label="업무 앱 상세를 불러오는 중입니다." />
         ) : detailError ? (
           <ErrorState
+            legacyFeatureId="agents.apps"
             message={safeAppErrorMessage(detailError, "업무 앱 상세를 불러오지 못했습니다.")}
             requestId={isAppError(detailError) ? detailError.requestId : undefined}
             onRetry={onRetry}

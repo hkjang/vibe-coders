@@ -305,6 +305,7 @@ function SkillPageContent(): React.JSX.Element {
       <div className="page-stack">
         {header}
         <ErrorState
+          legacyFeatureId="agents.skills"
           message={safeAppErrorMessage(list.error, "스킬 목록을 불러오지 못했습니다.")}
           requestId={isAppError(list.error) ? list.error.requestId : undefined}
           onRetry={() => void list.refetch()}

@@ -341,6 +341,25 @@ describe("migration registry", () => {
     }
   });
 
+  it.each([true, undefined])(
+    "does not revive retired Legacy fallback with an incompatible API (server=%s)",
+    (serverAvailable) => {
+      const feature = migrationRegistry.find((entry) => entry.featureId === "overview");
+      if (!feature) throw new Error("Missing overview fixture");
+      expect(
+        resolveFeature(
+          { ...feature, status: "retired", minimumApiVersion: "v9.0.0", serverAvailable },
+          operator,
+          "v0.80.0",
+        ),
+      ).toMatchObject({
+        status: "retired",
+        permitted: false,
+        reason: "api_version",
+      });
+    },
+  );
+
   it("keeps an implemented Retired feature available only in the app", () => {
     const overview = migrationRegistry.find((feature) => feature.featureId === "overview");
     if (!overview) throw new Error("overview fixture is missing");

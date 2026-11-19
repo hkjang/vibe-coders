@@ -1,7 +1,7 @@
 import { OverviewActivitySummary } from "./OverviewActivitySummary";
 import { useContext, useState } from "react";
 import { OverviewRefreshContext } from "./overview-refresh-context";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { useIsFetching, useQuery, type Query } from "@tanstack/react-query";
 import { Activity, RefreshCw } from "lucide-react";
@@ -182,9 +182,13 @@ function OverviewContent(): React.JSX.Element {
           <FeatureReadOnlyBadge readOnly />
           <Badge tone={overallTone}>{overallStatus}</Badge>
           {showLegacyAdmin ? (
-            <LegacyLink className="button button-secondary button-default" href="/admin#/dashboard">
+            <FeatureLegacyLink
+              featureId="overview"
+              className="button button-secondary button-default"
+              href="/admin#/dashboard"
+            >
               기존 화면에서 열기
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
           <Button onClick={refreshAll} disabled={refreshing}>
             <RefreshCw aria-hidden="true" /> 전체 새로고침

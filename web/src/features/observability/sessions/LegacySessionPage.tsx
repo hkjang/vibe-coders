@@ -165,6 +165,7 @@ function SessionPageContent({ access }: { access: SessionListAccess }): React.JS
         <SessionReadDenied focus={openSessionId === ""} onRetry={refresh} requestId={denialRequestId} />
       ) : sessions.isError ? (
         <ErrorState
+          legacyFeatureId="observability.sessions"
           message={
             sessions.data
               ? "최신 목록을 갱신하지 못해 마지막 정상 데이터를 표시합니다."

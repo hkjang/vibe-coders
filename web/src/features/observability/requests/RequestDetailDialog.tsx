@@ -1,4 +1,4 @@
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import type { RefObject } from "react";
 import { Link } from "react-router";
@@ -76,9 +76,13 @@ export function RequestDetailDialog({
             </Link>
           ) : null}
           {legacyHref ? (
-            <LegacyLink className="button button-secondary button-default" href={legacyHref}>
+            <FeatureLegacyLink
+              featureId="observability.requests"
+              className="button button-secondary button-default"
+              href={legacyHref}
+            >
               기존 요청 화면 열기
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
           <Button variant="primary" onClick={() => onOpenChange(false)}>
             닫기

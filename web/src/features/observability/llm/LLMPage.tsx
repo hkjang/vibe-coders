@@ -343,6 +343,7 @@ function LLMPageContent({ lifetime }: { lifetime: LLMReadLifetime }): React.JSX.
       <div className="page-stack">
         <PageHeader title="LLM 관측" legacyHref="/admin#/llm" />
         <ErrorState
+          legacyFeatureId="observability.llm"
           message={safeAppErrorMessage(evaluations.error, "LLM 관측 데이터를 불러오지 못했습니다.")}
           requestId={isAppError(evaluations.error) ? evaluations.error.requestId : undefined}
           onRetry={refreshAll}

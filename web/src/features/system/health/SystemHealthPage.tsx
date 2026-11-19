@@ -7,7 +7,7 @@ import { MigrationEyebrow } from "@/shared/components/page/MigrationStatus";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { useFeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
@@ -57,9 +57,13 @@ function SystemHealthWorkspace(): React.JSX.Element {
           <div className="page-actions">
             <Badge tone="info">{uiLabels.readOnly}</Badge>
             {canOpenLegacyAdmin(auth) ? (
-              <LegacyLink className="button button-secondary button-default" href="/admin#/ops-home">
+              <FeatureLegacyLink
+                featureId="system.health"
+                className="button button-secondary button-default"
+                href="/admin#/ops-home"
+              >
                 기존 화면에서 열기
-              </LegacyLink>
+              </FeatureLegacyLink>
             ) : null}
             <Button disabled={refreshing} onClick={() => refreshers.forEach((refresh) => refresh())}>
               <RefreshCw aria-hidden="true" />

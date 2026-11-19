@@ -4,7 +4,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
@@ -38,9 +38,13 @@ export function RoutingRuleDetail({
       footer={
         <>
           {canOpenLegacyAdmin(auth) ? (
-            <LegacyLink className="button button-secondary button-default" href="/admin#/routing">
+            <FeatureLegacyLink
+              featureId="routing.rules"
+              className="button button-secondary button-default"
+              href="/admin#/routing"
+            >
               기존 라우팅 화면
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
           <Button onClick={onClose}>닫기</Button>
         </>

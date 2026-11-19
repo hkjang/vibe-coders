@@ -179,6 +179,7 @@ export function WorkflowDetailSheet({
         <LoadingState label="워크플로 정의를 불러오는 중입니다." />
       ) : detailError ? (
         <ErrorState
+          legacyFeatureId="agents.workflows"
           message={safeAppErrorMessage(detailError, "워크플로 정의를 불러오지 못했습니다.")}
           requestId={isAppError(detailError) ? detailError.requestId : undefined}
           onRetry={onRetry}

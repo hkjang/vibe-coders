@@ -847,7 +847,13 @@ export function resolveFeature(
       // A rolling deployment may pair this UI build with an older backend
       // whose registry still marks the feature available. The UI's static
       // contract remains the lower bound for opening the React screen.
-      effective = { feature, status: "legacy", readOnly: true, permitted: true, reason: "api_version" };
+      effective = {
+        feature,
+        status: feature.status === "retired" ? "retired" : "legacy",
+        readOnly: true,
+        permitted: feature.status !== "retired",
+        reason: "api_version",
+      };
     } else {
       effective = {
         feature,
@@ -884,7 +890,13 @@ export function resolveFeature(
           ? { feature, status: "legacy", readOnly: true, permitted: true, reason: "legacy_fallback" }
           : { feature, status: "hidden", readOnly: true, permitted: false, reason: "preview_role" };
     } else if (!versionAtLeast(backendVersion, feature.minimumApiVersion)) {
-      effective = { feature, status: "legacy", readOnly: true, permitted: true, reason: "api_version" };
+      effective = {
+        feature,
+        status: feature.status === "retired" ? "retired" : "legacy",
+        readOnly: true,
+        permitted: feature.status !== "retired",
+        reason: "api_version",
+      };
     } else if (
       (feature.status === "preview" || feature.status === "preview_read_only") &&
       rolloutBucket(user?.id ?? "legacy", feature.featureId) >= feature.rolloutPercent

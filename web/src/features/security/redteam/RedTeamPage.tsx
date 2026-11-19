@@ -171,6 +171,7 @@ function RedTeamWorkspace(): React.JSX.Element {
         />
         <RedTeamEmergencyPanel canWrite={canWrite} />
         <ErrorState
+          legacyFeatureId="security.redteam"
           message={safeAppErrorMessage(firstError, "레드팀 데이터를 불러오지 못했습니다.")}
           requestId={isAppError(firstError) ? firstError.requestId : undefined}
           onRetry={refreshAll}

@@ -9,7 +9,13 @@ type LegacyFeatureAccess = Pick<
 
 /** Presentation only: the destination's policy never grants access to Legacy APIs. */
 export function canOpenLegacyFeature(auth: LegacyFeatureAccess, featureId: string): boolean {
-  if (!["authenticated", "legacy", "open"].includes(auth.mode) || !canOpenLegacyAdmin(auth)) return false;
+  if (
+    !["authenticated", "legacy", "open"].includes(auth.mode) ||
+    !canOpenLegacyAdmin(auth) ||
+    !Array.isArray(auth.features) ||
+    typeof auth.backendVersion !== "string"
+  )
+    return false;
   const feature = auth.features.find((item) => item.featureId === featureId);
   if (
     !feature ||

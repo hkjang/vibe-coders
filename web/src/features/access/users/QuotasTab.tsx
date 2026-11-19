@@ -36,6 +36,7 @@ export function QuotasTab(props: QuotasTabProps): React.JSX.Element {
   if (owner.denied)
     return (
       <ErrorState
+        legacyFeatureId="access.users"
         title="할당량·예산 조회 권한을 다시 확인하세요."
         message="이전 조회 결과와 열린 작업을 표시하지 않습니다."
         onRetry={owner.restart}

@@ -236,6 +236,28 @@ async function install(context: BrowserContext) {
     prefixes(values: string[]) {
       currentBootstrap.authentication.credential_prefixes = values;
     },
+    legacyPolicy(policy: {
+      status?: UiBootstrapResponse["migration_registry"][number]["status"];
+      fallbackEnabled?: boolean;
+      globalFallback?: boolean;
+      backendVersion?: string;
+    }) {
+      const feature = currentBootstrap.migration_registry.find(
+        (item) => item.feature_id === "gateway.models",
+      );
+      if (!feature) throw new Error("Fixture must register its destination");
+      if (policy.status !== undefined) feature.status = policy.status;
+      if (policy.fallbackEnabled !== undefined) feature.fallback_enabled = policy.fallbackEnabled;
+      if (policy.globalFallback !== undefined) currentBootstrap.ui.legacy_fallback = policy.globalFallback;
+      if (policy.backendVersion !== undefined) currentBootstrap.backend_version = policy.backendVersion;
+      currentBootstrap.legacy_route_map =
+        currentBootstrap.ui.legacy_fallback &&
+        feature.fallback_enabled &&
+        feature.status !== "retired" &&
+        feature.status !== "hidden"
+          ? { [feature.app_path]: feature.legacy_path }
+          : {};
+    },
     owner(id: string) {
       if (currentBootstrap.user) currentBootstrap.user.id = id;
     },

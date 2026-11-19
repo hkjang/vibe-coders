@@ -25,20 +25,19 @@ const authRuntime = vi.hoisted(() => ({
   prefixes: ["vc_sk_", "vc_sa_"],
 }));
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    credentialPrefixes: authRuntime.prefixes,
-    legacyFallback: authRuntime.legacyFallback,
-    mode: "authenticated",
-    user: {
-      id: "admin-1",
-      role: "admin",
-      roles: ["admin"],
-      scopes: authRuntime.scopes,
-    },
-  }),
-}));
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () => ({
+      ...testAuth({
+        scopes: authRuntime.scopes,
+        legacyFallback: authRuntime.legacyFallback,
+        user: { id: "admin-1" },
+      }),
+      credentialPrefixes: authRuntime.prefixes,
+    }),
+  };
+});
 
 const providerRef = (seed: string): string =>
   `prv_${[...seed]

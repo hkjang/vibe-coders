@@ -20,28 +20,31 @@ const authRuntime = vi.hoisted(() => ({
   scopes: ["admin:read"] as string[],
 }));
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    credentialPrefixes: authRuntime.credentialPrefixes,
-    features: [
-      {
-        appPath: "/app/observability/traces",
-        fallbackEnabled: true,
-        featureId: "observability.traces",
-        legacyPath: authRuntime.legacyPath,
-      },
-    ],
-    legacyFallback: authRuntime.legacyFallback,
-    mode: "authenticated",
-    user: {
-      id: "admin-1",
-      role: "admin",
-      roles: ["admin"],
-      scopes: authRuntime.scopes,
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () => {
+      const auth = testAuth({
+        scopes: authRuntime.scopes,
+        legacyFallback: authRuntime.legacyFallback,
+        rawPromptView: false,
+        backendVersion: "v0.83.0",
+        user: { id: "admin-1" },
+      });
+      return {
+        ...auth,
+        credentialPrefixes: authRuntime.credentialPrefixes,
+        features: auth.features
+          .filter((feature) => feature.featureId === "observability.traces")
+          .map((feature) => ({
+            ...feature,
+            fallbackEnabled: true,
+            legacyPath: authRuntime.legacyPath,
+          })),
+      };
     },
-  }),
-}));
+  };
+});
 
 const providerRef = `prv_${"a".repeat(43)}`;
 const firstRequestRef = `req_${"a".repeat(22)}.${"a".repeat(21)}`;
