@@ -9510,6 +9510,341 @@
         ],
         "type": "object"
       },
+      "RedTeamProbeCSVApplied": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "imported_cases": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "packs_touched": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "review_applied": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "skipped": {
+            "description": "Source row diagnostics; null when none. No prompt content.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "applied_revision",
+          "imported_cases",
+          "packs_touched",
+          "review_applied",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "RedTeamProbeCSVChange": {
+        "discriminator": {
+          "mapping": {
+            "case": "#/components/schemas/RedTeamProbeCaseChange",
+            "pack": "#/components/schemas/RedTeamProbePackChange"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RedTeamProbePackChange"
+          },
+          {
+            "$ref": "#/components/schemas/RedTeamProbeCaseChange"
+          }
+        ]
+      },
+      "RedTeamProbeCSVReview": {
+        "additionalProperties": false,
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/RedTeamProbeCSVChange"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "counts": {
+            "additionalProperties": false,
+            "properties": {
+              "created": {
+                "maximum": 20000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "unchanged": {
+                "maximum": 20000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "updated": {
+                "maximum": 20000,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "created",
+              "unchanged",
+              "updated"
+            ],
+            "type": "object"
+          },
+          "file_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "imported_cases": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "packs_touched": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "review_supported": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "skipped": {
+            "description": "Source row diagnostics; null when none. No prompt content.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "nullable": true,
+            "type": "array"
+          },
+          "total_items": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changes",
+          "counts",
+          "file_sha256",
+          "has_more",
+          "imported_cases",
+          "limit",
+          "offset",
+          "packs_touched",
+          "review_supported",
+          "revision",
+          "skipped",
+          "total_items"
+        ],
+        "type": "object"
+      },
+      "RedTeamProbeCaseChange": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "unchanged"
+            ],
+            "type": "string"
+          },
+          "after": {
+            "$ref": "#/components/schemas/RedTeamProbeCaseValue"
+          },
+          "before": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RedTeamProbeCaseValue"
+              }
+            ],
+            "description": "Null for a new entity; otherwise the full CSV-editable before value plus preserved version/enabled for packs.",
+            "nullable": true,
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "case"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "after",
+          "before",
+          "id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "RedTeamProbeCaseValue": {
+        "additionalProperties": false,
+        "properties": {
+          "case_key": {
+            "type": "string"
+          },
+          "evaluator_type": {
+            "type": "string"
+          },
+          "expected_policy": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_template": {
+            "type": "string"
+          },
+          "pack_id": {
+            "type": "string"
+          },
+          "risk_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "target_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "case_key",
+          "evaluator_type",
+          "expected_policy",
+          "id",
+          "input_template",
+          "pack_id",
+          "risk_tags",
+          "severity",
+          "target_types"
+        ],
+        "type": "object"
+      },
+      "RedTeamProbePackChange": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "unchanged"
+            ],
+            "type": "string"
+          },
+          "after": {
+            "$ref": "#/components/schemas/RedTeamProbePackValue"
+          },
+          "before": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RedTeamProbePackValue"
+              }
+            ],
+            "description": "Null for a new entity; otherwise the full CSV-editable before value plus preserved version/enabled for packs.",
+            "nullable": true,
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "pack"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "after",
+          "before",
+          "id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "RedTeamProbePackValue": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "requires_approval": {
+            "type": "boolean"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "enabled",
+          "id",
+          "name",
+          "requires_approval",
+          "severity",
+          "version"
+        ],
+        "type": "object"
+      },
       "RedTeamRecording": {
         "additionalProperties": false,
         "properties": {
@@ -27975,7 +28310,328 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Import probe cases from CSV (text/csv body)",
+        "summary": "Import probe CSV (POST legacy, PUT reviewed)",
+        "tags": [
+          "redteam"
+        ]
+      },
+      "put": {
+        "description": "Review or apply a probe CSV with existing admin:write AND admin:read. CSV file bytes (including BOM/line endings) are bound to the verified subject, session, team, role, sorted scopes, prospective values and current affected catalogue contents/update timestamps. Review is a consistent read with no seeding or apply audit. Only CSV-representable content is disclosed; execution parameters and provenance are excluded. A revision is a state precondition, not a secret, expiring reservation or proof a human reviewed every page. Source data rows are limited to 10000; affected existing text to 32 MiB and each JSON review page to 32 MiB. Exceeding a limit rejects, never truncates. First usable row owns each pack; last duplicate case ID wins; receipt counts source rows. Apply obtains a database write lock before checking the precondition, then commits all pack/case changes and one audit together. Concurrent legacy or other-process writers cannot slip between that check and apply. Existing pack version/enabled/creation metadata, case parameters and omitted cases remain. Do not automatically replay after an uncertain response or fall back to legacy POST. Legacy POST import remains separate and does not gain the review row cap.",
+        "operationId": "put__admin_redteam_probe_packs_import",
+        "parameters": [
+          {
+            "description": "Exactly one quoted lowercase SHA-256 revision, required for PUT and any offset greater than zero. No weak, wildcard or multi-value tags. A refreshed JWT in the same effective session preserves identity.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "pattern": "^\"[a-f0-9]{64}\"$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "description": "File part at most 8 MiB; complete multipart request at most 9 MiB. Only extracted file bytes are revision-bound.",
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object",
+                "x-body-max-bytes": 9437184
+              }
+            },
+            "text/csv": {
+              "schema": {
+                "description": "Original UTF-8 CSV bytes without NUL, at most 8 MiB. Legacy or marked probe-v1 format; marked escapes preserve text/lists. Repeat the exact same extracted file bytes for every page and apply.",
+                "type": "string",
+                "x-body-max-bytes": 8388608
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedTeamProbeCSVApplied"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Malformed CSV, UTF-8/NUL, no eligible rows, content type, strict query or If-Match: invalid_csv, invalid_csv_format, empty_csv, bad_body, invalid_csv_review. PUT accepts no query parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing subtree authentication/write scope rejection: invalid_api_key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Missing additional existing catalogue read scope: redteam_import_read_required."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "File, effective account/session or affected state changed: redteam_import_review_changed. Review again."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "File/envelope or review row/snapshot/encoded-page limit: csv_too_large, redteam_import_review_limit. Split the file; no partial review is returned."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Mutation/audit failed or commit acknowledgment unknown: redteam_pack_save_failed, redteam_case_save_failed, redteam_import_save_failed. Check current catalogue before an explicit retry."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import probe CSV (POST legacy, PUT reviewed)",
+        "tags": [
+          "redteam"
+        ]
+      }
+    },
+    "/admin/redteam/probe-packs/import-review": {
+      "post": {
+        "description": "Review or apply a probe CSV with existing admin:write AND admin:read. CSV file bytes (including BOM/line endings) are bound to the verified subject, session, team, role, sorted scopes, prospective values and current affected catalogue contents/update timestamps. Review is a consistent read with no seeding or apply audit. Only CSV-representable content is disclosed; execution parameters and provenance are excluded. A revision is a state precondition, not a secret, expiring reservation or proof a human reviewed every page. Source data rows are limited to 10000; affected existing text to 32 MiB and each JSON review page to 32 MiB. Exceeding a limit rejects, never truncates. First usable row owns each pack; last duplicate case ID wins; receipt counts source rows. Apply obtains a database write lock before checking the precondition, then commits all pack/case changes and one audit together. Concurrent legacy or other-process writers cannot slip between that check and apply. Existing pack version/enabled/creation metadata, case parameters and omitted cases remain. Do not automatically replay after an uncertain response or fall back to legacy POST. Legacy POST import remains separate and does not gain the review row cap.",
+        "operationId": "post__admin_redteam_probe_packs_import_review",
+        "parameters": [
+          {
+            "description": "Exactly one quoted lowercase SHA-256 revision, required for PUT and any offset greater than zero. No weak, wildcard or multi-value tags. A refreshed JWT in the same effective session preserves identity.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "pattern": "^\"[a-f0-9]{64}\"$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Zero-based unique change offset. Nonzero offsets require If-Match. Only one value; no unknown query parameters.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 20000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "description": "File part at most 8 MiB; complete multipart request at most 9 MiB. Only extracted file bytes are revision-bound.",
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object",
+                "x-body-max-bytes": 9437184
+              }
+            },
+            "text/csv": {
+              "schema": {
+                "description": "Original UTF-8 CSV bytes without NUL, at most 8 MiB. Legacy or marked probe-v1 format; marked escapes preserve text/lists. Repeat the exact same extracted file bytes for every page and apply.",
+                "type": "string",
+                "x-body-max-bytes": 8388608
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedTeamProbeCSVReview"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "schema": {
+                  "pattern": "^\"[a-f0-9]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Malformed CSV, UTF-8/NUL, no eligible rows, content type, strict query or If-Match: invalid_csv, invalid_csv_format, empty_csv, bad_body, invalid_csv_review. PUT accepts no query parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing subtree authentication/write scope rejection: invalid_api_key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Missing additional existing catalogue read scope: redteam_import_read_required."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "File, effective account/session or affected state changed: redteam_import_review_changed. Review again."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "File/envelope or review row/snapshot/encoded-page limit: csv_too_large, redteam_import_review_limit. Split the file; no partial review is returned."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Database read failed or stored text cannot be represented safely: redteam_import_review_unavailable."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read probe CSV before/after changes",
         "tags": [
           "redteam"
         ]

@@ -2654,6 +2654,89 @@ export type RedTeamPreflightResponse = {
     targets: number;
 };
 
+export type RedTeamProbeCsvApplied = {
+    applied_revision: string;
+    imported_cases: number;
+    packs_touched: number;
+    review_applied: true;
+    /**
+     * Source row diagnostics; null when none. No prompt content.
+     */
+    skipped: Array<string> | null;
+};
+
+export type RedTeamProbeCsvChange = ({
+    kind: 'pack';
+} & RedTeamProbePackChange) | ({
+    kind: 'case';
+} & RedTeamProbeCaseChange);
+
+export type RedTeamProbeCsvReview = {
+    changes: Array<RedTeamProbeCsvChange>;
+    counts: {
+        created: number;
+        unchanged: number;
+        updated: number;
+    };
+    file_sha256: string;
+    has_more: boolean;
+    imported_cases: number;
+    limit: number;
+    offset: number;
+    packs_touched: number;
+    review_supported: true;
+    revision: string;
+    /**
+     * Source row diagnostics; null when none. No prompt content.
+     */
+    skipped: Array<string> | null;
+    total_items: number;
+};
+
+export type RedTeamProbeCaseChange = {
+    action: 'create' | 'update' | 'unchanged';
+    after: RedTeamProbeCaseValue;
+    /**
+     * Null for a new entity; otherwise the full CSV-editable before value plus preserved version/enabled for packs.
+     */
+    before: RedTeamProbeCaseValue | null;
+    id: string;
+    kind: 'case';
+};
+
+export type RedTeamProbeCaseValue = {
+    case_key: string;
+    evaluator_type: string;
+    expected_policy: string;
+    id: string;
+    input_template: string;
+    pack_id: string;
+    risk_tags: Array<string>;
+    severity: string;
+    target_types: Array<string>;
+};
+
+export type RedTeamProbePackChange = {
+    action: 'create' | 'update' | 'unchanged';
+    after: RedTeamProbePackValue;
+    /**
+     * Null for a new entity; otherwise the full CSV-editable before value plus preserved version/enabled for packs.
+     */
+    before: RedTeamProbePackValue | null;
+    id: string;
+    kind: 'pack';
+};
+
+export type RedTeamProbePackValue = {
+    category: string;
+    enabled: boolean;
+    id: string;
+    name: string;
+    requires_approval: boolean;
+    severity: string;
+    version: string;
+};
+
 export type RedTeamRecording = {
     confirmed: boolean;
     results: number;
@@ -11410,6 +11493,132 @@ export type PostAdminRedteamProbePacksImportResponses = {
      */
     200: unknown;
 };
+
+export type PutAdminRedteamProbePacksImportData = {
+    /**
+     * File part at most 8 MiB; complete multipart request at most 9 MiB. Only extracted file bytes are revision-bound.
+     */
+    body: {
+        file: Blob | File;
+    };
+    headers: {
+        /**
+         * Exactly one quoted lowercase SHA-256 revision, required for PUT and any offset greater than zero. No weak, wildcard or multi-value tags. A refreshed JWT in the same effective session preserves identity.
+         */
+        'If-Match': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/admin/redteam/probe-packs/import';
+};
+
+export type PutAdminRedteamProbePacksImportErrors = {
+    /**
+     * Malformed CSV, UTF-8/NUL, no eligible rows, content type, strict query or If-Match: invalid_csv, invalid_csv_format, empty_csv, bad_body, invalid_csv_review. PUT accepts no query parameters.
+     */
+    400: AppError;
+    /**
+     * Existing subtree authentication/write scope rejection: invalid_api_key.
+     */
+    401: AppError;
+    /**
+     * Missing additional existing catalogue read scope: redteam_import_read_required.
+     */
+    403: AppError;
+    /**
+     * File, effective account/session or affected state changed: redteam_import_review_changed. Review again.
+     */
+    409: AppError;
+    /**
+     * File/envelope or review row/snapshot/encoded-page limit: csv_too_large, redteam_import_review_limit. Split the file; no partial review is returned.
+     */
+    413: AppError;
+    /**
+     * Mutation/audit failed or commit acknowledgment unknown: redteam_pack_save_failed, redteam_case_save_failed, redteam_import_save_failed. Check current catalogue before an explicit retry.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PutAdminRedteamProbePacksImportError = PutAdminRedteamProbePacksImportErrors[keyof PutAdminRedteamProbePacksImportErrors];
+
+export type PutAdminRedteamProbePacksImportResponses = {
+    /**
+     * OK
+     */
+    200: RedTeamProbeCsvApplied;
+};
+
+export type PutAdminRedteamProbePacksImportResponse = PutAdminRedteamProbePacksImportResponses[keyof PutAdminRedteamProbePacksImportResponses];
+
+export type PostAdminRedteamProbePacksImportReviewData = {
+    /**
+     * File part at most 8 MiB; complete multipart request at most 9 MiB. Only extracted file bytes are revision-bound.
+     */
+    body: {
+        file: Blob | File;
+    };
+    headers?: {
+        /**
+         * Exactly one quoted lowercase SHA-256 revision, required for PUT and any offset greater than zero. No weak, wildcard or multi-value tags. A refreshed JWT in the same effective session preserves identity.
+         */
+        'If-Match'?: string;
+    };
+    path?: never;
+    query?: {
+        /**
+         * Zero-based unique change offset. Nonzero offsets require If-Match. Only one value; no unknown query parameters.
+         */
+        offset?: number;
+        limit?: number;
+    };
+    url: '/admin/redteam/probe-packs/import-review';
+};
+
+export type PostAdminRedteamProbePacksImportReviewErrors = {
+    /**
+     * Malformed CSV, UTF-8/NUL, no eligible rows, content type, strict query or If-Match: invalid_csv, invalid_csv_format, empty_csv, bad_body, invalid_csv_review. PUT accepts no query parameters.
+     */
+    400: AppError;
+    /**
+     * Existing subtree authentication/write scope rejection: invalid_api_key.
+     */
+    401: AppError;
+    /**
+     * Missing additional existing catalogue read scope: redteam_import_read_required.
+     */
+    403: AppError;
+    /**
+     * File, effective account/session or affected state changed: redteam_import_review_changed. Review again.
+     */
+    409: AppError;
+    /**
+     * File/envelope or review row/snapshot/encoded-page limit: csv_too_large, redteam_import_review_limit. Split the file; no partial review is returned.
+     */
+    413: AppError;
+    /**
+     * Database read failed or stored text cannot be represented safely: redteam_import_review_unavailable.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRedteamProbePacksImportReviewError = PostAdminRedteamProbePacksImportReviewErrors[keyof PostAdminRedteamProbePacksImportReviewErrors];
+
+export type PostAdminRedteamProbePacksImportReviewResponses = {
+    /**
+     * OK
+     */
+    200: RedTeamProbeCsvReview;
+};
+
+export type PostAdminRedteamProbePacksImportReviewResponse = PostAdminRedteamProbePacksImportReviewResponses[keyof PostAdminRedteamProbePacksImportReviewResponses];
 
 export type GetAdminRedteamRemediationsData = {
     body?: never;

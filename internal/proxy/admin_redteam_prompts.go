@@ -40,6 +40,10 @@ func (s *Server) handleRedTeamProbePacksSub(w http.ResponseWriter, r *http.Reque
 		s.redTeamExportProbeCSV(w, r)
 	case action == "import" && r.Method == http.MethodPost:
 		s.redTeamImportProbeCSV(w, r)
+	case action == "import-review" && r.Method == http.MethodPost:
+		s.handleRedTeamProbeCSVReviewed(w, r, false)
+	case action == "import" && r.Method == http.MethodPut:
+		s.handleRedTeamProbeCSVReviewed(w, r, true)
 	default:
 		writeOpenAIError(w, http.StatusNotFound, "unknown probe-pack action", "invalid_request_error", "not_found")
 	}

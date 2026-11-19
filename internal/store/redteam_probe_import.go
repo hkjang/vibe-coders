@@ -29,6 +29,28 @@ func (s *SQLStore) ImportRedTeamProbeContent(ctx context.Context, plan RedTeamPr
 	if audit.ID == "" || audit.AdminID == "" || audit.Action != "redteam.probe.import" {
 		return errors.New("invalid probe import audit")
 	}
+	if err := validateRedTeamProbeImport(plan); err != nil {
+		return err
+	}
+
+	return s.withAdminAuditTransaction(ctx, audit, func(tx *sql.Tx) error { return s.writeRedTeamProbeImport(ctx, tx, plan) })
+}
+
+func (s *SQLStore) writeRedTeamProbeImport(ctx context.Context, tx *sql.Tx, plan RedTeamProbeImport) error {
+	for _, item := range plan.Packs {
+		if err := s.upsertRedTeamProbePackContent(ctx, tx, item.Pack, item.PreserveApproval); err != nil {
+			return fmt.Errorf("%w: %v", ErrRedTeamProbeImportPack, err)
+		}
+	}
+	for _, c := range plan.Cases {
+		if err := s.upsertRedTeamProbeCaseContent(ctx, tx, c); err != nil {
+			return fmt.Errorf("%w: %v", ErrRedTeamProbeImportCase, err)
+		}
+	}
+	return nil
+}
+
+func validateRedTeamProbeImport(plan RedTeamProbeImport) error {
 	packs := map[string]bool{}
 	for _, item := range plan.Packs {
 		if item.Pack.ID == "" || packs[item.Pack.ID] {
@@ -41,17 +63,5 @@ func (s *SQLStore) ImportRedTeamProbeContent(ctx context.Context, plan RedTeamPr
 			return errors.New("invalid probe import case identity")
 		}
 	}
-	return s.withAdminAuditTransaction(ctx, audit, func(tx *sql.Tx) error {
-		for _, item := range plan.Packs {
-			if err := s.upsertRedTeamProbePackContent(ctx, tx, item.Pack, item.PreserveApproval); err != nil {
-				return fmt.Errorf("%w: %v", ErrRedTeamProbeImportPack, err)
-			}
-		}
-		for _, c := range plan.Cases {
-			if err := s.upsertRedTeamProbeCaseContent(ctx, tx, c); err != nil {
-				return fmt.Errorf("%w: %v", ErrRedTeamProbeImportCase, err)
-			}
-		}
-		return nil
-	})
+	return nil
 }

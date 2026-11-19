@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/csv"
 	"fmt"
+	"io"
 	"strings"
 
 	"vibe-coders/internal/store"
@@ -21,15 +22,29 @@ type redTeamProbeCSVPlan struct {
 // before/after review share this exact normalization, identity and row ordering.
 // First usable row owns pack content; repeated case IDs retain last-write wins.
 func prepareRedTeamProbeCSV(raw []byte, actor string) (redTeamProbeCSVPlan, error) {
+	return prepareRedTeamProbeCSVBounded(raw, actor, 0)
+}
+
+func prepareRedTeamProbeCSVBounded(raw []byte, actor string, maxRows int) (redTeamProbeCSVPlan, error) {
 	invalid := func(message, code string) (redTeamProbeCSVPlan, error) {
 		return redTeamProbeCSVPlan{}, &redTeamProbeCSVPlanError{message: message, code: code}
 	}
 	body := strings.TrimPrefix(string(raw), "\uFEFF")
 	cr := csv.NewReader(strings.NewReader(body))
 	cr.FieldsPerRecord = -1
-	records, err := cr.ReadAll()
-	if err != nil {
-		return invalid("invalid CSV: "+err.Error(), "invalid_csv")
+	var records [][]string
+	for {
+		row, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return invalid("invalid CSV: "+err.Error(), "invalid_csv")
+		}
+		if maxRows > 0 && len(records) > maxRows {
+			return invalid("CSV review supports at most 10000 data rows; split the file", "redteam_import_review_limit")
+		}
+		records = append(records, row)
 	}
 	if len(records) < 2 {
 		return invalid("CSV has no data rows (need a header + at least one row)", "empty_csv")
