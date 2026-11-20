@@ -125,6 +125,11 @@ async function install(page: Page) {
     setReviewStatus: (value: number) => {
       reviewStatus = value;
     },
+    longValue: (text: string) => {
+      const source = review.changes[1];
+      if (!source || source.kind !== "case") throw new Error("missing case");
+      source.after.input_template = text;
+    },
     many: () => {
       const source = review.changes[1];
       if (!source || source.kind !== "case") throw new Error("missing case");
@@ -364,6 +369,54 @@ test("Escape keeps review until discard is explicitly confirmed and restores tri
   expect(api.writes).toHaveLength(0);
   api.check();
 });
+
+test("large values stay outside the initial DOM and expand without changing the imported file", async ({
+  page,
+}) => {
+  const api = await install(page);
+  const text = "공개 😀".repeat(2000) + "최종 꼬리";
+  const body = "case_key,input_template\npublic-key," + text + "\n";
+  api.longValue(text);
+  await open(page);
+  await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload(body));
+  const dialog = page.getByRole("dialog", { name: "CSV 변경 내용 확인" });
+  const value = dialog.getByLabel("요청 프롬프트 적용 후 값", { exact: true });
+  await expect(value).toBeVisible();
+  expect((await value.textContent())?.length).toBeLessThanOrEqual(2048);
+  await expect(dialog).not.toContainText("최종 꼬리");
+  const expand = dialog.getByRole("button", { name: "요청 프롬프트 적용 후 값 전체 펼치기", exact: true });
+  await expand.focus();
+  await page.keyboard.press("Enter");
+  expect(await value.textContent()).toBe(JSON.stringify(text));
+  await expect(dialog.getByRole("checkbox", { name: /원본 파일을 적용/ })).not.toBeChecked();
+  expect(api.writes).toHaveLength(0);
+  await dialog.getByRole("button", { name: "요청 프롬프트 적용 후 값 접기", exact: true }).click();
+  expect((await value.textContent())?.length).toBeLessThanOrEqual(2048);
+  await confirm(page);
+  await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
+  expect(api.writes[0]?.bytes).toEqual(Array.from(Buffer.from(body)));
+  api.check();
+});
+
+for (const [reason, text] of [
+  ["credential", "vc_sk_" + "x".repeat(43) + "가".repeat(4096)],
+  ["inspection limit", "가".repeat(16385)],
+] as const) {
+  test(reason + " remains masked without an expansion action", async ({ page }) => {
+    const api = await install(page);
+    api.longValue(text);
+    await open(page);
+    await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+    const dialog = page.getByRole("dialog", { name: "CSV 변경 내용 확인" });
+    await expect(dialog.getByLabel("요청 프롬프트 적용 후 값", { exact: true })).toContainText("민감정보");
+    await expect(dialog).not.toContainText(text);
+    await expect(
+      dialog.getByRole("button", { name: "요청 프롬프트 적용 후 값 전체 펼치기", exact: true }),
+    ).toHaveCount(0);
+    expect(api.writes).toHaveLength(0);
+    api.check();
+  });
+}
 
 for (const width of [390, 1440]) {
   test("comparison dialog is bounded and usable at " + width + "px", async ({ page }, testInfo) => {

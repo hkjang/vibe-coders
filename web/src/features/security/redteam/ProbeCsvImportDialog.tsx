@@ -3,6 +3,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { Dialog } from "@/shared/components/ui/Dialog";
+import { ExpandableCodeValue } from "@/shared/components/ui/ExpandableCodeValue";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
@@ -78,14 +79,16 @@ function Comparison({
             >
               <th scope="row">{labels[key] ?? key}</th>
               <td>
-                <pre tabIndex={0} aria-label={(labels[key] ?? key) + " 현재 값"}>
-                  {display(before?.[key], prefixes)}
-                </pre>
+                <ExpandableCodeValue
+                  label={(labels[key] ?? key) + " 현재 값"}
+                  text={display(before?.[key], prefixes)}
+                />
               </td>
               <td>
-                <pre tabIndex={0} aria-label={(labels[key] ?? key) + " 적용 후 값"}>
-                  {display(value, prefixes)}
-                </pre>
+                <ExpandableCodeValue
+                  label={(labels[key] ?? key) + " 적용 후 값"}
+                  text={display(value, prefixes)}
+                />
               </td>
             </tr>
           ))}
