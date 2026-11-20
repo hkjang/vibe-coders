@@ -23,6 +23,7 @@ import type {
   GetAdminRetentionData,
   GetAdminRolesData,
   GetAdminSettingsEffectiveData,
+  GetAdminSettingsEffectiveResponse,
   GetAdminSettingsExportData,
   GetAdminSettingsHistoryData,
   DeleteAdminTrackingViolationsData,
@@ -176,7 +177,7 @@ export const systemEndpoints = {
     ),
   },
   settings: {
-    effective: operation<GetAdminSettingsEffectiveData, unknown>()(
+    effective: operation<GetAdminSettingsEffectiveData, GetAdminSettingsEffectiveResponse>()(
       "GET",
       "/admin/settings/effective",
       effectiveSettingsSchema,
