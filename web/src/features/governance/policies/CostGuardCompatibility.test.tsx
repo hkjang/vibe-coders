@@ -46,6 +46,7 @@ describe("비용 보호 설정만의 서버 버전 보호", () => {
   it.each(["v0.86.14", "", "broken-version"])(
     "%s 서버에서는 새 확인 계약과 편집을 제공하지 않는다",
     async (version) => {
+      runtime.scopes.push("security:read");
       runtime.version = version;
       const calls = api();
       renderScreen(<CostGuardSection canWrite />);

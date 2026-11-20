@@ -1,10 +1,11 @@
+import { routingRuleLegacyHandoff } from "./legacy-routing-handoff";
 import { RoutingRuleDetailData } from "./RoutingRuleDetailData";
 import type { RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { versionAtLeast } from "@/config/migration-registry";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import type { FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
@@ -25,6 +26,12 @@ export function RoutingRuleDetail({
   const valid = values.length === 1 && validRoutingRuleDetailId(id, auth.credentialPrefixes);
   const supported = versionAtLeast(auth.backendVersion, "v0.86.103");
   const readable = owner.readable && !owner.denied;
+  const handoff = routingRuleLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "routing.rules")?.legacyPath,
+    valid && supported && readable ? id : undefined,
+    auth.capabilities?.legacy_routing_rule_detail === true,
+    auth.credentialPrefixes,
+  );
   return (
     <Sheet
       open
@@ -37,10 +44,14 @@ export function RoutingRuleDetail({
       }}
       footer={
         <>
-          {canOpenLegacyAdmin(auth) ? (
-            <LegacyLink className="button button-secondary button-default" href="/admin#/routing">
-              기존 라우팅 화면
-            </LegacyLink>
+          {canOpenLegacyAdmin(auth) && handoff.href ? (
+            <FeatureLegacyLink
+              featureId="routing.rules"
+              className="button button-secondary button-default"
+              href={handoff.href}
+            >
+              {handoff.sameRule ? "기존 화면에서 같은 규칙 열기" : "기존 라우팅 화면"}
+            </FeatureLegacyLink>
           ) : null}
           <Button onClick={onClose}>닫기</Button>
         </>

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
 import { useRef, useState } from "react";
@@ -240,7 +241,7 @@ export function ProductsPage(): React.JSX.Element {
       <PageHeader
         title="데이터 상품"
         description="게시된 데이터 상품과 팀의 접근 요청을 관리하고, 반복 질문을 새 상품 후보로 확인합니다."
-        legacyHref="/admin#/data-products"
+        legacyHref={legacyRoutes.dataProducts}
         actions={
           <>
             <Button

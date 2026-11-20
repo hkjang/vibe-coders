@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	_ "time/tzdata" // Keep explicit IANA zones available in standalone and Distroless builds.
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/datadir"

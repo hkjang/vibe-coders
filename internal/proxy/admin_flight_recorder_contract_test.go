@@ -255,3 +255,31 @@ func (f flightRecorderContractFixture) list(t *testing.T, sessionID string) stor
 	}
 	return result.Sessions[0]
 }
+
+func TestSessionFlightRecorderNoStore(t *testing.T) {
+	for _, auth := range []string{"open", "readonly_jwt", "no_admin_read"} {
+		t.Run(auth, func(t *testing.T) {
+			f := newFlightRecorderContractFixture(t, auth)
+			f.seed(t, "session-cache-proof", "세션 +%2F?&#", time.Now().UTC(), "", "safe preview")
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.gateway.URL+"/admin/sessions/"+url.PathEscape("세션 +%2F?&#")+"/flight-recorder", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f.token != "" {
+				req.Header.Set("Authorization", "Bearer "+f.token)
+			}
+			response, err := f.gateway.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			expected := http.StatusOK
+			if auth == "no_admin_read" {
+				expected = http.StatusUnauthorized
+			}
+			if response.StatusCode != expected || response.Header.Get("Cache-Control") != "no-store" {
+				t.Fatal("session response cache/authorization contract changed")
+			}
+		})
+	}
+}

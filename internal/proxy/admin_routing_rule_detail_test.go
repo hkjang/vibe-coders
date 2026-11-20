@@ -123,3 +123,39 @@ func TestResourceSearchRoutingScopedAuthorization(t *testing.T) {
 		t.Fatal("hidden routing feature remained searchable")
 	}
 }
+
+func TestRoutingRuleDetailReadScopeDoesNotGrantWrites(t *testing.T) {
+	db, s, rule := routingCreateFixture(t)
+	s.cfg.Auth.Enabled, s.cfg.Auth.JWTSecret = true, "public-routing-detail-session-fixture"
+	for _, tc := range []struct {
+		name   string
+		scopes []string
+		status int
+	}{
+		{"reader", []string{"admin:read", "routing:read"}, 200},
+		{"routing-only", []string{"routing:read"}, 200},
+		{"admin-only", []string{"admin:read"}, 401},
+		{"writer-only", []string{"routing:write"}, 401},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token := issueLLMScopedTestToken(t, db, s, "routing-detail-"+tc.name, "admin", "", tc.scopes, time.Now().UTC().Add(-time.Minute))
+			response := routingCreateRequest(t, s, "GET", "/admin/routing-rules?"+url.Values{"id": {rule.ID}}.Encode(), "", token)
+			if response.Code != tc.status {
+				t.Fatalf("read scope status=%d want=%d", response.Code, tc.status)
+			}
+			if tc.status != 200 && strings.Contains(response.Body.String(), rule.Note) {
+				t.Fatal("denied detail leaked rule")
+			}
+			if tc.name == "reader" {
+				denied := routingCreateRequest(t, s, "DELETE", "/admin/routing-rules/"+url.PathEscape(rule.ID), "", token)
+				if denied.Code != 401 {
+					t.Fatalf("readonly delete status=%d", denied.Code)
+				}
+				after, err := db.ListRoutingRulesByID(t.Context(), rule.ID)
+				if err != nil || len(after) != 1 || after[0].Note != rule.Note {
+					t.Fatal("denied mutation changed selected rule")
+				}
+			}
+		})
+	}
+}

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "@/shared/api/client";
 import { AppError } from "@/shared/api/error";
@@ -8,14 +8,27 @@ import { tokenStore } from "@/shared/auth/token-store";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { PolicySearchDetail } from "./PolicySearchDetail";
 
-const runtime = vi.hoisted(() => ({ id: "reader-a", scopes: ["security:read"], permitted: true }));
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    mode: "authenticated",
-    credentialPrefixes: ["vc_sk_", "corp_"],
-    user: { id: runtime.id, role: "admin", roles: ["admin"], team_id: "team-a", scopes: runtime.scopes },
-  }),
+const runtime = vi.hoisted(() => ({
+  id: "reader-a",
+  scopes: ["security:read"],
+  permitted: true,
+  handoff: true,
+  fallback: true,
 }));
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () => ({
+      ...testAuth({
+        scopes: runtime.scopes,
+        legacyFallback: runtime.fallback,
+        user: { id: runtime.id, team_id: "team-a" },
+      }),
+      credentialPrefixes: ["vc_sk_", "corp_"],
+      capabilities: { raw_prompt_view: false, legacy_policy_detail: runtime.handoff },
+    }),
+  };
+});
 const response = {
   policies: [
     {
@@ -30,7 +43,15 @@ const response = {
   ],
 };
 function Location() {
-  return <output aria-label="현재 주소">{useLocation().search}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output aria-label="현재 주소">{useLocation().search}</output>
+      <button type="button" onClick={() => navigate("?policy=policy-one&policy=policy-two")}>
+        중복 주소로 이동
+      </button>
+    </>
+  );
 }
 function setup(url = "/governance/policies?policy=policy-one&tab=safety") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -52,6 +73,30 @@ function setup(url = "/governance/policies?policy=policy-one&tab=safety") {
 }
 
 describe("read-only policy search detail", () => {
+  it("정책 조회만 허용된 계정에는 기존 관리자 이동을 추가하지 않는다", async () => {
+    runtime.scopes = ["security:read"];
+    vi.spyOn(apiClient, "request").mockResolvedValue(response);
+    setup();
+    await screen.findByRole("heading", { name: "정산 정책" });
+    expect(screen.queryByRole("link", { name: "기존 화면에서 열기" })).not.toBeInTheDocument();
+  });
+
+  it("미지원 서버는 정책 전체 화면으로 안내하고 비활성화된 기존 화면은 노출하지 않는다", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response);
+    runtime.handoff = false;
+    const view = setup();
+    await screen.findByRole("heading", { name: "정산 정책" });
+    expect(screen.getByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/safety",
+    );
+    expect(screen.getByText("기존 화면에서 정책을 다시 선택하세요.")).toBeVisible();
+    runtime.fallback = false;
+    view.rerender(view.tree());
+    expect(screen.queryByRole("link", { name: "기존 화면에서 열기" })).not.toBeInTheDocument();
+    expect(screen.queryByText("기존 화면에서 정책을 다시 선택하세요.")).not.toBeInTheDocument();
+  });
+
   it("keeps retry focus and blocks repeated requests while a read is pending", async () => {
     let resolve: (value: typeof response) => void = () => undefined;
     const request = vi
@@ -79,8 +124,10 @@ describe("read-only policy search detail", () => {
   });
   beforeEach(() => {
     runtime.id = "reader-a";
-    runtime.scopes = ["security:read"];
+    runtime.scopes = ["admin:read", "security:read"];
     runtime.permitted = true;
+    runtime.handoff = true;
+    runtime.fallback = true;
   });
 
   it("opens the exact URL-selected policy without exposing definitions or permitting writes", async () => {
@@ -89,6 +136,10 @@ describe("read-only policy search detail", () => {
     expect(await screen.findByRole("heading", { name: "정산 정책" })).toBeVisible();
     expect(screen.getByText("25%")).toBeVisible();
     expect(screen.getByText("1개")).toBeVisible();
+    expect(screen.getByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/safety?policy_id=policy-one",
+    );
     expect(screen.queryByText("private-description")).not.toBeInTheDocument();
     expect(screen.queryByText("private-action")).not.toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(1);
@@ -103,10 +154,44 @@ describe("read-only policy search detail", () => {
     "/governance/policies",
     "/governance/policies?policy=",
     "/governance/policies?policy=corp_" + "x".repeat(43),
+    "/governance/policies?policy=policy-one&policy=policy-two",
+    "/governance/policies?policy=policy-one&policy=policy-one",
+    "/governance/policies?policy=%ED%A0%80",
+    "/governance/policies?policy=%zz",
   ])("does not fetch for an absent or invalid selection", (url) => {
     const request = vi.spyOn(apiClient, "request").mockResolvedValue(response);
     setup(url);
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("keeps a literal encoded sequence as an exact policy identity", async () => {
+    const id = "정책 +%2F?&#";
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+      policies: [{ ...response.policies[0], id }],
+    });
+    setup("/governance/policies?" + new URLSearchParams({ policy: id, tab: "safety" }));
+    expect(await screen.findByRole("heading", { name: "정산 정책" })).toBeVisible();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0].method).toBe("GET");
+  });
+
+  it("retires an in-flight read when navigation makes the selection ambiguous", async () => {
+    let complete: (value: typeof response) => void = () => undefined;
+    const request = vi.spyOn(apiClient, "request").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    setup();
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    // The fixture simulates browser address/history navigation while the modal owns focus.
+    fireEvent.click(screen.getByRole("button", { name: "중복 주소로 이동", hidden: true }));
+    expect(await screen.findByText("정책 주소를 확인하세요.")).toBeVisible();
+    expect(request.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    await act(async () => complete(response));
+    expect(screen.queryByRole("heading", { name: "정산 정책" })).not.toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it.each(["scope", "feature"])("removes detail immediately after %s access is lost", async (boundary) => {

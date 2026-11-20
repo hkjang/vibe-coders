@@ -1,3 +1,7 @@
+import { useAuth } from "@/app/auth/AuthProvider";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
+import { libraryLegacyHandoff } from "./legacy-library-handoff";
 import type { RefObject } from "react";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
@@ -23,6 +27,16 @@ export function AssetReviewLoader({
     read: (prefixes, signal) => readLibraryAssets({}, prefixes, signal),
   });
   const asset = selected.data?.assets.find((row) => row.id === id);
+  const auth = useAuth();
+  const [params] = useSearchState();
+  const handoff = libraryLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "prompts.library")?.legacyPath,
+    "assets",
+    params,
+    auth.credentialPrefixes,
+    auth.capabilities?.legacy_prompt_library === true,
+  );
+
   return (
     <Sheet
       open
@@ -32,6 +46,15 @@ export function AssetReviewLoader({
       title={asset?.name || "프롬프트 자산"}
       description="자산 정보, 사용 현황과 변경 이력을 확인합니다. 변경 작업은 실행 전에 최신 내용과 다시 비교합니다."
     >
+      {asset && handoff.selectedAsset && !selected.isError ? (
+        <FeatureLegacyLink
+          featureId="prompts.library"
+          href={handoff.href}
+          className="button button-secondary button-default"
+        >
+          기존 화면에서 같은 자산 열기
+        </FeatureLegacyLink>
+      ) : null}
       {selected.isError ? (
         <PanelFailure
           error={selected.error}

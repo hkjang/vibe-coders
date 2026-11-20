@@ -1,3 +1,4 @@
+import { workAppLegacyHandoff } from "./legacy-work-app-handoff";
 import { Plus, RefreshCw } from "lucide-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
@@ -80,6 +81,12 @@ function AppPageContent(): React.JSX.Element {
     !receipt.open &&
     params.getAll("app").length === 1 &&
     validWorkAppDetailId(selectedId, auth.credentialPrefixes);
+  const legacyHandoff = workAppLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "agents.apps")?.legacyPath,
+    selectedValid ? selectedId : undefined,
+    auth.capabilities?.legacy_work_app_detail === true,
+    auth.credentialPrefixes,
+  );
   const selection = useRef(selectedId);
   useLayoutEffect(() => {
     selection.current = selectedId;
@@ -247,7 +254,7 @@ function AppPageContent(): React.JSX.Element {
     <PageHeader
       title="AI 업무 앱"
       description="스킬·프롬프트·리포트를 묶은 업무 앱을 만들고 검증·발행하며 접근 권한을 관리합니다."
-      legacyHref="/admin#/apps"
+      legacyHref={legacyHandoff.href}
       actions={
         <>
           <Button onClick={() => void list.refetch()} disabled={list.isFetching}>
@@ -445,6 +452,7 @@ function AppPageContent(): React.JSX.Element {
       />
 
       <AppDetailSheet
+        selectedId={selectedValid ? selectedId : undefined}
         app={selected}
         loading={selectedValid && (detail.isPending || detail.isFetching)}
         detailError={selectedValid ? detail.error : undefined}

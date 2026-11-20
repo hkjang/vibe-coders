@@ -1,3 +1,5 @@
+import { useId } from "react";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 
 import { AlertTriangle, Construction, LockKeyhole, Power, RefreshCw } from "lucide-react";
@@ -14,7 +16,7 @@ export function LoadingState({ label = "화면을 준비하는 중입니다." }:
   );
 }
 
-interface ErrorStateProps {
+interface ErrorStateBaseProps {
   title?: string;
   message: string;
   headingRef?: React.Ref<HTMLHeadingElement>;
@@ -26,8 +28,15 @@ interface ErrorStateProps {
   resetButtonRef?: React.Ref<HTMLButtonElement>;
   resetLabel?: string;
   showLegacy?: boolean;
-  legacyHref?: `/admin${string}`;
+  legacyNotice?: string;
 }
+
+/** Custom recovery destinations must name their feature; home recovery is explicit. */
+type ErrorStateProps = ErrorStateBaseProps &
+  (
+    | { legacyFeatureId?: never; legacyHref?: "/admin" }
+    | { legacyFeatureId: string; legacyHref?: `/admin${string}` }
+  );
 
 export function ErrorState({
   title = "화면을 불러오지 못했습니다.",
@@ -41,8 +50,11 @@ export function ErrorState({
   resetButtonRef,
   resetLabel = "입력 초기화",
   showLegacy = true,
-  legacyHref = "/admin",
+  legacyHref,
+  legacyFeatureId,
+  legacyNotice,
 }: ErrorStateProps): React.JSX.Element {
+  const legacyNoticeId = useId();
   return (
     <section className="page-state page-state-error" role="alert">
       <AlertTriangle aria-hidden="true" />
@@ -64,11 +76,23 @@ export function ErrorState({
           </Button>
         ) : null}
         {showLegacy ? (
-          <LegacyLink className="button button-secondary button-default" href={legacyHref}>
-            기존 관리자 화면 열기
-          </LegacyLink>
+          legacyFeatureId !== undefined ? (
+            <FeatureLegacyLink
+              featureId={legacyFeatureId}
+              className="button button-secondary button-default"
+              href={legacyHref}
+              aria-describedby={legacyNotice ? legacyNoticeId : undefined}
+            >
+              기존 관리자 화면 열기
+            </FeatureLegacyLink>
+          ) : (
+            <LegacyLink className="button button-secondary button-default" href="/admin">
+              기존 관리자 화면 열기
+            </LegacyLink>
+          )
         ) : null}
       </div>
+      {showLegacy && legacyNotice ? <p id={legacyNoticeId}>{legacyNotice}</p> : null}
     </section>
   );
 }
@@ -86,13 +110,17 @@ export function AppDisabled(): React.JSX.Element {
   );
 }
 
-export function FeatureUnavailable(): React.JSX.Element {
+export function FeatureUnavailable({ reason }: { reason?: "api_version" } = {}): React.JSX.Element {
   return (
     <section className="page-state" role="alert">
       <Construction aria-hidden="true" />
-      <h1>이 UI 버전에서 사용할 수 없는 기능입니다.</h1>
+      <h1>
+        {reason === "api_version" ? "서버 버전을 확인하세요." : "이 UI 버전에서 사용할 수 없는 기능입니다."}
+      </h1>
       <p>
-        기능 전환 상태와 현재 UI 빌드가 일치하지 않습니다. 운영자에게 전환 설정을 확인해 달라고 요청하세요.
+        {reason === "api_version"
+          ? "이 화면을 사용하려면 서버 버전 확인 또는 업그레이드가 필요합니다."
+          : "기능 전환 상태와 현재 UI 빌드가 일치하지 않습니다. 운영자에게 전환 설정을 확인해 달라고 요청하세요."}
       </p>
       <a className="button button-primary button-default" href="/app/overview">
         개요로 이동

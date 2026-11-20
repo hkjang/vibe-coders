@@ -17,6 +17,7 @@ const authRuntime = vi.hoisted(() => ({
   scopes: ["admin:read", "routing:read", "observability:read", "costs:read", "security:read"],
   role: "admin",
   backendVersion: "v0.81.0",
+  apiVersion: "v1",
 }));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
@@ -34,7 +35,7 @@ vi.mock("@/app/auth/AuthProvider", () => ({
     },
     backendVersion: authRuntime.backendVersion,
     uiVersion: "test",
-    apiVersion: "v1",
+    apiVersion: authRuntime.apiVersion,
     authenticationMode: "session",
     uiEnabled: authRuntime.uiEnabled,
     defaultEntry: "/app/overview",
@@ -73,6 +74,7 @@ describe("AppShell", () => {
     authRuntime.legacyFallback = true;
     authRuntime.role = "admin";
     authRuntime.backendVersion = "v0.81.0";
+    authRuntime.apiVersion = "v1";
     authRuntime.scopes = ["admin:read", "routing:read", "observability:read", "costs:read", "security:read"];
     usePreferences.setState({
       theme: "system",
@@ -84,6 +86,13 @@ describe("AppShell", () => {
       recentFeatures: [],
     });
     vi.spyOn(apiClient, "request").mockResolvedValue({ status: "ok" });
+  });
+
+  it("announces an incompatible API without unmounting the current page", () => {
+    authRuntime.apiVersion = "v2";
+    renderShell();
+    expect(screen.getByText("서버 API 버전이 현재 화면과 맞지 않습니다.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Overview content" })).toBeVisible();
   });
 
   it("shows Korean feature names while preserving paths and English search keywords", async () => {

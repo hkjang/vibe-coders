@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense } from "react";
@@ -43,7 +44,7 @@ export function McpPage(): React.JSX.Element {
         readOnly={!canWrite}
         title="MCP 운영"
         description="MCP 업스트림 연결, 노출 도구, 서버 정책과 최근 MCP 호출을 한 화면에서 관리합니다."
-        legacyHref="/admin#/mcp"
+        legacyHref={legacyRoutes.mcp}
         actions={
           <Button variant="primary" onClick={() => void queryClient.invalidateQueries({ queryKey: ["mcp"] })}>
             <RefreshCw aria-hidden="true" /> 새로고침

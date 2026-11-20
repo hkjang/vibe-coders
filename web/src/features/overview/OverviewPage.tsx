@@ -1,7 +1,10 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { OverviewActivitySummary } from "./OverviewActivitySummary";
 import { useContext, useState } from "react";
 import { OverviewRefreshContext } from "./overview-refresh-context";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { OverviewReadQueueContext } from "./overview-read-context";
+import { createReadQueue } from "@/shared/api/read-queue";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { useIsFetching, useQuery, type Query } from "@tanstack/react-query";
 import { Activity, RefreshCw } from "lucide-react";
@@ -42,15 +45,19 @@ const tabQueryFilter = {
 
 export function OverviewPage(): React.JSX.Element {
   const [refreshers] = useState(() => new Set<() => void>());
+  const [readQueue] = useState(() => createReadQueue(4));
   return (
-    <OverviewRefreshContext value={refreshers}>
-      <OverviewContent />
-    </OverviewRefreshContext>
+    <OverviewReadQueueContext value={readQueue}>
+      <OverviewRefreshContext value={refreshers}>
+        <OverviewContent />
+      </OverviewRefreshContext>
+    </OverviewReadQueueContext>
   );
 }
 
 function OverviewContent(): React.JSX.Element {
   const refreshers = useContext(OverviewRefreshContext);
+  const readQueue = useContext(OverviewReadQueueContext);
   const tabFetching = useIsFetching(tabQueryFilter);
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
@@ -64,11 +71,14 @@ function OverviewContent(): React.JSX.Element {
 
   const health = useQuery({
     queryKey: ["gateway", "health"],
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.health, {
-        signal,
-        routeId: "overview.health",
-      }),
+    queryFn: ({ signal }) => {
+      const read = () =>
+        apiClient.request(endpoints.health, {
+          signal,
+          routeId: "overview.health",
+        });
+      return readQueue ? readQueue.run(read, signal) : read();
+    },
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
@@ -182,9 +192,13 @@ function OverviewContent(): React.JSX.Element {
           <FeatureReadOnlyBadge readOnly />
           <Badge tone={overallTone}>{overallStatus}</Badge>
           {showLegacyAdmin ? (
-            <LegacyLink className="button button-secondary button-default" href="/admin#/dashboard">
+            <FeatureLegacyLink
+              featureId="overview"
+              className="button button-secondary button-default"
+              href={legacyRoutes.dashboard}
+            >
               기존 화면에서 열기
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
           <Button onClick={refreshAll} disabled={refreshing}>
             <RefreshCw aria-hidden="true" /> 전체 새로고침

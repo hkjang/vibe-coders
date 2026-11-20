@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -76,6 +77,7 @@ func (s *Server) handlePublicSkills(w http.ResponseWriter, r *http.Request) {
 }
 
 type skillPayload struct {
+	SkillRef      skillRefInput   `json:"skill_ref,omitzero"`
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
 	Version       string          `json:"version"`
@@ -100,19 +102,26 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if s.handleSkillReadView(w, r) {
+			return
+		}
 		skills, err := s.db.ListSkills(r.Context(), strings.TrimSpace(r.URL.Query().Get("status")))
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skills_failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
+		writeJSON(w, http.StatusOK, map[string]any{"skills": s.skillRefSnapshot().views(skills)})
 	case http.MethodPost:
 		var p skillPayload
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
-		name := strings.TrimSpace(p.Name)
+		target, ok := s.adminSkillTarget(w, r, p.Name, p.SkillRef)
+		if !ok {
+			return
+		}
+		name := target.name
 		if name == "" {
 			writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name")
 			return
@@ -128,24 +137,44 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		meta := strings.TrimSpace(string(p.Metadata))
-		if meta == "" || meta == "null" {
-			meta = "{}"
-		}
-		if !json.Valid([]byte(meta)) {
-			writeOpenAIError(w, http.StatusBadRequest, "metadata must be valid JSON", "invalid_request_error", "invalid_metadata")
-			return
+		if target.selected != nil && p.Metadata == nil {
+			meta = target.selected.Metadata
+		} else {
+			if meta == "" || meta == "null" {
+				meta = "{}"
+			}
+			if !json.Valid([]byte(meta)) {
+				writeOpenAIError(w, http.StatusBadRequest, "metadata must be valid JSON", "invalid_request_error", "invalid_metadata")
+				return
+			}
 		}
 		saved, err := s.db.UpsertSkill(r.Context(), store.Skill{
-			Name: name, Description: p.Description, Version: strings.TrimSpace(p.Version), Owner: strings.TrimSpace(p.Owner),
-			Status: status, RiskLevel: risk, AllowedModels: strings.TrimSpace(p.AllowedModels), AllowedTools: strings.TrimSpace(p.AllowedTools),
-			AllowedTeams: strings.TrimSpace(p.AllowedTeams), DailyLimit: p.DailyLimit, Instructions: p.Instructions, Metadata: meta,
+			Name: name, Description: p.Description, Version: target.inputText(p.Version), Owner: target.inputText(p.Owner),
+			Status: status, RiskLevel: risk, AllowedModels: target.inputText(p.AllowedModels), AllowedTools: target.inputText(p.AllowedTools),
+			AllowedTeams: target.inputText(p.AllowedTeams), DailyLimit: p.DailyLimit, Instructions: p.Instructions, Metadata: meta,
 		}, s.skillActor(r))
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_save_failed")
 			return
 		}
-		s.auditAdmin(r, "skill.upsert", saved.Name, auditJSON(map[string]any{"version": saved.Version, "status": saved.Status}))
-		writeJSON(w, http.StatusCreated, map[string]any{"skill": saved})
+		s.auditAdmin(r, "skill.upsert", target.auditIdentity(), auditJSON(map[string]any{"version": saved.Version, "status": saved.Status}))
+		writeJSON(w, http.StatusCreated, map[string]any{"skill": target.refs.view(saved)})
+	case http.MethodDelete:
+		values, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil || len(values) != 1 || len(values["skill_ref"]) != 1 {
+			invalidSkillReference(w)
+			return
+		}
+		target, ok := s.adminSkillQueryTarget(w, r, "name")
+		if !ok {
+			return
+		}
+		if err := s.db.DeleteSkill(r.Context(), target.name); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "failed to delete skill", "server_error", "skill_delete_failed")
+			return
+		}
+		s.auditAdmin(r, "skill.delete", target.auditIdentity(), "")
+		writeJSON(w, http.StatusOK, map[string]any{"skill_ref": target.refs(target.name), "deleted": true})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -158,7 +187,8 @@ func (s *Server) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/skills/by-name/"), "/")
+	// The route prefix is structural; every byte after it belongs to the identity.
+	name := strings.TrimPrefix(r.URL.Path, "/admin/skills/by-name/")
 	if name == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "skill name required", "invalid_request_error", "missing_name")
 		return
@@ -174,7 +204,7 @@ func (s *Server) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "skill not found", "invalid_request_error", "not_found")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"skill": sk})
+		writeJSON(w, http.StatusOK, map[string]any{"skill": s.skillRefSnapshot().view(sk)})
 	case http.MethodDelete:
 		if err := s.db.DeleteSkill(r.Context(), name); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_delete_failed")
@@ -201,16 +231,21 @@ func (s *Server) handleSkillEvaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p struct {
-		Name  string   `json:"name"`
-		Model string   `json:"model"`
-		Tools []string `json:"tools"`
-		Team  string   `json:"team"`
+		SkillRef skillRefInput `json:"skill_ref,omitzero"`
+		Name     string        `json:"name"`
+		Model    string        `json:"model"`
+		Tools    []string      `json:"tools"`
+		Team     string        `json:"team"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 		return
 	}
-	name := strings.TrimSpace(p.Name)
+	target, ok := s.adminSkillTarget(w, r, p.Name, p.SkillRef)
+	if !ok {
+		return
+	}
+	name := target.name
 	if name == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name")
 		return
@@ -352,16 +387,21 @@ func (s *Server) handleSkillPromote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p struct {
-		Name     string `json:"name"`
-		ToStatus string `json:"to_status"`
-		Version  string `json:"version"`
-		Note     string `json:"note"`
+		SkillRef skillRefInput `json:"skill_ref,omitzero"`
+		Name     string        `json:"name"`
+		ToStatus string        `json:"to_status"`
+		Version  string        `json:"version"`
+		Note     string        `json:"note"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 		return
 	}
-	name := strings.TrimSpace(p.Name)
+	target, ok := s.adminSkillTarget(w, r, p.Name, p.SkillRef)
+	if !ok {
+		return
+	}
+	name := target.name
 	to := strings.TrimSpace(p.ToStatus)
 	if name == "" || to == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "name and to_status are required", "invalid_request_error", "missing_fields")
@@ -417,8 +457,8 @@ func (s *Server) handleSkillPromote(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_promote_failed")
 		return
 	}
-	s.auditAdmin(r, "skill.promote", saved.Name, auditJSON(map[string]any{"from": sk.Status, "to": to, "version": saved.Version}))
-	writeJSON(w, http.StatusOK, map[string]any{"skill": saved})
+	s.auditAdmin(r, "skill.promote", target.auditIdentity(), auditJSON(map[string]any{"from": sk.Status, "to": to, "version": saved.Version}))
+	writeJSON(w, http.StatusOK, map[string]any{"skill": target.refs.view(saved)})
 }
 
 // handleSkillPromotions returns the promotion history (optionally for one skill).
@@ -428,7 +468,11 @@ func (s *Server) handleSkillPromotions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	proms, err := s.db.ListSkillPromotions(r.Context(), strings.TrimSpace(r.URL.Query().Get("skill")), recentLimit(r))
+	target, ok := s.adminSkillQueryTarget(w, r, "skill")
+	if !ok {
+		return
+	}
+	proms, err := s.db.ListSkillPromotions(r.Context(), target.name, recentLimit(r))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_promotions_failed")
 		return
@@ -602,7 +646,11 @@ func (s *Server) handleSkillScan(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	target, ok := s.adminSkillQueryTarget(w, r, "name")
+	if !ok {
+		return
+	}
+	name := target.name
 	if name != "" {
 		sk, found, err := s.db.GetSkill(r.Context(), name)
 		if err != nil {
@@ -671,7 +719,11 @@ func (s *Server) handleSkillRuns(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	runs, err := s.db.ListSkillRuns(r.Context(), strings.TrimSpace(r.URL.Query().Get("skill")), recentLimit(r))
+	target, ok := s.adminSkillQueryTarget(w, r, "skill")
+	if !ok {
+		return
+	}
+	runs, err := s.db.ListSkillRuns(r.Context(), target.name, recentLimit(r))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_runs_failed")
 		return

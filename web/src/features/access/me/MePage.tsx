@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -48,7 +49,7 @@ function MeContent(): React.JSX.Element {
             : "내 사용량, 요청 영수증, API 키와 연결 상태를 확인합니다."
         }
         status="preview"
-        legacyHref="/admin#/me"
+        legacyHref={legacyRoutes.me}
         actions={
           <Button variant="primary" onClick={() => void queryClient.invalidateQueries({ queryKey: ["me"] })}>
             <RefreshCw aria-hidden="true" /> 새로고침

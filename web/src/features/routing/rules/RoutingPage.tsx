@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
@@ -47,7 +48,7 @@ export function RoutingPage(): React.JSX.Element {
       <PageHeader
         title="라우팅"
         description="복잡도 기반 규칙, 라우팅 미리보기, 결정 이력, 장애 전환과 회로 차단기를 한 곳에서 운영합니다."
-        legacyHref="/admin#/routing"
+        legacyHref={legacyRoutes.routing}
         readOnly={!canWrite}
         status="preview"
         actions={

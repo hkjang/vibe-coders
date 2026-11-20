@@ -34,6 +34,46 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if len(prefixes) != 2 || prefixes[0] != "vc_sk_" || prefixes[1] != "vc_sa_" {
 		t.Fatalf("bootstrap credential prefixes = %#v", prefixes)
 	}
+	capabilities, _ := body["capabilities"].(map[string]any)
+	if supported, _ := capabilities["legacy_policy_detail"].(bool); !supported {
+		t.Fatal("exact Legacy policy capability missing")
+	}
+	if supported, _ := capabilities["legacy_request_filters"].(bool); !supported {
+		t.Fatal("expected support for exact Legacy request filter handoff")
+	}
+	if supported, _ := capabilities["legacy_skill_detail"].(bool); !supported {
+		t.Fatal("exact Legacy skill capability missing")
+	}
+	if supported, _ := capabilities["legacy_workflow_detail"].(bool); !supported {
+		t.Fatal("exact Legacy workflow capability missing")
+	}
+	if supported, _ := capabilities["legacy_work_app_detail"].(bool); !supported {
+		t.Fatal("exact Legacy work app capability missing")
+	}
+	if supported, _ := capabilities["legacy_text2sql_schema_detail"].(bool); !supported {
+		t.Fatal("missing exact Text2SQL schema capability")
+	}
+	if supported, _ := capabilities["legacy_access_detail"].(bool); !supported {
+		t.Fatal("missing exact access detail capability")
+	}
+	if supported, _ := capabilities["legacy_routing_rule_detail"].(bool); !supported {
+		t.Fatal("Legacy routing rule detail capability missing")
+	}
+	if supported, _ := capabilities["legacy_model_detail"].(bool); !supported {
+		t.Fatal("model detail handoff capability unavailable")
+	}
+	if supported, _ := capabilities["legacy_prompt_library"].(bool); !supported {
+		t.Fatal("prompt library Legacy handoff capability missing")
+	}
+	if supported, _ := capabilities["legacy_provider_detail"].(bool); !supported {
+		t.Fatal("provider Legacy detail capability missing")
+	}
+	if supported, _ := capabilities["legacy_request_direct_detail"].(bool); !supported {
+		t.Fatal("original request path handoff capability missing")
+	}
+	if supported, _ := capabilities["legacy_request_detail"].(bool); !supported {
+		t.Fatal("bootstrap must advertise the implemented Legacy request detail handoff")
+	}
 	features, _ := body["migration_registry"].([]any)
 	if len(features) != len(appUIFeatures) {
 		t.Fatalf("migration registry length = %d, want %d", len(features), len(appUIFeatures))

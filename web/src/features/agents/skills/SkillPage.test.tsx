@@ -8,11 +8,29 @@ import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 import { FeatureAccessHarness } from "@/test/feature-access";
 
-const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
+const authRuntime = vi.hoisted(() => ({
+  scopes: ["admin:read", "admin:write"],
+  legacySupported: true,
+  legacyPath: "/admin#/skills",
+  legacyFallback: true,
+}));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return {
+    useAuth: () => {
+      const auth = testAuth({ scopes: authRuntime.scopes, legacyFallback: authRuntime.legacyFallback });
+      return {
+        ...auth,
+        capabilities: { ...auth.capabilities, legacy_skill_detail: authRuntime.legacySupported },
+        features: auth.features.map((feature) =>
+          feature.featureId === "agents.skills"
+            ? { ...feature, legacyPath: authRuntime.legacyPath }
+            : feature,
+        ),
+      };
+    },
+  };
 });
 
 const skill = {
@@ -68,6 +86,9 @@ function renderPage(route = "/agents/skills"): ReturnType<typeof renderScreen> {
 describe("SkillPage", () => {
   beforeEach(() => {
     authRuntime.scopes = ["admin:read", "admin:write"];
+    authRuntime.legacySupported = true;
+    authRuntime.legacyPath = "/admin#/skills";
+    authRuntime.legacyFallback = true;
   });
 
   it("shows the skill catalog with its key values", async () => {
@@ -314,4 +335,52 @@ describe("SkillPage", () => {
     await screen.findByRole("table", { name: "스킬 카탈로그" });
     expect((await axe.run(container)).violations).toEqual([]);
   });
+});
+
+beforeEach(() => {
+  authRuntime.scopes = ["admin:read", "admin:write"];
+  authRuntime.legacySupported = true;
+  authRuntime.legacyPath = "/admin#/skills";
+  authRuntime.legacyFallback = true;
+});
+it("preserves opaque selected skill name in its native Legacy link without a mutation", async () => {
+  const name = "/스킬 +%2F?&#/";
+  const api = mockApi({ ...baseHandlers, "GET /admin/skills": () => ({ skills: [{ ...skill, name }] }) });
+  renderPage("/agents/skills?" + new URLSearchParams({ skill: name }));
+  const detail = await screen.findByRole("dialog", { name });
+  expect(await within(detail).findByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/skills?" + new URLSearchParams({ skill_name: name }),
+  );
+  expect(api.calls.every((call) => call.key.startsWith("GET "))).toBe(true);
+});
+it("retains exact selected name when a catalog status filter hides it", async () => {
+  mockApi({ ...baseHandlers, "GET /admin/skills": () => ({ skills: [] }) });
+  renderPage("/agents/skills?skill=hidden-skill&status=production");
+  const detail = await screen.findByRole("dialog", { name: "스킬" });
+  expect(await within(detail).findByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/skills?skill_name=hidden-skill",
+  );
+});
+it.each(["old-server", "custom", "disabled"])("preserves skill Legacy fallback policy %s", async (mode) => {
+  if (mode === "old-server") authRuntime.legacySupported = false;
+  if (mode === "custom") authRuntime.legacyPath = "/admin#/custom?public=ok";
+  if (mode === "disabled") authRuntime.legacyFallback = false;
+  mockApi(baseHandlers);
+  renderPage("/agents/skills?skill=code-review");
+  const detail = await screen.findByRole("dialog", { name: "code-review" });
+  if (mode === "disabled")
+    expect(within(detail).queryByRole("link", { name: "기존 화면에서 열기" })).toBeNull();
+  else
+    expect(await within(detail).findByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+      "href",
+      authRuntime.legacyPath,
+    );
+});
+it("ambiguous skill query cannot open the first resource as the selected detail", async () => {
+  mockApi(baseHandlers);
+  renderPage("/agents/skills?skill=code-review&skill=other");
+  const detail = await screen.findByRole("dialog", { name: "스킬" });
+  expect(within(detail).queryByRole("link", { name: "기존 화면에서 열기" })).toBeNull();
 });

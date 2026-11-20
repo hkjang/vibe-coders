@@ -2,7 +2,6 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuth } from "@/app/auth/AuthProvider";
-import { applyReviewedProbePrompts, reviewProbePrompts } from "./redteam-csv";
 import type { PreparedProbeCsv } from "./probe-csv-file";
 import type { ProbeCsvReview } from "@/shared/api/domains/redteam-probe-csv-review";
 import { redteamKeys, routeId } from "./use-redteam-data";
@@ -116,6 +115,8 @@ export function useProbeCsvImport(canWrite: boolean, reason: string, contextKey:
     const guard = context(selection);
     guard.assertCurrent();
     if (!selection.prepared) return;
+    const { reviewProbePrompts } = await import("./redteam-csv");
+    guard.assertCurrent();
     const review = await reviewProbePrompts(selection.prepared.text, offset, previous?.revision, guard);
     guard.assertCurrent();
     if (
@@ -226,6 +227,8 @@ export function useProbeCsvImport(canWrite: boolean, reason: string, contextKey:
     update(selection, { pending: true, stage: "applying", error: undefined });
     try {
       const guard = context(selection);
+      guard.assertCurrent();
+      const { applyReviewedProbePrompts } = await import("./redteam-csv");
       guard.assertCurrent();
       const result = await applyReviewedProbePrompts(selection.prepared.text, revision, guard);
       guard.assertCurrent();

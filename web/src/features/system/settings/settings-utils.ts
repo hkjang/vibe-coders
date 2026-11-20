@@ -8,6 +8,7 @@ export const consoleSettingLabels: Readonly<Record<string, string>> = {
   "ui.app.enabled": "신규 콘솔 사용",
   "ui.app.default_entry": "기본 진입 화면",
   "ui.app.legacy_fallback": "기존 화면 이동",
+  "ui.app.legacy_entry_link": "기존 콘솔의 새 콘솔 링크",
   "ui.app.feedback_enabled": "화면 피드백",
   "ui.app.telemetry_enabled": "콘솔 사용 관측",
 };

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 
@@ -31,7 +32,7 @@ export function FinopsPage(): React.JSX.Element {
       <PageHeader
         title="비용 관리"
         description="조직 전체 비용, 차원별 배부, 월별 정산 팩과 예산 소진 예측을 확인합니다."
-        legacyHref="/admin#/billing"
+        legacyHref={legacyRoutes.billing}
         readOnly
         status="preview"
         actions={

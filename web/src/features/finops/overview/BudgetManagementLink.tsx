@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { migrationRegistry, resolveFeature } from "@/config/migration-registry";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 /** Resolve the destination independently of the current costs permission. */
 export function BudgetManagementLink(): React.JSX.Element {
@@ -20,9 +20,13 @@ export function BudgetManagementLink(): React.JSX.Element {
       확인한 뒤 진행합니다.{" "}
       {permitted && effective?.status !== "hidden" ? (
         effective?.status === "legacy" ? (
-          <LegacyLink className="finops-budget-link" href={feature?.legacyPath}>
+          <FeatureLegacyLink
+            featureId={"access.users"}
+            className="finops-budget-link"
+            href={feature?.legacyPath}
+          >
             기존 사용자·팀 관리 열기
-          </LegacyLink>
+          </FeatureLegacyLink>
         ) : (
           <Link className="finops-budget-link" to="/access/users?tab=quotas">
             할당량·예산 관리 열기

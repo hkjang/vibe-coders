@@ -18,14 +18,17 @@ const authRuntime = vi.hoisted(() => ({
   scopes: ["admin:read", "routing:read", "routing:write"],
 }));
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    legacyFallback: authRuntime.legacyFallback,
-    mode: "authenticated",
-    user: { scopes: authRuntime.scopes },
-  }),
-}));
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () =>
+      testAuth({
+        scopes: authRuntime.scopes,
+        legacyFallback: authRuntime.legacyFallback,
+        backendVersion: "v0.84.0",
+      }),
+  };
+});
 
 const providerRef = `prv_${"a".repeat(43)}`;
 

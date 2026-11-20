@@ -1,3 +1,6 @@
+import { useAuth } from "@/app/auth/AuthProvider";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
+import { workAppLegacyHandoff } from "./legacy-work-app-handoff";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { isAppError } from "@/shared/api/error";
 import { workAppStatusLabel } from "./work-app-tables";
@@ -26,6 +29,7 @@ import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider"
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 interface AppDetailSheetProps {
+  selectedId?: string;
   app: WorkApp | undefined;
   loading?: boolean;
   detailError?: unknown;
@@ -55,6 +59,7 @@ export function AppDetailSheet(props: AppDetailSheetProps): React.JSX.Element {
 
 function AppDetailSheetContent({
   app: selectedApp,
+  selectedId,
   loading,
   detailError,
   invalidAddress,
@@ -69,6 +74,7 @@ function AppDetailSheetContent({
   returnFocusRef,
   writeDisabledReason,
 }: AppDetailSheetProps): React.JSX.Element {
+  const auth = useAuth();
   const permissionEditor = useAppPermissionDraft(canWrite);
   // A refetch or an external selection change cannot retarget an open draft.
   const app = permissionEditor.target?.app ?? selectedApp;
@@ -87,6 +93,12 @@ function AppDetailSheetContent({
       }),
   });
   const components = app?.components ?? [];
+  const legacyHandoff = workAppLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "agents.apps")?.legacyPath,
+    app?.id ?? selectedId,
+    auth.capabilities?.legacy_work_app_detail === true,
+    auth.credentialPrefixes,
+  );
 
   return (
     <Sheet
@@ -114,10 +126,11 @@ function AppDetailSheetContent({
           <LoadingState label="업무 앱 상세를 불러오는 중입니다." />
         ) : detailError ? (
           <ErrorState
+            legacyFeatureId="agents.apps"
             message={safeAppErrorMessage(detailError, "업무 앱 상세를 불러오지 못했습니다.")}
             requestId={isAppError(detailError) ? detailError.requestId : undefined}
             onRetry={onRetry}
-            legacyHref="/admin#/apps"
+            legacyHref={legacyHandoff.href}
           />
         ) : (
           <EmptyState
@@ -148,6 +161,15 @@ function AppDetailSheetContent({
           />
 
           <div className="agents-detail-actions">
+            {!permissionOpen ? (
+              <FeatureLegacyLink
+                featureId="agents.apps"
+                href={legacyHandoff.href}
+                className="button button-secondary button-default"
+              >
+                기존 화면에서 열기
+              </FeatureLegacyLink>
+            ) : null}
             <Button
               onClick={onPublish}
               disabled={!canWrite || permissionOpen}

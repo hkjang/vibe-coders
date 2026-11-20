@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { Link } from "react-router";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { PolicySearchDetail } from "./PolicySearchDetail";
@@ -11,7 +12,7 @@ export function PolicySearchPage(): React.JSX.Element {
         title="정책 및 거버넌스"
         description="자원 검색에서 선택한 정책의 현재 상태를 읽기 전용으로 확인합니다."
         readOnly
-        legacyHref="/admin#/safety"
+        legacyHref={legacyRoutes.safety}
       />
       <p>
         다른 정책을 확인하려면 명령 팔레트의 자원 검색을 이용하세요. 편집과 시뮬레이션은 정책 목록에서

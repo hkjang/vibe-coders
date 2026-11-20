@@ -181,9 +181,12 @@ async function discard(page: Page) {
 test("review precedes an explicitly confirmed PUT and preserves original BOM/CRLF download bytes", async ({
   page,
 }) => {
+  const transportLoads: string[] = [];
   const parserLoads: string[] = [];
   const dialogLoads: string[] = [];
   page.on("request", (request) => {
+    if (/\/assets\/redteam-csv-[^/]+\.js$/u.test(new URL(request.url()).pathname))
+      transportLoads.push(request.url());
     if (/\/assets\/ProbeCsvImportDialog-[^/]+\.js$/u.test(new URL(request.url()).pathname))
       dialogLoads.push(request.url());
     if (/\/assets\/probe-csv-file-[^/]+\.js$/u.test(new URL(request.url()).pathname))
@@ -192,6 +195,7 @@ test("review precedes an explicitly confirmed PUT and preserves original BOM/CRL
   const api = await install(page);
   await open(page);
   const initialReads = api.reads();
+  expect(transportLoads).toEqual([]);
   expect(parserLoads).toEqual([]);
   expect(dialogLoads).toEqual([]);
   await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
@@ -206,6 +210,7 @@ test("review precedes an explicitly confirmed PUT and preserves original BOM/CRL
   await confirm(page);
   await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
   expect(api.writes).toHaveLength(1);
+  expect(transportLoads).toHaveLength(1);
   expect(parserLoads).toHaveLength(1);
   expect(dialogLoads).toHaveLength(1);
   expect(api.writes[0]?.bytes).toEqual(Array.from(new TextEncoder().encode(csv)));
@@ -438,5 +443,56 @@ for (const width of [390, 1440]) {
     await confirm(page);
     await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("프롬프트 1건");
     api.check();
+  });
+}
+
+for (const action of ["review", "export"] as const) {
+  test("a permission change while CSV transport loads prevents " + action, async ({ page }) => {
+    const api = await install(page);
+    const downloads: string[] = [];
+    page.on("download", (file) => downloads.push(file.suggestedFilename()));
+    let captured = false;
+    let release = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pattern = "**/assets/redteam-csv-*.js";
+    await page.route(pattern, async (route) => {
+      const response = await route.fetch();
+      captured = true;
+      await hold;
+      await route.fulfill({ response });
+    });
+    try {
+      await open(page);
+      const permissionAction = page.getByRole("button", { name: "프롬프트 추가", exact: true });
+      await expect(permissionAction).toBeEnabled();
+      if (action === "review")
+        await page.getByLabel("프롬프트 CSV 파일 선택", { exact: true }).setInputFiles(upload());
+      else await page.getByRole("button", { name: "CSV 내보내기(엑셀)", exact: true }).click();
+      await expect.poll(() => captured).toBe(true);
+      if (!api.bootstrap.user) throw new Error("missing fixture user");
+      api.bootstrap.user.scopes = ["admin:read"];
+      await refreshRuntime(page);
+      await expect(permissionAction).toBeDisabled();
+      const loaded = page.waitForEvent("requestfinished", (request) =>
+        /\/assets\/redteam-csv-[^/]+\.js$/u.test(new URL(request.url()).pathname),
+      );
+      release();
+      await loaded;
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+      );
+      expect(api.reviews).toEqual([]);
+      expect(api.exports).toEqual([]);
+      expect(api.writes).toEqual([]);
+      expect(downloads).toEqual([]);
+      await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+      api.check();
+    } finally {
+      release();
+      await page.unroute(pattern);
+    }
   });
 }

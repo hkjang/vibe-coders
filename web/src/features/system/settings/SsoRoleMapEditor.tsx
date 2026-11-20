@@ -20,7 +20,17 @@ export function SsoRoleMapEditor({
   return (
     <fieldset className="settings-fieldset">
       <legend>역할 매핑 (Keycloak 역할 → 내부 역할)</legend>
-      <div className="data-table-scroll" role="region" aria-label="Keycloak 역할 매핑" tabIndex={0}>
+      <div
+        className="data-table-scroll settings-role-map"
+        role="region"
+        aria-label="Keycloak 역할 매핑"
+        tabIndex={0}
+        onFocus={(event) => {
+          // Native focus can leave a partially visible control clipped by this horizontal table.
+          if (event.target !== event.currentTarget)
+            event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }}
+      >
         <table className="data-table">
           <caption className="sr-only">Keycloak 역할 매핑</caption>
           <thead>

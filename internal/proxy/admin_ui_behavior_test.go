@@ -32,3 +32,100 @@ func TestAdminUIBehaviour(t *testing.T) {
 	}
 	t.Logf("\n%s", out)
 }
+
+// Cover asynchronous request selection with the actual embedded Legacy functions.
+func TestAdminUIRequestHandoffBehaviour(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; skipping admin UI request handoff checks")
+	}
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve admin UI request handoff path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, filepath.Join(packageDir, "testdata", "admin_ui_request_handoff.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("admin UI request handoff checks failed: %v\n%s", err, out)
+	}
+	t.Logf("\n%s", out)
+}
+
+// Execute the actual safe-projection provider handoff and deferred lifetime guards.
+func TestAdminUIProviderHandoffBehaviour(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; skipping provider handoff checks")
+	}
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve provider handoff test path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, "--test", filepath.Join(packageDir, "testdata", "admin_ui_provider_handoff.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("provider handoff checks failed: %v\n%s", err, out)
+	}
+	t.Logf("\n%s", out)
+}
+
+func TestAdminUIPromptHandoffBehaviour(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; skipping prompt handoff checks")
+	}
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve prompt handoff test path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, "--test", filepath.Join(packageDir, "testdata", "admin_ui_prompt_handoff.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("prompt handoff checks failed: %v\n%s", err, out)
+	}
+	t.Logf("\n%s", out)
+}
+
+func TestAdminUIModelHandoffBehaviour(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; skipping model handoff checks")
+	}
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve model handoff test path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, "--test", filepath.Join(packageDir, "testdata", "admin_ui_model_handoff.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("model handoff checks failed: %v\n%s", err, out)
+	}
+	t.Logf("\n%s", out)
+}
+
+func TestAdminUIRoutingHandoffBehaviour(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; skipping routing handoff checks")
+	}
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve routing handoff test path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, "--test", filepath.Join(packageDir, "testdata", "admin_ui_routing_handoff.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("routing handoff checks failed: %v\n%s", err, out)
+	}
+	t.Logf("\n%s", out)
+}

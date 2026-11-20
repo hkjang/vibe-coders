@@ -56,7 +56,11 @@ func (s *Server) handleSkillFitness(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		skill := strings.TrimSpace(r.URL.Query().Get("skill"))
+		target, ok := s.adminSkillQueryTarget(w, r, "skill")
+		if !ok {
+			return
+		}
+		skill := target.name
 		if skill == "" {
 			writeOpenAIError(w, http.StatusBadRequest, "skill query param is required", "invalid_request_error", "missing_skill")
 			return
@@ -72,19 +76,30 @@ func (s *Server) handleSkillFitness(w http.ResponseWriter, r *http.Request) {
 				passing++
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"skill": skill, "evidence": ev, "passing_count": passing, "required": skillFitnessMinEvidence,
-		})
+		response := map[string]any{"skill": skill, "evidence": ev, "passing_count": passing, "required": skillFitnessMinEvidence}
+		if target.selected != nil {
+			response["skill_ref"] = target.refs(skill)
+		}
+		writeJSON(w, http.StatusOK, response)
 	case http.MethodPost:
 		var p struct {
-			Skill  string  `json:"skill"`
-			Kind   string  `json:"kind"`
-			RefID  string  `json:"ref_id"`
-			Passed bool    `json:"passed"`
-			Score  float64 `json:"score"`
-			Note   string  `json:"note"`
+			SkillRef skillRefInput `json:"skill_ref,omitzero"`
+			Skill    string        `json:"skill"`
+			Kind     string        `json:"kind"`
+			RefID    string        `json:"ref_id"`
+			Passed   bool          `json:"passed"`
+			Score    float64       `json:"score"`
+			Note     string        `json:"note"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&p); err != nil || strings.TrimSpace(p.Skill) == "" {
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "skill is required", "invalid_request_error", "bad_request")
+			return
+		}
+		target, ok := s.adminSkillTarget(w, r, p.Skill, p.SkillRef)
+		if !ok {
+			return
+		}
+		if target.name == "" {
 			writeOpenAIError(w, http.StatusBadRequest, "skill is required", "invalid_request_error", "bad_request")
 			return
 		}
@@ -93,7 +108,7 @@ func (s *Server) handleSkillFitness(w http.ResponseWriter, r *http.Request) {
 			kind = "multimodel"
 		}
 		ev := store.SkillFitnessEvidence{
-			ID: newID("skfit"), SkillName: strings.TrimSpace(p.Skill), Kind: kind,
+			ID: newID("skfit"), SkillName: target.name, Kind: kind,
 			RefID: strings.TrimSpace(p.RefID), Passed: p.Passed, Score: p.Score, Note: strings.TrimSpace(p.Note),
 			CreatedBy: s.skillActor(r),
 		}
@@ -101,8 +116,15 @@ func (s *Server) handleSkillFitness(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "add_failed")
 			return
 		}
-		s.auditAdmin(r, "skill.fitness_evidence", ev.SkillName, auditJSON(map[string]any{"kind": kind, "passed": p.Passed, "ref": ev.RefID}))
-		writeJSON(w, http.StatusCreated, ev)
+		s.auditAdmin(r, "skill.fitness_evidence", target.auditIdentity(), auditJSON(map[string]any{"kind": kind, "passed": p.Passed, "ref": ev.RefID}))
+		if target.selected != nil {
+			writeJSON(w, http.StatusCreated, struct {
+				store.SkillFitnessEvidence
+				SkillRef string `json:"skill_ref"`
+			}{ev, target.refs(target.name)})
+		} else {
+			writeJSON(w, http.StatusCreated, ev)
+		}
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}

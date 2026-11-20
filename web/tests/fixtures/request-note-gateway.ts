@@ -28,7 +28,7 @@ export const masked = {
 };
 type Note = typeof initial;
 type Patch = { preserve_fields: ("note" | "tags")[]; note?: string; tags?: string[] };
-const userFor = (email: string) => ({
+const userFor = (email: string, requestAccess: boolean) => ({
   id: email === secondEmail ? "note-two" : email === readerEmail ? "note-reader" : "note-one",
   email,
   name: "요청 메모 검토자",
@@ -36,7 +36,11 @@ const userFor = (email: string) => ({
   roles: [email === readerEmail ? "readonly_admin" : "note_operator"],
   scopes: ["admin:read", ...(email === readerEmail ? [] : ["admin:write"])],
   team_id: "note-fixture-team",
-  features: { "observability.llm": true, "observability.xview": true },
+  features: {
+    "observability.llm": true,
+    "observability.xview": true,
+    "observability.requests": requestAccess,
+  },
 });
 type User = ReturnType<typeof userFor>;
 function bootstrap(
@@ -65,9 +69,19 @@ function bootstrap(
     ...(user ? { user } : {}),
     roles: user?.roles ?? [],
     permissions: user?.scopes ?? [],
-    allowed_features: user ? ["observability.llm", "observability.xview"] : [],
+    allowed_features: user
+      ? Object.entries(user.features)
+          .filter(([, allowed]) => allowed)
+          .map(([id]) => id)
+      : [],
     capabilities: { raw_prompt_view: false },
     migration_registry: [
+      {
+        feature_id: "observability.requests",
+        title: "요청 탐색기",
+        app_path: "/app/observability/requests",
+        legacy_path: "/admin#/requests",
+      },
       {
         feature_id: "observability.llm",
         title: "LLM 관측",
@@ -90,7 +104,10 @@ function bootstrap(
       fallback_enabled: true,
       required_permission: "admin:read",
       minimum_api_version: "v0.84.0",
-      available: Boolean(user),
+      available:
+        Boolean(user) &&
+        (feature.feature_id !== "observability.requests" ||
+          user?.features["observability.requests"] === true),
     })),
     system_status: { status: "healthy" },
     legacy_route_map: { "/app/observability/llm": "/admin#/llm", [xviewUrl]: "/admin#/xview" },
@@ -119,6 +136,7 @@ async function installGateway(context: BrowserContext) {
     [secondId, { ...initial, request_id: secondId, note: "두 번째 요청 메모" }],
   ]);
   let version: string | undefined = "v0.86.16";
+  let requestAccess = false;
   let readStatus = 200,
     writeStatus = 200,
     readCount = 0,
@@ -201,7 +219,7 @@ async function installGateway(context: BrowserContext) {
       const body = request.postDataJSON() as { email: string; password: string };
       expect([firstEmail, secondEmail, readerEmail]).toContain(body.email);
       expect(body.password).toBe("public-test-password");
-      const user = userFor(body.email),
+      const user = userFor(body.email, requestAccess),
         access = `public-note-access-${++logins}`,
         refresh = `public-note-refresh-${logins}`;
       sessions.set(`Bearer ${access}`, { refresh, user });
@@ -319,6 +337,10 @@ async function installGateway(context: BrowserContext) {
     logoutResponses: () => logoutResponses,
     replaceNote: (next: unknown, id = firstId) => {
       notes.set(id, structuredClone(next));
+    },
+    setRequestAccess: (allowed: boolean) => {
+      requestAccess = allowed;
+      for (const session of sessions.values()) session.user.features["observability.requests"] = allowed;
     },
     setVersion: (next: string | undefined) => {
       version = next;

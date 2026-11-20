@@ -401,6 +401,59 @@ async function noStoredDraft(page: Page) {
 }
 
 for (const kind of ["sso", "notification"] as const) {
+  for (const width of [1440, 390]) {
+    test(`${kind} ${width}px 저장 작업은 긴 폼 아래에 고정되고 입력 포커스를 가리지 않는다`, async ({
+      page,
+      api,
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: 480 });
+      await open(page, kind);
+      await draftField(page, kind).fill("public-inline-draft");
+      const form = page.locator("form").filter({ has: draftField(page, kind) });
+      const bar = page.getByRole("group", {
+        name: kind === "sso" ? "SSO 설정 저장 작업" : "알림 설정 저장 작업",
+      });
+      await form.evaluate((node) =>
+        window.scrollTo(0, node.getBoundingClientRect().top + window.scrollY - 80),
+      );
+      await expect(bar.getByRole("status")).toHaveText("저장하지 않은 변경사항이 있습니다.");
+      await expect(saveButton(page, kind)).toBeInViewport();
+      const formBounds = await form.boundingBox(),
+        barBounds = await bar.boundingBox();
+      expect(formBounds).not.toBeNull();
+      expect(barBounds).not.toBeNull();
+      expect((formBounds?.y ?? 0) + (formBounds?.height ?? 0)).toBeGreaterThan(480);
+      expect((barBounds?.y ?? 0) + (barBounds?.height ?? 0)).toBeLessThanOrEqual(480);
+      expect(barBounds?.y).toBeGreaterThan(56);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+      const lastField = form.locator("input:enabled,select:enabled,textarea:enabled").last();
+      await lastField.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(lastField).toBeFocused();
+      await page.screenshot({ path: testInfo.outputPath(`sticky-save-${kind}-${width}.png`) });
+      expect(
+        await lastField.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+          return {
+            exposed: hit === node || node.contains(hit),
+            field: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            hit: hit?.tagName,
+            hitClass: hit?.className,
+            bar: node.closest("form")?.querySelector(".sticky-save-bar")?.getBoundingClientRect().toJSON(),
+          };
+        }),
+      ).toMatchObject({ exposed: true });
+      await submit(page, kind);
+      await expect(bar.getByRole("status")).toHaveText("새 변경사항이 없습니다.");
+      expect(api.writes).toHaveLength(1);
+      expect(api.writes[0]?.kind).toBe(kind);
+      await expect(draftField(page, kind)).toHaveValue("public-inline-draft");
+    });
+  }
+
   test(`${kind} 인라인 변경 취소는 Escape로 계속 편집하고 명시적 폐기와 원복은 안전하게 초기화한다`, async ({
     page,
     api,

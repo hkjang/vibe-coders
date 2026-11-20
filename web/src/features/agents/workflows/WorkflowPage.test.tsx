@@ -9,11 +9,29 @@ import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 import { FeatureAccessHarness } from "@/test/feature-access";
 
-const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
+const authRuntime = vi.hoisted(() => ({
+  scopes: ["admin:read", "admin:write"],
+  legacySupported: true,
+  legacyPath: "/admin#/workflows",
+  legacyFallback: true,
+}));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
-  return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
+  return {
+    useAuth: () => {
+      const auth = testAuth({ scopes: authRuntime.scopes, legacyFallback: authRuntime.legacyFallback });
+      return {
+        ...auth,
+        capabilities: { ...auth.capabilities, legacy_workflow_detail: authRuntime.legacySupported },
+        features: auth.features.map((feature) =>
+          feature.featureId === "agents.workflows"
+            ? { ...feature, legacyPath: authRuntime.legacyPath }
+            : feature,
+        ),
+      };
+    },
+  };
 });
 
 const workflow = {
@@ -45,6 +63,52 @@ function renderPage(route = "/agents/workflows"): ReturnType<typeof renderScreen
 describe("WorkflowPage", () => {
   beforeEach(() => {
     authRuntime.scopes = ["admin:read", "admin:write"];
+    authRuntime.legacySupported = true;
+    authRuntime.legacyPath = "/admin#/workflows";
+    authRuntime.legacyFallback = true;
+  });
+
+  it("opens the exact workflow from its detail without a mutation", async () => {
+    const id = " 업무 앱 +%2F?&#/ ";
+    const api = mockApi({
+      "GET /admin/workflows": ({ query }) => workflowReadFixture([{ ...workflow, id }], query),
+    });
+    renderPage("/agents/workflows?" + new URLSearchParams({ workflow: id }));
+    const detail = await screen.findByRole("dialog", { name: /주간 보고 자동화/u });
+    expect(await within(detail).findByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/workflows?" + new URLSearchParams({ workflow_id: id }),
+    );
+    expect(api.calls.every((call) => call.key.startsWith("GET "))).toBe(true);
+  });
+  it("retains the selected identity when the exact read fails", async () => {
+    mockApi({
+      "GET /admin/workflows": ({ query }) => {
+        if ((query as { view?: string })?.view === "detail") throw apiFailure("unavailable", 500);
+        return workflowReadFixture([workflow], query);
+      },
+    });
+    renderPage("/agents/workflows?workflow=missing-workflow");
+    const detail = await screen.findByRole("dialog", { name: "워크플로" });
+    expect(await within(detail).findByRole("link", { name: /기존.*열기/u })).toHaveAttribute(
+      "href",
+      "/admin#/workflows?workflow_id=missing-workflow",
+    );
+  });
+  it.each(["old-server", "custom", "disabled"])("preserves fallback policy: %s", async (mode) => {
+    if (mode === "old-server") authRuntime.legacySupported = false;
+    if (mode === "custom") authRuntime.legacyPath = "/admin#/custom?public=ok";
+    if (mode === "disabled") authRuntime.legacyFallback = false;
+    mockApi({ "GET /admin/workflows": listHandler });
+    renderPage("/agents/workflows?workflow=" + workflow.id);
+    const detail = await screen.findByRole("dialog", { name: /주간 보고 자동화/u });
+    if (mode === "disabled")
+      expect(within(detail).queryByRole("link", { name: "기존 화면에서 열기" })).toBeNull();
+    else
+      expect(await within(detail).findByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+        "href",
+        authRuntime.legacyPath,
+      );
   });
 
   it("shows the workflow list with its key values", async () => {

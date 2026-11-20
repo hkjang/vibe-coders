@@ -1,4 +1,7 @@
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { legacyRoutes } from "@/config/legacy-route-map";
+import { useAuth } from "@/app/auth/AuthProvider";
+import { modelLegacyHandoff } from "./legacy-model-handoff";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
@@ -228,11 +231,28 @@ export function ModelDetailDialog({
       failure.code === "models_provider_limit_exceeded" ||
       failure.code === "models_response_limit_exceeded",
   );
-  const footer = showLegacyAdmin ? (
-    <LegacyLink className="button button-secondary button-default" href="/admin#/model-contracts">
-      기존 모델 계약 열기 <ExternalLink aria-hidden="true" />
-    </LegacyLink>
-  ) : undefined;
+  const auth = useAuth();
+  const handoff = modelLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "gateway.models")?.legacyPath,
+    catalogue.error ? undefined : row?.model,
+    auth.capabilities?.legacy_model_detail === true,
+    auth.credentialPrefixes,
+  );
+  const footer =
+    showLegacyAdmin && handoff.href ? (
+      <FeatureLegacyLink
+        featureId="gateway.models"
+        className="button button-secondary button-default"
+        href={handoff.href}
+      >
+        {handoff.sameModel
+          ? "기존 화면에서 같은 모델 열기"
+          : handoff.href === legacyRoutes.modelContracts
+            ? "기존 모델 계약 열기"
+            : "기존 화면에서 열기"}{" "}
+        <ExternalLink aria-hidden="true" />
+      </FeatureLegacyLink>
+    ) : undefined;
   const status = row ? modelStatusPresentation[row.status] : undefined;
 
   return (

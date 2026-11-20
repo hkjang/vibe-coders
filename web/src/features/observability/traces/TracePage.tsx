@@ -1,4 +1,4 @@
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { ExternalLink, ListTree, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
@@ -235,6 +235,7 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
       <div className="page-stack trace-page">
         {criteriaPanel}
         <ErrorState
+          legacyFeatureId="observability.traces"
           headingRef={errorHeadingRef}
           title="추적 요청 흐름을 불러오지 못했습니다."
           message={safeAppErrorMessage(result.error, "추적 요청 흐름을 확인할 수 없습니다.")}
@@ -300,9 +301,13 @@ function TracePageContent({ flowAccess }: { flowAccess: TraceSafeFlowAccess }): 
             <Search aria-hidden="true" /> 요청 탐색기
           </Link>
           {showLegacyAdmin && legacyPath ? (
-            <LegacyLink className="button button-secondary button-default" href={legacyPath}>
+            <FeatureLegacyLink
+              featureId="observability.traces"
+              className="button button-secondary button-default"
+              href={legacyPath}
+            >
               <ExternalLink aria-hidden="true" /> 기존 화면 보기
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
           <Button variant="primary" disabled={result.isFetching} onClick={list.retry}>
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}

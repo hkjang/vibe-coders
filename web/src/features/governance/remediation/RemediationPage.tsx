@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, PlayCircle, RefreshCw, Undo2 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -19,7 +20,7 @@ import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { JsonBlock } from "@/shared/components/ui/JsonBlock";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { RemediationLegacyLink } from "./RemediationLegacyLink";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { Sheet } from "@/shared/components/ui/Sheet";
@@ -118,7 +119,7 @@ export function RemediationPage(): React.JSX.Element {
         title="자동 조치"
         status="preview"
         description="현재 운영 상황에서 실행 가능한 되돌릴 수 있는 조치 후보입니다. 적용 전에 영향을 미리 확인하세요."
-        legacyHref="/admin#/remediation"
+        legacyHref={legacyRoutes.remediation}
         actions={
           <div className="governance-actions">
             <label className="toolbar">
@@ -232,14 +233,7 @@ export function RemediationPage(): React.JSX.Element {
                     >
                       <PlayCircle aria-hidden="true" /> 승인 후 적용
                     </Button>
-                    {action.link ? (
-                      <LegacyLink
-                        className="button button-secondary button-small"
-                        href={`/admin${action.link}`}
-                      >
-                        기존 화면에서 처리
-                      </LegacyLink>
-                    ) : null}
+                    <RemediationLegacyLink link={action.link} />
                   </div>
                 </article>
               ))}

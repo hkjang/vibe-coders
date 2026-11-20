@@ -66,7 +66,8 @@ def main():
         realm = {
             "realm": "vibe-browser", "enabled": True, "sslRequired": "all",
             "registrationAllowed": False, "resetPasswordAllowed": False,
-            "roles": {"realm": [{"name": "vibe-admin"}, {"name": "vibe-auditor"}]},
+            "groups": [{"name": "teams", "subGroups": [{"name": "Shared access"}]}],
+            "roles": {"realm": [{"name": "vibe-admin"}, {"name": "vibe-auditor"}, {"name": "vibe-team-admin"}, {"name": "vibe-ops"}]},
             "clients": [{
                 "clientId": "vibe-browser", "secret": secret, "publicClient": False,
                 "protocol": "openid-connect", "standardFlowEnabled": True,
@@ -79,17 +80,24 @@ def main():
                     "name": "gateway roles", "protocol": "openid-connect",
                     "protocolMapper": "oidc-usermodel-realm-role-mapper",
                     "config": {"claim.name": "realm_access.roles", "jsonType.label": "String", "multivalued": "true", "id.token.claim": "true", "access.token.claim": "true"},
+                }, {
+                    "name": "gateway groups", "protocol": "openid-connect",
+                    "protocolMapper": "oidc-group-membership-mapper",
+                    "config": {"claim.name": "groups", "full.path": "true", "id.token.claim": "true", "access.token.claim": "true"},
                 }],
             }],
             "users": [{
                 "username": name, "email": email, "enabled": True, "emailVerified": True,
                 "firstName": "제품 검증", "lastName": "사용자",
                 "realmRoles": [role],
+                "groups": ["/teams/Shared access"] if name == "routing-reader" else [],
                 "credentials": [{"type": "password", "value": password, "temporary": False}],
             } for name, email, role in [
                 ("existing-operator", "existing@example.invalid", "vibe-admin"),
                 ("new-operator", "new@example.invalid", "vibe-admin"),
                 ("reader", "reader@example.invalid", "vibe-auditor"),
+                ("routing-reader", "routing-reader@example.invalid", "vibe-team-admin"),
+                ("policy-denied", "policy-denied@example.invalid", "vibe-ops"),
             ]],
         }
         (imports / "vibe-browser-realm.json").write_text(json.dumps(realm))
@@ -131,14 +139,14 @@ def main():
                 else: raise RuntimeError("Keycloak discovery did not become ready")
                 print("Pinned Keycloak HTTPS discovery ready; no host ports or external runtime network", flush=True)
                 phase = "real Keycloak browser and database verification"
-                result = subprocess.run(["docker", "exec", browser_name, "/proxy.test", "-test.run=^TestKeycloakProductBrowserIntegration$", "-test.count=1", "-test.timeout=5m"], stdout=log, stderr=log)
+                result = subprocess.run(["docker", "exec", browser_name, "/proxy.test", "-test.run=^TestKeycloakProductBrowserIntegration$", "-test.count=1", "-test.timeout=6m"], stdout=log, stderr=log)
                 source = reports / "keycloak-live-summary.json"
                 if source.exists():
                     summary = json.loads(source.read_text())
-                    allowed = {"KEYCLOAK-LIVE-00" + str(i) for i in range(1, 6)}
+                    allowed = {f"KEYCLOAK-LIVE-{i:03d}" for i in range(1, 57)}
                     assert set(summary) == {"status", "tests"}
                     assert summary["status"] in {"passed", "failed", "timedout", "interrupted"}
-                    assert len(summary["tests"]) == 5
+                    assert len(summary["tests"]) == 56
                     assert {item["scenario"] for item in summary["tests"]} == allowed
                     for item in summary["tests"]:
                         assert set(item) <= {"scenario", "status", "durationMs", "lastSourceLine", "failureSourceLine"}

@@ -1,9 +1,9 @@
-import { useEffect, type RefObject } from "react";
+import { useEffect, useMemo, type RefObject } from "react";
 import { Controller } from "react-hook-form";
 
 import {
   skillFormDefaults,
-  skillFormSchema,
+  skillFormSchemaFor,
   skillRiskOptions,
   skillStatusOptions,
   type SkillFormInput,
@@ -38,7 +38,8 @@ export function SkillFormDialog({
   returnFocusRef,
   skill,
 }: SkillFormDialogProps): React.JSX.Element {
-  const form = useZodForm<SkillFormInput, SkillFormOutput>(skillFormSchema, skillFormDefaults(skill));
+  const schema = useMemo(() => skillFormSchemaFor(skill), [skill]);
+  const form = useZodForm<SkillFormInput, SkillFormOutput>(schema, skillFormDefaults(skill));
   const { reset } = form;
   useEffect(() => {
     if (open) reset(skillFormDefaults(skill));

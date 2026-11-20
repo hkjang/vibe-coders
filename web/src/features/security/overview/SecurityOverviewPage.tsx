@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 
@@ -43,7 +44,7 @@ export function SecurityOverviewPage(): React.JSX.Element {
         title="보안"
         readOnly
         description="정책 위반, 비밀정보 탐지, 인증 이벤트와 데이터 전송 원장을 한곳에서 확인합니다."
-        legacyHref="/admin#/security"
+        legacyHref={legacyRoutes.security}
         actions={
           <Button
             variant="primary"

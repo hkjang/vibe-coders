@@ -1,3 +1,4 @@
+import { accessLegacyHandoff } from "./legacy-access-handoff";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, type RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -11,7 +12,7 @@ import { LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import {
   assertFeatureRead,
@@ -41,6 +42,13 @@ export function ApiKeyDetail({
   const id = values[0] ?? "";
   const supported = versionAtLeast(auth.backendVersion, "v0.86.101");
   const valid = values.length === 1 && validAPIKeyDetailId(id, auth.credentialPrefixes);
+  const handoff = accessLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "access.users")?.legacyPath,
+    "key",
+    valid && supported && owner.readable && !owner.denied ? id : undefined,
+    auth.capabilities?.legacy_access_detail === true,
+    auth.credentialPrefixes,
+  );
   const result = useQuery({
     queryKey: featureOwnedKey([...accessKeys.apiKeys, "detail", valid ? id : null], owner),
     enabled: valid && supported && owner.readable && !owner.denied,
@@ -82,10 +90,14 @@ export function ApiKeyDetail({
       scrollLabel="API 키 정보"
       footer={
         <>
-          {canOpenLegacyAdmin(auth) ? (
-            <LegacyLink className="button button-secondary button-default" href="/admin#/users">
-              기존 사용자·키 화면
-            </LegacyLink>
+          {canOpenLegacyAdmin(auth) && handoff.href ? (
+            <FeatureLegacyLink
+              featureId="access.users"
+              className="button button-secondary button-default"
+              href={handoff.href}
+            >
+              {handoff.sameResource ? "기존 화면에서 같은 API 키 열기" : "기존 화면에서 열기"}
+            </FeatureLegacyLink>
           ) : null}
           <Button onClick={onClose}>닫기</Button>
         </>

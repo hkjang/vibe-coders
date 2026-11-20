@@ -120,6 +120,25 @@ describe("PageHeader runtime migration presentation", () => {
     expect(within(header).getByRole("button", { name: "새로고침" })).toBeVisible();
   });
 
+  it("removes a mounted retired or fallback-disabled Legacy action but keeps deprecated fallback", () => {
+    const result = render(routedHeader());
+    expect(screen.getByRole("link", { name: "기존 화면에서 열기" })).toBeVisible();
+    setFeature({ status: "retired", serverAvailable: true });
+    result.rerender(routedHeader());
+    expect(screen.queryByRole("link", { name: "기존 화면에서 열기" })).not.toBeInTheDocument();
+    setFeature({ status: "deprecated", serverAvailable: true });
+    result.rerender(routedHeader());
+    expect(screen.getByRole("link", { name: "기존 화면에서 열기" })).toBeVisible();
+    setFeature({ status: "stable", fallbackEnabled: false, serverAvailable: true });
+    result.rerender(routedHeader());
+    expect(screen.queryByRole("link", { name: "기존 화면에서 열기" })).not.toBeInTheDocument();
+  });
+
+  it("does not infer a target policy for an unowned heading", () => {
+    render(<PageHeader title="별도 화면" legacyHref="/admin#/text2sql" />);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
   it("does not restore a globally disabled legacy link", () => {
     runtime.auth = { ...runtime.auth, legacyFallback: false };
     render(routedHeader());

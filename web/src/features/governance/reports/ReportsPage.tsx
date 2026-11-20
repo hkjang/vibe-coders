@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useCallback } from "react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -51,7 +52,7 @@ export function ReportsPage(): React.JSX.Element {
       <PageHeader
         title="운영 리포트"
         description="팀 성숙도 스코어카드, 월간 운영 서술 보고서, AI 업무성과를 한 화면에서 확인합니다."
-        legacyHref="/admin#/scorecard"
+        legacyHref={legacyRoutes.scorecard}
         status="preview"
       />
 

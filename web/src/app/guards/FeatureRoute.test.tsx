@@ -24,11 +24,14 @@ const feature: MigrationFeature = {
 
 const authRuntime = vi.hoisted(() => ({
   feature: {} as MigrationFeature,
+  backendVersion: "v0.82.1",
 }));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
-    backendVersion: "v0.82.1",
+    backendVersion: authRuntime.backendVersion,
+    mode: "authenticated",
+    authenticationMode: "session",
     features: [authRuntime.feature],
     legacyFallback: true,
     user: {
@@ -37,7 +40,7 @@ vi.mock("@/app/auth/AuthProvider", () => ({
       role: "admin",
       roles: ["admin"],
       team_id: "ops",
-      scopes: ["admin:read"],
+      scopes: ["admin:read", "routing:read"],
       features: {},
     },
   }),
@@ -46,6 +49,29 @@ vi.mock("@/app/auth/AuthProvider", () => ({
 describe("FeatureRoute access state", () => {
   beforeEach(() => {
     authRuntime.feature = { ...feature };
+    authRuntime.backendVersion = "v0.82.1";
+  });
+
+  it("keeps an incompatible retired feature out of the Legacy bridge and recovers after upgrade", () => {
+    authRuntime.feature = { ...feature, status: "retired", serverAvailable: true };
+    authRuntime.backendVersion = "v0.1.0";
+    const tree = (
+      <FeatureRoute feature={feature}>
+        <div>보호된 화면</div>
+      </FeatureRoute>
+    );
+    const result = render(tree);
+    expect(screen.getByRole("heading", { name: "서버 버전을 확인하세요." })).toBeVisible();
+    expect(screen.queryByText("기존 화면 연결")).not.toBeInTheDocument();
+    expect(screen.queryByText("보호된 화면")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /기존/ })).not.toBeInTheDocument();
+    authRuntime.backendVersion = "v0.82.1";
+    result.rerender(
+      <FeatureRoute feature={feature}>
+        <div>보호된 화면</div>
+      </FeatureRoute>,
+    );
+    expect(screen.getByText("보호된 화면")).toBeVisible();
   });
 
   it("shows the required permission instead of the server reason code", () => {

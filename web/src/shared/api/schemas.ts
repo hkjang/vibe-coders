@@ -166,9 +166,27 @@ export const uiBootstrapSchema = z.object({
   }),
   user: authUserSchema.nullable().optional(),
   roles: z.array(z.string()),
-  // Rules the gateway decides by role rather than by scope, so a screen can
-  // disable an action with a reason instead of discovering a 403 on click.
-  capabilities: z.object({ raw_prompt_view: z.boolean() }).default({ raw_prompt_view: false }),
+  // Server role decisions and optional Legacy navigation support. Missing support stays off.
+  capabilities: z
+    .object({
+      raw_prompt_view: z.boolean(),
+      legacy_request_detail: z.boolean().optional(),
+      legacy_request_direct_detail: z.boolean().optional(),
+      legacy_provider_detail: z.boolean().optional(),
+      legacy_prompt_library: z.boolean().optional(),
+      legacy_model_detail: z.boolean().optional(),
+      legacy_text2sql_schema_detail: z.boolean().optional(),
+      legacy_work_app_detail: z.boolean().optional(),
+      legacy_workflow_detail: z.boolean().optional(),
+      legacy_skill_detail: z.boolean().optional(),
+      legacy_skill_reference_detail: z.boolean().optional(),
+      legacy_session_detail: z.boolean().optional(),
+      legacy_access_detail: z.boolean().optional(),
+      legacy_routing_rule_detail: z.boolean().optional(),
+      legacy_policy_detail: z.boolean().optional(),
+      legacy_request_filters: z.boolean().optional(),
+    })
+    .default({ raw_prompt_view: false }),
   permissions: z.array(z.string()),
   allowed_features: z.array(z.string()),
   migration_registry: z.array(migrationFeatureSchema),

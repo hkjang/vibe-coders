@@ -24,7 +24,7 @@ export function RequestNoteSection({
       title="운영 메모·태그"
       description="이 요청에 대해 팀이 공유하는 메모와 태그입니다. 프롬프트 원문은 적지 마세요."
     >
-      <RequestNoteNotices supported={editor.supported} current={current} />
+      <RequestNoteNotices requestId={requestId} supported={editor.supported} current={current} />
       {!allowed ? (
         <InlineNotice tone="warning" title="쓰기 권한이 없습니다.">
           {editor.writeDisabledReason ?? "요청 메모 작성에는 admin:write 권한이 필요합니다."}

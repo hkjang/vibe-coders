@@ -134,3 +134,45 @@ it("팀 변경 뒤 이전 상세 응답은 화면과 캐시에 남지 않는다"
   await act(async () => finish({ rules: [row] }));
   expect(screen.queryByText(row.note)).not.toBeInTheDocument();
 });
+
+it("지원 서버에서는 선택한 규칙 ID를 기존 화면으로 전달한다", async () => {
+  state.auth = { ...testAuth(), capabilities: { raw_prompt_view: false, legacy_routing_rule_detail: true } };
+  setup("/routing/rules?rule_id=" + encodeURIComponent(row.id));
+  const link = await screen.findByRole("link", { name: "기존 화면에서 같은 규칙 열기" });
+  expect(link).toHaveAttribute("href", "/admin#/routing?" + new URLSearchParams({ rule_id: row.id }));
+});
+it("이전 서버와 거부된 조회에는 같은 규칙 링크를 만들지 않는다", async () => {
+  state.auth = testAuth();
+  const first = setup("/routing/rules?rule_id=" + encodeURIComponent(row.id));
+  expect(await screen.findByRole("link", { name: "기존 라우팅 화면" })).toHaveAttribute(
+    "href",
+    "/admin#/routing",
+  );
+  expect(screen.queryByRole("link", { name: "기존 화면에서 같은 규칙 열기" })).not.toBeInTheDocument();
+  first.unmount();
+  state.auth = { ...testAuth(), capabilities: { raw_prompt_view: false, legacy_routing_rule_detail: true } };
+  setup("/routing/rules?rule_id=" + encodeURIComponent(row.id), () => {
+    throw apiFailure("denied", 403);
+  });
+  await screen.findByText("라우팅 규칙 조회 권한을 확인하세요.");
+  expect(screen.queryByRole("link", { name: "기존 화면에서 같은 규칙 열기" })).not.toBeInTheDocument();
+});
+it("현재 기능의 사용자 지정 기존 경로와 비활성 복귀 정책을 따른다", async () => {
+  state.auth = {
+    ...testAuth(),
+    capabilities: { raw_prompt_view: false, legacy_routing_rule_detail: true },
+    features: testAuth().features.map((feature) =>
+      feature.featureId === "routing.rules" ? { ...feature, legacyPath: "/admin#/custom" } : feature,
+    ),
+  };
+  const first = setup("/routing/rules?rule_id=" + encodeURIComponent(row.id));
+  expect(await screen.findByRole("link", { name: "기존 라우팅 화면" })).toHaveAttribute(
+    "href",
+    "/admin#/custom",
+  );
+  first.unmount();
+  state.auth = { ...state.auth, legacyFallback: false };
+  setup("/routing/rules?rule_id=" + encodeURIComponent(row.id));
+  await screen.findByText(row.note);
+  expect(screen.queryByRole("link", { name: /기존.*화면/ })).not.toBeInTheDocument();
+});

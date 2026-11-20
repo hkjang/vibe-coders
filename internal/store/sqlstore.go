@@ -431,7 +431,7 @@ func renderForDialect(statement, dialect string) string {
 	// These indexes are introduced on high-write observability tables. PostgreSQL's
 	// ordinary CREATE INDEX blocks writers for the duration of the build; each migration
 	// statement runs outside an explicit transaction, so the concurrent form is safe here.
-	if strings.Contains(out, "idx_workflow_runs_trace_metadata") || strings.Contains(out, "idx_ai_app_runs_trace_metadata") || strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
+	if strings.Contains(out, "idx_request_logs_legacy_time") || strings.Contains(out, "idx_workflow_runs_trace_metadata") || strings.Contains(out, "idx_ai_app_runs_trace_metadata") || strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
 		out = strings.Replace(out, "CREATE INDEX IF NOT EXISTS", "CREATE INDEX CONCURRENTLY IF NOT EXISTS", 1)
 	}
 	return out
@@ -646,6 +646,8 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_project ON request_logs(project)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_cost_center ON request_logs(cost_center)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)`,
+		// Legacy rows are not constrained by the App projection ID guards; keep a full index.
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_legacy_time ON request_logs(` + legacyRequestCreatedAtExpr("created_at") + `)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_valid_cursor ON request_logs(` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at", "sqlite"),
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_team_valid_cursor ON request_logs(api_key_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at", "sqlite") + ` AND ` + appRequestBoundedTextPredicate("api_key_id", "sqlite"),
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_trace_valid_cursor ON request_logs(trace_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at", "sqlite") + ` AND ` + appRequestBoundedTextPredicate("trace_id", "sqlite"),
@@ -3543,7 +3545,14 @@ func (s *SQLStore) topUsers(ctx context.Context, limit int) ([]UserSummary, erro
 	return result, rows.Err()
 }
 
-func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]RecentRequest, error) {
+// The Legacy index covers every stored ID, while App indexes intentionally exclude
+// oversized projection IDs. A byte-preserving expression boundary keeps the full
+// index from displacing the App partial indexes for timestamp equality lookups.
+func legacyRequestCreatedAtExpr(column string) string {
+	return "(" + appRequestCreatedAtExpr(column) + " || '')"
+}
+
+func (s *SQLStore) recentRequestsQuery(filter RequestFilter) (string, []any) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -3552,6 +3561,7 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 		limit = 200
 	}
 
+	createdAt := legacyRequestCreatedAtExpr("r.created_at")
 	where := []string{"1=1"}
 	args := []any{}
 	if len(filter.IDs) > 0 {
@@ -3617,12 +3627,12 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 		where = append(where, "EXISTS (SELECT 1 FROM tool_invocations ti WHERE "+strings.Join(toolClauses, " AND ")+")")
 	}
 	if !filter.From.IsZero() {
-		where = append(where, "r.created_at >= ?")
-		args = append(args, filter.From.UTC().Format(time.RFC3339Nano))
+		where = append(where, createdAt+" >= ?")
+		args = append(args, appRequestFixedTime(filter.From))
 	}
 	if !filter.To.IsZero() {
-		where = append(where, "r.created_at <= ?")
-		args = append(args, filter.To.UTC().Format(time.RFC3339Nano))
+		where = append(where, createdAt+" <= ?")
+		args = append(args, appRequestFixedTime(filter.To))
 	}
 	args = append(args, limit)
 
@@ -3639,8 +3649,16 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		LEFT JOIN response_logs resp ON resp.request_id = r.id
 		WHERE ` + strings.Join(where, " AND ") + `
-		ORDER BY r.created_at DESC
+		ORDER BY ` + createdAt + ` DESC, r.id DESC
 		LIMIT ?`)
+
+	return query, args
+}
+
+// RecentRequests preserves Legacy projections while comparing UTC timestamps
+// chronologically, including exact seconds and variable fractional precision.
+func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]RecentRequest, error) {
+	query, args := s.recentRequestsQuery(filter)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

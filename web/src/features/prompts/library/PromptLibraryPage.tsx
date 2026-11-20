@@ -1,3 +1,6 @@
+import { libraryLegacyHandoff } from "./legacy-library-handoff";
+import { useSearchState } from "@/shared/hooks/use-search-state";
+import { canOpenLegacyFeature } from "@/shared/permissions/legacy-feature";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -40,7 +43,9 @@ export function PromptLibraryPage(): React.JSX.Element {
 }
 
 function LibraryContent(): React.JSX.Element {
-  const { backendVersion } = useAuth();
+  const auth = useAuth();
+  const { backendVersion } = auth;
+  const [params] = useSearchState();
   const owner = useLibraryOwner();
   const access = useLibraryAccess();
   const queryClient = useQueryClient();
@@ -54,6 +59,13 @@ function LibraryContent(): React.JSX.Element {
   if (versionAtLeast(backendVersion, "v0.86.132") || tab === "promotions")
     availableTabs.push({ id: "promotions", label: stageMessages.tab });
   const metadataOnly = tab === "contexts" || tab === "products";
+  const handoff = libraryLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "prompts.library")?.legacyPath,
+    tab,
+    params,
+    auth.credentialPrefixes,
+    auth.capabilities?.legacy_prompt_library === true,
+  );
 
   return (
     <div className="page-stack">
@@ -70,7 +82,7 @@ function LibraryContent(): React.JSX.Element {
                 ? contextMessages.description
                 : "프롬프트 검색과 지문, 재사용 자산, 프롬프트 부채를 한곳에서 관리합니다."
         }
-        legacyHref={metadataOnly || tab === "promotions" ? undefined : "/admin#/prompts"}
+        legacyHref={handoff.href}
         actions={
           <Button
             variant="primary"
@@ -85,6 +97,12 @@ function LibraryContent(): React.JSX.Element {
           </Button>
         }
       />
+
+      {handoff.omitted && canOpenLegacyFeature(auth, "prompts.library") ? (
+        <InlineNotice tone="info" title="기존 화면 연결 안내">
+          기존 화면에서는 현재 선택이나 일부 필터가 적용되지 않습니다. 이동 후 조회 조건을 확인하세요.
+        </InlineNotice>
+      ) : null}
 
       {!canWrite && !metadataOnly ? (
         <InlineNotice tone="info" title="읽기 전용으로 열려 있습니다.">

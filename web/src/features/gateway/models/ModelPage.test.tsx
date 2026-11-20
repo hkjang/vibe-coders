@@ -21,24 +21,25 @@ import { usePreferences } from "@/shared/stores/preferences";
 
 const authRuntime = vi.hoisted(() => ({
   legacyFallback: true,
+  modelHandoff: true,
   scopes: ["admin:read"],
   prefixes: ["vc_sk_", "vc_sa_"],
 }));
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    credentialPrefixes: authRuntime.prefixes,
-    legacyFallback: authRuntime.legacyFallback,
-    mode: "authenticated",
-    user: {
-      id: "admin-1",
-      role: "admin",
-      roles: ["admin"],
-      scopes: authRuntime.scopes,
-    },
-  }),
-}));
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () => ({
+      ...testAuth({
+        scopes: authRuntime.scopes,
+        legacyFallback: authRuntime.legacyFallback,
+        user: { id: "admin-1" },
+      }),
+      credentialPrefixes: authRuntime.prefixes,
+      capabilities: { raw_prompt_view: false, legacy_model_detail: authRuntime.modelHandoff },
+    }),
+  };
+});
 
 const providerRef = (seed: string): string =>
   `prv_${[...seed]
@@ -262,6 +263,7 @@ function mockApi({
 describe("ModelPage", () => {
   beforeEach(() => {
     authRuntime.legacyFallback = true;
+    authRuntime.modelHandoff = true;
     authRuntime.scopes = ["admin:read"];
     authRuntime.prefixes = ["vc_sk_", "vc_sa_"];
     usePreferences.setState({ refreshInterval: 0 });
@@ -955,5 +957,49 @@ describe("ModelPage", () => {
 
     await screen.findByRole("table", { name: "공급자별 모델 상태, 품질과 가격" });
     expect((await axe.run(container)).violations).toEqual([]);
+  });
+});
+
+describe("selected model Legacy identity", () => {
+  beforeEach(() => {
+    authRuntime.legacyFallback = true;
+    authRuntime.modelHandoff = true;
+    authRuntime.scopes = ["admin:read"];
+    vi.restoreAllMocks();
+  });
+  it("links the exact provider and source when IDs collide", async () => {
+    mockApi();
+    const ref = providerRef("agent-route-openai");
+    renderPage(
+      "/gateway/models?" +
+        new URLSearchParams({ model: "shared-model", model_provider: ref, source: "agent_route" }),
+    );
+    const link = await screen.findByRole("link", { name: "기존 화면에서 같은 모델 열기" });
+    expect(link).toHaveAttribute(
+      "href",
+      "/admin#/model-contracts?" +
+        new URLSearchParams({ model: "shared-model", provider_ref: ref, source: "agent_route" }),
+    );
+  });
+  it("does not claim a same-model link for an ambiguous selection", async () => {
+    mockApi();
+    renderPage("/gateway/models?model=shared-model");
+    await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(screen.queryByRole("link", { name: "기존 화면에서 같은 모델 열기" })).not.toBeInTheDocument(),
+    );
+  });
+  it("uses the related contract list when an old backend lacks the capability", async () => {
+    authRuntime.modelHandoff = false;
+    mockApi();
+    renderPage("/gateway/models?model=gpt-5");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("link", { name: "기존 모델 계약 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/model-contracts",
+    );
+    expect(
+      within(dialog).queryByRole("link", { name: "기존 화면에서 같은 모델 열기" }),
+    ).not.toBeInTheDocument();
   });
 });
