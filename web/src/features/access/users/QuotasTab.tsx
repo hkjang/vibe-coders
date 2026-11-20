@@ -116,7 +116,7 @@ function QuotaBudgetContent({
 
       <SectionCard
         title="할당량"
-        description="범위별 토큰·비용 한도와 현재 사용량입니다. 한도가 설정되지 않은 항목은 대시로 표시합니다."
+        description="범위별 토큰·비용 한도와 사용량입니다. 진행 중 요청이 확보한 사용량을 포함하며, 완료 후 실제 사용량으로 갱신됩니다."
         actions={
           <Button
             ref={quotaTrigger}

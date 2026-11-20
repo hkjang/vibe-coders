@@ -50,9 +50,12 @@ export function QuotaUsageTable({
               </td>
               <td>
                 <div className="cell-number">
-                  {formatNumber(row.tokens)}
+                  {formatNumber(row.tokens + row.reserved_tokens)}
                   {row.quota.token_limit > 0 ? ` / ${formatNumber(row.quota.token_limit)}` : ""}
                 </div>
+                {row.reserved_tokens > 0 ? (
+                  <p className="access-note">진행 중 {formatNumber(row.reserved_tokens)} 토큰 포함</p>
+                ) : null}
                 {row.token_remain_ratio >= 0 ? (
                   <UsageMeter
                     ratio={usedRatio(row.token_remain_ratio)}
@@ -64,9 +67,12 @@ export function QuotaUsageTable({
               </td>
               <td>
                 <div className="cell-number">
-                  {formatKRW(row.cost_krw)}
+                  {formatKRW(row.cost_krw + row.reserved_cost_krw)}
                   {row.quota.krw_limit > 0 ? ` / ${formatKRW(row.quota.krw_limit)}` : ""}
                 </div>
+                {row.reserved_cost_krw > 0 ? (
+                  <p className="access-note">진행 중 {formatKRW(row.reserved_cost_krw)} 포함</p>
+                ) : null}
                 {row.krw_remain_ratio >= 0 ? (
                   <UsageMeter
                     ratio={usedRatio(row.krw_remain_ratio)}

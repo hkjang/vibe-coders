@@ -3,6 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 import { accountFixtureResponse } from "../../src/test/account-fixtures";
 import { teamFixtureResponse } from "../../src/test/team-fixtures";
+import { expectCellBoundaries } from "../fixtures/table-cell-boundaries";
+import { expectReadableTableText } from "../fixtures/table-text-readability";
 
 async function installBudgetNotifications(page: Page) {
   const gateway = await installGateway(page);
@@ -56,6 +58,15 @@ async function installQuotaEditor(page: Page) {
     note: "변경 비교 메모",
   };
   const writes: unknown[] = [];
+  const usage = {
+    quota,
+    tokens: 0,
+    cost_krw: 0,
+    reserved_tokens: 0,
+    reserved_cost_krw: 0,
+    token_remain_ratio: 1,
+    krw_remain_ratio: 1,
+  };
   let status = 200;
   let reads = 0;
   await page.route("**/admin/quotas", (route) => {
@@ -66,7 +77,7 @@ async function installQuotaEditor(page: Page) {
         status === 200
           ? {
               quotas: [quota],
-              usage: [{ quota, tokens: 0, cost_krw: 0, token_remain_ratio: 1, krw_remain_ratio: 1 }],
+              usage: [usage],
             }
           : { error: { code: "quota_read_failed", message: "private-quota-read" } },
     });
@@ -79,11 +90,90 @@ async function installQuotaEditor(page: Page) {
   return {
     ...fixture,
     writes,
+    usage,
     reads: () => reads,
     quotaStatus: (value: number) => {
       status = value;
     },
   };
+}
+
+for (const width of [1440, 390]) {
+  test(`진행 중 할당량은 ${width}px에서 예약량·사용률을 함께 표시하고 완료 후 갱신한다`, async ({
+    page,
+  }, info) => {
+    const fixture = await installQuotaEditor(page);
+    fixture.gateway.revokeWrite("readonly");
+    Object.assign(fixture.usage, {
+      tokens: 12,
+      cost_krw: 4,
+      reserved_tokens: 26,
+      reserved_cost_krw: 26,
+      token_remain_ratio: 0.962,
+      krw_remain_ratio: 0.994,
+    });
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ colorScheme: width === 390 ? "dark" : "light", reducedMotion: "reduce" });
+    await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+    await page.goto("/app/access/users?tab=quotas");
+    if (width === 390)
+      await page.locator("html").evaluate((element) => {
+        element.style.fontSize = "20px";
+      });
+    const table = page.getByRole("table", { name: "할당량과 사용량", exact: true });
+    await expect(table.getByText("38 / 1,000", { exact: true })).toBeVisible();
+    await expect(table.getByText("₩30 / ₩5,000", { exact: true })).toBeVisible();
+    await expect(table.getByText("진행 중 26 토큰 포함", { exact: true })).toBeVisible();
+    await expect(table.getByText("진행 중 ₩26 포함", { exact: true })).toBeVisible();
+    await expect(table.getByRole("meter", { name: "한글 운영팀 토큰 사용률" })).toHaveAttribute(
+      "aria-valuenow",
+      "4",
+    );
+    await expect(table.getByRole("button", { name: "수정", exact: true })).toBeDisabled();
+    await expectCellBoundaries(table);
+    await expectReadableTableText(table);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as { axe: { run(root: Document): Promise<{ violations: { id: string }[] }> } }
+        ).axe;
+        return (await axe.run(document)).violations.map((violation) => violation.id);
+      }),
+    ).toEqual([]);
+    await table
+      .locator("xpath=ancestor::section[1]")
+      .screenshot({ path: info.outputPath("quota-reservation.png") });
+    if (width === 390) {
+      for (const [name, label] of [
+        ["tokens", "진행 중 26 토큰 포함"],
+        ["cost", "진행 중 ₩26 포함"],
+      ] as const) {
+        const note = table.getByText(label, { exact: true });
+        await note.scrollIntoViewIfNeeded();
+        await expect(note).toBeInViewport();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await table
+          .locator("xpath=ancestor::section[1]")
+          .screenshot({ path: info.outputPath(`quota-reservation-${name}.png`) });
+      }
+    }
+    Object.assign(fixture.usage, {
+      tokens: 6,
+      cost_krw: 6,
+      reserved_tokens: 0,
+      reserved_cost_krw: 0,
+      token_remain_ratio: 0.994,
+      krw_remain_ratio: 0.9988,
+    });
+    await page.reload();
+    await expect(table.getByText("6 / 1,000", { exact: true })).toBeVisible();
+    await expect(table.getByText("₩6 / ₩5,000", { exact: true })).toBeVisible();
+    await expect(table.getByText(/진행 중/)).toHaveCount(0);
+    expect(fixture.writes).toEqual([]);
+    expect(fixture.sent()).toBe(0);
+    expect(fixture.gateway.unexpected).toEqual([]);
+  });
 }
 
 test("할당량 변경 비교는 수정값을 표시하고 저장 후 기존 목록을 갱신한다", async ({ page }) => {
