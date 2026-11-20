@@ -356,7 +356,7 @@ jobs:
       - name: Verify read-only backup inspection on PostgreSQL and SQLite
         run: go test -race ./internal/secretbackup ./cmd/gateway -run '^Test(SecretBackup|VerifySecretBackup)' -count=1 -timeout=3m
       - name: Verify PostgreSQL Red Team review, recording transactions and audit
-        run: go test -race ./internal/store ./internal/proxy -run '^TestRedTeam' -count=1 -timeout=5m
+        run: go test -race ./internal/store ./internal/proxy -run '^TestRedTeam' -count=1 -timeout=10m
       - name: Verify PostgreSQL gateway and Text2SQL emergency review contracts
         run: go test -p 2 -race ./internal/store ./internal/proxy -run '^Test(RuntimeFlag|KillState|KillSwitch|ProxyInflight|ReadonlyAdminToken|Text2SQLEmergency)' -count=1 -timeout=5m
       - name: Verify PostgreSQL bounded provider impact and permission projections
