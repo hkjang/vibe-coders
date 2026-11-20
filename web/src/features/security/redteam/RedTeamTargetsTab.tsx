@@ -13,7 +13,6 @@ import {
   type ProbeCaseFormValues,
 } from "@/features/security/redteam/probe-case-form";
 import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
-import { exportProbePrompts } from "@/features/security/redteam/redteam-csv";
 import { riskTone, writeDeniedReason } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, type RedTeamData } from "@/features/security/redteam/use-redteam-data";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
@@ -203,10 +202,17 @@ export function RedTeamTargetsTab({
         <Button
           disabled={!exportCsv.available || exportCsv.pending}
           onClick={() =>
-            void exportCsv.run(exportProbePrompts, {
-              successMessage: "프롬프트 CSV를 내려받았습니다.",
-              errorMessage: "프롬프트 CSV를 내보내지 못했습니다.",
-            })
+            void exportCsv.run(
+              async (context) => {
+                const { exportProbePrompts } = await import("./redteam-csv");
+                context.assertCurrent?.();
+                await exportProbePrompts(context);
+              },
+              {
+                successMessage: "프롬프트 CSV를 내려받았습니다.",
+                errorMessage: "프롬프트 CSV를 내보내지 못했습니다.",
+              },
+            )
           }
         >
           <Download aria-hidden="true" /> CSV 내보내기(엑셀)

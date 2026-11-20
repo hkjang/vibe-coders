@@ -107,6 +107,51 @@ const allowedScenarios = [
   "KEYCLOAK-LIVE-009",
   "KEYCLOAK-LIVE-010",
   "KEYCLOAK-LIVE-011",
+  "KEYCLOAK-LIVE-012",
+  "KEYCLOAK-LIVE-013",
+  "KEYCLOAK-LIVE-014",
+  "KEYCLOAK-LIVE-015",
+  "KEYCLOAK-LIVE-016",
+  "KEYCLOAK-LIVE-017",
+  "KEYCLOAK-LIVE-018",
+  "KEYCLOAK-LIVE-019",
+  "KEYCLOAK-LIVE-020",
+  "KEYCLOAK-LIVE-021",
+  "KEYCLOAK-LIVE-022",
+  "KEYCLOAK-LIVE-023",
+  "KEYCLOAK-LIVE-024",
+  "KEYCLOAK-LIVE-025",
+  "KEYCLOAK-LIVE-026",
+  "KEYCLOAK-LIVE-027",
+  "KEYCLOAK-LIVE-028",
+  "KEYCLOAK-LIVE-029",
+  "KEYCLOAK-LIVE-030",
+  "KEYCLOAK-LIVE-031",
+  "KEYCLOAK-LIVE-032",
+  "KEYCLOAK-LIVE-033",
+  "KEYCLOAK-LIVE-034",
+  "KEYCLOAK-LIVE-035",
+  "KEYCLOAK-LIVE-036",
+  "KEYCLOAK-LIVE-037",
+  "KEYCLOAK-LIVE-038",
+  "KEYCLOAK-LIVE-039",
+  "KEYCLOAK-LIVE-040",
+  "KEYCLOAK-LIVE-041",
+  "KEYCLOAK-LIVE-042",
+  "KEYCLOAK-LIVE-043",
+  "KEYCLOAK-LIVE-044",
+  "KEYCLOAK-LIVE-045",
+  "KEYCLOAK-LIVE-046",
+  "KEYCLOAK-LIVE-047",
+  "KEYCLOAK-LIVE-048",
+  "KEYCLOAK-LIVE-049",
+  "KEYCLOAK-LIVE-050",
+  "KEYCLOAK-LIVE-051",
+  "KEYCLOAK-LIVE-052",
+  "KEYCLOAK-LIVE-053",
+  "KEYCLOAK-LIVE-054",
+  "KEYCLOAK-LIVE-055",
+  "KEYCLOAK-LIVE-056",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -255,7 +300,12 @@ test("Keycloak product reporter preserves only fixed IDs and numeric failure loc
 });
 
 test("Keycloak product reporter rejects forged IDs and source filenames", async () => {
-  const fixtures = ["KEYCLOAK-LIVE-000", "KEYCLOAK-LIVE-053", "KEYCLOAK-LIVE-001suffix"].map((id) => {
+  const fixtures = [
+    "KEYCLOAK-LIVE-000",
+    "KEYCLOAK-LIVE-057",
+    "KEYCLOAK-LIVE-999",
+    "KEYCLOAK-LIVE-001suffix",
+  ].map((id) => {
     const fixture = row(id);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (/private/not-keycloak-product.spec.ts:58:2)`;
     return fixture;

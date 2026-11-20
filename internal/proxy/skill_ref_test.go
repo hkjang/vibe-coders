@@ -58,7 +58,7 @@ func TestSkillReferenceExactReadAndWriteHTTP(t *testing.T) {
 	server, gateway := serveAdminModelsTestStore(t, "ref-admin", db)
 	refs := server.skillRefSnapshot()
 	const metadata = `{"unchanged":["private","metadata"]}`
-	names := []string{" exact ", "exact", strings.Repeat("a", 4097), "/target/", "target", "sk-ant-opaque-fixture", "literal\x00control", "__proto__"}
+	names := []string{" exact ", "exact", strings.Repeat("a", 4097), "/target/", "target", "sk-ant-opaque-fixture", "__proto__"}
 	for _, name := range names {
 		if _, err := db.UpsertSkill(t.Context(), store.Skill{Name: name, Description: "original", Instructions: "instructions", Metadata: metadata}, "fixture"); err != nil {
 			t.Fatal(err)
@@ -132,6 +132,33 @@ func TestSkillReferenceExactReadAndWriteHTTP(t *testing.T) {
 		t.Fatal("reference did not delete selected identity")
 	}
 	assertExactSkillAlias(t, db, alias)
+}
+
+// PostgreSQL TEXT cannot contain NUL. Keep the shared database contract above
+// valid for both engines while explicitly preserving SQLite's existing names.
+func TestSQLiteSkillReferenceNULReadHTTP(t *testing.T) {
+	db := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "skill-nul.db"))
+	server, gateway := serveAdminModelsTestStore(t, "ref-admin", db)
+	const name = "literal\x00control"
+	const metadata = `{"unchanged":["private","metadata"]}`
+	if _, err := db.UpsertSkill(t.Context(), store.Skill{Name: name, Description: "original", Instructions: "instructions", Metadata: metadata}, "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	ref := server.skillRefSnapshot()(name)
+	list := exactSkillRequest(t, gateway.URL, "ref-admin", "GET", "/admin/skills", nil, 200)
+	var catalog struct {
+		Skills []adminSkillView `json:"skills"`
+	}
+	if json.Unmarshal(list, &catalog) != nil || len(catalog.Skills) != 1 || catalog.Skills[0].Name != name || catalog.Skills[0].SkillRef != ref {
+		t.Fatal("SQLite legacy name or catalogue reference changed")
+	}
+	data := exactSkillRequest(t, gateway.URL, "ref-admin", "GET", "/admin/skills?"+url.Values{"view": {"detail"}, "skill_ref": {ref}}.Encode(), nil, 200)
+	var detail struct {
+		Skill adminSkillView `json:"skill"`
+	}
+	if json.Unmarshal(data, &detail) != nil || detail.Skill.Name != name || detail.Skill.SkillRef != ref || detail.Skill.Metadata != metadata {
+		t.Fatal("SQLite legacy NUL detail changed identity or content")
+	}
 }
 
 func TestSkillReferenceInvalidAndStaleNeverFallBack(t *testing.T) {
