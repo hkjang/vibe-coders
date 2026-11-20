@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { apiClient } from "@/shared/api/client";
 import { withPathParams } from "@/shared/api/endpoint-factory";

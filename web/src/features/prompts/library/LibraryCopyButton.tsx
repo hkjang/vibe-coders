@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ClipboardCopy } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { Button } from "@/shared/components/ui/Button";
 import { useLibraryOwner } from "./library-context";
 import { hiddenLibraryText } from "./library-model";

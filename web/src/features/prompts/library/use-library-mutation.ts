@@ -6,7 +6,7 @@ import {
   type QueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AppError, isAppError } from "@/shared/api/error";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";

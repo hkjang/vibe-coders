@@ -446,6 +446,8 @@ describe("probe CSV review ownership", () => {
     await userEvent.click(screen.getByRole("button", { name: "apply" }));
     await waitFor(() => expect(notifications.success).toHaveBeenCalledOnce());
     expect(applyReviewedProbePrompts).toHaveBeenCalledOnce();
-    expect(notifications.warning).toHaveBeenCalledWith("가져오기는 반영되었습니다. 목록을 다시 불러오세요.");
+    expect(notifications.warning).toHaveBeenCalledWith("가져오기는 반영되었습니다. 목록을 다시 불러오세요.", {
+      duration: 10_000,
+    });
   });
 });

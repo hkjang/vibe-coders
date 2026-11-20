@@ -5,7 +5,7 @@ import { readLibraryDebt } from "./library-api";
 import { useLibraryOwner } from "./library-context";
 import { assertFeatureRead } from "@/shared/hooks/use-feature-read-owner";
 import { Download } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { PanelFailure, PromptTable, type PromptColumn } from "@/features/prompts/library/prompt-parts";
 import { debtTypeLabel, debtTypeTone } from "@/features/prompts/library/prompt-utils";

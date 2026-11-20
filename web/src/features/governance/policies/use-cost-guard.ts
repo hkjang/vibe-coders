@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { confirmedCostGuard, type CostGuardValues } from "./cost-guard-state";

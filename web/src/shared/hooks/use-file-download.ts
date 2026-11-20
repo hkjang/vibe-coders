@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { AppError, isAppError } from "@/shared/api/error";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";

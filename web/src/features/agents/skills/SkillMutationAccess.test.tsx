@@ -216,7 +216,7 @@ describe("Skills 실제 요청 직전 readonly 경계", () => {
     await act(async () => release(JSON.stringify({ version: "1", skills: [skill] })));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(current.api.bodies("POST /admin/skills/import")).toEqual([]);
-    expect(toast.error).toHaveBeenCalledWith("이 작업을 수행할 권한이 없습니다.");
+    expect(toast.error).toHaveBeenCalledWith("이 작업을 수행할 권한이 없습니다.", { duration: Infinity });
   });
   it("runtime readonly에서도 순수 POST 추천조회·정책계산은 기존 권한으로 유지한다", async () => {
     runtime.readOnly = true;

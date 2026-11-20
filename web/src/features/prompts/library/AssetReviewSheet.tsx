@@ -10,7 +10,7 @@ import { useLibraryQuery } from "./use-library-query";
 import { readLibraryUsage } from "./library-api";
 import { ClipboardCopy, Send } from "lucide-react";
 import { useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { PanelFailure, PromptTable, type PromptColumn } from "@/features/prompts/library/prompt-parts";
 import {

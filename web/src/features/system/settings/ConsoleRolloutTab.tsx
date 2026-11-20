@@ -1,6 +1,6 @@
 import { ConsoleFeatureTable } from "./ConsoleFeatureTable";
 import { useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { RuntimeSettingUnavailable } from "./RuntimeSettingUnavailable";
 

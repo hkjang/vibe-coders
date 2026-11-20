@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type QueryKey, type UseMutationResult } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { AppError, isAppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";

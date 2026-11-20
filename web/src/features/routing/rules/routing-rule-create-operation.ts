@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { apiClient } from "@/shared/api/client";
 import { routingCreateEndpoints, type RoutingCreateInput } from "@/shared/api/domains/routing-create";
 import { AppError } from "@/shared/api/error";

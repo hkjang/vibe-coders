@@ -1,5 +1,5 @@
 import { useState, type RefObject } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { settingEditPermission } from "@/features/system/settings/settings-utils";
 import {

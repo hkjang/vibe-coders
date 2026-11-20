@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
 import type { PreparedProbeCsv } from "./probe-csv-file";
 import type { ProbeCsvReview } from "@/shared/api/domains/redteam-probe-csv-review";

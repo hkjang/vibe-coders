@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { useAppOperationAccess, useAppScope } from "./app-scope";
 import { featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 
