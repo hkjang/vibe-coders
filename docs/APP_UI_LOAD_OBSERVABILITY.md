@@ -22,4 +22,4 @@
 
 SQLite와 PostgreSQL의 업그레이드·동시 수집·상한·중복·보존·권한 범위, HTTP의 엄격한 페이로드·옵트아웃·비밀값 비노출, 생성 OpenAPI 타입, React 라우터의 대기·중단·숨김·StrictMode, 내장 Go와 실제 브라우저의 수집/집계·한글·모바일 표·키보드·접근성·밝고 어두운 테마를 검증 대상으로 둡니다.
 
-이 변경은 원 요구사항 36의 Page Load와 UI Version을 한정된 의미로 보완합니다. API 오류·JavaScript 오류·변경 작업 성공률·권한 거부·전체 Preview 채택률 분모의 관측과 운영 안정성 인수는 별도 잔여입니다. 조회·변경 권한이나 기능의 Stable 승격, 전체 Phase 0–6 완료를 의미하지 않습니다.
+이 변경은 원 요구사항 36의 Page Load와 UI Version을 한정된 의미로 보완합니다. API 오류·JavaScript 오류는 후속 [v0.86.180 개발 후보](APP_UI_ERROR_OBSERVABILITY.md)에서 보완합니다. 변경 작업 성공률·권한 거부·전체 Preview 채택률 분모의 관측과 운영 안정성 인수는 별도 잔여입니다. 조회·변경 권한이나 기능의 Stable 승격, 전체 Phase 0–6 완료를 의미하지 않습니다.

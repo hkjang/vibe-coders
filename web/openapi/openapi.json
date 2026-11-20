@@ -16188,6 +16188,411 @@
         ],
         "type": "object"
       },
+      "UIDiagnosticEventRequest": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "endpoint": {
+                "description": "Exact registered OpenAPI path template, never resolved identifiers, a query string or full URL. Auth and observation endpoints are excluded.",
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "event_id": {
+                "description": "Fresh cryptographically random event nonce; retained only as a hash; never identity-derived or persisted in browser storage.",
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "failure": {
+                "enum": [
+                  "http",
+                  "auth",
+                  "permission",
+                  "contract",
+                  "network",
+                  "timeout"
+                ],
+                "type": "string"
+              },
+              "feature_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "api_error"
+                ],
+                "type": "string"
+              },
+              "method": {
+                "enum": [
+                  "GET",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE",
+                  "HEAD"
+                ],
+                "type": "string"
+              },
+              "request_id": {
+                "description": "Only trace_ followed by 32 lowercase hex characters is retained; any other identifier is discarded before storage.",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "status": {
+                "description": "0 when no response; otherwise an HTTP status between 100 and 599.",
+                "maximum": 599,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "event_id",
+              "feature_id",
+              "kind",
+              "endpoint",
+              "method",
+              "status",
+              "failure"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "boundary": {
+                "enum": [
+                  "root",
+                  "route"
+                ],
+                "type": "string"
+              },
+              "event_id": {
+                "description": "Fresh cryptographically random event nonce; retained only as a hash; never identity-derived or persisted in browser storage.",
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "failure": {
+                "enum": [
+                  "error",
+                  "type",
+                  "range",
+                  "reference",
+                  "syntax",
+                  "uri",
+                  "eval",
+                  "aggregate",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "feature_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "js_error"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "event_id",
+              "feature_id",
+              "kind",
+              "boundary",
+              "failure"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "UIDiagnosticGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary": {
+            "enum": [
+              "",
+              "root",
+              "route"
+            ],
+            "type": "string"
+          },
+          "endpoint": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "events": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failure": {
+            "enum": [
+              "http",
+              "auth",
+              "permission",
+              "contract",
+              "network",
+              "timeout",
+              "error",
+              "type",
+              "range",
+              "reference",
+              "syntax",
+              "uri",
+              "eval",
+              "aggregate",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "feature_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "api_error",
+              "js_error"
+            ],
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "",
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD"
+            ],
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^(trace_[0-9a-f]{32})?$",
+            "type": "string"
+          },
+          "status": {
+            "description": "0 when no response; otherwise an HTTP status between 100 and 599.",
+            "maximum": 599,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ui_version": {
+            "maxLength": 32,
+            "pattern": "^(v(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5}))?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "ui_version",
+          "endpoint",
+          "method",
+          "status",
+          "request_id",
+          "failure",
+          "boundary",
+          "events"
+        ],
+        "type": "object"
+      },
+      "UIDiagnosticRecent": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary": {
+            "enum": [
+              "",
+              "root",
+              "route"
+            ],
+            "type": "string"
+          },
+          "endpoint": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "failure": {
+            "enum": [
+              "http",
+              "auth",
+              "permission",
+              "contract",
+              "network",
+              "timeout",
+              "error",
+              "type",
+              "range",
+              "reference",
+              "syntax",
+              "uri",
+              "eval",
+              "aggregate",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "feature_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "api_error",
+              "js_error"
+            ],
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "",
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD"
+            ],
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^(trace_[0-9a-f]{32})?$",
+            "type": "string"
+          },
+          "status": {
+            "description": "0 when no response; otherwise an HTTP status between 100 and 599.",
+            "maximum": 599,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ui_version": {
+            "maxLength": 32,
+            "pattern": "^(v(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5}))?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "ui_version",
+          "endpoint",
+          "method",
+          "status",
+          "request_id",
+          "failure",
+          "boundary",
+          "received_at"
+        ],
+        "type": "object"
+      },
+      "UIDiagnosticSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "enum": [
+              7,
+              30
+            ],
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "event_limit": {
+            "enum": [
+              10000
+            ],
+            "type": "integer"
+          },
+          "from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "group_limit": {
+            "enum": [
+              100
+            ],
+            "type": "integer"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/UIDiagnosticGroup"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "other_group_events": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/UIDiagnosticRecent"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "recent_limit": {
+            "enum": [
+              20
+            ],
+            "type": "integer"
+          },
+          "retention_days": {
+            "enum": [
+              30
+            ],
+            "type": "integer"
+          },
+          "to": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "total": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "days",
+          "from",
+          "to",
+          "retention_days",
+          "event_limit",
+          "group_limit",
+          "recent_limit",
+          "total",
+          "other_group_events",
+          "groups",
+          "recent"
+        ],
+        "type": "object"
+      },
       "UIRuntimeConfig": {
         "additionalProperties": false,
         "properties": {
@@ -17661,7 +18066,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.179"
+    "version": "v0.86.180"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -39332,6 +39737,119 @@
           }
         },
         "summary": "Next Admin UI bootstrap, permissions, migration registry, and health",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/ui-diagnostics/events": {
+      "post": {
+        "description": "Opt-in, lossy UI error observations. Reuses fresh shared-DB UI/telemetry flags, existing identity and feature access, process/caller intake quotas and two-second cancellation/body-read budgets. Body is limited to 1024 bytes. Strict schema rejects duplicate/unknown/case-variant keys. Only registered endpoint templates, error classifications, HTTP status, numeric UI release and gateway-shaped request IDs are retained. No messages, stacks, raw URLs, payloads or identity. Event nonces are hashed and idempotent. At most 10000 observations for 30 days; disabled/overloaded/full intake returns 204 without collection or retry. This is not a complete error log or integrity guarantee.",
+        "operationId": "post__admin_ui_diagnostics_events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UIDiagnosticEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Recorded idempotently or intentionally dropped; never retry"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Feature access denied"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Observation unavailable; never retry"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record an opt-in bounded console API or error-boundary diagnostic",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/ui-diagnostics/summary": {
+      "get": {
+        "description": "Requires admin read and current feature permissions. Returns at most 100 error groups and 20 recent safe correlations from one snapshot. Historical observations remain readable while collection is off. Counts are incomplete and exclude initial bootstrap, stale sessions, canceled requests, auth endpoints and observation requests themselves.",
+        "operationId": "get__admin_ui_diagnostics_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "enum": [
+                7,
+                30
+              ],
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UIDiagnosticSummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read permission-scoped console error groups and safe request correlations",
         "tags": [
           "admin"
         ]

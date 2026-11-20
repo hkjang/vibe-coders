@@ -4740,6 +4740,85 @@ export type UiBootstrapResponse = {
     user?: AuthUser | null;
 };
 
+export type UiDiagnosticEventRequest = {
+    /**
+     * Exact registered OpenAPI path template, never resolved identifiers, a query string or full URL. Auth and observation endpoints are excluded.
+     */
+    endpoint: string;
+    /**
+     * Fresh cryptographically random event nonce; retained only as a hash; never identity-derived or persisted in browser storage.
+     */
+    event_id: string;
+    failure: 'http' | 'auth' | 'permission' | 'contract' | 'network' | 'timeout';
+    feature_id: string;
+    kind: 'api_error';
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
+    /**
+     * Only trace_ followed by 32 lowercase hex characters is retained; any other identifier is discarded before storage.
+     */
+    request_id?: string;
+    /**
+     * 0 when no response; otherwise an HTTP status between 100 and 599.
+     */
+    status: number;
+} | {
+    boundary: 'root' | 'route';
+    /**
+     * Fresh cryptographically random event nonce; retained only as a hash; never identity-derived or persisted in browser storage.
+     */
+    event_id: string;
+    failure: 'error' | 'type' | 'range' | 'reference' | 'syntax' | 'uri' | 'eval' | 'aggregate' | 'unknown';
+    feature_id: string;
+    kind: 'js_error';
+};
+
+export type UiDiagnosticGroup = {
+    boundary: '' | 'root' | 'route';
+    endpoint: string;
+    events: number;
+    failure: 'http' | 'auth' | 'permission' | 'contract' | 'network' | 'timeout' | 'error' | 'type' | 'range' | 'reference' | 'syntax' | 'uri' | 'eval' | 'aggregate' | 'unknown';
+    feature_id: string;
+    kind: 'api_error' | 'js_error';
+    method: '' | 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
+    request_id: string;
+    /**
+     * 0 when no response; otherwise an HTTP status between 100 and 599.
+     */
+    status: number;
+    ui_version: string;
+};
+
+export type UiDiagnosticRecent = {
+    boundary: '' | 'root' | 'route';
+    endpoint: string;
+    failure: 'http' | 'auth' | 'permission' | 'contract' | 'network' | 'timeout' | 'error' | 'type' | 'range' | 'reference' | 'syntax' | 'uri' | 'eval' | 'aggregate' | 'unknown';
+    feature_id: string;
+    kind: 'api_error' | 'js_error';
+    method: '' | 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
+    received_at: string;
+    request_id: string;
+    /**
+     * 0 when no response; otherwise an HTTP status between 100 and 599.
+     */
+    status: number;
+    ui_version: string;
+};
+
+export type UiDiagnosticSummaryResponse = {
+    days: 7 | 30;
+    enabled: boolean;
+    event_limit: 10000;
+    from: string;
+    group_limit: 100;
+    groups: Array<UiDiagnosticGroup>;
+    other_group_events: number;
+    recent: Array<UiDiagnosticRecent>;
+    recent_limit: 20;
+    retention_days: 30;
+    to: string;
+    total: number;
+};
+
 export type UiRuntimeConfig = {
     default_entry: string;
     enabled: boolean;
@@ -17006,6 +17085,66 @@ export type GetAdminUiBootstrapResponses = {
 };
 
 export type GetAdminUiBootstrapResponse = GetAdminUiBootstrapResponses[keyof GetAdminUiBootstrapResponses];
+
+export type PostAdminUiDiagnosticsEventsData = {
+    body: UiDiagnosticEventRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/ui-diagnostics/events';
+};
+
+export type PostAdminUiDiagnosticsEventsErrors = {
+    /**
+     * Feature access denied
+     */
+    403: AppError;
+    /**
+     * Observation unavailable; never retry
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminUiDiagnosticsEventsError = PostAdminUiDiagnosticsEventsErrors[keyof PostAdminUiDiagnosticsEventsErrors];
+
+export type PostAdminUiDiagnosticsEventsResponses = {
+    /**
+     * Recorded idempotently or intentionally dropped; never retry
+     */
+    204: void;
+};
+
+export type PostAdminUiDiagnosticsEventsResponse = PostAdminUiDiagnosticsEventsResponses[keyof PostAdminUiDiagnosticsEventsResponses];
+
+export type GetAdminUiDiagnosticsSummaryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        days?: 7 | 30;
+    };
+    url: '/admin/ui-diagnostics/summary';
+};
+
+export type GetAdminUiDiagnosticsSummaryErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminUiDiagnosticsSummaryError = GetAdminUiDiagnosticsSummaryErrors[keyof GetAdminUiDiagnosticsSummaryErrors];
+
+export type GetAdminUiDiagnosticsSummaryResponses = {
+    /**
+     * OK
+     */
+    200: UiDiagnosticSummaryResponse;
+};
+
+export type GetAdminUiDiagnosticsSummaryResponse = GetAdminUiDiagnosticsSummaryResponses[keyof GetAdminUiDiagnosticsSummaryResponses];
 
 export type PostAdminUiTelemetryEventsData = {
     body: UiTelemetryEventRequest;

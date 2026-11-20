@@ -59,6 +59,7 @@
     "tests/e2e/probe-csv-ownership.spec.ts",
     "tests/e2e/notification-lifetime.spec.ts",
     "tests/e2e/auth-startup-settings.spec.ts",
-    "tests/e2e/console-load-observability.spec.ts"
+    "tests/e2e/console-load-observability.spec.ts",
+    "tests/e2e/console-error-observability.spec.ts"
   ]
 }
