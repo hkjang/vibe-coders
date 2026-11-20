@@ -243,3 +243,37 @@ test("AUTH-LIVE-005 실제 갱신 거부 뒤 로그인 복귀와 재로그인", 
   expect(new URL(page.url()).pathname).toBe(providerPath);
   expect(await currentRole(page)).toBe("admin");
 });
+
+test("AUTH-LIVE-061 내 권한은 실제 로그인 응답과 일치하고 계정 전환 시 이전 권한을 남기지 않는다", async ({
+  page,
+}) => {
+  await login(page);
+  for (const writable of [true, false]) {
+    if (!writable) await signIn(page, reader);
+    const grants = await page.evaluate(async () => {
+      const headers = { Authorization: `Bearer ${sessionStorage.getItem("vibe.app.auth.access") ?? ""}` };
+      const response = await fetch("/admin/ui-bootstrap", { headers });
+      const data: { user: { scopes: string[] }; capabilities: { raw_prompt_view: boolean } } =
+        await response.json();
+      return { scopes: data.user.scopes, raw: data.capabilities.raw_prompt_view };
+    });
+    await page.getByLabel("사용자 메뉴").click();
+    await page.getByRole("button", { name: "내 권한 확인", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "내 권한 확인", exact: true });
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("부여 상태").selectOption("all");
+    for (const code of ["admin:write", "admin:read", "routing:write", "models:read"]) {
+      const row = dialog.getByRole("listitem").filter({ has: page.getByText(code, { exact: true }) });
+      await expect(row).toContainText(grants.scopes.includes(code) ? "부여됨" : "미부여");
+    }
+    await expect(dialog.getByRole("region", { name: "요청 원문 열람" })).toContainText(
+      grants.raw ? "허용됨" : "제한됨",
+    );
+    expect(grants.scopes.includes("admin:write")).toBe(writable);
+    await page.keyboard.press("Escape");
+    await expect(page.getByLabel("사용자 메뉴")).toBeFocused();
+    await signOut(page);
+    await expect(dialog).toBeHidden();
+    expect(await sessionIsEmpty(page)).toBe(true);
+  }
+});

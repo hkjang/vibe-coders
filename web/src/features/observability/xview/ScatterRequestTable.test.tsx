@@ -155,10 +155,10 @@ it("단일 요청 열기와 선택 해제는 명시한 대상과 복귀 초점�
   expect(onSelect).toHaveBeenCalledTimes(1);
 });
 
-it("표시 건수를 바꿔도 같은 자료의 선택을 유지하고 표 접근성 검사를 통과한다", async () => {
+it("표시 건수를 바꿔도 같은 자료의 선택을 유지한다", async () => {
   const user = userEvent.setup();
   const original = points(201);
-  const view = render(
+  render(
     <ScatterRequestTable
       points={original}
       metric="tokens"
@@ -170,5 +170,21 @@ it("표시 건수를 바꿔도 같은 자료의 선택을 유지하고 표 접�
   await user.selectOptions(screen.getByLabelText("페이지당 표시 건수"), "100");
   expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(101);
   expect(screen.getByRole("checkbox", { name: "request-200 비교 대상으로 선택" })).toBeChecked();
+});
+
+it("선택된 행과 페이지 탐색이 있는 표의 접근성 검사를 통과한다", async () => {
+  const user = userEvent.setup();
+  const view = render(
+    <ScatterRequestTable
+      points={points(51)}
+      metric="tokens"
+      categoryLabel={categoryLabel}
+      onSelect={vi.fn()}
+    />,
+  );
+  await user.selectOptions(screen.getByLabelText("페이지 이동"), "1");
+  await user.click(screen.getByRole("checkbox", { name: "request-0 비교 대상으로 선택" }));
+  expect(screen.getByRole("button", { name: "선택한 요청 열기" })).toBeEnabled();
+  expect(screen.getByLabelText("페이지 이동")).toBeEnabled();
   expect((await axe.run(view.container)).violations).toEqual([]);
 });

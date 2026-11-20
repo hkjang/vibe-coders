@@ -13,6 +13,7 @@ export const ROUTE_RAW_LIMIT = 250_000;
 // a route exemption: static reachability still fails and ordinary routes keep
 // their original limit. Browser tests verify the activation boundary.
 export const INTERACTIVE_FEATURES = {
+  "src/app/layouts/SessionPermissionsDialog.tsx": { rawBytes: 20_000, wireBytes: 8_000 },
   "src/features/observability/xview/ScatterRequestTable.tsx": { rawBytes: 100_000, wireBytes: 40_000 },
   "src/features/mcp/overview/ToolRiskDialog.tsx": { rawBytes: 55_000, wireBytes: 22_000 },
   "src/features/mcp/overview/UpstreamFormDialog.tsx": { rawBytes: 65_000, wireBytes: 25_000 },
