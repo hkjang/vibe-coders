@@ -1,3 +1,4 @@
+import { readDwDateSelection } from "@/shared/utils/dw-date-bounds";
 import { validDwRetryJobId } from "@/shared/utils/dw-retry-query";
 import { readRedTeamJobRef, validRedTeamJobId } from "@/shared/utils/redteam-job-query";
 import { directRequestSelection } from "@/config/legacy-request-map";
@@ -309,6 +310,16 @@ export function sanitizeAppRouteSearch(
   // Keep only an empty refusal marker: dropping an explicit invalid/secret ID
   // would let the IO page silently select a different first-row request.
   if (ioSelection?.present && !ioSelection.id) sanitized.set("request_id", "");
+  if (
+    route === "/data/warehouse" &&
+    (readDwDateSelection(parameters).kind === "invalid" ||
+      ["since_day", "until_day"].some((key) => rejectedValues.get(key)))
+  ) {
+    // Empty refusal markers survive reload without retaining untrusted raw text.
+    // Dropping both dates would silently broaden the selected table/export.
+    sanitized.set("since_day", "");
+    sanitized.set("until_day", "");
+  }
   const serialized = sanitized.toString();
   return {
     rejectedKeys: [...rejectedKeys],

@@ -1,0 +1,96 @@
+.dw-trend-help {
+  color: var(--color-muted);
+  font-size: 14px;
+  margin: 0;
+}
+.dw-trend-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+.dw-trend-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 4px;
+}
+.dw-trend-bars {
+  display: flex;
+  min-width: min-content;
+  gap: 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+.dw-trend-point {
+  display: flex;
+  flex: 1 0 52px;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 52px;
+  max-width: 120px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-medium);
+  background: transparent;
+  color: var(--color-foreground);
+  padding: 8px 6px 4px;
+  cursor: pointer;
+}
+.dw-trend-point:hover:not(:disabled),
+.dw-trend-point[aria-pressed="true"] {
+  background: var(--color-muted-soft);
+  border-color: var(--color-primary);
+}
+.dw-trend-point:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.dw-trend-point:disabled {
+  cursor: default;
+}
+.dw-trend-bar-track {
+  display: flex;
+  align-items: flex-end;
+  height: 160px;
+}
+.dw-trend-bar {
+  width: 100%;
+  background: var(--color-primary);
+  border-radius: var(--radius-small) var(--radius-small) 0 0;
+  min-height: 3px;
+}
+.dw-trend-date {
+  font-size: 13px;
+  margin-top: 8px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.dw-trend-selected {
+  min-height: 20px;
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.dw-trend-data summary {
+  cursor: pointer;
+  padding-block: 8px;
+  font-size: 14px;
+}
+.dw-date-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  padding: 12px 16px;
+  background: var(--color-muted-soft);
+}
+.dw-date-selection p {
+  margin: 0;
+}
+.dw-date-selection small {
+  color: var(--color-muted);
+  font-size: 14px;
+}

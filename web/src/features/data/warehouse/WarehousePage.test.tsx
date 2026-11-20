@@ -493,3 +493,118 @@ describe("WarehousePage", () => {
     expect((await axe.run(container)).violations).toEqual([]);
   });
 });
+
+const supportedSeries = () => ({ ...timeseriesResponse, date_bounds_supported: true });
+const boundedDimensions: ApiHandler = ({ query }) => {
+  const bounds = query as { since_day?: string; until_day?: string } | undefined;
+  return {
+    ...dimensionsResponse,
+    ...(bounds?.since_day ? { since: bounds.since_day, until: bounds.until_day } : {}),
+  };
+};
+
+describe("DW 추이 기간 선택", () => {
+  it("키보드로 날짜를 선택하고 분석 차원을 바꿔도 같은 기간을 유지한다", async () => {
+    const api = mockAllEndpoints({
+      "GET /admin/dw/dashboard/timeseries": supportedSeries,
+      "GET /admin/dw/dashboard/dimensions": boundedDimensions,
+    });
+    render();
+    const first = await screen.findByRole("button", { name: /2026-09-05 \(UTC\), 비용/u });
+    first.focus();
+    await userEvent.keyboard("{ArrowRight}{Enter}");
+    const second = screen.getByRole("button", { name: /2026-09-06 \(UTC\), 비용/u });
+    await waitFor(() => expect(second).toHaveAttribute("aria-pressed", "true"));
+    expect(second).toHaveFocus();
+    await userEvent.selectOptions(screen.getByLabelText("분석 차원"), "provider");
+    await waitFor(() =>
+      expect(
+        api.calls.filter((call) => call.key === "GET /admin/dw/dashboard/dimensions").at(-1)?.options.query,
+      ).toMatchObject({ dimension: "provider", since_day: "2026-09-06", until_day: "2026-09-07" }),
+    );
+    expect(screen.getByText("상세 집계 · 2026-09-06 (UTC)")).toBeVisible();
+    await userEvent.selectOptions(screen.getByLabelText("조회 구간"), "7d");
+    await waitFor(() =>
+      expect(
+        api.calls.filter((call) => call.key === "GET /admin/dw/dashboard/dimensions").at(-1)?.options.query,
+      ).toEqual({ window: "7d", dimension: "provider", order_by: "cost", limit: 10 }),
+    );
+    expect(screen.queryByText(/상세 집계 ·/u)).not.toBeInTheDocument();
+  });
+  it("절대 기간 주소를 복원하고 전체 기간으로 돌아간다", async () => {
+    const api = mockAllEndpoints({
+      "GET /admin/dw/dashboard/timeseries": supportedSeries,
+      "GET /admin/dw/dashboard/dimensions": boundedDimensions,
+    });
+    render("/data/warehouse?since_day=2024-02-29&until_day=2024-03-02");
+    await screen.findByText("₩210,000");
+    expect(
+      api.calls
+        .filter((call) => call.key === "GET /admin/dw/dashboard/dimensions")
+        .map((call) => call.options.query),
+    ).toEqual([
+      {
+        window: "30d",
+        dimension: "model",
+        order_by: "cost",
+        limit: 10,
+        since_day: "2024-02-29",
+        until_day: "2024-03-02",
+      },
+    ]);
+    await userEvent.click(screen.getByRole("button", { name: "전체 기간으로 돌아가기" }));
+    await waitFor(() =>
+      expect(
+        api.calls.filter((call) => call.key === "GET /admin/dw/dashboard/dimensions").at(-1)?.options.query,
+      ).not.toHaveProperty("since_day"),
+    );
+  });
+  it.each([
+    "since_day=invalid&until_day=2024-03-01",
+    "since_day=2024-02-29",
+    "since_day=2024-02-29&since_day=2024-02-28&until_day=2024-03-01",
+  ])("잘못된 기간은 표와 내보내기 요청을 차단한다: %s", async (query) => {
+    const api = mockAllEndpoints({ "GET /admin/dw/dashboard/timeseries": supportedSeries });
+    render(`/data/warehouse?${query}`);
+    await screen.findByRole("button", { name: /2026-09-05 \(UTC\), 비용/u });
+    expect(screen.getByText("선택 기간이 올바르지 않습니다.")).toBeVisible();
+    expect(api.calls.filter((call) => call.key === "GET /admin/dw/dashboard/dimensions")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "CSV 내보내기" })).toBeDisabled();
+    expect(screen.queryByText("₩210,000")).not.toBeInTheDocument();
+  });
+  it("구버전 서버에서는 선택된 기간이 적용되지 않은 데이터를 표시하지 않는다", async () => {
+    const api = mockAllEndpoints();
+    render("/data/warehouse?since_day=2024-02-29&until_day=2024-03-01");
+    expect(await screen.findByText("선택 기간을 확인할 수 없습니다.")).toBeVisible();
+    await screen.findByText("₩318,000");
+    expect(api.calls.filter((call) => call.key === "GET /admin/dw/dashboard/dimensions")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "CSV 내보내기" })).toBeDisabled();
+  });
+  it("서버가 선택 기간을 다르게 반환하면 표와 CSV를 제공하지 않는다", async () => {
+    mockAllEndpoints({ "GET /admin/dw/dashboard/timeseries": supportedSeries });
+    render("/data/warehouse?since_day=2024-02-29&until_day=2024-03-01");
+    expect(await screen.findByRole("alert")).toHaveTextContent("차원별 집계 조회 실패");
+    expect(screen.queryByText("₩210,000")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "CSV 내보내기" })).toBeDisabled();
+  });
+  it("각 영역에 갱신 상태를 표시하고 권한 거부 뒤 이전 집계를 비운다", async () => {
+    let denied = false;
+    mockAllEndpoints({
+      "GET /admin/dw/dashboard/dimensions": (options, endpoint) => {
+        if (denied) throw apiFailure("denied", 403);
+        return boundedDimensions(options, endpoint);
+      },
+    });
+    const { client } = render();
+    await screen.findByText("₩210,000");
+    expect(screen.getAllByRole("status", { name: /갱신 상태/u })).toHaveLength(9);
+    denied = true;
+    await client.invalidateQueries({ queryKey: ["data", "warehouse", "dimensions"] });
+    await waitFor(() => expect(screen.queryByText("₩210,000")).not.toBeInTheDocument());
+    expect(screen.getByText("₩318,000")).toBeVisible();
+    expect(screen.getByRole("button", { name: "CSV 내보내기" })).toBeDisabled();
+    denied = false;
+    await userEvent.click(screen.getByRole("button", { name: "차원별 집계 다시 시도" }));
+    await screen.findByText("₩210,000");
+  });
+});
