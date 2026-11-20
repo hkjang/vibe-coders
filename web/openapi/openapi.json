@@ -2192,6 +2192,268 @@
         ],
         "type": "object"
       },
+      "DwRetryDimension": {
+        "additionalProperties": false,
+        "properties": {
+          "dimension": {
+            "type": "string"
+          },
+          "estimated_rows": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "issue": {
+            "enum": [
+              "",
+              "invalid_source_interval",
+              "not_configured",
+              "fact_not_configured",
+              "delivery_incomplete",
+              "completion_unconfirmed",
+              "new_failure_queued",
+              "operation_interrupted"
+            ],
+            "type": "string"
+          },
+          "sent_rows": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "blocked",
+              "running",
+              "succeeded",
+              "failed",
+              "pending",
+              "not_run"
+            ],
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dimension",
+          "since",
+          "until",
+          "estimated_rows",
+          "sent_rows",
+          "status",
+          "issue"
+        ],
+        "type": "object"
+      },
+      "DwRetryLegacyResult": {
+        "additionalProperties": false,
+        "properties": {
+          "failed": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "recovered_dimensions": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sent_rows": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recovered_dimensions",
+          "sent_rows",
+          "failed"
+        ],
+        "type": "object"
+      },
+      "DwRetryProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "dimensions": {
+            "items": {
+              "$ref": "#/components/schemas/DwRetryDimension"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "estimated_rows": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "finished_dimensions": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sent_rows": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "estimated_rows",
+          "sent_rows",
+          "finished_dimensions",
+          "dimensions"
+        ],
+        "type": "object"
+      },
+      "DwRetryReadResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DwRetryReview"
+          },
+          {
+            "$ref": "#/components/schemas/DwRetryRun"
+          }
+        ]
+      },
+      "DwRetryReview": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "dimensions": {
+            "items": {
+              "$ref": "#/components/schemas/DwRetryDimension"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "eligible_dimensions": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_rows": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "reviewed_at": {
+            "type": "string"
+          },
+          "revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "run_id": {
+            "pattern": "^dwr_[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "run_id",
+          "reviewed_at",
+          "expires_at",
+          "all",
+          "eligible_dimensions",
+          "estimated_rows",
+          "dimensions"
+        ],
+        "type": "object"
+      },
+      "DwRetryReviewedRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Trimmed nonblank reason; length in Unicode code points.",
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reviewed_at": {
+            "type": "string"
+          },
+          "revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "reviewed_at",
+          "all",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "DwRetryRun": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^dwr_[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/DwRetryProgress"
+          },
+          "reviewed_at": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "partial_failed",
+              "failed",
+              "interrupted"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "reviewed_at",
+          "created_at",
+          "updated_at",
+          "finished_at",
+          "progress"
+        ],
+        "type": "object"
+      },
+      "DwRetryWriteResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DwRetryLegacyResult"
+          },
+          {
+            "$ref": "#/components/schemas/DwRetryRun"
+          }
+        ]
+      },
       "EmbeddingCacheStats": {
         "additionalProperties": false,
         "properties": {
@@ -16859,7 +17121,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.172"
+    "version": "v0.86.173"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -20810,11 +21072,251 @@
       }
     },
     "/admin/dw/sink-retry": {
-      "post": {
-        "operationId": "post__admin_dw_sink_retry",
+      "get": {
+        "description": "Read-only preflight of the existing retry queue: closed source intervals and estimated row counts; no outbound ClickHouse call or audit mutation. Optional all=1 reviews the five existing rollup dimensions for the configured sink window instead. Review expires in five minutes and binds actor, queue generations, destination configuration and counts. A sole job_id query instead reads an admitted job owned by the same actor, across server pods. Expired worker leases are reported as interrupted without automatic redispatch. No private configuration, lease or worker token is returned. Responses are no-store.",
+        "operationId": "get__admin_dw_sink_retry",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "all",
+            "schema": {
+              "enum": [
+                "0",
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Mutually exclusive with all and other query keys.",
+            "in": "query",
+            "name": "job_id",
+            "schema": {
+              "pattern": "^dwr_[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DwRetryReadResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Malformed review, query or required reason."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing admin authentication/scope rejection; readonly tokens cannot POST."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Job belongs to another authenticated actor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No admitted job for this exact ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review expired, evidence changed, no eligible work or another reviewed retry is active; read again, never automatically repeat a mutation."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review, admission or durable job status unavailable. A lost response does not prove no admission: read the deterministic run_id."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reprocess sink retry queue",
+        "tags": [
+          "dw"
+        ]
+      },
+      "post": {
+        "description": "Without reviewed=1, preserves the existing synchronous retry behavior and optional all=1 rollup backfill. Exactly reviewed=1 selects the strict reviewed request body (8 KiB maximum). Admission and required-reason audit are atomic; response is 202 with a durable job. The same actor/revision returns the existing job with 200 and never redispatches. Other active reviewed jobs reject overlapping admission. The background worker survives browser disconnection, is bounded to 30 minutes/server lifecycle, reports accepted rows and retained failures, and commits final status with its completion audit. External delivery is not exactly-once: a lost sink acknowledgment may require explicit re-review and destination deduplication. A terminal or expired job is never automatically resumed.",
+        "operationId": "post__admin_dw_sink_retry",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "reviewed",
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Legacy POST only; mutually exclusive with reviewed.",
+            "in": "query",
+            "name": "all",
+            "schema": {
+              "enum": [
+                "0",
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DwRetryReviewedRequest"
+              }
+            }
+          },
+          "description": "Required only when reviewed=1. Legacy requests do not require or consume a body.",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DwRetryWriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DwRetryRun"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Malformed review, query or required reason."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing admin authentication/scope rejection; readonly tokens cannot POST."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Job belongs to another authenticated actor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "No admitted job for this exact ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review expired, evidence changed, no eligible work or another reviewed retry is active; read again, never automatically repeat a mutation."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Review, admission or durable job status unavailable. A lost response does not prove no admission: read the deterministic run_id."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

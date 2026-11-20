@@ -1,5 +1,5 @@
 import { DatabaseZap, PlugZap, RefreshCcwDot, ShieldCheck } from "lucide-react";
-import { useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 
 import { DataQueryNotice } from "@/features/data/DataQueryNotice";
 import { SimpleTable } from "@/features/data/SimpleTable";
@@ -26,17 +26,21 @@ import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
+const DwRetryWorkspace = lazy(() =>
+  import("./DwRetryWorkspace").then((module) => ({ default: module.DwRetryWorkspace })),
+);
 const pipeline = endpoints.domains.data.pipeline;
 const consistencyDayOptions = [7, 30, 90];
 const sinkDays = 7;
 const eventLimit = 20;
 
-type PipelineAction = "bootstrap" | "sink" | "retry";
+type PipelineAction = "bootstrap" | "sink";
 
 interface PipelineTabProps {
   canWrite: boolean;
   days: number;
   eventTable: string;
+  retryJobId?: string;
   onFilterChange: (updates: Record<string, string | undefined>) => void;
 }
 
@@ -46,11 +50,15 @@ export function PipelineTab({
   canWrite,
   days,
   eventTable,
+  retryJobId,
   onFilterChange,
 }: PipelineTabProps): React.JSX.Element {
   const { overview, lag, sinkStatus, consistency } = usePipelineQueries(days);
   const [action, setAction] = useState<PipelineAction | undefined>();
   const [testOpen, setTestOpen] = useState(false);
+  const [retryOpen, setRetryOpen] = useState(false);
+  const [retryLoaded, setRetryLoaded] = useState(false);
+  const retryTriggerRef = useRef<HTMLButtonElement>(null);
   const [events, setEvents] = useState<unknown>();
   const [eventsError, setEventsError] = useState<string | undefined>();
   const actionTriggerRef = useRef<HTMLButtonElement>(null);
@@ -68,13 +76,6 @@ export function PipelineTab({
     invalidates: [dataQueryKeys.pipeline, dataQueryKeys.warehouse],
     successMessage: (result) => `${formatNumber(result.sent_rows)}행을 적재했습니다.`,
     errorMessage: "적재하지 못했습니다.",
-  });
-  const retry = useMutationFeedback({
-    mutate: () => apiClient.request(pipeline.sinkRetry),
-    invalidates: [dataQueryKeys.pipeline, dataQueryKeys.warehouse],
-    successMessage: (result) =>
-      `${formatNumber(result.recovered_dimensions)}개 차원, ${formatNumber(result.sent_rows)}행을 재처리했습니다.`,
-    errorMessage: "재처리하지 못했습니다.",
   });
 
   const loadEvents = (table: string): void => {
@@ -102,16 +103,10 @@ export function PipelineTab({
       description: `최근 ${sinkDays}일 롤업을 다시 계산해 ClickHouse로 전송합니다.`,
       label: "적재",
     },
-    retry: {
-      title: "실패분 재처리",
-      description: "재처리 대기열에 남아 있는 차원을 다시 전송합니다.",
-      label: "재처리",
-    },
   };
   const runAction = async (): Promise<void> => {
     if (action === "bootstrap") await bootstrap.mutateAsync(undefined);
     if (action === "sink") await runSink.mutateAsync(undefined);
-    if (action === "retry") await retry.mutateAsync(undefined);
   };
 
   return (
@@ -150,7 +145,11 @@ export function PipelineTab({
               variant="secondary"
               disabled={!canWrite}
               title={canWrite ? undefined : writeDeniedReason}
-              onClick={() => setAction("retry")}
+              ref={retryTriggerRef}
+              onClick={() => {
+                setRetryLoaded(true);
+                setRetryOpen(true);
+              }}
             >
               <ShieldCheck aria-hidden="true" /> 실패분 재처리
             </Button>
@@ -185,6 +184,19 @@ export function PipelineTab({
           </Select>
         </label>
       </Toolbar>
+
+      {retryLoaded || retryJobId ? (
+        <Suspense fallback={<p role="status">재처리 화면을 불러오고 있습니다.</p>}>
+          <DwRetryWorkspace
+            open={retryOpen}
+            onOpenChange={setRetryOpen}
+            canWrite={canWrite}
+            jobId={retryJobId}
+            returnFocusRef={retryTriggerRef}
+            onJobChange={(id) => onFilterChange({ retry_job: id })}
+          />
+        </Suspense>
+      ) : null}
 
       {!canWrite ? (
         <InlineNotice tone="info" title="읽기 전용으로 열려 있습니다.">

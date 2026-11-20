@@ -1,3 +1,4 @@
+import { validDwRetryJobId } from "@/shared/utils/dw-retry-query";
 import { directRequestSelection } from "@/config/legacy-request-map";
 import { validTraceTimelineView } from "@/shared/utils/trace-timeline-query";
 import { validSessionPageValue } from "@/shared/utils/session-page-query";
@@ -84,6 +85,8 @@ function sensitiveParameter(
   // `sk-` substring, cannot break safe request-detail navigation.
   if (key === "selected_ref" && values.every(isAppRequestRef)) return false;
   if (key === "skill_ref" && values.every(isSkillRef)) return false;
+  // Server-issued operation identity; access still requires the owning actor.
+  if (key === "retry_job" && values.length === 1 && values.every(validDwRetryJobId)) return false;
   // This bounded enum grammar contains only column ids and directions. The
   // registry column named key is not an assigned credential.
   if (key === "runs_sort" && values.length === 1 && validRunSort(values[0] ?? "")) return false;
@@ -125,6 +128,10 @@ export function sanitizeAppRouteSearch(
   const rejectedValues = new Map<string, boolean>();
   const route = routerPath(pathname);
   const invalidOperationalKeys = new Set<string>();
+  if (route === "/data/warehouse" && parameters.has("retry_job")) {
+    const values = parameters.getAll("retry_job");
+    if (values.length !== 1 || !validDwRetryJobId(values[0] ?? "")) invalidOperationalKeys.add("retry_job");
+  }
   const ioSelection =
     route === "/observability/io" ? directRequestSelection(search, credentialPrefixes) : undefined;
   if (ioSelection?.present && !ioSelection.id) invalidOperationalKeys.add("request_id");

@@ -1,3 +1,4 @@
+import { dwRetryEndpoints } from "./dw-retry";
 import { z } from "zod";
 
 import type {
@@ -196,6 +197,7 @@ export const dataEndpoints = {
     ),
   },
   pipeline: {
+    retry: dwRetryEndpoints,
     sinkStatus: operation<GetAdminDwSinkStatusData, LegacyResponse>()(
       "GET",
       "/admin/dw/sink-status",

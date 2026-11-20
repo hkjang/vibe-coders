@@ -155,57 +155,11 @@ func boolToInt(b bool) int {
 // syncText2SQLFacts ships Text2SQL facts created since the stored watermark; first run
 // backfills the last 7 days. Advances the "text2sql_fact" watermark on success.
 func (s *Server) syncText2SQLFacts(ctx context.Context) (int, error) {
-	cfg := s.chConf()
-	if cfg.URL == "" || cfg.Text2SQLFactTable == "" {
-		return 0, nil
-	}
-	since := time.Now().UTC().AddDate(0, 0, -7)
-	if states, err := s.db.ListClickHouseSinkState(ctx); err == nil {
-		for _, st := range states {
-			if st.Dimension == "text2sql_fact" && st.LastSyncedDay != "" {
-				if t, perr := time.Parse(time.RFC3339Nano, st.LastSyncedDay); perr == nil {
-					since = t
-				}
-			}
-		}
-	}
-	logs, err := s.db.ListText2SQLLogsSince(ctx, since, 5000)
-	if err != nil {
-		_ = s.db.RecordClickHouseSinkFailure(ctx, "text2sql_fact", since.Format("2006-01-02"), "log read: "+err.Error())
-		return 0, err
-	}
-	if len(logs) == 0 {
-		return 0, nil
-	}
-	n, err := clickhouseText2SQLFactSink(ctx, s.client, cfg, logs)
-	if err != nil {
-		_ = s.db.RecordClickHouseSinkFailure(ctx, "text2sql_fact", since.Format("2006-01-02"), err.Error())
-		return 0, err
-	}
-	maxTS := logs[len(logs)-1].CreatedAt.UTC().Format(time.RFC3339Nano)
-	_ = s.db.RecordClickHouseSinkSuccess(ctx, "text2sql_fact", maxTS, int64(n))
-	return n, nil
+	return s.syncClickHouseFactDimension(ctx, "text2sql_fact")
 }
 
 // dwDimensions is the set of rollup dimensions shipped to ClickHouse.
 var dwDimensions = []string{"all", "model", "provider", "project", "cost_center"}
-
-// syncClickHouseDimension ships one dimension's daily rollups since sinceDay and
-// records the outcome: a watermark on success, or a persisted retry entry on failure.
-func (s *Server) syncClickHouseDimension(ctx context.Context, dim, sinceDay string) (int, error) {
-	rows, err := s.db.ListDailyRollups(ctx, dim, sinceDay, 5000)
-	if err != nil {
-		_ = s.db.RecordClickHouseSinkFailure(ctx, dim, sinceDay, "rollup read: "+err.Error())
-		return 0, err
-	}
-	n, err := clickhouseSink(ctx, s.client, s.chConf(), rows)
-	if err != nil {
-		_ = s.db.RecordClickHouseSinkFailure(ctx, dim, sinceDay, err.Error())
-		return 0, err
-	}
-	_ = s.db.RecordClickHouseSinkSuccess(ctx, dim, sinceDay, int64(n))
-	return n, nil
-}
 
 // handleClickHouseSink rolls up the last N days and ships every dimension's daily
 // aggregates to ClickHouse for long-term analysis.
@@ -286,6 +240,14 @@ func (s *Server) handleClickHouseSinkRetry(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method == http.MethodGet {
+		s.handleDwRetryRead(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Query().Has("reviewed") {
+		s.handleDwRetryReviewed(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -319,11 +281,20 @@ func (s *Server) handleClickHouseSinkRetry(w http.ResponseWriter, r *http.Reques
 	failed := map[string]string{}
 	for _, j := range jobs {
 		n, err := s.syncClickHouseDimension(r.Context(), j.dim, j.since)
+		total += n
 		if err != nil {
 			failed[j.dim] = err.Error()
 			continue
 		}
-		total += n
+		pending, err := s.db.ClickHouseSinkRetrySnapshot(r.Context(), j.dim)
+		if err != nil {
+			failed[j.dim] = "could not verify retry state"
+			continue
+		}
+		if pending != nil {
+			failed[j.dim] = "newer failed work remains queued"
+			continue
+		}
 		recovered++
 	}
 	s.auditAdmin(r, "dw.clickhouse.retry", "", auditJSON(map[string]any{"recovered": recovered, "rows": total, "failed": failed}))

@@ -611,6 +611,7 @@ export const openApiOperations = [
   { method: "POST", path: "/admin/dw/redteam" },
   { method: "GET", path: "/admin/dw/rollups" },
   { method: "POST", path: "/admin/dw/rollups" },
+  { method: "GET", path: "/admin/dw/sink-retry" },
   { method: "POST", path: "/admin/dw/sink-retry" },
   { method: "GET", path: "/admin/dw/sink-status" },
   { method: "GET", path: "/admin/dw/table-info" },

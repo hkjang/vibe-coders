@@ -1,3 +1,4 @@
+import { validDwRetryJobId } from "@/shared/utils/dw-retry-query";
 import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Zap } from "lucide-react";
@@ -50,6 +51,8 @@ export function WarehousePage(): React.JSX.Element {
   const order = oneOf(params.get("order_by"), dwOrders, "cost");
   const days = positiveInt(params.get("days"), 30, maxConsistencyDays);
   const eventTable = params.get("table") ?? "";
+  const rawRetryJob = params.get("retry_job") ?? "";
+  const retryJobId = validDwRetryJobId(rawRetryJob) ? rawRetryJob : undefined;
 
   const onFilterChange = useCallback(
     (updates: Record<string, string | undefined>): void => update(updates),
@@ -115,6 +118,7 @@ export function WarehousePage(): React.JSX.Element {
             canWrite={canWrite}
             days={days}
             eventTable={eventTable}
+            retryJobId={retryJobId}
             onFilterChange={onFilterChange}
           />
         </TabPanel>

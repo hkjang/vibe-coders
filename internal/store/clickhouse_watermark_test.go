@@ -32,7 +32,11 @@ func TestClickHouseSinkWatermarkAndRetry(t *testing.T) {
 	}
 
 	// A subsequent success advances the watermark and clears the retry.
-	if err := db.RecordClickHouseSinkSuccess(ctx, "model", "2026-06-02", 42); err != nil {
+	observed, err := db.ClickHouseSinkRetrySnapshot(ctx, "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared, err := db.CompleteClickHouseSink(ctx, "model", "2026-06-02", 42, observed); err != nil || !cleared {
 		t.Fatal(err)
 	}
 	retries, _ = db.ListClickHouseSinkRetries(ctx)
@@ -48,7 +52,7 @@ func TestClickHouseSinkWatermarkAndRetry(t *testing.T) {
 	}
 
 	// Re-recording success updates the watermark in place (no duplicate row).
-	if err := db.RecordClickHouseSinkSuccess(ctx, "model", "2026-06-03", 10); err != nil {
+	if cleared, err := db.CompleteClickHouseSink(ctx, "model", "2026-06-03", 10, nil); err != nil || !cleared {
 		t.Fatal(err)
 	}
 	state, _ = db.ListClickHouseSinkState(ctx)
