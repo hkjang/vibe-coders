@@ -29,26 +29,27 @@ const (
 // explorer. It is intentionally separate from RequestFilter so the legacy
 // /admin/requests contract and query remain unchanged.
 type AppRequestFilter struct {
-	Limit       int
-	IP          string
-	Model       string
-	Provider    string
-	ProviderSet bool
-	RequestID   string
-	TraceID     string
-	SessionID   string
-	APIKeyID    string
-	Language    string
-	StatusMin   int
-	StatusMax   int
-	StatusCode  int
-	Teams       []string
-	TeamScoped  bool
-	From        time.Time
-	To          time.Time
-	CursorAt    string
-	CursorID    string
-	Direction   string
+	ExcludeModels bool // optional monitor-only filter; ordinary request lists retain all traffic
+	Limit         int
+	IP            string
+	Model         string
+	Provider      string
+	ProviderSet   bool
+	RequestID     string
+	TraceID       string
+	SessionID     string
+	APIKeyID      string
+	Language      string
+	StatusMin     int
+	StatusMax     int
+	StatusCode    int
+	Teams         []string
+	TeamScoped    bool
+	From          time.Time
+	To            time.Time
+	CursorAt      string
+	CursorID      string
+	Direction     string
 }
 
 // AppRequestSummary contains only metadata approved for the React read-only
@@ -175,6 +176,9 @@ func (s *SQLStore) appRecentRequestsQuery(filter AppRequestFilter) (string, []an
 	validTokenUsage := appRequestValidChildPredicate("t_pick.request_id", "t_pick.id", "t_pick.created_at", s.dialect)
 	validResponse := appRequestValidChildPredicate("resp_pick.request_id", "resp_pick.id", "resp_pick.created_at", s.dialect)
 	where := []string{validRow}
+	if filter.ExcludeModels {
+		where = append(where, excludeModelCatalogPredicate)
+	}
 	args := []any{}
 	addExact := func(column, value string) {
 		if value != "" {

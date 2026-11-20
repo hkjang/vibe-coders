@@ -1268,16 +1268,17 @@ type ScatterPoint struct {
 }
 
 type ScatterFilter struct {
-	Since      time.Time
-	Until      time.Time // upper bound on r.created_at (UTC); zero = open-ended (up to now)
-	Endpoint   string
-	Model      string   // single model (backward compat); ignored when Models is non-empty
-	Models     []string // multi-model filter; empty = all models
-	APIKeyID   string
-	Team       string
-	Teams      []string // accepted api_keys.team identities (canonical id and display name)
-	TeamScoped bool     // true means team isolation is required; no team identities must return no rows
-	Limit      int
+	ExcludeModels bool // omit model catalog metadata before sampling, including live deltas
+	Since         time.Time
+	Until         time.Time // upper bound on r.created_at (UTC); zero = open-ended (up to now)
+	Endpoint      string
+	Model         string   // single model (backward compat); ignored when Models is non-empty
+	Models        []string // multi-model filter; empty = all models
+	APIKeyID      string
+	Team          string
+	Teams         []string // accepted api_keys.team identities (canonical id and display name)
+	TeamScoped    bool     // true means team isolation is required; no team identities must return no rows
+	Limit         int
 }
 
 // ScatterCursor identifies one committed request-log high-water mark by a database-serialized

@@ -298,7 +298,7 @@ func validateSavedFilterParams(view, raw string) error {
 	allowed := map[string]bool{
 		"window": true, "metric": true, "scale": true, "viewMode": true,
 		"from": true, "to": true, "tz": true,
-		"model": true, "models": true, "endpoint": true,
+		"model": true, "models": true, "endpoint": true, "include_models": true,
 	}
 	for key, values := range params {
 		if !allowed[key] {
@@ -312,6 +312,9 @@ func validateSavedFilterParams(view, raw string) error {
 		return err
 	}
 	if err := validateSavedEnum(params.Get("metric"), "metric", "latency", "first_chunk", "tokens", "cost", "risk", "health"); err != nil {
+		return err
+	}
+	if err := validateSavedEnum(params.Get("include_models"), "include_models", "true", "false"); err != nil {
 		return err
 	}
 	if err := validateSavedEnum(params.Get("scale"), "scale", "log", "linear"); err != nil {

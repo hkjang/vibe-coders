@@ -722,6 +722,7 @@ export const appRequestsResponseSchema = z.union([
 
 export const appRequestsQuerySchema = z
   .object({
+    exclude_models: z.boolean().optional(),
     limit: z.number().int().min(1).max(200).optional(),
     from: utf8BoundedString(64).optional(),
     to: utf8BoundedString(64).optional(),

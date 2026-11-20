@@ -302,3 +302,22 @@ test("이미 보낸 메모의 늦은 성공은 자동 복귀·추가 조회·재
   await resumed.locator("form").evaluate((node) => (node as HTMLFormElement).requestSubmit());
   expect(gateway.writes).toHaveLength(1);
 });
+
+test("모델 목록 표시 옵션은 실시간 증분에도 반영한다", async ({ page, liveGateway }) => {
+  await page.clock.install({ time: serverStart });
+  await login(page);
+  await page.clock.runFor(1600);
+  await expect.poll(() => deltas(liveGateway.calls).at(-1)?.searchParams.get("exclude_models")).toBe("true");
+  await page.getByRole("switch", { name: "모델 목록 조회 포함", exact: true }).click();
+  await expect
+    .poll(() =>
+      liveGateway.calls
+        .filter((url) => url.pathname === "/admin/scatter")
+        .at(-1)
+        ?.searchParams.get("exclude_models"),
+    )
+    .toBe("false");
+  await expect(page.getByText(/^마지막 응답 확인/u)).toBeVisible();
+  await page.clock.runFor(1600);
+  await expect.poll(() => deltas(liveGateway.calls).at(-1)?.searchParams.get("exclude_models")).toBe("false");
+});

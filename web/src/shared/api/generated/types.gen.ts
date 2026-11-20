@@ -12238,6 +12238,10 @@ export type GetAdminRequestsData = {
     };
     path?: never;
     query?: {
+        /**
+         * When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.
+         */
+        exclude_models?: boolean;
         limit?: number;
         from?: string;
         to?: string;
@@ -13777,16 +13781,32 @@ export type GetAdminSbomResponses = {
 export type GetAdminScatterData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.
+         */
+        exclude_models?: boolean;
+    };
     url: '/admin/scatter';
 };
 
+export type GetAdminScatterErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminScatterError = GetAdminScatterErrors[keyof GetAdminScatterErrors];
+
 export type GetAdminScatterResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminScatterResponse = GetAdminScatterResponses[keyof GetAdminScatterResponses];
 
 export type PostAdminSecretsRotateData = {
     body?: never;
@@ -16939,58 +16959,122 @@ export type GetAdminWorkflowsIdVersionsResponse = GetAdminWorkflowsIdVersionsRes
 export type GetAdminXviewDeltaData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.
+         */
+        exclude_models?: boolean;
+    };
     url: '/admin/xview/delta';
 };
 
+export type GetAdminXviewDeltaErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminXviewDeltaError = GetAdminXviewDeltaErrors[keyof GetAdminXviewDeltaErrors];
+
 export type GetAdminXviewDeltaResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminXviewDeltaResponse = GetAdminXviewDeltaResponses[keyof GetAdminXviewDeltaResponses];
 
 export type GetAdminXviewModelOutliersData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.
+         */
+        exclude_models?: boolean;
+    };
     url: '/admin/xview/model-outliers';
 };
 
+export type GetAdminXviewModelOutliersErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminXviewModelOutliersError = GetAdminXviewModelOutliersErrors[keyof GetAdminXviewModelOutliersErrors];
+
 export type GetAdminXviewModelOutliersResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminXviewModelOutliersResponse = GetAdminXviewModelOutliersResponses[keyof GetAdminXviewModelOutliersResponses];
 
 export type GetAdminXviewModelSeriesData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.
+         */
+        exclude_models?: boolean;
+    };
     url: '/admin/xview/model-series';
 };
 
+export type GetAdminXviewModelSeriesErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminXviewModelSeriesError = GetAdminXviewModelSeriesErrors[keyof GetAdminXviewModelSeriesErrors];
+
 export type GetAdminXviewModelSeriesResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminXviewModelSeriesResponse = GetAdminXviewModelSeriesResponses[keyof GetAdminXviewModelSeriesResponses];
 
 export type GetAdminXviewModelsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.
+         */
+        exclude_models?: boolean;
+    };
     url: '/admin/xview/models';
 };
 
+export type GetAdminXviewModelsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminXviewModelsError = GetAdminXviewModelsErrors[keyof GetAdminXviewModelsErrors];
+
 export type GetAdminXviewModelsResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminXviewModelsResponse = GetAdminXviewModelsResponses[keyof GetAdminXviewModelsResponses];
 
 export type PostAuthKeycloakBackchannelLogoutData = {
     body?: never;

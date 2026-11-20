@@ -167,6 +167,7 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
   const to = params.get("to") ?? "";
   const models = params.get("models") ?? "";
   const endpoint = params.get("endpoint") ?? "";
+  const includeModels = params.get("include_models") === "true";
   const live = params.get("live") !== "off";
   const savedViewId = params.get("view") ?? "";
   const sessionId = params.get("session_id") ?? "";
@@ -192,7 +193,7 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
   const [advancedOpen, setAdvancedOpen] = useState(advancedFilters > 0);
 
   const filters = useMemo<XViewFilters>(() => {
-    const next: XViewFilters = { tz: timeZone };
+    const next: XViewFilters = { tz: timeZone, exclude_models: !includeModels };
     if (from || to) {
       if (from) next.from = from;
       if (to) next.to = to;
@@ -202,7 +203,7 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
     if (models) next.models = models;
     if (endpoint) next.endpoint = endpoint;
     return next;
-  }, [endpoint, from, models, timeZone, to, window_]);
+  }, [endpoint, from, includeModels, models, timeZone, to, window_]);
 
   const [draft, setDraft] = useState({ from, to, models, endpoint });
   const [filterError, setFilterError] = useState<string>();
@@ -332,13 +333,14 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
       tz: timeZone,
       models,
       endpoint,
+      include_models: includeModels ? "true" : "",
     };
     for (const key of savedViewParamKeys) {
       const value = values[key];
       if (value) search.set(key, value);
     }
     return search.toString();
-  }, [endpoint, from, metric, models, scale, timeZone, to, viewMode, window_]);
+  }, [endpoint, from, includeModels, metric, models, scale, timeZone, to, viewMode, window_]);
 
   const applySavedView = (rawParams: string, id: string): void => {
     const parsed = new URLSearchParams(rawParams);
@@ -377,6 +379,7 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
       to: undefined,
       models: undefined,
       endpoint: undefined,
+      include_models: undefined,
       window: undefined,
       metric: undefined,
       scale: undefined,
@@ -395,6 +398,13 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
         legacyHref={legacyRoutes.xview}
         actions={
           <>
+            <Switch
+              checked={includeModels}
+              label="모델 목록 조회 포함"
+              onCheckedChange={(next) =>
+                updateParams({ include_models: next ? "true" : undefined, view: undefined })
+              }
+            />
             <Switch
               checked={live}
               label="실시간"

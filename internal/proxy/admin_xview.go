@@ -216,12 +216,13 @@ var xviewAggregateLimit = 20000
 func (s *Server) xviewAggregatePoints(r *http.Request, since, until time.Time) ([]store.ScatterPoint, map[string]any, error) {
 	teams, teamScoped := requestTeamScopeForCaller(s, r)
 	points, truncated, err := s.db.ScatterPoints(r.Context(), store.ScatterFilter{
-		Since:      since,
-		Until:      until,
-		Models:     parseModelsParam(r.URL.Query().Get("models")),
-		Teams:      teams,
-		TeamScoped: teamScoped,
-		Limit:      xviewAggregateLimit,
+		Since:         since,
+		Until:         until,
+		Models:        parseModelsParam(r.URL.Query().Get("models")),
+		ExcludeModels: r.URL.Query().Get("exclude_models") == "true",
+		Teams:         teams,
+		TeamScoped:    teamScoped,
+		Limit:         xviewAggregateLimit,
 	})
 	if err != nil {
 		return nil, nil, err

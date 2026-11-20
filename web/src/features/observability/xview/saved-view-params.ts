@@ -9,4 +9,5 @@ export const savedViewParamKeys = [
   "tz",
   "models",
   "endpoint",
+  "include_models",
 ] as const;

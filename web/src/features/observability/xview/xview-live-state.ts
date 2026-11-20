@@ -8,6 +8,7 @@ export const catchUpIntervalMs = 25;
 export const maxCatchUpPages = 20;
 
 export interface XViewFilters {
+  exclude_models?: boolean;
   window?: string;
   from?: string;
   to?: string;

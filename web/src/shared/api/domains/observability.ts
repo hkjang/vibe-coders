@@ -147,6 +147,7 @@ const optionalNumber = z.number().optional();
 
 /** Shared XView range/filter parameters (xviewTimeRange + scatterFilterFromRequest). */
 const xviewRangeQuerySchema = z.object({
+  exclude_models: z.boolean().optional(),
   window: optionalString,
   from: optionalString,
   to: optionalString,

@@ -210,10 +210,15 @@ func parseAppRequestStatus(value string, filter *store.AppRequestFilter) error {
 func appRequestFilterFingerprint(filter store.AppRequestFilter, providerRef string) string {
 	teams := append([]string(nil), filter.Teams...)
 	sort.Strings(teams)
-	payload, _ := json.Marshal([]any{filter.Limit, filter.IP, filter.Model, providerRef, filter.RequestID,
+	fields := []any{filter.Limit, filter.IP, filter.Model, providerRef, filter.RequestID,
 		filter.TraceID, filter.SessionID, filter.APIKeyID, filter.Language, filter.StatusMin,
 		filter.StatusMax, filter.StatusCode, teams, filter.TeamScoped,
-		filter.From.UTC().Format(time.RFC3339Nano), filter.To.UTC().Format(time.RFC3339Nano)})
+		filter.From.UTC().Format(time.RFC3339Nano), filter.To.UTC().Format(time.RFC3339Nano)}
+	// Preserve existing unfiltered cursors across rolling upgrades.
+	if filter.ExcludeModels {
+		fields = append(fields, "exclude_models")
+	}
+	payload, _ := json.Marshal(fields)
 	digest := sha256.Sum256(payload)
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
@@ -381,7 +386,7 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 	values := r.URL.Query()
 	allowed := map[string]int{"limit": 3, "from": 64, "to": 64, "tz": 64, "status": 16,
 		"model": 256, "provider_ref": providerRefLength, "request_id": 512, "trace_id": 512,
-		"session_id": 512, "api_key_id": 512, "ip": 128, "language": 64, "cursor": 4096}
+		"session_id": 512, "api_key_id": 512, "ip": 128, "language": 64, "cursor": 4096, "exclude_models": 5}
 	params := map[string]string{}
 	for key := range values {
 		max, ok := allowed[key]
@@ -395,6 +400,10 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params[key] = value
+	}
+	if value := params["exclude_models"]; value != "" && value != "true" && value != "false" {
+		writeOpenAIError(w, http.StatusBadRequest, "모델 목록 조회 필터가 올바르지 않습니다.", "invalid_request_error", "invalid_requests_filter")
+		return
 	}
 	limit := 50
 	if params["limit"] != "" {
@@ -441,7 +450,7 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 	filter := store.AppRequestFilter{Limit: limit, IP: params["ip"], Model: params["model"],
 		RequestID: params["request_id"], TraceID: params["trace_id"], SessionID: params["session_id"],
 		APIKeyID: params["api_key_id"], Language: params["language"], Teams: teams,
-		TeamScoped: teamScoped, From: from, To: to}
+		TeamScoped: teamScoped, From: from, To: to, ExcludeModels: params["exclude_models"] == "true"}
 	if err := parseAppRequestStatus(params["status"], &filter); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "status가 올바르지 않습니다.", "invalid_request_error", "invalid_requests_status")
 		return

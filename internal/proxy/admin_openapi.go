@@ -907,6 +907,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		op["description"] = "Requires admin read access. Returns only registered features currently accessible to the caller, including zero counts. Historical aggregates remain visible while collection is disabled. Legacy opens are deduplicated per visit and never exceed visits; a Legacy event received first creates that visit. No user or visit identifiers are returned. Counts are observational and may be incomplete due to opt-out, delivery loss, rate limits or capacity."
 		op["parameters"] = []any{map[string]any{"name": "days", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "enum": []int{7, 30}, "default": 7}}}
 		responses["200"] = successResponse("UITelemetrySummaryResponse")
+	case "get /admin/scatter", "get /admin/xview/delta", "get /admin/xview/models", "get /admin/xview/model-series", "get /admin/xview/model-outliers":
+		op["parameters"] = []any{modelCatalogExclusionParameter()}
 	case "get /v1/models":
 		op["parameters"] = []any{map[string]any{
 			"name": "provider", "in": "query", "required": false,
@@ -960,6 +962,7 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	case "get /admin/requests":
 		op["description"] = "Legacy callers keep the existing dynamic response shape. React callers request the version 2 safe projection with X-Vibe-UI: app and X-Vibe-App-Requests-Version: 2. Omitting the version header preserves the v0.82 app projection during rolling deployments."
 		op["parameters"] = []any{
+			modelCatalogExclusionParameter(),
 			map[string]any{"name": "X-Vibe-UI", "in": "header", "required": false, "description": "Set to app to request the safe React console projection.", "schema": map[string]any{"type": "string", "enum": []string{"app"}}},
 			map[string]any{"name": appRequestContractHeader, "in": "header", "required": false, "description": "Set to 2 for request_ref and filterability fields. Absent or 1 returns the v0.82-compatible app shape.", "schema": map[string]any{"type": "string", "enum": []string{appRequestContractV1, appRequestContractV2}, "default": appRequestContractV1}},
 			map[string]any{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
@@ -2037,3 +2040,11 @@ const swaggerOfflineHTML = `<!DOCTYPE html>
   </script>
 </body>
 </html>`
+
+// This opt-in query leaves existing API and Legacy callers unchanged. The React
+// input/output monitor and XView send it by default; their include toggle sends false.
+func modelCatalogExclusionParameter() map[string]any {
+	return map[string]any{"name": "exclude_models", "in": "query", "required": false,
+		"description": "When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.",
+		"schema":      map[string]any{"type": "boolean", "default": false}}
+}
