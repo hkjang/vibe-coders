@@ -2043,3 +2043,192 @@ test("KEYCLOAK-LIVE-052 잘못된 입출력 요청 주소는 다른 요청을 �
   expect(rawReads).toBe(0);
   expect(writes).toBe(0);
 });
+
+const policyHandoffID = "SSO 정책 +%2F?&#/exact";
+async function openPolicyBridge(page: Page, username: string, id = policyHandoffID) {
+  let writes = 0,
+    broadReads = 0,
+    legacy = false;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin !== gateway || !url.pathname.startsWith("/admin/")) return;
+    if (request.method() !== "GET") writes++;
+    if (
+      legacy &&
+      ["/admin/kill-switch", "/admin/alerts", "/admin/cost", "/admin/policies/decisions"].includes(
+        url.pathname,
+      )
+    )
+      broadReads++;
+  });
+  const path = "/app/governance/policies/detail?" + new URLSearchParams({ tab: "safety", policy: id });
+  await signIn(page, username, path);
+  const sheet = page.getByRole("dialog", { name: "정책 상세", exact: true });
+  await expect(sheet.getByRole("heading", { name: "동일 정책 제목", exact: true })).toBeVisible();
+  const href = "/admin#/safety?" + new URLSearchParams({ policy_id: id });
+  const link = sheet.getByRole("link", { name: "기존 화면에서 열기", exact: true });
+  await expect(link).toHaveAttribute("href", href);
+  await link.focus();
+  legacy = true;
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await page.getByRole("button", { name: "SSO 로그인 (Keycloak)", exact: true }).click();
+  const detail = page.locator("#legacy-policy-detail");
+  await expect(detail).toContainText("동일 정책 제목");
+  await expect(page).toHaveURL(gateway + href);
+  expect(await page.evaluate(() => sessionStorage.getItem("vibe.admin.auth.sso-return-to"))).toBeNull();
+  return { detail, counts: () => ({ writes, broadReads }) };
+}
+
+test("KEYCLOAK-LIVE-053 선택한 정책의 저장된 규칙을 실제 SSO로 열고 변경 없이 키보드로 읽는다", async ({
+  page,
+}) => {
+  const { detail, counts } = await openPolicyBridge(page, "new-operator");
+  for (const value of [
+    policyHandoffID,
+    "선택한 정책 설명",
+    "사용 중지",
+    "25%",
+    "저장된 정책 규칙 0",
+    "저장된 정책 규칙 1",
+    "shared-access-id",
+    "saved-policy-model",
+    "require_approval",
+    "denied-policy-model",
+  ])
+    await expect(detail).toContainText(value);
+  await expect(detail).not.toContainText("다른 정책 설명");
+  await expect(detail.locator("input,select,textarea,form")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: /저장|실행|승인|삭제|시뮬레이션/ })).toHaveCount(0);
+  await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(
+      await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe: { run: (element: Element, options: object) => Promise<{ violations: unknown[] }> };
+          }
+        ).axe;
+        const detail = document.querySelector("#legacy-policy-detail");
+        if (!detail) throw Error("Policy detail missing");
+        return (await axe.run(detail, { rules: { "color-contrast": { enabled: true } } })).violations.length;
+      }),
+    ).toBe(0);
+  }
+  const retry = detail.getByRole("button", { name: "다시 조회", exact: true });
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(detail).toContainText("선택한 정책 설명");
+  expect(counts()).toEqual({ writes: 0, broadReads: 0 });
+});
+
+test("KEYCLOAK-LIVE-054 읽기 전용 정책과 긴 UTF8 정의는 전체를 읽고 로그아웃하면 사라진다", async ({
+  page,
+}) => {
+  const { detail, counts } = await openPolicyBridge(page, "reader", "😀".repeat(512));
+  async function fullText(label: string) {
+    let text = "";
+    for (let i = 0; i < 20; i++) {
+      text += await detail.getByLabel(label, { exact: true }).innerText();
+      const next = detail.getByRole("button", { name: "다음 " + label, exact: true });
+      if ((await next.count()) === 0 || (await next.isDisabled())) break;
+      await next.click();
+      await expect(detail.getByLabel(label, { exact: true })).toBeFocused();
+    }
+    return text;
+  }
+  const expected = "가".repeat(16383) + "😀policy-final-tail";
+  expect(await fullText("정책 설명")).toBe(expected);
+  const rules = JSON.parse(await fullText("정책 규칙")) as { conditions: { note: string } }[];
+  expect(rules).toHaveLength(2);
+  expect(rules[0]?.conditions.note === expected).toBe(true);
+  expect(rules[1]?.conditions.note === expected).toBe(true);
+  await page.locator("#auth-user").click();
+  await page.locator("#auth-logout").click();
+  await expect(page.locator("#login-backdrop.open")).toBeVisible();
+  await expect(detail).toBeEmpty();
+  expect(counts()).toEqual({ writes: 0, broadReads: 0 });
+});
+
+test("KEYCLOAK-LIVE-055 정책 선택 오류와 없는 ID를 구분하고 이전 전체 화면 응답을 격리한다", async ({
+  page,
+}) => {
+  const { detail } = await openPolicyBridge(page, "new-operator", "__proto__");
+  let reads = 0,
+    writes = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin !== gateway || !url.pathname.startsWith("/admin/")) return;
+    if (url.pathname === "/admin/policies") reads++;
+    if (request.method() !== "GET") writes++;
+  });
+  for (const query of [
+    "policy_id=%ED%A0%80",
+    "policy_id=x&policy_id=y",
+    "policy_id=",
+    "policy_id=x&other=y",
+  ]) {
+    const before = reads;
+    await page.goto("/admin#/safety?" + query);
+    await expect(detail).toContainText("정책 상세 주소가 올바르지 않습니다");
+    expect(reads).toBe(before);
+  }
+  await page.goto("/admin#/safety?policy_id=missing-policy");
+  await expect(detail).toContainText("선택한 정책을 찾을 수 없습니다");
+  await expect(detail).not.toContainText("동일 정책 제목");
+  let captured = false,
+    completed = false,
+    release = () => {};
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  await page.route("**/admin/policies", async (route) => {
+    if (captured) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    captured = true;
+    await gate;
+    await route.fulfill({ response }).catch(() => {});
+    completed = true;
+  });
+  try {
+    await detail.getByRole("link", { name: "정책 전체 화면 열기", exact: true }).click();
+    await expect.poll(() => captured).toBe(true);
+    await page.goto("/admin#/safety?" + new URLSearchParams({ policy_id: policyHandoffID }));
+    await expect(detail).toContainText("선택한 정책 설명");
+    release();
+    await expect.poll(() => completed).toBe(true);
+    await page.evaluate(
+      () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+    );
+    await expect(detail).toContainText("선택한 정책 설명");
+    expect(writes).toBe(0);
+  } finally {
+    release();
+    await page.unroute("**/admin/policies");
+  }
+});
+
+test("KEYCLOAK-LIVE-056 정책 권한이 없는 실제 계정은 원문과 기존 정책 링크를 받지 않는다", async ({
+  page,
+}) => {
+  await signIn(page, "policy-denied");
+  expect((await currentUser(page)).role).toBe("ops_admin");
+  const status = await page.evaluate(async () => {
+    return (
+      await fetch("/admin/policies", {
+        headers: { Authorization: "Bearer " + (sessionStorage.getItem("vibe.app.auth.access") ?? "") },
+      })
+    ).status;
+  });
+  expect(status).toBe(401);
+  await page.goto("/app/governance/policies/detail?" + new URLSearchParams({ policy: policyHandoffID }));
+  await expect(page.getByText("접근 권한이 없습니다.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "정책 상세", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "기존 화면에서 열기", exact: true })).toHaveCount(0);
+  await expect(page.getByText("선택한 정책 설명", { exact: true })).toHaveCount(0);
+});

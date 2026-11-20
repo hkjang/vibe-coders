@@ -18,6 +18,7 @@ function block(from, to) {
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
 const directRequestTarget = block('function legacyRequestDetailIDValid(', 'window.openRequestDetail =');
 const sessionTarget = block('function legacySessionTarget(', 'function validLegacySessionRecorder(');
+const policyTarget = block('function legacyPolicyTarget(', 'async function renderLegacyPolicyDetail(');
 const skillTarget = block('function legacySkillTarget(', 'async function renderLegacySkillDetail(');
 const workflowTarget = block('function legacyWorkflowTarget(', '// Project only the persisted definition contract.');
 const workAppTarget = block('function legacyWorkAppTarget(', 'async function renderLegacyWorkAppDetail(');
@@ -88,7 +89,7 @@ function harness(transport, initialHash = '', initialStorage) {
       return transport(call);
     },
   });
-  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + directRequestTarget + sessionTarget + skillTarget + '\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + directRequestTarget + sessionTarget + policyTarget + skillTarget + '\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
     '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
@@ -960,3 +961,10 @@ for (const query of [
   assert.equal(callback.location.hash,'');
  });
 }
+
+for(const id of ['정책 +%2F?&#/','😀'.repeat(512),'__proto__'])test('exact policy handoff survives local and SSO login '+id.slice(0,12),async()=>{
+ const hash='#/safety?'+new URLSearchParams({policy_id:id});
+ const local=harness(call=>call.path==='/auth/login'?response(200,tokens('B')):response(200,nav('B')),hash);local.authState.enabled=true;await local.login();assert.equal(local.location.hash,hash);
+ const sso=harness(call=>call.path==='/auth/sso/exchange'?response(200,tokens('SSO')):response(200,{auth_enabled:true,user:tokens('SSO').user}),hash);sso.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));sso.location.hash='#kc_code=synthetic';await sso.initAuth();assert.equal(sso.location.hash,hash);assert.equal(sso.routes,1);
+});
+test('logout clears displayed policy and cached policy definitions',async()=>{const h=harness(()=>response(200));h.seed();h.node('legacy-policy-detail').textContent='PRIVATE_POLICY';await h.logout();assert.equal(h.node('legacy-policy-detail').textContent,'');});

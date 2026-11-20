@@ -851,6 +851,7 @@ const adminHTML = `<!doctype html>
       if (hash.startsWith('#/apps?') && legacyWorkAppTarget(hash)) return hash;
       if (hash.startsWith('#/workflows?') && legacyWorkflowTarget(hash)) return hash;
       if (hash.startsWith('#/skills?') && legacySkillTarget(hash)) return hash;
+      if (hash.startsWith('#/safety?') && legacyPolicyTarget(hash)) return hash;
       if (hash.startsWith('#/sessions?') && legacySessionTarget(hash)) return hash;
       if (hash.startsWith('#/requests?') && legacyDirectRequestTarget(hash)) return hash;
       if (hash.length > 8192) return '';
@@ -901,6 +902,9 @@ const adminHTML = `<!doctype html>
       if (modelDetail) modelDetail.textContent = '';
       const sessionDetail = document.getElementById('legacy-session-detail');
       if (sessionDetail) sessionDetail.innerHTML = '';
+      const policyDetail = document.getElementById('legacy-policy-detail');
+      if (policyDetail) policyDetail.textContent = '';
+      window.safetyPolicies = [];
       const skillDetail = document.getElementById('legacy-skill-detail');
       if (skillDetail) skillDetail.textContent = '';
       window._skillsByName = Object.create(null);
@@ -2238,6 +2242,9 @@ const adminHTML = `<!doctype html>
       if (modelDetail) modelDetail.textContent = '';
       const sessionDetail = document.getElementById('legacy-session-detail');
       if (sessionDetail) sessionDetail.innerHTML = '';
+      const policyDetail = document.getElementById('legacy-policy-detail');
+      if (policyDetail) policyDetail.textContent = '';
+      window.safetyPolicies = [];
       const skillDetail = document.getElementById('legacy-skill-detail');
       if (skillDetail) skillDetail.textContent = '';
       window._skillsByName = Object.create(null);
@@ -2340,7 +2347,7 @@ const adminHTML = `<!doctype html>
           case 'prompt-lab': await renderPromptLab(params); break;
           case 'agents':    await renderAgents(params); break;
           case 'vcs':       await renderVCS(params); break;
-          case 'safety':    await renderSafety(); break;
+          case 'safety': if (params.has('policy_id')) await renderLegacyPolicyDetail(); else await renderSafety(); break;
           case 'text2sql':
             if (!rest.length && params.has('schema_name')) await renderLegacyText2SQLSchemaDetail();
             else await renderText2SQL();
@@ -13148,7 +13155,93 @@ const adminHTML = `<!doctype html>
         '</tr>').join('') + '</tbody></table>' +
         '<div class="muted" style="font-size:12px; padding:8px 14px 12px">폴백(자동 전환) 또는 5xx 가 시간당 ' + '5건 이상인 시간대를 프로바이더별로 묶어 장애로 추정합니다. 연속된 시간대는 한 건으로 병합. 예: "openai 응답 장애 → anthropic 자동 전환, 폴백 212회, 영향 사용자 18명". API: <code>GET /admin/incidents?window=7d&min_events=5</code></div>';
     }
+    function legacyPolicyTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/safety?')) return null;
+      const query = rawHash.slice('#/safety?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('policy_id').length !== 1 || Array.from(params.keys()).some(key => key !== 'policy_id')) return null;
+      const id = params.get('policy_id');
+      return id && id.trim() === id && Array.from(id).length <= 512 && !/\p{Cc}/u.test(id) ? id : null;
+    }
+
+    async function renderLegacyPolicyDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const id = legacyPolicyTarget(hash);
+      const retry = '<button type="button" id="legacy-policy-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-policy-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('정책 상세', '<div id="legacy-policy-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/safety">정책 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (key, action) => {
+        if (current()) document.getElementById(key)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!id) { render('<p role="alert">정책 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 정책을 확인하고 있습니다.</p>');
+      try {
+        // The existing security:read API remains the authority for this read-only handoff.
+        const data = await api('/admin/policies', { cache:'no-store' });
+        if (!current()) return;
+        if (!Array.isArray(data?.policies)) throw new Error('Invalid policy list');
+        const matches = data.policies.filter(row => row?.id === id);
+        if (!matches.length) {
+          render('<p role="status">선택한 정책을 찾을 수 없습니다.</p>' + retry);
+          bind('legacy-policy-retry', () => { void route(); });
+          return;
+        }
+        const row = matches[0], rules = row.rules ?? [];
+        if (matches.length !== 1 || ['id','name','description','created_at','updated_at'].some(key => typeof row[key] !== 'string') ||
+            typeof row.enabled !== 'boolean' || !Number.isSafeInteger(row.priority) || !Number.isSafeInteger(row.rollout_percent) ||
+            !Array.isArray(rules) || rules.some(rule => !rule || rule.policy_id !== id ||
+              ['id','name','created_at','updated_at'].some(key => typeof rule[key] !== 'string') ||
+              typeof rule.enabled !== 'boolean' || !Number.isSafeInteger(rule.priority) ||
+              ['conditions','actions'].some(key => rule[key] !== null && (typeof rule[key] !== 'object' || Array.isArray(rule[key])))))
+          throw new Error('Invalid selected policy');
+        const fields = [['정책 ID', row.id], ['이름', row.name], ['상태', row.enabled ? '사용 중' : '사용 중지'],
+          ['우선순위', String(row.priority)], ['적용 비율', String(row.rollout_percent || 100) + '%'],
+          ['규칙 수', String(rules.length)], ['생성 시각', row.created_at], ['수정 시각', row.updated_at]];
+        const metadata = '<p>현재 저장된 정책과 조건·동작을 읽기 전용으로 확인합니다. 적용 비율의 저장값 0은 전체 적용(100%)을 뜻합니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl>';
+        const sections = [
+          {key:'description', title:'정책 설명', text:row.description, empty:'등록된 설명이 없습니다.', page:0},
+          {key:'rules', title:'정책 규칙', text:JSON.stringify(rules, null, 2), empty:'등록된 규칙이 없습니다.', page:0},
+        ];
+        for (const item of sections) item.pages = legacyDetailTextPages(item.text);
+        const paint = focusId => {
+          if (!current()) return;
+          let body = metadata + '<p>정책 저장·가져오기·승인·시뮬레이션·긴급 중지는 실행하지 않습니다.</p>';
+          for (const item of sections) {
+            const [start,end] = item.pages[item.page], key = 'legacy-policy-' + item.key;
+            body += '<h3>' + item.title + '</h3><pre id="' + key + '" tabindex="0" aria-label="' + item.title + '" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px;overflow:auto">' +
+              escapeHTML(item.text.slice(start,end) || item.empty) + '</pre>';
+            if (item.pages.length > 1) body += '<nav aria-label="' + item.title + ' 페이지"><span role="status">' + (item.page + 1) + ' / ' + item.pages.length +
+              '페이지</span><button type="button" id="' + key + '-prev"' + (item.page === 0 ? ' disabled' : '') + '>이전 ' + item.title + '</button>' +
+              '<button type="button" id="' + key + '-next"' + (item.page + 1 === item.pages.length ? ' disabled' : '') + '>다음 ' + item.title + '</button></nav>';
+          }
+          render(body + retry, focusId);
+          bind('legacy-policy-retry', () => { void route(); });
+          for (const item of sections) {
+            const key = 'legacy-policy-' + item.key;
+            bind(key+'-prev', () => { if (item.page > 0) { item.page--; paint(key); } });
+            bind(key+'-next', () => { if (item.page + 1 < item.pages.length) { item.page++; paint(key); } });
+          }
+        };
+        paint();
+      } catch (error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 정책을 불러오지 못했습니다. 로그인과 정책 조회 권한을 확인하세요.</p>' + retry);
+        bind('legacy-policy-retry', () => { void route(); });
+      }
+    }
+
     async function renderSafety() {
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
       const [kill, alerts, cost, policiesResp, secretResp, policyResp, approvalResp, incidentsResp] = await Promise.all([
         api('/admin/kill-switch'),
         api('/admin/alerts'),
@@ -13159,6 +13252,7 @@ const adminHTML = `<!doctype html>
         api('/admin/approvals?status=pending&window=24h&limit=50').catch(() => ({ approvals: [], count: 0, filters: {} })),
         api('/admin/incidents?window=7d').catch(() => ({ incidents: [] })),
       ]);
+      if (!current()) return;
       const rules = alerts.rules || [];
       const events = alerts.events || [];
       const aiPolicies = policiesResp.policies || [];

@@ -553,3 +553,19 @@ it("accepts only the optional boolean skill handoff capability", () => {
     }),
   ).toThrow();
 });
+
+it("accepts only the optional boolean policy handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_policy_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_policy_detail: true },
+    }).capabilities.legacy_policy_detail,
+  ).toBe(true);
+  expect(() =>
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_policy_detail: "true" },
+    }),
+  ).toThrow();
+});

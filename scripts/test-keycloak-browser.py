@@ -67,7 +67,7 @@ def main():
             "realm": "vibe-browser", "enabled": True, "sslRequired": "all",
             "registrationAllowed": False, "resetPasswordAllowed": False,
             "groups": [{"name": "teams", "subGroups": [{"name": "Shared access"}]}],
-            "roles": {"realm": [{"name": "vibe-admin"}, {"name": "vibe-auditor"}, {"name": "vibe-team-admin"}]},
+            "roles": {"realm": [{"name": "vibe-admin"}, {"name": "vibe-auditor"}, {"name": "vibe-team-admin"}, {"name": "vibe-ops"}]},
             "clients": [{
                 "clientId": "vibe-browser", "secret": secret, "publicClient": False,
                 "protocol": "openid-connect", "standardFlowEnabled": True,
@@ -97,6 +97,7 @@ def main():
                 ("new-operator", "new@example.invalid", "vibe-admin"),
                 ("reader", "reader@example.invalid", "vibe-auditor"),
                 ("routing-reader", "routing-reader@example.invalid", "vibe-team-admin"),
+                ("policy-denied", "policy-denied@example.invalid", "vibe-ops"),
             ]],
         }
         (imports / "vibe-browser-realm.json").write_text(json.dumps(realm))
@@ -142,10 +143,10 @@ def main():
                 source = reports / "keycloak-live-summary.json"
                 if source.exists():
                     summary = json.loads(source.read_text())
-                    allowed = {f"KEYCLOAK-LIVE-{i:03d}" for i in range(1, 53)}
+                    allowed = {f"KEYCLOAK-LIVE-{i:03d}" for i in range(1, 57)}
                     assert set(summary) == {"status", "tests"}
                     assert summary["status"] in {"passed", "failed", "timedout", "interrupted"}
-                    assert len(summary["tests"]) == 52
+                    assert len(summary["tests"]) == 56
                     assert {item["scenario"] for item in summary["tests"]} == allowed
                     for item in summary["tests"]:
                         assert set(item) <= {"scenario", "status", "durationMs", "lastSourceLine", "failureSourceLine"}

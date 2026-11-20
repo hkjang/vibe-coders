@@ -516,6 +516,7 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 			"legacy_work_app_detail":        true,
 			"legacy_workflow_detail":        true,
 			"legacy_skill_detail":           true,
+			"legacy_policy_detail":          true,
 			"legacy_skill_reference_detail": true,
 			"legacy_session_detail":         true,
 			"legacy_access_detail":          true,
