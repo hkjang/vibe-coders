@@ -188,7 +188,9 @@ export function RequestResultsTable({
                       )}
                       {row.getVisibleCells().map((cell) => (
                         <td key={cell.id} style={{ width: cell.column.getSize() }}>
-                          <table.FlexRender cell={cell} />
+                          <div className="data-table-cell-content">
+                            <table.FlexRender cell={cell} />
+                          </div>
                         </td>
                       ))}
                       <td>

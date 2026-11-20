@@ -14,7 +14,7 @@ export function upstreamColumns(
       id: "name",
       header: "이름",
       cell: (info) => (
-        <div>
+        <div className="mcp-upstream-name-cell">
           <strong>{info.getValue<string>() || "—"}</strong>
           <div className="mono">{info.row.original.id}</div>
         </div>

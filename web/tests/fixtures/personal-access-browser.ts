@@ -94,6 +94,7 @@ export async function installPersonalAccess(page: Page, readOnly = false) {
     return route.fallback();
   });
   return {
+    home: base,
     state,
     reads,
     writes,

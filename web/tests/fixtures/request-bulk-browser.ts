@@ -41,5 +41,5 @@ export async function installRequestBulk(page: Page) {
       } satisfies AppRequestsResponse,
     });
   });
-  return { ...fixture, bulk };
+  return { ...fixture, bulk, rows };
 }

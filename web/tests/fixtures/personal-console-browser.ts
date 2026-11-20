@@ -88,6 +88,14 @@ export async function installPersonalConsole(page: Page, readOnly = false, backe
     created_at: created,
   };
   const state = {
+    actions: [
+      {
+        type: "key_expiry",
+        severity: "high",
+        message: "곧 만료되는 API 키가 있습니다.",
+        button_label: "키 확인",
+      },
+    ],
     availableName: personalSkill.name,
     requestableName: "공개 분석 도우미",
     requests: [personalRequest],
@@ -182,15 +190,8 @@ export async function installPersonalConsole(page: Page, readOnly = false, backe
       if (path === "/me/actions")
         return json({
           ...base,
-          count: 1,
-          actions: [
-            {
-              type: "key_expiry",
-              severity: "high",
-              message: "곧 만료되는 API 키가 있습니다.",
-              button_label: "키 확인",
-            },
-          ],
+          count: state.actions.length,
+          actions: state.actions,
         });
       if (path === "/me/notifications")
         return json({
