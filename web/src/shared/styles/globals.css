@@ -345,7 +345,7 @@ h2 {
 .app-header {
   position: sticky;
   top: 0;
-  z-index: var(--z-sticky);
+  z-index: var(--z-dropdown);
   display: flex;
   height: var(--header-height);
   align-items: center;
