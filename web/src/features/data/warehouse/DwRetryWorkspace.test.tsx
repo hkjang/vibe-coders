@@ -215,8 +215,12 @@ it("검토가 변경되면 입력 사유를 보존하고 새 검토 전에는 �
   expect(within(dialog).getByRole("button", { name: "검토한 대상 재처리" })).toBeEnabled();
 });
 it("접수 응답이 유실되면 기존 작업 조회로 복구하고 POST를 재시도하지 않는다", async () => {
+  let releaseInitialRead: () => void = () => undefined;
+  const initialRead = new Promise<DwRetryRunView>((resolve) => {
+    releaseInitialRead = () => resolve(running);
+  });
   const api = mockApi({
-    [getKey]: ({ query }) => (query ? running : reviewed),
+    [getKey]: ({ query }) => (query ? initialRead : reviewed),
     [postKey]: () => {
       throw apiFailure("response lost", 503);
     },
@@ -225,7 +229,15 @@ it("접수 응답이 유실되면 기존 작업 조회로 복구하고 POST를 �
   const dialog = await open();
   await userEvent.type(within(dialog).getByRole("textbox", { name: /실행 사유/u }), "복구 사유");
   await userEvent.click(within(dialog).getByRole("button", { name: "검토한 대상 재처리" }));
-  await userEvent.click(await within(dialog).findByRole("button", { name: "접수 결과 확인" }));
+  const recover = await within(dialog).findByRole("button", { name: "접수 결과 확인" });
+  await waitFor(() => expect(recover).toBeDisabled());
+  // A click during the automatic status read is intentionally ignored. Wait
+  // for that read to finish before exercising the explicit recovery action.
+  await userEvent.click(recover);
+  await act(async () => releaseInitialRead());
+  await waitFor(() => expect(recover).toBeEnabled());
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  await userEvent.click(recover);
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(api.bodies(postKey)).toHaveLength(1);
   expect(await screen.findByText("재처리 진행 중")).toBeInTheDocument();
