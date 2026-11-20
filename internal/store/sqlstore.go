@@ -1425,6 +1425,21 @@ func migrationStatements() []string {
 		)`,
 		`INSERT INTO app_ui_telemetry_capacity (singleton, live_visits)
 			VALUES (1, 0) ON CONFLICT(singleton) DO NOTHING`,
+		`ALTER TABLE app_ui_telemetry_capacity ADD COLUMN live_diagnostics INTEGER NOT NULL DEFAULT 0 CHECK (live_diagnostics BETWEEN 0 AND 10000)`,
+		`CREATE TABLE IF NOT EXISTS app_ui_diagnostics (
+			event_hash TEXT PRIMARY KEY CHECK (length(event_hash) = 64),
+			feature_id TEXT NOT NULL CHECK (length(feature_id) BETWEEN 1 AND 64),
+			kind TEXT NOT NULL CHECK (kind IN ('api_error', 'js_error')),
+			received_epoch BIGINT NOT NULL CHECK (received_epoch > 0),
+			ui_version TEXT NOT NULL DEFAULT '' CHECK (length(ui_version) <= 32),
+			endpoint TEXT NOT NULL DEFAULT '' CHECK (length(endpoint) <= 256),
+			method TEXT NOT NULL DEFAULT '' CHECK (method IN ('', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD')),
+			status INTEGER NOT NULL DEFAULT 0 CHECK (status = 0 OR status BETWEEN 100 AND 599),
+			request_id TEXT NOT NULL DEFAULT '' CHECK (length(request_id) <= 64),
+			failure TEXT NOT NULL CHECK (length(failure) BETWEEN 1 AND 24),
+			boundary TEXT NOT NULL DEFAULT '' CHECK (boundary IN ('', 'root', 'route'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_ui_diagnostics_received ON app_ui_diagnostics(received_epoch)`,
 		// Skills — reusable AI task manuals with metadata, lifecycle status, and policy hints.
 		`CREATE TABLE IF NOT EXISTS skills (
 			name TEXT PRIMARY KEY,

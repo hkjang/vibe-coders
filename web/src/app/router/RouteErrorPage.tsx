@@ -5,14 +5,22 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { routeErrorMessage } from "@/app/router/route-error-message";
 import { ErrorState } from "@/shared/components/state/PageStates";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { reportBoundaryError } from "@/shared/telemetry/diagnostic-channel";
 
 export function RouteErrorPage(): React.JSX.Element {
   const auth = useAuth();
   const error = useRouteError();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const observation = useRef<{ error: unknown } | undefined>(undefined);
   useEffect(() => {
     headingRef.current?.focus();
   }, [error]);
+  useEffect(() => {
+    // A cold deep link can fail before bootstrap resolves. Observe only the error
+    // still on screen after opt-in is known; never replay an earlier route.
+    if (observation.current?.error === error) return;
+    if (reportBoundaryError(error, "route")) observation.current = { error };
+  }, [error, auth]);
   return (
     <ErrorState
       title="화면 오류"

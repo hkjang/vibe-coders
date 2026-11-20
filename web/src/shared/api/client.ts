@@ -13,6 +13,7 @@ import { openAIErrorSchema } from "@/shared/api/schemas";
 import { buildApiPath } from "@/shared/api/query";
 import { discardResponse, RequestLifetime } from "@/shared/api/request-lifetime";
 import { publishLogout, tokenStore } from "@/shared/auth/token-store";
+import { captureAPIError } from "@/shared/telemetry/diagnostic-channel";
 
 const defaultTimeoutMs = 15_000;
 
@@ -167,6 +168,7 @@ export class ApiClient {
 
     const epoch = this.dependencies.getSessionEpoch();
     const lifetime = this.createLifetime(epoch, options.timeoutMs, options.signal, options.assertCurrent);
+    const reportError = captureAPIError(endpoint);
     let response: Response | undefined;
     try {
       response = await this.authorizedResponse(endpoint, options, epoch, lifetime);
@@ -198,6 +200,9 @@ export class ApiClient {
         });
       }
       return parsed.data as ApiEndpointOutput<Endpoint>;
+    } catch (error) {
+      if (epoch === this.dependencies.getSessionEpoch() && !options.signal?.aborted) reportError?.(error);
+      throw error;
     } finally {
       if (endpoint.textRequest && response) discardResponse(response);
       lifetime.dispose();
@@ -219,6 +224,7 @@ export class ApiClient {
     };
     assertCurrent();
     const lifetime = this.createLifetime(epoch, options.timeoutMs, options.signal, assertOwner);
+    const reportError = captureAPIError(endpoint);
     let response: Response | undefined;
     try {
       const headers = new Headers(options.headers);
@@ -251,6 +257,9 @@ export class ApiClient {
       const bytes = await readFileBody(response, lifetime, endpoint);
       assertCurrent();
       return { bytes, contentType, assertCurrent };
+    } catch (error) {
+      if (epoch === this.dependencies.getSessionEpoch() && !options.signal?.aborted) reportError?.(error);
+      throw error;
     } finally {
       if (response) discardResponse(response);
       lifetime.dispose();

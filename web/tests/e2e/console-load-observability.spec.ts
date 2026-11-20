@@ -58,6 +58,7 @@ async function installUsage(page: Page, backend = "v0.86.179") {
 
 test("실제 Go에 첫 표시 시간과 릴리즈 버전을 기록하고 합계로 읽는다", async ({ page, request }) => {
   test.skip(process.env.APP_UI_LOAD_LIVE !== "1", "격리된 Go embed 실행에서 검증합니다.");
+  const expectedVersion = process.env.APP_UI_LOAD_VERSION ?? "v0.86.179";
   const sent: Request[] = [];
   page.on("request", (event) => {
     if (new URL(event.url()).pathname === "/admin/ui-telemetry/events") sent.push(event);
@@ -66,18 +67,18 @@ test("실제 Go에 첫 표시 시간과 릴리즈 버전을 기록하고 합계�
   await expect(page.getByRole("heading", { name: "첫 화면 표시 시간", exact: true })).toBeVisible();
   await expect.poll(() => sent.some((event) => event.postDataJSON().event === "page_load")).toBe(true);
   const load = sent.find((event) => event.postDataJSON().event === "page_load");
-  expect(load?.headers()["x-vibe-ui-version"]).toBe("v0.86.179");
+  expect(load?.headers()["x-vibe-ui-version"]).toBe(expectedVersion);
   await expect
     .poll(async () => {
       const response = await request.get("/admin/ui-telemetry/summary");
       expect(response.ok()).toBe(true);
       const body = (await response.json()) as typeof summary;
-      return body.versions.find((row) => row.ui_version === "v0.86.179")?.load_samples ?? 0;
+      return body.versions.find((row) => row.ui_version === expectedVersion)?.load_samples ?? 0;
     })
     .toBeGreaterThan(0);
   await page.getByRole("button", { name: "관측 결과 새로고침", exact: true }).click();
   await expect(page.getByRole("region", { name: "UI 버전별 사용 관측", exact: true })).toContainText(
-    "v0.86.179",
+    expectedVersion,
   );
 });
 

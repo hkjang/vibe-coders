@@ -34,6 +34,7 @@ export interface ApiRoute<
 > {
   readonly method: Method;
   readonly path: Data["url"];
+  readonly diagnosticTemplate?: Data["url"];
   readonly [endpointBrand]: true;
   readonly [operationData]?: Data;
 }
@@ -60,6 +61,7 @@ export type ApiEndpointErrorSchemas = Readonly<Partial<Record<number, z.ZodType>
 export interface ApiEndpointBase {
   readonly method: OpenApiMethod;
   readonly path: OpenApiPath;
+  readonly diagnosticTemplate?: OpenApiPath;
   readonly schema: z.ZodType;
   readonly querySchema?: z.ZodType<object>;
   readonly errorSchemas?: ApiEndpointErrorSchemas;
@@ -88,6 +90,7 @@ export function operation<Data extends OperationData, Response>() {
     [endpointBrand]: true,
     method,
     path,
+    diagnosticTemplate: path,
     schema,
     ...(querySchema ? { querySchema } : {}),
     ...(errorSchemas ? { errorSchemas } : {}),
@@ -109,6 +112,7 @@ export function textOperation<Data extends OperationData, Response>() {
     [endpointBrand]: true,
     method,
     path,
+    diagnosticTemplate: path,
     schema,
     textRequest,
     ...(querySchema ? { querySchema } : {}),
@@ -126,6 +130,7 @@ export function fileOperation<Data extends OperationData>() {
     [endpointBrand]: true,
     method,
     path,
+    diagnosticTemplate: path,
     ...contract,
     responseFormat: "bytes",
     ...(querySchema ? { querySchema } : {}),
