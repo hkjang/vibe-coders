@@ -665,11 +665,17 @@ describe("RedTeamPage", () => {
 
   it("프롬프트 CSV는 변경 비교 후 확인해야 원문을 적용한다", async () => {
     const review = probeCsvReviewFixture();
+    let completeReview: (value: typeof review) => void = () => {
+      throw new Error("review not initialized");
+    };
+    const pendingReview = new Promise<typeof review>((resolve) => {
+      completeReview = resolve;
+    });
     const api = mockApi(
       listHandlers({
         "POST /admin/redteam/probe-packs/import-review": (_options, endpoint) => {
           expect(endpoint.textRequest).toEqual({ contentType: "text/csv", maxBytes: 8 * 1024 * 1024 });
-          return review;
+          return pendingReview;
         },
         "PUT /admin/redteam/probe-packs/import": () => ({
           review_applied: true,
@@ -689,7 +695,12 @@ describe("RedTeamPage", () => {
       new File([csv], "prompts.csv", { type: "text/csv" }),
     );
     const dialog = await screen.findByRole("dialog", { name: "CSV 변경 내용 확인" });
-    expect(dialog).toHaveTextContent("기존 공개 프롬프트");
+    await waitFor(() => expect(api.bodies("POST /admin/redteam/probe-packs/import-review")).toEqual([csv]));
+    expect(dialog).toHaveTextContent("변경 전후를 확인하고 있습니다.");
+    expect(screen.getByRole("button", { name: "변경 내용 적용" })).toBeDisabled();
+    expect(api.bodies("PUT /admin/redteam/probe-packs/import")).toHaveLength(0);
+    await act(async () => completeReview(review));
+    await waitFor(() => expect(dialog).toHaveTextContent("기존 공개 프롬프트"));
     expect(dialog).toHaveTextContent("검토한 공개 프롬프트");
     expect(api.bodies("POST /admin/redteam/probe-packs/import-review")).toEqual([csv]);
     expect(api.bodies("PUT /admin/redteam/probe-packs/import")).toHaveLength(0);
