@@ -254,7 +254,7 @@ function SkillDetailContent({
           </SectionCard>
 
           {panel === "policy" ? (
-            <SkillPolicyTester skillName={skill.name} skillRef={skillReference(skill)} />
+            <SkillPolicyTester skillName={skill.name} skillRef={skill.skill_ref} />
           ) : null}
 
           {panel === "runs" ? (

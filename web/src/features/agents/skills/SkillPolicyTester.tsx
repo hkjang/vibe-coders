@@ -13,6 +13,14 @@ import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
+function policySelector(name: string, skill_ref?: string) {
+  try {
+    return skillNameSelector({ name, skill_ref });
+  } catch {
+    return undefined;
+  }
+}
+
 /** Dry-runs a skill's allowed_models/tools/teams policy without calling any provider. */
 export function SkillPolicyTester({
   skillName,
@@ -26,20 +34,23 @@ export function SkillPolicyTester({
   const [tools, setTools] = useState("");
   const [team, setTeam] = useState("");
   const readAction = useSkillReadAction();
-  const body = {
-    ...skillNameSelector({ name: skillName, skill_ref: skillRef }),
-    model: model.trim(),
-    tools: tools
-      .split(",")
-      .map((tool) => tool.trim())
-      .filter(Boolean),
-    team: team.trim(),
-  };
+  const selector = policySelector(skillName, skillRef);
+  const body = selector
+    ? {
+        ...selector,
+        model: model.trim(),
+        tools: tools
+          .split(",")
+          .map((tool) => tool.trim())
+          .filter(Boolean),
+        team: team.trim(),
+      }
+    : undefined;
 
   const evaluate = useMutation({
     gcTime: 0,
     retry: false,
-    mutationFn: (input: typeof body) =>
+    mutationFn: (input: NonNullable<typeof body>) =>
       readAction((signal) =>
         apiClient.request(endpoints.domains.agents.skills.evaluate, {
           body: input,
@@ -49,7 +60,7 @@ export function SkillPolicyTester({
         }),
       ),
   });
-  const current = JSON.stringify(evaluate.variables) === JSON.stringify(body);
+  const current = body !== undefined && JSON.stringify(evaluate.variables) === JSON.stringify(body);
   const result = current ? evaluate.data : undefined;
 
   return (
@@ -58,17 +69,23 @@ export function SkillPolicyTester({
       headingLevel={3}
       description="모델·도구·팀 조합이 이 스킬의 정책을 통과하는지 실제 호출 없이 확인합니다."
     >
+      {!body ? (
+        <InlineNotice tone="warning" title="정확한 스킬 식별자가 필요합니다.">
+          현재 서버에서는 이 스킬을 이름 변경 없이 구분할 수 없습니다. 서버를 업데이트한 뒤 다시 조회하세요.
+        </InlineNotice>
+      ) : null}
       <form
         className="form-grid"
         onSubmit={(event) => {
           event.preventDefault();
-          evaluate.mutate(body);
+          if (body && !evaluate.isPending) evaluate.mutate(body);
         }}
       >
         <div className="form-field">
           <label htmlFor={`${fieldId}-model`}>모델</label>
           <Input
             id={`${fieldId}-model`}
+            disabled={!body}
             value={model}
             onChange={(event) => setModel(event.target.value)}
             placeholder="gpt-4o-mini"
@@ -78,6 +95,7 @@ export function SkillPolicyTester({
           <label htmlFor={`${fieldId}-tools`}>도구</label>
           <Input
             id={`${fieldId}-tools`}
+            disabled={!body}
             value={tools}
             onChange={(event) => setTools(event.target.value)}
             placeholder="쉼표로 구분"
@@ -87,12 +105,13 @@ export function SkillPolicyTester({
           <label htmlFor={`${fieldId}-team`}>팀</label>
           <Input
             id={`${fieldId}-team`}
+            disabled={!body}
             value={team}
             onChange={(event) => setTeam(event.target.value)}
             placeholder="platform"
           />
         </div>
-        <Button type="submit" variant="primary" size="small" disabled={evaluate.isPending}>
+        <Button type="submit" variant="primary" size="small" disabled={!body || evaluate.isPending}>
           {evaluate.isPending ? "확인 중" : "정책 확인"}
         </Button>
       </form>

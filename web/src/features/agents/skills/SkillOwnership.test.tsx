@@ -288,3 +288,44 @@ it.each(["계정 변경", "팀 변경", "조회 권한 회수", "화면 나가�
     ).not.toContain(first.instructions);
   },
 );
+
+it("구형 서버의 공백 이름은 정책 화면을 유지하고 식별자 안내로 검사를 막는다", async () => {
+  const api = mockApi({
+    ...stats,
+    "GET /admin/skills": () => ({ skills: [{ ...first, name: " exact " }] }),
+  });
+  const user = userEvent.setup();
+  setup();
+  await user.click(await screen.findByRole("button", { name: /상세 열기$/u }));
+  await user.click(screen.getByRole("button", { name: "정책 시뮬레이션" }));
+  expect(screen.getByText("정확한 스킬 식별자가 필요합니다.")).toBeVisible();
+  const submit = screen.getByRole("button", { name: "정책 확인" });
+  expect(submit).toBeDisabled();
+  const form = submit.closest("form");
+  if (!form) throw new Error("정책 확인 폼이 필요합니다.");
+  fireEvent.submit(form);
+  expect(api.bodies("POST /admin/skills/evaluate")).toEqual([]);
+});
+
+it("식별자를 지원하는 서버의 공백 이름은 이름을 다듬지 않고 참조로 정책을 확인한다", async () => {
+  const skill = { ...first, name: " exact ", skill_ref: "skl_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" };
+  const api = mockApi({
+    ...stats,
+    "GET /admin/skills": ({ query }) => (query && "view" in query ? { skill } : { skills: [skill] }),
+    "POST /admin/skills/evaluate": () => ({
+      allowed: true,
+      would_block: false,
+      enforcement: "off",
+      violations: [],
+    }),
+  });
+  const user = userEvent.setup();
+  setup();
+  await user.click(await screen.findByRole("button", { name: /상세 열기$/u }));
+  await user.click(await screen.findByRole("button", { name: "정책 시뮬레이션" }));
+  await user.click(screen.getByRole("button", { name: "정책 확인" }));
+  expect(await screen.findByText("판정")).toBeVisible();
+  expect(api.bodies("POST /admin/skills/evaluate")).toEqual([
+    { skill_ref: skill.skill_ref, model: "", tools: [], team: "" },
+  ]);
+});

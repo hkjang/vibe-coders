@@ -108,3 +108,51 @@ test("로그아웃 뒤 도착한 이전 계정의 번들은 새 세션에 내려
     release();
   }
 });
+
+for (const supportsReference of [false, true]) {
+  test(`공백 이름의 정책 검사는 ${supportsReference ? "참조로 정확히 실행한다" : "구형 서버 안내로 안전하게 차단한다"}`, async ({
+    page,
+    gateway,
+  }) => {
+    const reference = "skl_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+    const imported = { ...skill(" exact "), ...(supportsReference ? { skill_ref: reference } : {}) };
+    gateway.replaceSkills([imported]);
+    await page.emulateMedia({ colorScheme: supportsReference ? "light" : "dark", reducedMotion: "reduce" });
+    const errors: string[] = [];
+    const calls: unknown[] = [];
+    page.on("pageerror", (error) => errors.push(error.name));
+    await page.route("**/admin/skills?*", async (route) => {
+      if (new URL(route.request().url()).searchParams.get("view") === "detail") {
+        expect(new URL(route.request().url()).searchParams.get("skill_ref")).toBe(reference);
+        return route.fulfill({ json: { skill: imported } });
+      }
+      return route.fallback();
+    });
+    await page.route("**/admin/skills/evaluate", async (route) => {
+      calls.push(route.request().postDataJSON());
+      return route.fulfill({
+        json: { allowed: true, violations: [], would_block: false, enforcement: "off" },
+      });
+    });
+    await login(page);
+    await page.setViewportSize({ width: supportsReference ? 1440 : 390, height: 900 });
+    await page.getByRole("button", { name: /상세 열기$/u }).click();
+    const sheet = page.getByRole("dialog");
+    await sheet.getByRole("button", { name: "정책 시뮬레이션", exact: true }).click();
+    const submit = sheet.getByRole("button", { name: "정책 확인", exact: true });
+    if (supportsReference) {
+      await submit.click();
+      await expect(sheet.getByText("판정", { exact: true })).toBeVisible();
+      expect(calls).toEqual([{ skill_ref: reference, model: "", tools: [], team: "" }]);
+    } else {
+      await expect(sheet.getByText("정확한 스킬 식별자가 필요합니다.", { exact: true })).toBeVisible();
+      await expect(submit).toBeDisabled();
+      await submit.evaluate((button) => button.closest("form")?.requestSubmit());
+      expect(calls).toEqual([]);
+    }
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: /상세 열기$/u })).toBeFocused();
+    expect(errors).toEqual([]);
+    expect(gateway.unexpected).toEqual([]);
+  });
+}

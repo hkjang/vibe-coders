@@ -163,33 +163,94 @@ func indexColumnList(rest string) ([]string, bool) {
 // a column and how the database reports it back — quoting, ASC/DESC, null ordering, an
 // operator class Postgres appends — so that identical indexes compare equal.
 func normalizeIndexColumn(raw string) string {
-	s := strings.ToLower(strings.TrimSpace(raw))
+	s := strings.TrimSpace(raw)
 	for _, suffix := range []string{" nulls first", " nulls last"} {
-		s = strings.TrimSuffix(s, suffix)
+		if strings.HasSuffix(strings.ToLower(s), suffix) {
+			s = s[:len(s)-len(suffix)]
+		}
 		s = strings.TrimSpace(s)
 	}
 	for _, suffix := range []string{" asc", " desc"} {
-		s = strings.TrimSuffix(s, suffix)
+		if strings.HasSuffix(strings.ToLower(s), suffix) {
+			s = s[:len(s)-len(suffix)]
+		}
 		s = strings.TrimSpace(s)
 	}
 	// Postgres appends the operator class for non-default collations, e.g. "name
 	// text_pattern_ops". Only trim it when the column is a plain identifier, so an
 	// expression index keeps its text intact.
-	if fields := strings.Fields(s); len(fields) == 2 && strings.HasSuffix(fields[1], "_ops") {
+	if fields := strings.Fields(s); len(fields) == 2 && strings.HasSuffix(strings.ToLower(fields[1]), "_ops") {
 		s = fields[0]
 	}
 	// Expressions are not identifiers. Passing one through normalizeIdent would
 	// mistake a dot inside a string literal (for example the RFC3339 fraction
 	// separator) for a schema qualifier and discard most of the expression.
-	// PostgreSQL annotates text literals in reconstructed expression indexes with
-	// ::text while SQLite preserves the submitted SQL. Removing only that implicit
-	// cast plus insignificant whitespace makes the same portable expression compare
-	// equally without hiding changed operators or literals.
 	if strings.Contains(s, "(") {
-		s = strings.ReplaceAll(s, "::text", "")
-		return strings.Join(strings.Fields(s), "")
+		s = normalizeIndexExpression(s)
+		// PostgreSQL moves this CASE's grouping around its empty concatenation.
+		// Match only our complete known expression; dropping arbitrary parentheses
+		// would hide changed operator precedence in an actual index definition.
+		postgres := "(" + strings.TrimSuffix(appRequestCreatedAtExpr("created_at"), ")") + " || ''))"
+		if s == normalizeIndexExpression(postgres) {
+			return normalizeIndexExpression(legacyRequestCreatedAtExpr("created_at"))
+		}
+		return s
 	}
 	return normalizeIdent(s)
+}
+
+// PostgreSQL annotates quoted text constants with ::text. Ignore that annotation
+// and SQL formatting, but retain literal bytes (including spaces, case, escaped
+// quotes and the text "::text") and quoted identifiers. This is intentionally not
+// a general SQL equivalence parser.
+func normalizeIndexExpression(raw string) string {
+	var out strings.Builder
+	for i := 0; i < len(raw); {
+		c := raw[i]
+		if c == '\'' || c == '"' {
+			quote := c
+			out.WriteByte(c)
+			i++
+			closed := false
+			for i < len(raw) {
+				c = raw[i]
+				out.WriteByte(c)
+				i++
+				if c != quote {
+					continue
+				}
+				if i < len(raw) && raw[i] == quote {
+					out.WriteByte(raw[i])
+					i++
+					continue
+				}
+				closed = true
+				break
+			}
+			if quote == '\'' && closed {
+				end := i
+				for end < len(raw) && strings.ContainsRune(" \t\r\n", rune(raw[end])) {
+					end++
+				}
+				if len(raw)-end >= 6 && strings.EqualFold(raw[end:end+6], "::text") {
+					next := end + 6
+					if next == len(raw) || strings.ContainsRune(" \t\r\n),|+-*/=<>!", rune(raw[next])) {
+						i = next
+					}
+				}
+			}
+			continue
+		}
+		i++
+		if strings.ContainsRune(" \t\r\n", rune(c)) {
+			continue
+		}
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
 }
 
 // normalizeIdent unquotes and lowercases an identifier, and drops a schema qualifier —
