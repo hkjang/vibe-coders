@@ -280,6 +280,52 @@ table :is(.badge, .mono, small, kbd) {
   text-overflow: ellipsis;
 }
 
+.data-table-header-with-help {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.data-table-heading-label {
+  flex: 1 1 2rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.data-table-help-button {
+  display: grid;
+  flex: 0 0 1.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: var(--space-1);
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--color-muted);
+  cursor: help;
+}
+.data-table-help-button svg {
+  width: 1rem;
+  height: 1rem;
+}
+.data-table-help-button:hover,
+.data-table-help-button:focus-visible {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+.data-table-help-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+@media (pointer: coarse) {
+  /* Keep the 24px help target clear of the existing 44px resize target,
+     including columns restored at the supported 80px minimum. */
+  .data-table-resizable-heading:has(.data-table-header-with-help) {
+    padding-inline: var(--space-2);
+  }
+}
+
 .data-table-sort-button {
   display: flex;
   max-width: 100%;

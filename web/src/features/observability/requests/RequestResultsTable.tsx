@@ -1,3 +1,4 @@
+import { DataTableHeaderContent } from "@/shared/data-table/DataTableColumnHelp";
 import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { useMemo, useRef, useState } from "react";
 import { Columns3, MoveHorizontal } from "lucide-react";
@@ -149,9 +150,12 @@ export function RequestResultsTable({
                     className="data-table-resizable-heading"
                     style={{ width: header.getSize() }}
                   >
-                    <span className="data-table-header-content">
+                    <DataTableHeaderContent
+                      label={dataTableColumnLabel(header.column)}
+                      help={header.column.columnDef.meta?.help}
+                    >
                       <table.FlexRender header={header} />
-                    </span>
+                    </DataTableHeaderContent>
                     <DataTableResizeHandle
                       label={dataTableColumnLabel(header.column)}
                       width={header.getSize()}

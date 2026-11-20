@@ -51,6 +51,7 @@
     "tests/fixtures/agent-code-editor.ts",
     "eslint.config.js",
     "tests/e2e/probe-csv-ownership.spec.ts",
-    "tests/e2e/notification-lifetime.spec.ts"
+    "tests/e2e/notification-lifetime.spec.ts",
+    "tests/e2e/table-column-help.spec.ts"
   ]
 }

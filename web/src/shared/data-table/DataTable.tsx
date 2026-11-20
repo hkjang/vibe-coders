@@ -1,6 +1,12 @@
 import type { RowData } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ArrowUpDown, Columns3, MoveHorizontal } from "lucide-react";
-import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useRef,
+  useState,
+  type ComponentType,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 
 import { Button } from "@/shared/components/ui/Button";
 import { Select } from "@/shared/components/ui/Select";
@@ -13,6 +19,7 @@ import {
   useDataTableLayout,
   useDataTableOverflow,
 } from "@/shared/data-table/use-data-table-layout";
+import type { DataTableHeaderContentProps } from "./DataTableColumnHelp";
 import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { DataTableResizeHandle } from "@/shared/data-table/DataTableResizeHandle";
 
@@ -28,6 +35,8 @@ interface DataTableBaseProps<TData extends RowData> {
   emptyMessage?: string;
   error?: string;
   getRowId?: (row: TData, index: number) => string;
+  /** Opt in to shared column help without adding interaction code to every table route. */
+  headerContent?: ComponentType<DataTableHeaderContentProps>;
   /** Columns that must remain visible, such as the resource identity column. */
   lockedColumnIds?: readonly string[];
   loading?: boolean;
@@ -62,6 +71,10 @@ type DataTableProps<TData extends RowData> = DataTableBaseProps<TData> & DataTab
 
 const skeletonRowCount = 5;
 
+function PlainTableHeader({ children }: DataTableHeaderContentProps) {
+  return <span className="data-table-header-content">{children}</span>;
+}
+
 export function DataTable<TData extends RowData>({
   caption,
   columns,
@@ -70,6 +83,7 @@ export function DataTable<TData extends RowData>({
   error,
   getRowActionLabel,
   getRowId,
+  headerContent: HeaderContent = PlainTableHeader,
   lockedColumnIds = [],
   loading = false,
   onPageChange,
@@ -197,7 +211,10 @@ export function DataTable<TData extends RowData>({
                           }
                           style={layout.configurable ? { width: size } : undefined}
                         >
-                          <span className="data-table-header-content">
+                          <HeaderContent
+                            label={label}
+                            help={header.isPlaceholder ? undefined : header.column.columnDef.meta?.help}
+                          >
                             {sortOption ? (
                               <button
                                 type="button"
@@ -219,7 +236,7 @@ export function DataTable<TData extends RowData>({
                             ) : (
                               heading
                             )}
-                          </span>
+                          </HeaderContent>
                           {resizable ? (
                             <DataTableResizeHandle
                               label={label}

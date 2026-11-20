@@ -18,6 +18,7 @@ export const INTERACTIVE_FEATURES = {
   "src/features/security/redteam/ProbeCsvImportDialog.tsx": { rawBytes: 20_000, wireBytes: 8_000 },
   "src/features/system/settings/SettingsRecoveryDialog.tsx": { rawBytes: 20_000, wireBytes: 8_000 },
   "src/shared/code-editor/MonacoEditor.tsx": { rawBytes: 6_000_000, wireBytes: 1_500_000 },
+  "src/shared/data-table/ColumnTooltip.tsx": { rawBytes: 8_000, wireBytes: 4_000 },
   "src/shared/data-table/TableRowMenu.tsx": { rawBytes: 8_000, wireBytes: 4_000 },
   "src/shared/data-table/DataTableSettingsDialog.tsx": { rawBytes: 12_000, wireBytes: 6_000 },
   "src/features/routing/rules/RoutingOrderDialog.tsx": { rawBytes: 40_000, wireBytes: 15_000 },
