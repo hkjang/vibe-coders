@@ -371,20 +371,20 @@ test("명령 팔레트의 전체 조회 무효화도 열린 메모 저장을 막
   await expect(dialog.getByLabel("새 메모", { exact: true })).toHaveValue(draftText);
 });
 
-for (const version of ["v0.86.15"]) {
-  test(`서버 버전 ${version ?? "누락"}은 새 편집 계약을 확인하지 못해 쓰기를 막는다`, async ({
+for (const requestAccess of [true, false]) {
+  test(`이전 서버는 메모 쓰기를 막고 요청 화면 권한 ${requestAccess ? "허용 시에만 연결한다" : "없으면 연결하지 않는다"}`, async ({
     page,
     gateway,
   }) => {
-    gateway.setVersion(version);
+    gateway.setVersion("v0.86.15");
+    gateway.setRequestAccess(requestAccess);
     await login(page);
     await showNote(page);
     await expect(card(page)).toContainText("v0.86.16");
     await expect(trigger(page)).toBeDisabled();
-    await expect(card(page).getByRole("link", { name: "기존 관리자에서 요청 열기" })).toHaveAttribute(
-      "href",
-      "/admin#/requests",
-    );
+    const legacy = card(page).getByRole("link", { name: "기존 화면에서 요청 열기", exact: true });
+    if (requestAccess) await expect(legacy).toHaveAttribute("href", "/admin#/requests");
+    else await expect(legacy).toHaveCount(0);
     expect(gateway.writes).toEqual([]);
   });
 }
