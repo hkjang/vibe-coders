@@ -2,10 +2,10 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "vibe-coders-v0.86.171-integrated-source-sbom",
-  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.171",
+  "name": "vibe-coders-v0.86.172-integrated-source-sbom",
+  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/v0.86.172",
   "creationInfo": {
-    "created": "2026-11-20T02:25:49Z",
+    "created": "2026-11-20T05:40:00Z",
     "creators": [
       "Tool: Syft-1.51.0",
       "Tool: scripts/merge-source-sbom.mjs",
@@ -20,8 +20,8 @@
     {
       "name": "vibe-coders",
       "SPDXID": "SPDXRef-Package-vibe-coders",
-      "versionInfo": "0.86.171",
-      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@v0.86.171",
+      "versionInfo": "0.86.172",
+      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@v0.86.172",
       "filesAnalyzed": false,
       "licenseConcluded": "AGPL-3.0-only",
       "licenseDeclared": "AGPL-3.0-only",
@@ -30,7 +30,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/vibe-coders@0.86.171"
+          "referenceLocator": "pkg:golang/vibe-coders@0.86.172"
         }
       ]
     },
@@ -2245,6 +2245,23 @@
       ]
     },
     {
+      "name": "@tanstack/react-virtual",
+      "SPDXID": "SPDXRef-Package-npm-tanstack-react-virtual-c682623371cbfdc0",
+      "versionInfo": "3.14.26",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40tanstack/react-virtual@3.14.26"
+        }
+      ]
+    },
+    {
       "name": "@tanstack/store",
       "SPDXID": "SPDXRef-Package-npm-tanstack-store-add405c7a9e3fdc9",
       "versionInfo": "0.11.1",
@@ -2275,6 +2292,23 @@
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
           "referenceLocator": "pkg:npm/%40tanstack/table-core@9.2.4"
+        }
+      ]
+    },
+    {
+      "name": "@tanstack/virtual-core",
+      "SPDXID": "SPDXRef-Package-npm-tanstack-virtual-core-94a6290cae327eb9",
+      "versionInfo": "3.19.11",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40tanstack/virtual-core@3.19.11"
         }
       ]
     },
@@ -7630,12 +7664,22 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-npm-tanstack-react-virtual-c682623371cbfdc0"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-vibe-coders",
+      "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-npm-tanstack-store-add405c7a9e3fdc9"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-npm-tanstack-table-core-3111cae499ae2b19"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-vibe-coders",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-npm-tanstack-virtual-core-94a6290cae327eb9"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",

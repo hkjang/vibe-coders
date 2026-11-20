@@ -4,6 +4,7 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { formatDateTime, formatNumber, formatPercent } from "@/shared/utils/format";
+import { ExpandableCellText } from "@/shared/data-table/ExpandableCellText";
 
 export interface ToolRow extends McpToolRisk {
   calls: number;
@@ -19,11 +20,15 @@ export function toolColumns(
   onEdit: (row: ToolRow, trigger: HTMLElement) => void,
 ): ReadonlyArray<DataTableColumn<ToolRow>> {
   return [
-    toolColumn.accessor((row) => row.server_label, { id: "server", header: "서버" }),
+    toolColumn.accessor((row) => row.server_label, {
+      id: "server",
+      header: "서버",
+      cell: (info) => <ExpandableCellText value={info.getValue<string>()} />,
+    }),
     toolColumn.accessor((row) => row.tool_name, {
       id: "tool",
       header: "도구",
-      cell: (info) => <span className="mono">{info.getValue<string>()}</span>,
+      cell: (info) => <ExpandableCellText value={info.getValue<string>()} mono />,
     }),
     toolColumn.accessor((row) => row.access_class, { id: "class", header: "접근 유형" }),
     toolColumn.accessor((row) => row.risk_level, {
@@ -92,7 +97,11 @@ interface ServerRow {
 }
 const serverColumn = createDataTableColumnHelper<ServerRow>();
 export const serverColumns = [
-  serverColumn.accessor((row) => row.server_label, { id: "server", header: "서버" }),
+  serverColumn.accessor((row) => row.server_label, {
+    id: "server",
+    header: "서버",
+    cell: (info) => <ExpandableCellText value={info.getValue<string>()} />,
+  }),
   serverColumn.accessor((row) => (row.is_mcp ? "MCP" : "일반 도구"), { id: "kind", header: "유형" }),
   serverColumn.accessor((row) => formatNumber(row.tools), { id: "tools", header: "도구 수" }),
   serverColumn.accessor((row) => formatNumber(row.calls), { id: "calls", header: "호출" }),
@@ -112,11 +121,15 @@ interface CatalogRow {
 }
 const catalogColumn = createDataTableColumnHelper<CatalogRow>();
 export const catalogColumns = [
-  catalogColumn.accessor((row) => row.server_label, { id: "server", header: "서버" }),
+  catalogColumn.accessor((row) => row.server_label, {
+    id: "server",
+    header: "서버",
+    cell: (info) => <ExpandableCellText value={info.getValue<string>()} />,
+  }),
   catalogColumn.accessor((row) => row.tool_name, {
     id: "tool",
     header: "도구",
-    cell: (info) => <span className="mono">{info.getValue<string>()}</span>,
+    cell: (info) => <ExpandableCellText value={info.getValue<string>()} mono />,
   }),
   catalogColumn.accessor((row) => (row.is_new ? "신규" : row.is_stale ? "유휴" : "정상"), {
     id: "state",
@@ -146,7 +159,7 @@ export const trustColumns = [
   trustColumn.accessor((row) => row.ref, {
     id: "ref",
     header: "서버/도구",
-    cell: (info) => <span className="mono">{info.getValue<string>()}</span>,
+    cell: (info) => <ExpandableCellText value={info.getValue<string>()} mono />,
   }),
   trustColumn.accessor((row) => row.trust_score, {
     id: "score",

@@ -78,7 +78,7 @@ async function edit() {
   await userEvent.click(
     await screen.findByRole("button", { name: "public-server write_item 위험 등급 편집" }),
   );
-  return screen.getByRole("dialog", { name: "도구 위험 등급" });
+  return screen.findByRole("dialog", { name: "도구 위험 등급" });
 }
 async function change(dialog: HTMLElement) {
   await userEvent.clear(within(dialog).getByLabelText("메모"));

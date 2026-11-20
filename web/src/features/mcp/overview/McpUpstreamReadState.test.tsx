@@ -79,7 +79,7 @@ it("preserves the edit draft while a read-only transition locks both click and d
   const edit = await screen.findByRole("button", { name: "수정" });
   await waitFor(() => expect(edit).toBeEnabled());
   await user.click(edit);
-  const dialog = screen.getByRole("dialog", { name: "업스트림 수정" });
+  const dialog = await screen.findByRole("dialog", { name: "업스트림 수정" });
   const input = within(dialog).getByLabelText(/^표시 이름/);
   await user.clear(input);
   await user.type(input, "보존할 서버 초안");

@@ -197,8 +197,9 @@ describe("McpPage", () => {
     renderPage("/mcp?tab=upstreams");
 
     await user.click(await screen.findByRole("button", { name: /업스트림 등록/ }));
-    const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText("표시 이름*"), "Docs MCP");
+    const name = await screen.findByLabelText("표시 이름*");
+    const dialog = screen.getByRole("dialog");
+    await user.type(name, "Docs MCP");
     await user.type(within(dialog).getByLabelText("MCP 엔드포인트 URL*"), "https://docs.example.com/mcp");
     await user.click(within(dialog).getByRole("button", { name: "등록" }));
 
