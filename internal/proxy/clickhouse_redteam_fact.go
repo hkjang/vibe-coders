@@ -84,34 +84,7 @@ func clickhouseRedTeamFactSink(ctx context.Context, client *http.Client, cfg con
 // syncRedTeamFacts ships red-team case-result facts created since the stored watermark; first run
 // backfills 7 days. Advances the "redteam_fact" watermark on success.
 func (s *Server) syncRedTeamFacts(ctx context.Context) (int, error) {
-	cfg := s.chConf()
-	if cfg.URL == "" || cfg.RedTeamFactTable == "" {
-		return 0, nil
-	}
-	since := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339Nano)
-	if states, err := s.db.ListClickHouseSinkState(ctx); err == nil {
-		for _, st := range states {
-			if st.Dimension == "redteam_fact" && st.LastSyncedDay != "" {
-				since = st.LastSyncedDay
-			}
-		}
-	}
-	rows, err := s.db.ListRedTeamCaseResultsSince(ctx, since, 5000)
-	if err != nil {
-		_ = s.db.RecordClickHouseSinkFailure(ctx, "redteam_fact", since, "result read: "+err.Error())
-		return 0, err
-	}
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	n, err := clickhouseRedTeamFactSink(ctx, s.client, cfg, rows)
-	if err != nil {
-		_ = s.db.RecordClickHouseSinkFailure(ctx, "redteam_fact", since, err.Error())
-		return 0, err
-	}
-	maxTS := rows[len(rows)-1].CreatedAt
-	_ = s.db.RecordClickHouseSinkSuccess(ctx, "redteam_fact", maxTS, int64(n))
-	return n, nil
+	return s.syncClickHouseFactDimension(ctx, "redteam_fact")
 }
 
 // handleClickHouseRedTeamFact manually triggers the red-team fact sink.

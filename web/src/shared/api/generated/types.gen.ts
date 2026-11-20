@@ -557,6 +557,66 @@ export type CostGuardConfigResponse = {
     threshold_krw: number;
 };
 
+export type DwRetryDimension = {
+    dimension: string;
+    estimated_rows: number;
+    issue: '' | 'invalid_source_interval' | 'not_configured' | 'fact_not_configured' | 'delivery_incomplete' | 'completion_unconfirmed' | 'new_failure_queued' | 'operation_interrupted';
+    sent_rows: number;
+    since: string;
+    status: 'queued' | 'blocked' | 'running' | 'succeeded' | 'failed' | 'pending' | 'not_run';
+    until: string;
+};
+
+export type DwRetryLegacyResult = {
+    failed: {
+        [key: string]: string;
+    };
+    recovered_dimensions: number;
+    sent_rows: number;
+};
+
+export type DwRetryProgress = {
+    dimensions: Array<DwRetryDimension>;
+    estimated_rows: number;
+    finished_dimensions: number;
+    sent_rows: number;
+};
+
+export type DwRetryReadResponse = DwRetryReview | DwRetryRun;
+
+export type DwRetryReview = {
+    all: boolean;
+    dimensions: Array<DwRetryDimension>;
+    eligible_dimensions: number;
+    estimated_rows: number;
+    expires_at: string;
+    reviewed_at: string;
+    revision: string;
+    run_id: string;
+};
+
+export type DwRetryReviewedRequest = {
+    all: boolean;
+    /**
+     * Trimmed nonblank reason; length in Unicode code points.
+     */
+    reason: string;
+    reviewed_at: string;
+    revision: string;
+};
+
+export type DwRetryRun = {
+    created_at: string;
+    finished_at: string;
+    id: string;
+    progress: DwRetryProgress;
+    reviewed_at: string;
+    status: 'running' | 'succeeded' | 'partial_failed' | 'failed' | 'interrupted';
+    updated_at: string;
+};
+
+export type DwRetryWriteResponse = DwRetryLegacyResult | DwRetryRun;
+
 export type EmbeddingCacheStats = {
     bytes: number;
     entries: number;
@@ -7242,19 +7302,122 @@ export type PostAdminDwRollupsResponses = {
     200: unknown;
 };
 
-export type PostAdminDwSinkRetryData = {
+export type GetAdminDwSinkRetryData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        all?: '0' | '1';
+        /**
+         * Mutually exclusive with all and other query keys.
+         */
+        job_id?: string;
+    };
     url: '/admin/dw/sink-retry';
 };
+
+export type GetAdminDwSinkRetryErrors = {
+    /**
+     * Malformed review, query or required reason.
+     */
+    400: AppError;
+    /**
+     * Existing admin authentication/scope rejection; readonly tokens cannot POST.
+     */
+    401: AppError;
+    /**
+     * Job belongs to another authenticated actor.
+     */
+    403: AppError;
+    /**
+     * No admitted job for this exact ID.
+     */
+    404: AppError;
+    /**
+     * Review expired, evidence changed, no eligible work or another reviewed retry is active; read again, never automatically repeat a mutation.
+     */
+    409: AppError;
+    /**
+     * Review, admission or durable job status unavailable. A lost response does not prove no admission: read the deterministic run_id.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminDwSinkRetryError = GetAdminDwSinkRetryErrors[keyof GetAdminDwSinkRetryErrors];
+
+export type GetAdminDwSinkRetryResponses = {
+    /**
+     * OK
+     */
+    200: DwRetryReadResponse;
+};
+
+export type GetAdminDwSinkRetryResponse = GetAdminDwSinkRetryResponses[keyof GetAdminDwSinkRetryResponses];
+
+export type PostAdminDwSinkRetryData = {
+    /**
+     * Required only when reviewed=1. Legacy requests do not require or consume a body.
+     */
+    body?: DwRetryReviewedRequest;
+    path?: never;
+    query?: {
+        reviewed?: '1';
+        /**
+         * Legacy POST only; mutually exclusive with reviewed.
+         */
+        all?: '0' | '1';
+    };
+    url: '/admin/dw/sink-retry';
+};
+
+export type PostAdminDwSinkRetryErrors = {
+    /**
+     * Malformed review, query or required reason.
+     */
+    400: AppError;
+    /**
+     * Existing admin authentication/scope rejection; readonly tokens cannot POST.
+     */
+    401: AppError;
+    /**
+     * Job belongs to another authenticated actor.
+     */
+    403: AppError;
+    /**
+     * No admitted job for this exact ID.
+     */
+    404: AppError;
+    /**
+     * Review expired, evidence changed, no eligible work or another reviewed retry is active; read again, never automatically repeat a mutation.
+     */
+    409: AppError;
+    /**
+     * Review, admission or durable job status unavailable. A lost response does not prove no admission: read the deterministic run_id.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminDwSinkRetryError = PostAdminDwSinkRetryErrors[keyof PostAdminDwSinkRetryErrors];
 
 export type PostAdminDwSinkRetryResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: DwRetryWriteResponse;
+    /**
+     * OK
+     */
+    202: DwRetryRun;
 };
+
+export type PostAdminDwSinkRetryResponse = PostAdminDwSinkRetryResponses[keyof PostAdminDwSinkRetryResponses];
 
 export type GetAdminDwSinkStatusData = {
     body?: never;

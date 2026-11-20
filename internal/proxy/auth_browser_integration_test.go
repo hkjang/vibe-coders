@@ -33,6 +33,7 @@ import (
 const browserAuthAccessTTL = 8 * time.Second
 
 type browserAuthHarness struct {
+	server           *Server
 	gateway          *httptest.Server
 	idp              *browserOIDCFixture
 	upstream         *browserAccessUpstream
@@ -153,6 +154,7 @@ func newBrowserAuthHarnessWithDomainFixtures(t *testing.T, domainFixtures bool) 
 	if err != nil {
 		t.Fatal("isolated gateway could not be initialized")
 	}
+	h.server = server
 	gateway.Config.Handler = server.Routes() // No test routes or authentication bypass.
 	gateway.Config.ErrorLog = log.New(io.Discard, "", 0)
 	gateway.Config.ReadHeaderTimeout = 3 * time.Second

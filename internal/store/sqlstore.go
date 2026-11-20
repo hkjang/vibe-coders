@@ -431,7 +431,7 @@ func renderForDialect(statement, dialect string) string {
 	// These indexes are introduced on high-write observability tables. PostgreSQL's
 	// ordinary CREATE INDEX blocks writers for the duration of the build; each migration
 	// statement runs outside an explicit transaction, so the concurrent form is safe here.
-	if strings.Contains(out, "idx_request_logs_legacy_time") || strings.Contains(out, "idx_workflow_runs_trace_metadata") || strings.Contains(out, "idx_ai_app_runs_trace_metadata") || strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
+	if strings.Contains(out, "idx_text2sql_sink_cursor") || strings.Contains(out, "idx_redteam_sink_cursor") || strings.Contains(out, "idx_analytics_sink_cursor") || strings.Contains(out, "idx_request_logs_legacy_time") || strings.Contains(out, "idx_workflow_runs_trace_metadata") || strings.Contains(out, "idx_ai_app_runs_trace_metadata") || strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
 		out = strings.Replace(out, "CREATE INDEX IF NOT EXISTS", "CREATE INDEX CONCURRENTLY IF NOT EXISTS", 1)
 	}
 	return out
@@ -1107,6 +1107,7 @@ func migrationStatements() []string {
 				created_at TEXT NOT NULL
 			)`,
 		`CREATE INDEX IF NOT EXISTS idx_text2sql_query_logs_created_at ON text2sql_query_logs(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_text2sql_sink_cursor ON text2sql_query_logs (` + appRequestCreatedAtExpr("created_at") + `,id) WHERE COALESCE(mode,'') <> 'shadow'`,
 		`ALTER TABLE text2sql_query_logs ADD COLUMN failure_category TEXT`,
 		`ALTER TABLE text2sql_query_logs ADD COLUMN explain_cost REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE text2sql_query_logs ADD COLUMN explain_risk INTEGER NOT NULL DEFAULT 0`,
@@ -1149,6 +1150,7 @@ func migrationStatements() []string {
 				first_failed_at TEXT,
 				last_attempt_at TEXT
 			)`,
+		clickHouseSinkRunsTable,
 		`CREATE TABLE IF NOT EXISTS text2sql_replay_bundles (
 				id TEXT PRIMARY KEY,
 				request_id TEXT,
@@ -1276,6 +1278,7 @@ func migrationStatements() []string {
 				PRIMARY KEY (day, dimension, dim_value)
 			)`,
 		`CREATE INDEX IF NOT EXISTS idx_analytics_daily_day ON analytics_daily(day)`,
+		`CREATE INDEX IF NOT EXISTS idx_analytics_sink_cursor ON analytics_daily(dimension,day,dim_value)`,
 		`CREATE TABLE IF NOT EXISTS pod_status (
 				hostname TEXT PRIMARY KEY,
 				build_version TEXT NOT NULL DEFAULT '',
@@ -2255,6 +2258,7 @@ func migrationStatements() []string {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_redteam_results_run ON redteam_case_results(run_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_redteam_sink_cursor ON redteam_case_results (` + appRequestCreatedAtExpr("created_at") + `,id)`,
 		`CREATE TABLE IF NOT EXISTS redteam_evidence (
 			id TEXT PRIMARY KEY,
 			result_id TEXT NOT NULL,

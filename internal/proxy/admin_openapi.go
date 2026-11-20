@@ -492,7 +492,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/dw/dashboard/export.csv", []string{"get"}, "dw", "DW dashboard CSV export (current filter)", false},
 	{"/admin/dw/consistency", []string{"get"}, "dw", "Local vs ClickHouse consistency", false},
 	{"/admin/dw/sink-status", []string{"get"}, "dw", "Sink watermarks + retry queue", false},
-	{"/admin/dw/sink-retry", []string{"post"}, "dw", "Reprocess sink retry queue", false},
+	{"/admin/dw/sink-retry", []string{"get", "post"}, "dw", "Reprocess sink retry queue", false},
 	{"/admin/dw/table-info", []string{"get"}, "dw", "Inspect target table engine/sort key", false},
 	{"/admin/dw/text2sql-fact", []string{"post"}, "dw", "Ship Text2SQL facts", false},
 	{"/admin/dw/redteam", []string{"post"}, "dw", "Ship Red Team case-result facts to ClickHouse", false},
@@ -834,6 +834,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["400"] = map[string]any{"description": "Webhook missing or malformed", "content": jsonContent(schemaRef("AppError"))}
 		responses["502"] = map[string]any{"description": "webhook_failed: transport failed or the receiver rejected the test message; response body and URL are not echoed", "content": jsonContent(schemaRef("AppError"))}
 		responses["503"] = map[string]any{"description": "mattermost_config_unavailable: saved configuration could not be loaded", "content": jsonContent(schemaRef("AppError"))}
+	case "get /admin/dw/sink-retry", "post /admin/dw/sink-retry":
+		enrichDwRetryOpenAPI(method, op, responses)
 	case "get /admin/cost", "post /admin/cost":
 		enrichCostGuardOpenAPIOperation(method, op, responses)
 	case "get /admin/kill-switch", "post /admin/kill-switch":
@@ -1245,6 +1247,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range settingsEditorOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range dwRetryOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range costGuardOpenAPISchemas() {

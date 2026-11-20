@@ -5,7 +5,7 @@ export const dataFeatureModules = defineFeatureModules([
   {
     featureId: "data.warehouse",
     load: () => import("@/features/data/warehouse/WarehousePage").then((module) => module.WarehousePage),
-    queryKeys: ["bucket", "days", "dimension", "order_by", "tab", "table", "window"],
+    queryKeys: ["bucket", "days", "dimension", "order_by", "tab", "table", "window", "retry_job"],
   },
   {
     featureId: "data.products",
