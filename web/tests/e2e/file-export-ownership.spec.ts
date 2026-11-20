@@ -131,7 +131,7 @@ async function install(page: Page, item: Scenario) {
     "/admin/privacy-ledger": { rows: [] },
     "/admin/dw/dashboard/overview": { configured: true },
     "/admin/dw/dashboard/timeseries": {},
-    "/admin/dw/dashboard/dimensions": {},
+    "/admin/dw/dashboard/dimensions": { configured: true, rows: [] },
     "/admin/dw/dashboard/latency": {},
     "/admin/dw/dashboard/quality": {},
     "/admin/dw/dashboard/routing": {},
