@@ -118,3 +118,7 @@
   margin: 0 0 var(--space-3);
   overflow-wrap: anywhere;
 }
+
+.settings-role-map {
+  scroll-padding-inline: var(--space-2);
+}

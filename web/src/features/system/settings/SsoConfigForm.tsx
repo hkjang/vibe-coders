@@ -4,6 +4,7 @@ import { useSsoDraft } from "@/features/system/settings/use-sso-draft";
 import { SsoRoleMapEditor } from "@/features/system/settings/SsoRoleMapEditor";
 import type { KeycloakConfig } from "@/shared/api/domains/system.schemas";
 import { FormField } from "@/shared/components/form/FormField";
+import { StickySaveBar } from "@/shared/components/form/StickySaveBar";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
@@ -49,7 +50,7 @@ function SsoEditor({ config, hasAdminWrite, roleOptions }: SsoConfigFormProps): 
   return (
     <>
       <form
-        className="form-grid"
+        className="form-grid form-with-sticky-save-bar"
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
@@ -181,7 +182,7 @@ function SsoEditor({ config, hasAdminWrite, roleOptions }: SsoConfigFormProps): 
             {editor.error}
           </p>
         ) : null}
-        <div className="settings-form-actions">
+        <StickySaveBar label="SSO 설정 저장 작업" dirty={editor.dirty} pending={guard.pending}>
           <Button
             ref={saveTriggerRef}
             type="submit"
@@ -194,7 +195,7 @@ function SsoEditor({ config, hasAdminWrite, roleOptions }: SsoConfigFormProps): 
             {editor.locked ? "최신 설정 다시 불러오기" : "변경 취소"}
           </Button>
           {!hasAdminWrite ? <p className="settings-permission-note">admin:write 권한이 필요합니다.</p> : null}
-        </div>
+        </StickySaveBar>
       </form>
       <Dialog
         open={editor.confirmation !== undefined}
