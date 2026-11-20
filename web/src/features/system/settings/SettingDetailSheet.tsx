@@ -26,6 +26,7 @@ import { formatDateTime } from "@/shared/utils/format";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
 import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
 import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
+import { settingLabel, settingCategoryLabel } from "./startup-auth-settings";
 
 export interface SettingSaveInput {
   setting: EffectiveSetting;
@@ -135,7 +136,8 @@ function SettingEditor({
         if (!next) guard.requestClose();
       }}
       size="wide"
-      title={setting.key}
+      scrollLabel={!permission.editable ? "설정 상세 내용" : undefined}
+      title={settingLabel(setting.key)}
       description={setting.description || "런타임 설정 값을 확인하고 변경합니다."}
       returnFocusRef={returnFocusRef}
       footer={
@@ -169,7 +171,14 @@ function SettingEditor({
         <KeyValueList
           columns={2}
           items={[
-            { label: "범주", value: setting.category, mono: true },
+            ...(settingLabel(setting.key) !== setting.key
+              ? [{ label: "설정 키", value: setting.key, mono: true }]
+              : []),
+            {
+              label: "범주",
+              value: settingCategoryLabel(setting.category),
+              mono: settingCategoryLabel(setting.category) === setting.category,
+            },
             { label: "유형", value: setting.type },
             { label: "현재 값", value: settingDisplayValue(setting), mono: !setting.is_secret },
             { label: "적용 출처", value: settingSourceLabel(setting.source) },

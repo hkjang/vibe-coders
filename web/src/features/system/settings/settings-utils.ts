@@ -1,5 +1,6 @@
 import { migrationStatusLabels } from "@/config/ui-labels";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
+import { settingLabel, startupAuthenticationValue } from "./startup-auth-settings";
 
 export const consoleSettingPrefix = "ui.app.";
 export const consoleFeaturePrefix = "ui.app.feature.";
@@ -53,6 +54,7 @@ export function filterSettings(
     if (!needle) return true;
     return (
       setting.key.toLowerCase().includes(needle) ||
+      settingLabel(setting.key).toLowerCase().includes(needle) ||
       setting.description.toLowerCase().includes(needle) ||
       setting.category.toLowerCase().includes(needle)
     );
@@ -62,6 +64,8 @@ export function filterSettings(
 /** Never renders a secret: the server masks it and the console shows only whether it is set. */
 export function settingDisplayValue(setting: EffectiveSetting): string {
   if (setting.is_secret) return setting.is_set ? "설정됨 (표시하지 않음)" : "미설정";
+  const startupValue = startupAuthenticationValue(setting.key, setting.value);
+  if (startupValue !== undefined) return startupValue;
   return setting.value === "" ? "(비어 있음)" : setting.value;
 }
 

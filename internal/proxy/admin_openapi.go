@@ -879,6 +879,13 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	case "post /tracking/csp-report":
 		responses["204"] = map[string]any{"description": "Report recorded"}
 		responses["404"] = map[string]any{"description": "Tracking is off"}
+	case "get /admin/settings/effective":
+		op["description"] = "Secret-masked effective settings and this pod's reload status. Read-only startup settings always use the process startup config; stale DB rows do not override their value or can_write. Authentication startup settings expose token durations and signing-key presence, never credentials."
+		op["parameters"] = []any{map[string]any{"name": "category", "in": "query", "schema": map[string]any{"type": "string"}, "description": "Exact category or dot-prefix parent, for example env.auth or env."}}
+		responses["200"] = successResponse("EffectiveSettingsResponse")
+		for code, description := range map[string]string{"401": "Existing administrator authentication or scope check failed.", "405": "Only GET is supported.", "500": "Settings lookup failed."} {
+			responses[code] = map[string]any{"description": description, "content": jsonContent(schemaRef("AppError"))}
+		}
 	case "put /admin/settings/by-key/{key}":
 		op["requestBody"] = requestBody("SettingWriteRequest")
 		responses["200"] = successResponse("AdminSettingView")
@@ -1254,6 +1261,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range settingsEditorOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range effectiveSettingsOpenAPISchemas(schemas["AdminSettingView"].(map[string]any)) {
 		schemas[name] = schema
 	}
 	for name, schema := range dwDashboardOpenAPISchemas() {

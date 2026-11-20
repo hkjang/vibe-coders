@@ -48,6 +48,10 @@
 .settings-key-cell small {
   color: var(--color-muted);
 }
+/* Keep setting names and their help readable inside the horizontal table scroller. */
+.data-table-auto td:has(.settings-key-cell) {
+  min-width: 22rem;
+}
 .settings-danger-actions,
 .settings-form-actions {
   display: flex;

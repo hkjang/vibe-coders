@@ -1,6 +1,7 @@
 import { Link, useSearchParams } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { sanitizeAppRouteSearch } from "@/shared/security/app-route-query";
+import { settingLabel } from "./startup-auth-settings";
 
 export function SettingKeyLink({ settingKey }: { settingKey: string }) {
   const [params] = useSearchParams();
@@ -16,7 +17,7 @@ export function SettingKeyLink({ settingKey }: { settingKey: string }) {
       data-setting-link
       onClick={(event) => event.stopPropagation()}
     >
-      {settingKey}
+      {settingLabel(settingKey)}
     </Link>
   );
 }

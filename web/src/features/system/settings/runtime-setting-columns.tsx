@@ -4,6 +4,7 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { formatDateTime } from "@/shared/utils/format";
 import { settingDisplayValue, settingSourceLabel } from "./settings-utils";
+import { settingLabel, settingCategoryLabel } from "./startup-auth-settings";
 
 function createSettingColumns(): ReadonlyArray<DataTableColumn<EffectiveSetting>> {
   const column = createDataTableColumnHelper<EffectiveSetting>();
@@ -14,11 +15,12 @@ function createSettingColumns(): ReadonlyArray<DataTableColumn<EffectiveSetting>
       cell: ({ row }) => (
         <div className="settings-key-cell">
           <SettingKeyLink settingKey={row.original.key} />
+          {settingLabel(row.original.key) !== row.original.key ? <code>{row.original.key}</code> : null}
           {row.original.description ? <small>{row.original.description}</small> : null}
         </div>
       ),
     }),
-    column.accessor((row) => row.category, { id: "category", header: "범주" }),
+    column.accessor((row) => settingCategoryLabel(row.category), { id: "category", header: "범주" }),
     column.accessor((row) => settingDisplayValue(row), {
       id: "value",
       header: "현재 값",

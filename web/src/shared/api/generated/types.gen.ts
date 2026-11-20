@@ -647,6 +647,52 @@ export type DwRetryRun = {
 
 export type DwRetryWriteResponse = DwRetryLegacyResult | DwRetryRun;
 
+export type EffectiveSettingLayer = {
+    active: boolean;
+    configured: boolean;
+    error?: boolean;
+    is_set: boolean;
+    name: string;
+    source: string;
+    updated_at?: string;
+    updated_by?: string;
+    value: string;
+    version?: number;
+    writable: boolean;
+};
+
+export type EffectiveSettingView = {
+    active_layer?: string;
+    can_write?: boolean;
+    category: string;
+    description: string;
+    effective_source?: string;
+    is_secret: boolean;
+    is_set?: boolean;
+    key: string;
+    layers?: Array<EffectiveSettingLayer>;
+    permission_group?: string;
+    read_only: boolean;
+    request_scoped?: boolean;
+    restart_required: boolean;
+    runtime_overridden?: boolean;
+    source: string;
+    type: string;
+    updated_at?: string;
+    updated_by?: string;
+    value: string;
+    value_error?: string;
+    version?: number;
+};
+
+export type EffectiveSettingsResponse = {
+    category?: string;
+    layers?: Array<string>;
+    resolution_order?: Array<string>;
+    settings: Array<EffectiveSettingView>;
+    this_pod?: SettingsPodStatus;
+};
+
 export type EmbeddingCacheStats = {
     bytes: number;
     entries: number;
@@ -4004,6 +4050,15 @@ export type SettingsBatchRequest = {
 export type SettingsBatchResponse = {
     applied: number;
     ok: boolean;
+};
+
+export type SettingsPodStatus = {
+    applied_token?: string;
+    current_token?: string;
+    hostname?: string;
+    last_reload_at?: string;
+    reload_interval?: string;
+    up_to_date?: boolean;
 };
 
 export type SkillCatalogList = {
@@ -14422,16 +14477,44 @@ export type PutAdminSettingsByKeyKeyResponse = PutAdminSettingsByKeyKeyResponses
 export type GetAdminSettingsEffectiveData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Exact category or dot-prefix parent, for example env.auth or env.
+         */
+        category?: string;
+    };
     url: '/admin/settings/effective';
 };
+
+export type GetAdminSettingsEffectiveErrors = {
+    /**
+     * Existing administrator authentication or scope check failed.
+     */
+    401: AppError;
+    /**
+     * Only GET is supported.
+     */
+    405: AppError;
+    /**
+     * Settings lookup failed.
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSettingsEffectiveError = GetAdminSettingsEffectiveErrors[keyof GetAdminSettingsEffectiveErrors];
 
 export type GetAdminSettingsEffectiveResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: EffectiveSettingsResponse;
 };
+
+export type GetAdminSettingsEffectiveResponse = GetAdminSettingsEffectiveResponses[keyof GetAdminSettingsEffectiveResponses];
 
 export type GetAdminSettingsExportData = {
     body?: never;

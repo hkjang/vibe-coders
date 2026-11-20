@@ -42,6 +42,7 @@ import { useSearchState } from "@/shared/hooks/use-search-state";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { downloadText } from "@/shared/utils/csv";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
+import { settingLabel, settingCategoryLabel } from "./startup-auth-settings";
 
 const system = endpoints.domains.system;
 
@@ -246,7 +247,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
             <option value="">전체 범주</option>
             {categories.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {settingCategoryLabel(item)}
               </option>
             ))}
           </Select>
@@ -286,6 +287,13 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
           ) : null}
         </form>
       </Toolbar>
+
+      {category === "env.auth" ? (
+        <InlineNotice tone="info" title="인증 시작 설정">
+          이 파드가 시작할 때 읽은 환경변수·기본값입니다. 변경은 배포 환경에서 적용한 뒤 재시작해야 합니다.
+          로그인 허용 방식은 SSO 설정도 함께 확인하세요.
+        </InlineNotice>
+      ) : null}
 
       <section aria-label="연결 테스트" className="settings-test-row">
         {connectionTests.map((test) => (
@@ -327,7 +335,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
           caption="런타임 설정 목록"
           columns={settingColumns}
           data={rows}
-          getRowActionLabel={(row) => `${row.key} 설정 열기`}
+          getRowActionLabel={(row) => `${settingLabel(row.key)} 설정 열기`}
           getRowId={(row) => row.key}
           loading={settingsQuery.isPending}
           onRowClick={openSetting}

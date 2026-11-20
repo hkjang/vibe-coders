@@ -2565,6 +2565,172 @@
           }
         ]
       },
+      "EffectiveSettingLayer": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "is_set": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "writable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "configured",
+          "active",
+          "value",
+          "is_set",
+          "writable"
+        ],
+        "type": "object"
+      },
+      "EffectiveSettingView": {
+        "additionalProperties": false,
+        "properties": {
+          "active_layer": {
+            "type": "string"
+          },
+          "can_write": {
+            "type": "boolean"
+          },
+          "category": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "effective_source": {
+            "type": "string"
+          },
+          "is_secret": {
+            "type": "boolean"
+          },
+          "is_set": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "layers": {
+            "items": {
+              "$ref": "#/components/schemas/EffectiveSettingLayer"
+            },
+            "type": "array"
+          },
+          "permission_group": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "request_scoped": {
+            "type": "boolean"
+          },
+          "restart_required": {
+            "type": "boolean"
+          },
+          "runtime_overridden": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "value_error": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "category",
+          "type",
+          "is_secret",
+          "restart_required",
+          "source",
+          "description",
+          "read_only",
+          "value"
+        ],
+        "type": "object"
+      },
+      "EffectiveSettingsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "layers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "resolution_order": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/EffectiveSettingView"
+            },
+            "type": "array"
+          },
+          "this_pod": {
+            "$ref": "#/components/schemas/SettingsPodStatus"
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "type": "object"
+      },
       "EmbeddingCacheStats": {
         "additionalProperties": false,
         "properties": {
@@ -13941,6 +14107,30 @@
         ],
         "type": "object"
       },
+      "SettingsPodStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_token": {
+            "type": "string"
+          },
+          "current_token": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "last_reload_at": {
+            "type": "string"
+          },
+          "reload_interval": {
+            "type": "string"
+          },
+          "up_to_date": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "SkillCatalogList": {
         "additionalProperties": false,
         "properties": {
@@ -17354,7 +17544,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.177"
+    "version": "v0.86.178"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -34605,10 +34795,68 @@
     },
     "/admin/settings/effective": {
       "get": {
+        "description": "Secret-masked effective settings and this pod's reload status. Read-only startup settings always use the process startup config; stale DB rows do not override their value or can_write. Authentication startup settings expose token durations and signing-key presence, never credentials.",
         "operationId": "get__admin_settings_effective",
+        "parameters": [
+          {
+            "description": "Exact category or dot-prefix parent, for example env.auth or env.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveSettingsResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing administrator authentication or scope check failed."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Only GET is supported."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Settings lookup failed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
