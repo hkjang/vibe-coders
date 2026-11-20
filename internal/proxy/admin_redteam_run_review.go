@@ -30,6 +30,7 @@ type redTeamReviewedTarget struct {
 }
 
 type redTeamRunReviewResponse struct {
+	JobID                 string                  `json:"job_id,omitempty"`
 	ReviewToken           string                  `json:"review_token"`
 	ReviewID              string                  `json:"review_id"`
 	ExpiresAt             string                  `json:"expires_at"`
@@ -107,6 +108,9 @@ func (s *Server) handleRedTeamRunReview(w http.ResponseWriter, r *http.Request, 
 func redTeamPlanReviewResponse(plan *redTeamRunPlan, review redTeamExecutionReview, token string) redTeamRunReviewResponse {
 	campaign := plan.Campaign
 	response := redTeamRunReviewResponse{ReviewToken: token, ReviewID: review.ID, ExpiresAt: review.ExpiresAt.UTC().Format(time.RFC3339Nano), Scope: "responding_server", CampaignID: campaign.ID, CampaignName: campaign.Name, Kind: review.Kind, Reason: review.Reason, Limits: review.Limits, Targets: []redTeamReviewedTarget{}, PackIDs: []string{}, LiveCalls: plan.LiveCalls, CaseExecutions: plan.CaseExecutions, EstimatedCost: plan.EstimatedCost, RequestedOutputTokens: plan.LiveCalls * review.Limits.MaxOutputTokens, InputBytes: plan.InputBytes, TimeoutMS: int(redTeamReviewedTimeout(campaign).Milliseconds()), RetainRawEvidence: campaign.RetainRawEvidence}
+	if review.SourceResultID == "" {
+		response.JobID = redTeamJobID(token)
+	}
 	for _, pack := range plan.Packs {
 		response.PackIDs = append(response.PackIDs, pack.ID)
 	}
@@ -131,38 +135,70 @@ func redTeamPlanReviewResponse(plan *redTeamRunPlan, review redTeamExecutionRevi
 	return response
 }
 
+type redTeamExecutionRequest struct {
+	ReviewToken string `json:"review_token"`
+	ProxyKey    string `json:"proxy_key"`
+}
+
 func (s *Server) handleRedTeamReviewedExecution(w http.ResponseWriter, r *http.Request, campaign store.RedTeamCampaign) {
-	var body struct {
-		ReviewToken string `json:"review_token"`
-		ProxyKey    string `json:"proxy_key"`
-	}
+	var body redTeamExecutionRequest
 	if !readRedTeamReviewJSON(w, r, &body) {
 		return
 	}
-	review, ok := s.redTeamReviews.consume(body.ReviewToken, s.adminKeyActor(r), campaign.ID)
+	if _, present := r.URL.Query()["job"]; present {
+		s.handleRedTeamJobSubmission(w, r, campaign, body)
+		return
+	}
+	review, plan, ok := s.consumeRedTeamExecution(w, r, campaign, &body)
 	if !ok {
-		writeOpenAIError(w, http.StatusConflict, "review expired, consumed, busy or belongs to another server/actor", "invalid_request_error", "redteam_run_review_conflict")
 		return
 	}
 	defer s.redTeamReviews.finish(campaign.ID)
-	body.ProxyKey = strings.TrimSpace(body.ProxyKey)
-	if (len(body.ProxyKey) > 8192) || (review.Kind == "live" && body.ProxyKey == "") || (review.Kind == "simulation" && body.ProxyKey != "") {
-		writeOpenAIError(w, http.StatusBadRequest, "credential does not match reviewed execution kind", "invalid_request_error", "redteam_run_review_invalid")
-		return
-	}
-	plan, err := s.prepareRedTeamRunPlan(r, campaign, review.Kind, review.Limits, review.Models)
-	if err != nil || plan.revision() != review.Revision || redteamKillSwitch.Load() {
-		writeOpenAIError(w, http.StatusConflict, "reviewed definitions or emergency state changed; review again", "invalid_request_error", "redteam_run_review_changed")
-		return
-	}
-	// This acknowledges intent before any live call. A database uncertainty or
-	// lost response consumes the review; it must never authorize an automatic retry.
+	// A database uncertainty or lost response consumes the review; it must
+	// never authorize an automatic retry of this synchronous Legacy contract.
 	if err := s.db.InsertAdminAudit(r.Context(), store.AdminAuditLog{ID: newID("audit"), AdminID: review.Actor, Action: "redteam.campaign.run.reviewed", AfterValue: auditJSON(map[string]any{"campaign_id": campaign.ID, "review_id": review.ID, "reason": review.Reason, "kind": review.Kind, "revision": review.Revision, "limits": review.Limits, "planned_live_calls": plan.LiveCalls}), CreatedAt: time.Now().UTC()}); err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "reviewed admission audit not confirmed", "server_error", "redteam_run_review_audit_failed")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), redTeamReviewedTimeout(campaign))
 	defer cancel()
+	result, err := s.executeRedTeamReviewed(r.WithContext(ctx), campaign, body.ProxyKey, review, plan)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "reviewed execution outcome unavailable", "server_error", "redteam_run_review_outcome_unknown")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// Both transport lifecycles consume the same actor-bound capability and validate
+// the same exact selection; no second selection/authorization implementation.
+func (s *Server) consumeRedTeamExecution(w http.ResponseWriter, r *http.Request, campaign store.RedTeamCampaign, body *redTeamExecutionRequest) (redTeamExecutionReview, *redTeamRunPlan, bool) {
+	review, ok := s.redTeamReviews.consume(body.ReviewToken, s.adminKeyActor(r), campaign.ID)
+	if !ok {
+		writeOpenAIError(w, http.StatusConflict, "review expired, consumed, busy or belongs to another server/actor", "invalid_request_error", "redteam_run_review_conflict")
+		return review, nil, false
+	}
+	valid := false
+	defer func() {
+		if !valid {
+			s.redTeamReviews.finish(campaign.ID)
+		}
+	}()
+	body.ProxyKey = strings.TrimSpace(body.ProxyKey)
+	if (len(body.ProxyKey) > 8192) || (review.Kind == "live" && body.ProxyKey == "") || (review.Kind == "simulation" && body.ProxyKey != "") {
+		writeOpenAIError(w, http.StatusBadRequest, "credential does not match reviewed execution kind", "invalid_request_error", "redteam_run_review_invalid")
+		return review, nil, false
+	}
+	plan, err := s.prepareRedTeamRunPlan(r, campaign, review.Kind, review.Limits, review.Models)
+	if err != nil || plan.revision() != review.Revision || redteamKillSwitch.Load() {
+		writeOpenAIError(w, http.StatusConflict, "reviewed definitions or emergency state changed; review again", "invalid_request_error", "redteam_run_review_changed")
+		return review, nil, false
+	}
+	valid = true
+	return review, plan, true
+}
+
+func (s *Server) executeRedTeamReviewed(r *http.Request, campaign store.RedTeamCampaign, key string, review redTeamExecutionReview, plan *redTeamRunPlan) (map[string]any, error) {
 	execution := campaign
 	execution.BudgetLimitKRW = review.Limits.BudgetLimitKRW
 	if review.Kind == "simulation" {
@@ -171,14 +207,13 @@ func (s *Server) handleRedTeamReviewedExecution(w http.ResponseWriter, r *http.R
 	// Persist the admitted review on every run before calling the provider, so
 	// pending and uncertain responses can be inspected without executing again.
 	plan.ReviewID = review.ID
-	result, err := s.runRedTeamSelectionReviewed(r.WithContext(ctx), execution, body.ProxyKey, plan.Targets, plan.Packs, plan.Cases, plan)
+	result, err := s.runRedTeamSelectionReviewed(r, execution, key, plan.Targets, plan.Packs, plan.Cases, plan)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, "reviewed execution outcome unavailable", "server_error", "redteam_run_review_outcome_unknown")
-		return
+		return nil, err
 	}
 	result["review_id"], result["execution_kind"], result["limits"] = review.ID, review.Kind, review.Limits
 	result["planned_live_calls"], result["planned_case_executions"] = plan.LiveCalls, plan.CaseExecutions
 	summary := result["summary"].(map[string]any)
-	result["complete"] = result["recording"].(redTeamRecording).Confirmed && result["status"] == "completed" && summary["live_calls"] == plan.LiveCalls && summary["results"] == plan.CaseExecutions && ctx.Err() == nil
-	writeJSON(w, http.StatusOK, result)
+	result["complete"] = result["recording"].(redTeamRecording).Confirmed && result["status"] == "completed" && summary["live_calls"] == plan.LiveCalls && summary["results"] == plan.CaseExecutions && r.Context().Err() == nil
+	return result, nil
 }

@@ -220,24 +220,48 @@ func verifyRedTeamBrowserStorage(t *testing.T, h *browserAuthHarness) {
 	if err != nil {
 		t.Fatal("execution audit unavailable")
 	}
-	admissions := 0
+	admissions, jobAdmissions, jobCompletions := 0, 0, 0
 	for _, row := range audits {
+		if row.Action == "redteam.job.requested" || row.Action == "redteam.job.completed" {
+			if row.AdminID != "browser-local-admin" {
+				t.Fatal("job audit lost browser actor")
+			}
+			if row.Action == "redteam.job.requested" {
+				jobAdmissions++
+				var admission struct {
+					CampaignID string                     `json:"campaign_id"`
+					Review     store.RedTeamJobDefinition `json:"review"`
+				}
+				if json.Unmarshal([]byte(row.AfterValue), &admission) != nil || admission.Review.ReviewID == "" || admission.Review.Reason != "격리 브라우저 업무 검증" {
+					t.Fatal("review admission identity or reason missing")
+				}
+				matched, total, err := h.db.RedTeamRunPage(t.Context(), store.RedTeamRunQuery{Limit: 25, CampaignID: admission.CampaignID, ReviewID: admission.Review.ReviewID, Kind: "campaign"})
+				if err != nil || total != 1 || len(matched) != 1 || matched[0].ReviewID != admission.Review.ReviewID || matched[0].Status == "running" {
+					t.Fatal("browser execution cannot be traced to its admission review")
+				}
+				admissions++
+			} else {
+				jobCompletions++
+				var payload struct {
+					JobID string `json:"job_id"`
+				}
+				if json.Unmarshal([]byte(row.AfterValue), &payload) != nil {
+					t.Fatal("invalid job audit")
+				}
+				job, found, err := h.db.RedTeamJob(t.Context(), payload.JobID)
+				if err != nil || !found || job.Actor != "browser-local-admin" || job.Status == "running" || len(job.Outcome) == 0 {
+					t.Fatal("durable browser outcome missing")
+				}
+			}
+		}
 		if row.Action == "redteam.campaign.run.reviewed" {
-			admissions++
-			var admission struct {
-				CampaignID string `json:"campaign_id"`
-				ReviewID   string `json:"review_id"`
-			}
-			if json.Unmarshal([]byte(row.AfterValue), &admission) != nil || admission.ReviewID == "" {
-				t.Fatal("review admission identity missing")
-			}
-			matched, total, err := h.db.RedTeamRunPage(t.Context(), store.RedTeamRunQuery{Limit: 25, CampaignID: admission.CampaignID, ReviewID: admission.ReviewID, Kind: "campaign"})
-			if err != nil || total != 1 || len(matched) != 1 || matched[0].ReviewID != admission.ReviewID || matched[0].Status == "running" {
-				t.Fatal("browser execution cannot be traced to its admission review")
-			}
+			t.Fatal("job transport unexpectedly used synchronous admission")
 		}
 	}
 	if admissions != 4 {
 		t.Fatal("reviewed execution admission audit count mismatch")
+	}
+	if jobAdmissions != 4 || jobCompletions != 4 {
+		t.Fatal("job admission or completion audit is missing or duplicated")
 	}
 }

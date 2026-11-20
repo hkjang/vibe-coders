@@ -31,6 +31,10 @@ export const reviewedModelsSchema = z
   .refine((value) => new Set(value).size === value.length, "모델 이름이 중복됩니다.");
 export const redTeamReviewSchema = z
   .object({
+    job_id: z
+      .string()
+      .regex(/^rtj_[a-f0-9]{64}$/u)
+      .optional(),
     review_token: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
     review_id: z.string().min(1),
     expires_at: z.iso.datetime({ offset: true }),

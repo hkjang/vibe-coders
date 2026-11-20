@@ -796,6 +796,7 @@ export const openApiOperations = [
   { method: "POST", path: "/admin/redteam/campaigns/{id}/dry-run" },
   { method: "POST", path: "/admin/redteam/campaigns/{id}/run" },
   { method: "POST", path: "/admin/redteam/campaigns/{id}/run-review" },
+  { method: "GET", path: "/admin/redteam/campaigns/{id}/run-reviewed" },
   { method: "POST", path: "/admin/redteam/campaigns/{id}/run-reviewed" },
   { method: "GET", path: "/admin/redteam/dashboard" },
   { method: "POST", path: "/admin/redteam/export" },

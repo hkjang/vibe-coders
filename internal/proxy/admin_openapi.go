@@ -143,7 +143,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/redteam/campaigns/{id}/dry-run", []string{"post"}, "redteam", "Red Team dry-run preview without upstream calls", false},
 	{"/admin/redteam/campaigns/{id}/approve", []string{"post"}, "redteam", "Approve a high-risk Red Team campaign", false},
 	{"/admin/redteam/campaigns/{id}/run-review", []string{"post"}, "redteam", "Review bounded Red Team execution without model calls", false},
-	{"/admin/redteam/campaigns/{id}/run-reviewed", []string{"post"}, "redteam", "Consume reviewed Red Team execution once", false},
+	{"/admin/redteam/campaigns/{id}/run-reviewed", []string{"get", "post"}, "redteam", "Consume reviewed Red Team execution once or read its owned job", false},
 	{"/admin/redteam/campaigns/{id}/run", []string{"post"}, "redteam", "Run a controlled Red Team campaign", false},
 	{"/admin/redteam/runs", []string{"get"}, "redteam", "Red Team run history", false},
 	{"/admin/redteam/runs/{id}", []string{"get"}, "redteam", "Red Team run detail", false},
@@ -844,6 +844,11 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichRedTeamEmergencyOpenAPI(method, op, responses)
 	case "post /admin/redteam/campaigns/{id}/run-review", "post /admin/redteam/campaigns/{id}/run-reviewed":
 		enrichRedTeamRunReviewOpenAPI(key, op, responses)
+		if strings.HasSuffix(key, "/run-reviewed") {
+			enrichRedTeamJobOpenAPI("post", op, responses)
+		}
+	case "get /admin/redteam/campaigns/{id}/run-reviewed":
+		enrichRedTeamJobOpenAPI("get", op, responses)
 	case "post /admin/redteam/results/{id}/rerun-review", "post /admin/redteam/results/{id}/rerun-reviewed":
 		enrichRedTeamReplayOpenAPI(key, op, responses)
 	case "post /admin/redteam/campaigns/{id}/dry-run":

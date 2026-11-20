@@ -9671,6 +9671,113 @@
         ],
         "type": "object"
       },
+      "RedTeamExecutionJob": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "id": {
+            "description": "Safe recovery reference for optional job=1 admission; not a bearer capability.",
+            "pattern": "^rtj_[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "live",
+              "simulation"
+            ],
+            "type": "string"
+          },
+          "outcome": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RedTeamReviewedExecutionResponse"
+              }
+            ],
+            "nullable": true
+          },
+          "planned_case_executions": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "planned_live_calls": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "progress": {
+            "additionalProperties": false,
+            "properties": {
+              "completed_cases": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "cost_krw": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "live_calls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "run_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "completed_cases",
+              "cost_krw",
+              "live_calls",
+              "run_ids"
+            ],
+            "type": "object"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "review_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "completed",
+              "stopped",
+              "unknown",
+              "interrupted"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "created_at",
+          "finished_at",
+          "id",
+          "kind",
+          "outcome",
+          "planned_case_executions",
+          "planned_live_calls",
+          "progress",
+          "reason",
+          "review_id",
+          "status",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "RedTeamPreflightResponse": {
         "properties": {
           "active_eligible_targets": {
@@ -10903,6 +11010,16 @@
         ],
         "type": "object"
       },
+      "RedTeamReviewedWriteResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RedTeamReviewedExecutionResponse"
+          },
+          {
+            "$ref": "#/components/schemas/RedTeamExecutionJob"
+          }
+        ]
+      },
       "RedTeamRunLegacyList": {
         "additionalProperties": false,
         "properties": {
@@ -11110,6 +11227,11 @@
           },
           "expires_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "job_id": {
+            "description": "Safe recovery reference for optional job=1 admission; not a bearer capability.",
+            "pattern": "^rtj_[a-f0-9]{64}$",
             "type": "string"
           },
           "kind": {
@@ -17121,7 +17243,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.173"
+    "version": "v0.86.174"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -28597,10 +28719,146 @@
       }
     },
     "/admin/redteam/campaigns/{id}/run-reviewed": {
+      "get": {
+        "description": "Read an admitted reviewed-campaign job using existing admin:read authentication and exact actor ownership. Status is durable and readable across server processes, even after campaign deletion. A stale worker lease is reported interrupted without dispatching or mutating the job. No credential, review capability, prompt, raw response, worker token or lease is returned. All responses are no-store.",
+        "operationId": "get__admin_redteam_campaigns_id_run_reviewed",
+        "parameters": [
+          {
+            "description": "Sole query parameter; use the job_id supplied in the review before submission.",
+            "in": "query",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^rtj_[a-f0-9]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedTeamExecutionJob"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Consume reviewed Red Team execution once or read its owned job",
+        "tags": [
+          "redteam"
+        ]
+      },
       "post": {
-        "description": "Existing admin:write campaign runner, explicit live or simulation selection. A server-local, actor-bound review expires after five minutes and is consumed before admission audit or execution. Registered definitions and provider/runtime configuration are revalidated. Live model discovery and automatic routing aliases are disabled. The reviewed physical model identity is checked after routing; deprecation replacements and context-overflow retries to another model are refused. Reviewed probes do not follow HTTP redirects to another endpoint. Maximum 200 model probes, requested output tokens per call 1..4096, sequential execution, at most 120 seconds. A positive KRW limit stops subsequent calls after measured/estimated cost reaches it; the last call can exceed it. Gateway internal retries and expanded input are not covered by probe/output-request counts. Text2SQL targets are simulation-only, like MCP/app/workflow targets. Live model names must be physical: Text2SQL, MCP discovery and enabled agent-route virtual models are rejected both during preparation and at their execution boundary. Nested generation/review/summary/shadow calls are not covered by this review. Current routing and security policies still apply; concurrent external configuration writes are not locked. Only reviewed runs of the same campaign on this Server are serialized; legacy/scheduled/other-server executions are not. Reviewed runs require acknowledged result/evidence/remediation bundles and atomic run/campaign/baseline finalization. Recording failures stop later calls and return recording.confirmed=false; complete requires confirmed storage. These acknowledgements are not whole-execution rollback, crash recovery or exactly-once model invocation. Never automatically replay or fall back to the legacy run endpoint after an uncertain response.",
+        "description": "Existing admin:write campaign runner, explicit live or simulation selection. A server-local, actor-bound review expires after five minutes and is consumed before admission audit or execution. Registered definitions and provider/runtime configuration are revalidated. Live model discovery and automatic routing aliases are disabled. The reviewed physical model identity is checked after routing; deprecation replacements and context-overflow retries to another model are refused. Reviewed probes do not follow HTTP redirects to another endpoint. Maximum 200 model probes, requested output tokens per call 1..4096, sequential execution, at most 120 seconds. A positive KRW limit stops subsequent calls after measured/estimated cost reaches it; the last call can exceed it. Gateway internal retries and expanded input are not covered by probe/output-request counts. Text2SQL targets are simulation-only, like MCP/app/workflow targets. Live model names must be physical: Text2SQL, MCP discovery and enabled agent-route virtual models are rejected both during preparation and at their execution boundary. Nested generation/review/summary/shadow calls are not covered by this review. Current routing and security policies still apply; concurrent external configuration writes are not locked. Only reviewed runs of the same campaign on this Server are serialized; legacy/scheduled/other-server executions are not. Reviewed runs require acknowledged result/evidence/remediation bundles and atomic run/campaign/baseline finalization. Recording failures stop later calls and return recording.confirmed=false; complete requires confirmed storage. These acknowledgements are not whole-execution rollback, crash recovery or exactly-once model invocation. Never automatically replay or fall back to the legacy run endpoint after an uncertain response. Optional job=1 acknowledges an actor-owned durable operation with202 after atomic job/admission-audit commit. A duplicate accepted capability returns the same job with200 and never invokes again. Job IDs are safe recovery references, not credentials. Only this job mode excludes active jobs for the same campaign across DB pools; synchronous Legacy/scheduled/replay executions retain their existing behavior. The shared runner outlives browser cancellation but is bounded by server lifecycle and the same120s maximum. Its sole proxy key remains in worker memory and is never stored. Progress and completion are conditional on a live worker lease; final job state and its audit commit together. Restart/expired lease/uncertain storage never automatically redispatches. This is not exactly-once provider invocation or a cross-system transaction. GET with job_id reads the same operation; do not submit another run to recover a lost reply.",
         "operationId": "post__admin_redteam_campaigns_id_run_reviewed",
         "parameters": [
+          {
+            "description": "Sole optional query parameter. Without it, the existing synchronous response is unchanged.",
+            "in": "query",
+            "name": "job",
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "id",
@@ -28625,7 +28883,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RedTeamReviewedExecutionResponse"
+                  "$ref": "#/components/schemas/RedTeamReviewedWriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedTeamExecutionJob"
                 }
               }
             },
@@ -28639,7 +28907,7 @@
                 }
               }
             },
-            "description": "Review rejected or outcome unknown; read current history before a new review"
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
           },
           "401": {
             "content": {
@@ -28649,7 +28917,7 @@
                 }
               }
             },
-            "description": "Review rejected or outcome unknown; read current history before a new review"
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
           },
           "403": {
             "content": {
@@ -28659,7 +28927,7 @@
                 }
               }
             },
-            "description": "Review rejected or outcome unknown; read current history before a new review"
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
           },
           "404": {
             "content": {
@@ -28669,7 +28937,7 @@
                 }
               }
             },
-            "description": "Review rejected or outcome unknown; read current history before a new review"
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
           },
           "409": {
             "content": {
@@ -28679,7 +28947,7 @@
                 }
               }
             },
-            "description": "Review rejected or outcome unknown; read current history before a new review"
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
           },
           "500": {
             "content": {
@@ -28689,7 +28957,7 @@
                 }
               }
             },
-            "description": "Review rejected or outcome unknown; read current history before a new review"
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
           },
           "503": {
             "content": {
@@ -28699,7 +28967,7 @@
                 }
               }
             },
-            "description": "Review rejected or outcome unknown; read current history before a new review"
+            "description": "Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work."
           },
           "default": {
             "content": {
@@ -28717,7 +28985,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Consume reviewed Red Team execution once",
+        "summary": "Consume reviewed Red Team execution once or read its owned job",
         "tags": [
           "redteam"
         ]

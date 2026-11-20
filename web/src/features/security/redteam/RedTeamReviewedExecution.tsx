@@ -1,5 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useAuth } from "@/app/auth/AuthProvider";
 import { apiClient } from "@/shared/api/client";
+import { submitReviewedJob } from "./submit-reviewed-job";
+import { validRedTeamJobId, type RedTeamJobRef } from "@/shared/utils/redteam-job-query";
+import { validRunRef } from "@/shared/utils/redteam-run-query";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { AppError, isAppError } from "@/shared/api/error";
 import { withPathParams, type RedTeamCampaign } from "@/shared/api/domains/redteam";
@@ -37,6 +41,8 @@ export function RedTeamReviewedExecution({
   onClose,
   onResult,
   onPending,
+  onJobTracked,
+  onJobAccepted,
   historyAvailable,
   onOpenHistory,
   returnFocusRef,
@@ -47,11 +53,14 @@ export function RedTeamReviewedExecution({
   onClose: () => void;
   onResult: (outcome: ReviewedRedTeamOutcome) => void;
   onPending: (pending: boolean) => void;
+  onJobTracked?: (job: RedTeamJobRef) => void;
+  onJobAccepted?: (job: RedTeamJobRef) => void;
   historyAvailable?: (reviewId: string) => boolean;
   onOpenHistory?: (reviewId: string) => void;
   returnFocusRef: RefObject<HTMLElement | null>;
 }): React.JSX.Element {
   const access = useFeatureMutationAccess(["security.redteam"], canWrite);
+  const { credentialPrefixes } = useAuth();
   const [originalKey] = useState(proxyKey);
   const currentKey = useRef(proxyKey);
   const active = useRef(true);
@@ -160,10 +169,25 @@ export function RedTeamReviewedExecution({
     try {
       assertCurrent();
       if (Date.parse(candidate.expires_at) <= Date.now()) throw unavailable();
+      if (
+        candidate.job_id &&
+        (!onJobTracked ||
+          !onJobAccepted ||
+          !validRedTeamJobId(candidate.job_id) ||
+          !validRunRef(campaign.id, credentialPrefixes))
+      )
+        throw unavailable();
       sent.current = true;
       setConsumed(true);
       setPending(true);
-      onPending(true);
+      onPending(!candidate.job_id);
+      if (candidate.job_id) {
+        onJobTracked?.({ id: candidate.job_id, campaign: campaign.id });
+        const job = await submitReviewedJob(candidate, originalKey);
+        assertCurrent();
+        onJobAccepted?.({ id: job.id, campaign: job.campaign_id });
+        return;
+      }
       const result = reviewedOutcomeSchema.parse(
         await apiClient.request(withPathParams(redTeamReviewedEndpoints.execute, { id: campaign.id }), {
           body: {
@@ -241,7 +265,11 @@ export function RedTeamReviewedExecution({
               }
               onClick={() => void execute()}
             >
-              {pending ? "실행 결과 확인 중…" : "검토한 조건으로 한 번 실행"}
+              {pending
+                ? review.job_id
+                  ? "작업 접수 확인 중…"
+                  : "실행 결과 확인 중…"
+                : "검토한 조건으로 한 번 실행"}
             </Button>
           </div>
         }
@@ -255,7 +283,11 @@ export function RedTeamReviewedExecution({
           ) : null}
           <div ref={feedbackRef} className="rt-execution-feedback" tabIndex={-1} role="status">
             {pending ? (
-              <p role="status">실행 중입니다. 패널을 닫아도 이미 전송한 호출은 취소되지 않을 수 있습니다.</p>
+              <p role="status">
+                {review.job_id
+                  ? "작업 접수를 확인하고 있습니다. 접수한 검사는 서버에서 계속 처리하며, 패널을 닫으면 작업 상태를 확인할 수 있습니다."
+                  : "실행 중입니다. 패널을 닫아도 이미 전송한 호출은 취소되지 않을 수 있습니다."}
+              </p>
             ) : null}
             {error ? (
               <InlineNotice tone="danger" title={error.message}>

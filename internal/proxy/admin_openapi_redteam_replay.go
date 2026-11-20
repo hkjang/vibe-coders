@@ -41,6 +41,7 @@ func redTeamReplayOpenAPISchemas() map[string]any {
 	}
 	source["latency_ms"], source["cost_krw"] = count, amount
 	review := properties(base["RedTeamRunReviewResponse"])
+	delete(review, "job_id")
 	review["source_result"], review["case_key"], review["pack_name"] = object(source), text, text
 	review["kind"] = map[string]any{"type": "string", "enum": []string{"live"}}
 	execution := properties(base["RedTeamReviewedExecutionResponse"])

@@ -231,6 +231,10 @@ func (s *Server) handleRedTeamCampaignByID(w http.ResponseWriter, r *http.Reques
 	if len(parts) > 1 {
 		action = parts[1]
 	}
+	if action == "run-reviewed" && len(parts) == 2 && r.Method == http.MethodGet {
+		s.handleRedTeamJobRead(w, r, id)
+		return
+	}
 	c, found, err := s.db.GetRedTeamCampaign(r.Context(), id)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_campaign_failed")
@@ -684,6 +688,14 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 	stopped := ""                      // set to a reason if budget/kill-switch aborts the run mid-flight
 	recording := redTeamRecording{Confirmed: true}
 	baselines := []store.RedTeamBaseline{}
+	startedIDs := []string{}
+	reportJob := func() {
+		if review != nil && review.JobProgress != nil {
+			if err := review.JobProgress(store.RedTeamJobProgress{RunIDs: append([]string{}, startedIDs...), LiveCalls: liveCalls, CompletedCases: totalResults, CostKRW: liveCost}); err != nil {
+				stopped = "job_state_unavailable"
+			}
+		}
+	}
 	admitLive := func() bool {
 		switch {
 		case r.Context().Err() != nil:
@@ -698,6 +710,12 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			stopped = "budget_exceeded"
 		}
 		if stopped == "" && review != nil {
+			if review.JobBeforeCall != nil {
+				if err := review.JobBeforeCall(); err != nil {
+					stopped = "job_lease_lost"
+					return false
+				}
+			}
 			revision, err := s.redTeamRuntimeRevision(r)
 			if err != nil || revision != review.RuntimeRevision {
 				stopped = "configuration_changed"
@@ -720,6 +738,8 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			recording.fail("run_start", &stopped)
 			break
 		}
+		startedIDs = append(startedIDs, run.ID)
+		reportJob()
 		maxRisk, failed, total, cost := 0, 0, 0, 0.0
 		// record persists one case result (+evidence/remediation) and folds it into the counters.
 		record := func(cs store.RedTeamProbeCase, result store.RedTeamCaseResult, ev store.RedTeamEvidence, rem store.RedTeamRemediation) {
@@ -735,6 +755,9 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			if review != nil {
 				if err := s.db.SaveRedTeamCaseBundle(recordCtx, result, ev, rem); err != nil {
 					recording.fail("case_result", &stopped)
+					// The provider may already have processed this call even though
+					// its case result could not be stored. Preserve that distinction.
+					reportJob()
 					return
 				}
 				recording.Results++
@@ -761,8 +784,12 @@ func (s *Server) runRedTeamSelectionReviewed(r *http.Request, c store.RedTeamCam
 			case "warning":
 				warnings++
 			}
+			reportJob()
 		}
 		for _, cs := range cases {
+			if stopped != "" {
+				break
+			}
 			if !redTeamCaseApplies(t, cs) {
 				continue
 			}
