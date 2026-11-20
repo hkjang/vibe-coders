@@ -115,11 +115,17 @@ func safeAuthReturnTo(raw string) (string, bool) {
 		return "/admin", true
 	}
 	lower := strings.ToLower(raw)
-	if strings.Contains(raw, "\\") || strings.ContainsAny(raw, "\r\n\x00") || strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") || strings.Contains(lower, "%00") {
+	if strings.Contains(raw, "\\") || strings.ContainsAny(raw, "\r\n\x00") || strings.Contains(lower, "%5c") || strings.Contains(lower, "%00") {
 		return "", false
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || u.Fragment != "" || strings.HasPrefix(raw, "//") {
+		return "", false
+	}
+	// Reject encoded path separators without treating an encoded slash in a
+	// query identifier as a redirect path. Keep RawQuery unchanged so policy,
+	// model and other selected resource identities survive the OIDC round trip.
+	if strings.Contains(strings.ToLower(u.EscapedPath()), "%2f") {
 		return "", false
 	}
 	cleanPath := path.Clean(u.Path)
