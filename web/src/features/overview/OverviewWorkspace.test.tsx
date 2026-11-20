@@ -7,6 +7,8 @@ import { FeatureAccessHarness } from "@/test/feature-access";
 import { testAuth } from "@/test/auth";
 import { renderScreen } from "@/test/render";
 import { OverviewRefreshContext } from "./overview-refresh-context";
+import { OverviewReadQueueContext } from "./overview-read-context";
+import { createReadQueue } from "@/shared/api/read-queue";
 import { useOverviewQuery } from "./use-overview-query";
 
 function exportHarness(read: Reader) {
@@ -117,34 +119,100 @@ function Widget({ name, read, polling }: { name: string; read: Reader; polling: 
     </section>
   );
 }
-function setup(read: Reader, secondary?: Reader, polling = false) {
+function setup(read: Reader, secondary?: Reader, polling = false, concurrency = 4) {
   let refresh = () => {};
   function Host() {
     const [, update] = useState(0);
     const [refreshers] = useState(() => new Set<() => void>());
+    const [queue] = useState(() => createReadQueue(concurrency));
     const [second, setSecond] = useState(true);
     useLayoutEffect(() => {
       refresh = () => update((value) => value + 1);
     }, []);
     return (
       <FeatureAccessHarness featureId="overview" readOnly>
-        <OverviewRefreshContext value={refreshers}>
-          <button
-            onClick={() => {
-              for (const reload of refreshers) reload();
-            }}
-          >
-            전체 새로고침
-          </button>
-          <button onClick={() => setSecond(false)}>두 번째 영역 닫기</button>
-          <Widget name="통계" read={read} polling={polling} />
-          {second && secondary ? <Widget name="추이" read={secondary} polling={polling} /> : null}
-        </OverviewRefreshContext>
+        <OverviewReadQueueContext value={queue}>
+          <OverviewRefreshContext value={refreshers}>
+            <button
+              onClick={() => {
+                for (const reload of refreshers) reload();
+              }}
+            >
+              전체 새로고침
+            </button>
+            <button onClick={() => setSecond(false)}>두 번째 영역 닫기</button>
+            <Widget name="통계" read={read} polling={polling} />
+            {second && secondary ? <Widget name="추이" read={secondary} polling={polling} /> : null}
+          </OverviewRefreshContext>
+        </OverviewReadQueueContext>
       </FeatureAccessHarness>
     );
   }
   return { ...renderScreen(<Host />, { route: "/overview" }), refresh: () => act(refresh) };
 }
+
+it("대기 중 닫은 위젯은 앞선 조회가 끝나도 API를 호출하지 않는다", async () => {
+  let finish!: (value: Value) => void;
+  const first = vi.fn<Reader>(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const second = vi.fn<Reader>(async () => ({ label: "닫은 영역" }));
+  setup(first, second, false, 1);
+  await waitFor(() => expect(first).toHaveBeenCalledTimes(1));
+  expect(second).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "두 번째 영역 닫기" }));
+  await act(async () => finish({ label: "현재 비용" }));
+  await screen.findByText("현재 비용");
+  expect(second).not.toHaveBeenCalled();
+});
+
+it.each(["team", "permission"])(
+  "대기 중 %s 변경은 이전 요청을 폐기하고 현재 권한으로만 조회한다",
+  async (change) => {
+    let finish!: (value: Value) => void;
+    let oldSignal: AbortSignal | undefined;
+    const first = vi.fn<Reader>((signal) => {
+      if (!oldSignal) {
+        oldSignal = signal;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      }
+      return Promise.resolve({ label: "현재 비용" });
+    });
+    const second = vi.fn<Reader>(async () => ({ label: `팀 ${state.auth.user?.team_id}` }));
+    const view = setup(first, second, false, 1);
+    await waitFor(() => expect(first).toHaveBeenCalledTimes(1));
+    expect(second).not.toHaveBeenCalled();
+    state.auth =
+      change === "team"
+        ? testAuth({ scopes: ["admin:read"], user: { team_id: "beta" } })
+        : testAuth({ scopes: [], user: { team_id: "alpha" } });
+    view.refresh();
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => finish({ label: "이전 비공개 비용" }));
+    if (change === "team") {
+      await screen.findByText("팀 beta");
+      expect(first).toHaveBeenCalledTimes(2);
+      expect(second).toHaveBeenCalledTimes(1);
+    } else {
+      expect(first).toHaveBeenCalledTimes(1);
+      expect(second).not.toHaveBeenCalled();
+    }
+    expect(screen.queryByText("이전 비공개 비용")).not.toBeInTheDocument();
+    expect(
+      JSON.stringify(
+        view.client
+          .getQueryCache()
+          .getAll()
+          .map((q) => q.state.data),
+      ),
+    ).not.toMatch(/이전|alpha/u);
+  },
+);
 
 it("팀 변경 후 이전 통계의 늦은 응답을 화면과 캐시에 남기지 않는다", async () => {
   let finish!: (value: Value) => void;
