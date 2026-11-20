@@ -128,6 +128,11 @@ export function sanitizeAppRouteSearch(
   const ioSelection =
     route === "/observability/io" ? directRequestSelection(search, credentialPrefixes) : undefined;
   if (ioSelection?.present && !ioSelection.id) invalidOperationalKeys.add("request_id");
+  if (route === "/observability/io" || route === "/observability/xview") {
+    const values = parameters.getAll("include_models");
+    if (values.length > 0 && (values.length !== 1 || !["true", "false"].includes(values[0] ?? "")))
+      invalidOperationalKeys.add("include_models");
+  }
 
   // These are gateway-owned refusal markers, not arbitrary provider errors.
   // Keep one bounded outcome through both startup and client-side navigation.

@@ -150,6 +150,75 @@ describe("XViewPage", () => {
     vi.useRealTimers();
   });
 
+  it("모델 목록 제외 조건을 초기 조회·실시간·집계에 함께 전달한다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = mockApi({
+      ...scatterHandlers,
+      "GET /admin/xview/models": () => modelsResponse,
+      "GET /admin/xview/model-series": () => seriesResponse,
+      "GET /admin/xview/model-outliers": () => ({
+        since: "",
+        outliers: [],
+        truncated: false,
+        sample_size: 0,
+        aggregate_limit: 20000,
+        covered_since: "",
+      }),
+    });
+    renderPage();
+    await screen.findByRole("img", { name: /산점도/u });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600);
+    });
+    for (const key of ["GET /admin/scatter", "GET /admin/xview/delta"]) {
+      const calls = api.calls.filter((call) => call.key === key);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls.every((call) => (call.options.query as { exclude_models: boolean }).exclude_models)).toBe(
+        true,
+      );
+    }
+    fireEvent.click(screen.getByRole("switch", { name: "모델 목록 조회 포함" }));
+    await waitFor(() =>
+      expect(
+        api.calls.filter((call) => call.key === "GET /admin/scatter").at(-1)?.options.query,
+      ).toMatchObject({ exclude_models: false }),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "모델 집계" }));
+    await waitFor(() => expect(api.calls.some((call) => call.key === "GET /admin/xview/models")).toBe(true));
+    for (const key of [
+      "GET /admin/xview/models",
+      "GET /admin/xview/model-series",
+      "GET /admin/xview/model-outliers",
+    ]) {
+      expect(api.calls.find((call) => call.key === key)?.options.query).toMatchObject({
+        exclude_models: false,
+      });
+    }
+  });
+
+  it("포함 옵션을 주소에서 복원하고 저장할 뷰에 보존한다", async () => {
+    const api = mockApi({
+      ...scatterHandlers,
+      "POST /admin/saved-filters": () => ({ filter: { ...savedFilters.filters[0], id: "filt_2" } }),
+    });
+    renderPage("/observability/xview?live=off&include_models=true");
+    await screen.findByRole("img", { name: /산점도/u });
+    expect(screen.getByRole("switch", { name: "모델 목록 조회 포함" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(api.calls.find((call) => call.key === "GET /admin/scatter")?.options.query).toMatchObject({
+      exclude_models: false,
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /새로 저장/u }));
+    await user.type(await screen.findByLabelText(/뷰 이름/u), "모델 목록 포함");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(api.bodies("POST /admin/saved-filters")).toHaveLength(1));
+    const body = api.bodies("POST /admin/saved-filters")[0] as { params: string };
+    expect(new URLSearchParams(body.params).get("include_models")).toBe("true");
+  });
+
   it("renders the live scatter and the signal summary", async () => {
     mockApi(scatterHandlers);
     renderPage();

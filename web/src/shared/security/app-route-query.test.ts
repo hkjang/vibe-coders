@@ -559,3 +559,16 @@ describe("IO original target rejection boundary", () => {
     expect(sanitizeAppRouteSearch("/app/observability/requests", query).search).toBe("");
   });
 });
+
+for (const route of ["/observability/io", "/observability/xview"]) {
+  it(`keeps only explicit catalog visibility on ${route}`, () => {
+    expect(sanitizeAppRouteSearch(route, "?include_models=true").search).toBe("?include_models=true");
+    expect(sanitizeAppRouteSearch(route, "?include_models=false").search).toBe("?include_models=false");
+    for (const query of [
+      "?include_models=yes",
+      "?include_models=true&include_models=false",
+      "?include_models=",
+    ])
+      expect(sanitizeAppRouteSearch(route, query).search).toBe("");
+  });
+}

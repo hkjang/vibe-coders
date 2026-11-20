@@ -94,13 +94,14 @@ func (s *Server) scatterFilterFromRequest(r *http.Request, defaultLimit int) sto
 	teams, teamScoped := requestTeamScopeForCaller(s, r)
 
 	f := store.ScatterFilter{
-		Since:      since,
-		Until:      until,
-		Endpoint:   strings.TrimSpace(r.URL.Query().Get("endpoint")),
-		APIKeyID:   strings.TrimSpace(r.URL.Query().Get("api_key_id")),
-		Teams:      teams,
-		TeamScoped: teamScoped,
-		Limit:      limit,
+		Since:         since,
+		Until:         until,
+		Endpoint:      strings.TrimSpace(r.URL.Query().Get("endpoint")),
+		ExcludeModels: r.URL.Query().Get("exclude_models") == "true",
+		APIKeyID:      strings.TrimSpace(r.URL.Query().Get("api_key_id")),
+		Teams:         teams,
+		TeamScoped:    teamScoped,
+		Limit:         limit,
 	}
 	if len(models) > 0 {
 		f.Models = models

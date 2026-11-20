@@ -52,12 +52,13 @@ export const observabilityFeatureModules = defineFeatureModules([
     featureId: "observability.io",
     load: () => import("@/features/observability/io/RequestIOPage").then((module) => module.RequestIOPage),
     // The search box filters received rows in memory: prompt text never reaches the URL.
-    queryKeys: ["cursor", "limit", "live", "model", "request_id", "status"],
+    queryKeys: ["cursor", "limit", "live", "model", "request_id", "status", "include_models"],
   },
   {
     featureId: "observability.xview",
     load: () => import("@/features/observability/xview/XViewPage").then((module) => module.XViewPage),
     queryKeys: [
+      "include_models",
       "endpoint",
       "from",
       "hide",

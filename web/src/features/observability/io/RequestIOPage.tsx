@@ -3,7 +3,7 @@ import { directRequestSelection } from "@/config/legacy-request-map";
 import { useRequestLegacyHandoff } from "../request-insight/use-request-legacy-handoff";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { Link, useLocation } from "react-router";
 
 import {
@@ -147,7 +147,18 @@ function CaptureNotice({ capture }: { capture: RequestIOCapture | undefined }): 
 
 export function RequestIOPage(): React.JSX.Element {
   const owner = useFeatureReadOwner(routeId, "request-io");
-  const scope = useRequestDetailReadScope(owner, owner.isCurrent);
+  const [params] = useSearchState();
+  const includeModels = params.get("include_models") === "true";
+  const displayOwner = useMemo(() => ({ owner, includeModels }), [owner, includeModels]);
+  const scope = useRequestDetailReadScope(displayOwner, owner.isCurrent);
+  const modelFilterRef = useRef<HTMLButtonElement>(null);
+  const restoreFilterFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (restoreFilterFocus.current) {
+      modelFilterRef.current?.focus();
+      restoreFilterFocus.current = false;
+    }
+  }, [scope.id]);
   if (!owner.readable || owner.denied) {
     return (
       <InlineNotice
@@ -159,15 +170,32 @@ export function RequestIOPage(): React.JSX.Element {
       </InlineNotice>
     );
   }
-  return <RequestIOPageContent key={scope.id} owner={owner} scope={scope} />;
+  return (
+    <RequestIOPageContent
+      key={scope.id}
+      owner={owner}
+      scope={scope}
+      includeModels={includeModels}
+      modelFilterRef={modelFilterRef}
+      onModelFilterChange={() => {
+        restoreFilterFocus.current = true;
+      }}
+    />
+  );
 }
 
 function RequestIOPageContent({
   owner,
   scope,
+  includeModels,
+  modelFilterRef,
+  onModelFilterChange,
 }: {
   owner: FeatureReadOwner;
   scope: RequestDetailReadScope;
+  includeModels: boolean;
+  modelFilterRef: RefObject<HTMLButtonElement | null>;
+  onModelFilterChange: () => void;
 }): React.JSX.Element {
   const wide = useWideLayout();
   const [params, updateParams] = useSearchState();
@@ -184,11 +212,12 @@ function RequestIOPageContent({
   const query = useMemo<AppRequestsQuery>(
     () => ({
       limit: pageSize,
+      exclude_models: !includeModels,
       ...(status ? { status: status as AppRequestsQuery["status"] } : {}),
       ...(model ? { model } : {}),
       ...(cursor ? { cursor } : {}),
     }),
-    [cursor, model, status],
+    [cursor, includeModels, model, status],
   );
   const list = useQuery<AppRequestsResponse>({
     queryKey: featureOwnedKey(["observability", "io", "list", scope.id, query], owner),
@@ -296,6 +325,19 @@ function RequestIOPageContent({
         legacyHref={legacyHandoff.href}
         actions={
           <>
+            <Switch
+              ref={modelFilterRef}
+              checked={includeModels}
+              label="모델 목록 조회 포함"
+              onCheckedChange={(next) => {
+                onModelFilterChange();
+                updateParams({
+                  include_models: next ? "true" : undefined,
+                  cursor: undefined,
+                  request_id: undefined,
+                });
+              }}
+            />
             <Switch
               checked={live}
               label="실시간"

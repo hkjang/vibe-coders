@@ -75,6 +75,9 @@ func scatterConditions(f ScatterFilter) ([]string, []any) {
 		where = append(where, "r.created_at <= ?")
 		args = append(args, f.Until.UTC().Format(time.RFC3339Nano))
 	}
+	if f.ExcludeModels {
+		where = append(where, excludeModelCatalogPredicate)
+	}
 	if f.Endpoint != "" {
 		where = append(where, "r.endpoint = ?")
 		args = append(args, f.Endpoint)

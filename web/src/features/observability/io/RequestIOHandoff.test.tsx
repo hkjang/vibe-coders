@@ -170,6 +170,7 @@ it.each([true, false])(
     expect(api.calls.find((c) => c.key === "GET /admin/requests")?.options.query).toEqual({
       model,
       limit: 30,
+      exclude_models: true,
       status: "error",
       cursor: "opaque",
     });

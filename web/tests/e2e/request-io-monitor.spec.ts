@@ -643,3 +643,77 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+for (const width of [1440, 390]) {
+  for (const screen of ["io", "xview"]) {
+    test(`모델 목록 조회는 ${screen} ${width}px에서 기본 제외하고 포함 선택을 복원한다`, async ({
+      page,
+    }, info) => {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.emulateMedia({ colorScheme: width === 390 ? "dark" : "light", reducedMotion: "reduce" });
+      await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+      const gateway = await install(page, false);
+      const queries: URL[] = [];
+      const rows = [
+        summary("catalog", { endpoint: "/v1/models", method: "GET", model: "모델 목록 조회 표본" }),
+        summary("inference", { model: "실제 추론 표본" }),
+      ];
+      await page.route(
+        (url) => ["/admin/requests", "/admin/scatter"].includes(url.pathname),
+        async (route) => {
+          const url = new URL(route.request().url());
+          queries.push(url);
+          const selected = url.searchParams.get("exclude_models") === "true" ? rows.slice(1) : rows;
+          if (url.pathname === "/admin/requests")
+            return route.fulfill({
+              headers: { "X-Vibe-App-Requests-Version": "2" },
+              json: { requests: selected, limit: 30, generated_at: new Date(now).toISOString() },
+            });
+          return route.fulfill({
+            json: {
+              points: selected.map((row) => ({
+                ...row,
+                ingested_at: "2026-11-05T07:29:59.000000001Z",
+                cost_krw: 0,
+              })),
+              groups: [],
+              truncated: false,
+              since: new Date(now - 3600000).toISOString(),
+              server_time: new Date(now).toISOString(),
+              cursor: { ingested_at: "2026-11-05T07:29:59.000000001Z", request_id: "inference" },
+            },
+          });
+        },
+      );
+      await page.goto(`observability/${screen}?live=off`);
+      const toggle = page.getByRole("switch", { name: "모델 목록 조회 포함", exact: true });
+      await expect(toggle).toHaveAttribute("aria-checked", "false");
+      const count = async (n: number) => {
+        if (screen === "io") return expect(page.locator(".io-row")).toHaveCount(n);
+        await page.getByRole("button", { name: "최근 25건 선택", exact: true }).click();
+        const dialog = page.getByRole("dialog", { name: `선택한 요청 ${n}건`, exact: true });
+        await expect(dialog).toBeVisible();
+        await dialog.getByRole("button", { name: "패널 닫기", exact: true }).click();
+      };
+      await count(1);
+      expect(queries.at(-1)?.searchParams.get("exclude_models")).toBe("true");
+      expect(await axeViolations(page)).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: info.outputPath("catalog-hidden.png"), fullPage: true });
+      await toggle.focus();
+      await page.keyboard.press("Space");
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await expect(toggle).toBeFocused();
+      await count(2);
+      expect(queries.at(-1)?.searchParams.get("exclude_models")).toBe("false");
+      await expect(page).toHaveURL(/include_models=true/);
+      await page.reload();
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await count(2);
+      await toggle.click();
+      await count(1);
+      await expect(page).not.toHaveURL(/include_models=/);
+      expect(gateway.calls.every((call) => call.startsWith("GET "))).toBe(true);
+    });
+  }
+}

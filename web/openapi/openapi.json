@@ -16859,7 +16859,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.169"
+    "version": "v0.86.170"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -29931,6 +29931,16 @@
         "operationId": "get__admin_requests",
         "parameters": [
           {
+            "description": "When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.",
+            "in": "query",
+            "name": "exclude_models",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
             "description": "Set to app to request the safe React console projection.",
             "in": "header",
             "name": "X-Vibe-UI",
@@ -32929,9 +32939,31 @@
     "/admin/scatter": {
       "get": {
         "operationId": "get__admin_scatter",
+        "parameters": [
+          {
+            "description": "When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.",
+            "in": "query",
+            "name": "exclude_models",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -38680,9 +38712,31 @@
     "/admin/xview/delta": {
       "get": {
         "operationId": "get__admin_xview_delta",
+        "parameters": [
+          {
+            "description": "When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.",
+            "in": "query",
+            "name": "exclude_models",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -38699,9 +38753,31 @@
     "/admin/xview/model-outliers": {
       "get": {
         "operationId": "get__admin_xview_model_outliers",
+        "parameters": [
+          {
+            "description": "When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.",
+            "in": "query",
+            "name": "exclude_models",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -38718,9 +38794,31 @@
     "/admin/xview/model-series": {
       "get": {
         "operationId": "get__admin_xview_model_series",
+        "parameters": [
+          {
+            "description": "When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.",
+            "in": "query",
+            "name": "exclude_models",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -38737,9 +38835,31 @@
     "/admin/xview/models": {
       "get": {
         "operationId": "get__admin_xview_models",
+        "parameters": [
+          {
+            "description": "When true, exclude exact /v1/models endpoints and models_aggregate/model_aggregate routing reasons before page/sample limits. Applies to the app projection of /admin/requests and XView snapshots, deltas and model aggregates. Omitted or false preserves all rows. Does not delete audit logs or change gateway metrics.",
+            "in": "query",
+            "name": "exclude_models",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

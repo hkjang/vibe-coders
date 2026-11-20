@@ -644,7 +644,14 @@ func TestAppRequestsOpenAPIProjectionMatchesRuntimeFields(t *testing.T) {
 	paths := spec["paths"].(map[string]any)
 	operation := paths["/admin/requests"].(map[string]any)["get"].(map[string]any)
 	parameters := operation["parameters"].([]any)
-	header := parameters[0].(map[string]any)
+	var header map[string]any
+	for _, raw := range parameters {
+		parameter := raw.(map[string]any)
+		if parameter["name"] == "X-Vibe-UI" {
+			header = parameter
+			break
+		}
+	}
 	if header["name"] != "X-Vibe-UI" || header["required"] != false {
 		t.Fatalf("X-Vibe-UI must remain optional for legacy callers: %v", header)
 	}
