@@ -1,19 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
 
 import { PanelFailure } from "@/features/governance/reports/report-parts";
 import type { ReportWindow } from "@/features/governance/reports/report-window";
 import { downloadExport, exportDateStamp } from "@/features/governance/reports/report-download";
 import { apiClient } from "@/shared/api/client";
+import { fileEndpoints } from "@/shared/api/file-endpoints";
+import { useFileDownload } from "@/shared/hooks/use-file-download";
 import { endpoints } from "@/shared/api/endpoints";
 import type { NarrativeSection } from "@/shared/api/domains/governance-reports";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { KeyValueList, type KeyValueItem } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { formatDate, formatNumber } from "@/shared/utils/format";
 
 /**
@@ -54,7 +53,8 @@ export function NarrativeTab({
   refetchInterval: number | false;
   window: ReportWindow;
 }): React.JSX.Element {
-  const [exporting, setExporting] = useState(false);
+  const exportTask = useFileDownload("governance.reports", reportWindow, canExport);
+  const exporting = exportTask.pending;
   const report = useQuery({
     queryKey: ["governance", "narrative", reportWindow],
     queryFn: ({ signal }) =>
@@ -72,20 +72,19 @@ export function NarrativeTab({
     ? `${formatDate(report.data.period_start)} ~ ${formatDate(report.data.period_end)}`
     : "—";
 
-  const exportMarkdown = async (): Promise<void> => {
-    setExporting(true);
-    try {
-      await downloadExport(
-        `/admin/reports/narrative?window=${encodeURIComponent(reportWindow)}&format=md`,
-        `ai-gateway-report-${exportDateStamp()}.md`,
-      );
-      toast.success("운영 보고서 마크다운을 내려받았습니다.");
-    } catch (error) {
-      toast.error(safeAppErrorMessage(error, "마크다운을 내려받지 못했습니다."));
-    } finally {
-      setExporting(false);
-    }
-  };
+  const exportMarkdown = (): Promise<void> =>
+    exportTask.run(
+      (ownership) =>
+        downloadExport(fileEndpoints.narrative, `ai-gateway-report-${exportDateStamp()}.md`, {
+          ...ownership,
+          query: { window: reportWindow, format: "md" },
+          routeId: "governance.reports",
+        }),
+      {
+        successMessage: "운영 보고서 마크다운을 내려받았습니다.",
+        errorMessage: "마크다운을 내려받지 못했습니다.",
+      },
+    );
 
   return (
     <div className="gov-stack">
@@ -99,7 +98,7 @@ export function NarrativeTab({
         actions={
           <Button
             onClick={() => void exportMarkdown()}
-            disabled={!canExport || exporting}
+            disabled={!exportTask.available || exporting}
             title={canExport ? undefined : "보고서를 내려받으려면 admin:read 권한이 필요합니다."}
           >
             <Download aria-hidden="true" /> 마크다운 다운로드

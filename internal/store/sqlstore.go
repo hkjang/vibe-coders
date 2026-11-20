@@ -3100,9 +3100,19 @@ func (s *SQLStore) insertAdminAudit(ctx context.Context, executor adminAuditExec
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now().UTC()
 	}
-	_, err := executor.ExecContext(ctx, s.bind(`INSERT INTO admin_audit_logs (id, admin_id, action, before_value, after_value, created_at)
+	result, err := executor.ExecContext(ctx, s.bind(`INSERT INTO admin_audit_logs (id, admin_id, action, before_value, after_value, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`), log.ID, log.AdminID, log.Action, log.BeforeValue, log.AfterValue, formatTime(log.CreatedAt))
-	return err
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("admin audit insert was not confirmed")
+	}
+	return nil
 }
 
 func (s *SQLStore) ListAdminAudit(ctx context.Context, limit int) ([]AdminAuditPublic, error) {

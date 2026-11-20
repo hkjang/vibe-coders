@@ -21,6 +21,7 @@ interface ApiRequestMetadata {
   timeoutMs?: number;
   routeId?: string;
   retryUnauthorized?: boolean;
+  assertCurrent?: () => void;
 }
 
 type ApiEndpointBody<Endpoint extends ApiEndpointBase> =
@@ -151,16 +152,40 @@ export class ApiClient {
     endpoint: Endpoint,
     ...args: ApiRequestArguments<Endpoint>
   ): Promise<ApiEndpointOutput<Endpoint>> {
-    const options: InternalApiRequestOptions = args[0] ?? {};
+    const options: InternalApiRequestOptions = endpoint.textRequest
+      ? {
+          ...args[0],
+          retryUnauthorized: false,
+          redirect: "error",
+          credentials: "same-origin",
+          cache: "no-store",
+        }
+      : (args[0] ?? {});
     if (!isInternalPath(endpoint.path)) {
       throw new AppError("외부 API URL은 허용되지 않습니다.", { kind: "contract" });
     }
 
     const epoch = this.dependencies.getSessionEpoch();
-    const lifetime = this.createLifetime(epoch, options.timeoutMs, options.signal);
+    const lifetime = this.createLifetime(epoch, options.timeoutMs, options.signal, options.assertCurrent);
+    let response: Response | undefined;
     try {
-      const response = await this.authorizedResponse(endpoint, options, epoch, lifetime);
-      const body = await lifetime.run(() => readResponseBody(response));
+      response = await this.authorizedResponse(endpoint, options, epoch, lifetime);
+      if (
+        endpoint.textRequest &&
+        response.ok &&
+        response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json"
+      ) {
+        throw new AppError("서버가 올바른 JSON 응답을 반환하지 않았습니다.", {
+          kind: "contract",
+          status: response.status,
+          requestId: lifetime.requestId,
+        });
+      }
+      const received = response;
+      const body =
+        endpoint.textRequest && !response.ok
+          ? await this.readStructuredError(response, lifetime)
+          : await lifetime.run(() => readResponseBody(received));
       if (!response.ok) throw this.endpointError(endpoint, response, body);
       const parsed = endpoint.schema.safeParse(body);
       lifetime.assertActive();
@@ -174,6 +199,7 @@ export class ApiClient {
       }
       return parsed.data as ApiEndpointOutput<Endpoint>;
     } finally {
+      if (endpoint.textRequest && response) discardResponse(response);
       lifetime.dispose();
     }
   }
@@ -213,19 +239,7 @@ export class ApiClient {
       const contentType = response.headers.get("Content-Type") ?? "";
       const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
       if (!response.ok) {
-        let body: unknown;
-        // File errors may echo uploaded/private data. Only structured JSON errors
-        // are consumed, within a diagnostic cap; 401 bodies are never needed.
-        if (response.status !== 401 && mediaType === "application/json") {
-          const bytes = await readFileBody(response, lifetime, {
-            maxBytes: Math.min(endpoint.maxBytes ?? 65_536, 65_536),
-          });
-          try {
-            body = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-          } catch {
-            /* Use safe HTTP fallback. */
-          }
-        }
+        const body = await this.readStructuredError(response, lifetime, endpoint.maxBytes);
         throw this.toAppError(response, body);
       }
       if (!endpoint.contentTypes.includes(mediaType))
@@ -240,6 +254,22 @@ export class ApiClient {
     } finally {
       if (response) discardResponse(response);
       lifetime.dispose();
+    }
+  }
+
+  private async readStructuredError(
+    response: Response,
+    lifetime: RequestLifetime,
+    maxBytes = 65_536,
+  ): Promise<unknown> {
+    // Never consume raw upload echoes, HTML errors, or unnecessary 401 bodies.
+    const mediaType = response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (response.status === 401 || mediaType !== "application/json") return undefined;
+    const bytes = await readFileBody(response, lifetime, { maxBytes: Math.min(maxBytes, 65_536) });
+    try {
+      return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    } catch {
+      return undefined;
     }
   }
 
@@ -358,12 +388,27 @@ export class ApiClient {
     options: InternalApiRequestOptions,
     lifetime: RequestLifetime,
   ): Promise<Response> {
-    const { body, query, timeoutMs, signal, routeId, retryUnauthorized, ...init } = options;
+    const { body, query, timeoutMs, signal, routeId, retryUnauthorized, assertCurrent, ...init } = options;
     void retryUnauthorized;
+    void assertCurrent;
     void timeoutMs;
     void signal;
     lifetime.assertActive();
     const headers = this.headers(init.headers, true, routeId);
+    let payload: string | undefined;
+    const textRequest = "textRequest" in endpoint ? endpoint.textRequest : undefined;
+    if (textRequest) {
+      if (typeof body !== "string")
+        throw new AppError("CSV 요청 본문은 문자열이어야 합니다.", { kind: "contract" });
+      if (new TextEncoder().encode(body).byteLength > textRequest.maxBytes)
+        throw new AppError("CSV 파일은 8 MiB 이하여야 합니다.", {
+          kind: "contract",
+          code: "request_too_large",
+        });
+      payload = body;
+      headers.set("Content-Type", textRequest.contentType);
+      headers.set("Accept", "application/json");
+    } else if (body !== undefined) payload = JSON.stringify(body);
     let validatedQuery = query;
     if (query !== undefined) {
       if (!endpoint.querySchema) {
@@ -387,7 +432,7 @@ export class ApiClient {
         ...init,
         method: endpoint.method,
         headers,
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(payload === undefined ? {} : { body: payload }),
       },
       lifetime,
     );

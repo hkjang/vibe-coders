@@ -136,7 +136,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/redteam/probe-cases", []string{"post", "delete"}, "redteam", "Red Team probe case authoring within a pack", false},
 	{"/admin/redteam/probe-cases/{id}", []string{"delete"}, "redteam", "Delete one Red Team probe case", false},
 	{"/admin/redteam/probe-packs/export", []string{"get"}, "redteam", "Export probe cases as CSV (?format=csv)", false},
-	{"/admin/redteam/probe-packs/import", []string{"post"}, "redteam", "Import probe cases from CSV (text/csv body)", false},
+	{"/admin/redteam/probe-packs/import", []string{"post", "put"}, "redteam", "Import probe CSV (POST legacy, PUT reviewed)", false},
+	{"/admin/redteam/probe-packs/import-review", []string{"post"}, "redteam", "Read probe CSV before/after changes", false},
 	{"/admin/redteam/campaigns", []string{"get", "post"}, "redteam", "Red Team campaign builder/list", false},
 	{"/admin/redteam/campaigns/{id}", []string{"get", "delete"}, "redteam", "Red Team campaign detail / delete", false},
 	{"/admin/redteam/campaigns/{id}/dry-run", []string{"post"}, "redteam", "Red Team dry-run preview without upstream calls", false},
@@ -648,6 +649,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
 	switch key {
+	case "post /admin/redteam/probe-packs/import-review", "put /admin/redteam/probe-packs/import":
+		enrichRedTeamProbeCSVReviewOpenAPI(strings.ToLower(method) == "put", op, responses)
 	case "get /admin/contexts":
 		enrichContextMetadataOpenAPI(op, responses)
 	case "get /admin/redteam/runs":
@@ -1276,6 +1279,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range appRequestFlowOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range redTeamProbeCSVReviewOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range policyImportOpenAPISchemas() {

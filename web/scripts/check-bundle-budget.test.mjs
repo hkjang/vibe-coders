@@ -118,9 +118,8 @@ test("the explicit runtime entry must be reachable from the startup shell", () =
   assert.throws(() => analyze(input), /runtime.*startup/u);
 });
 
-function interactiveFixture() {
+function interactiveFixture(entry = Object.keys(INTERACTIVE_FEATURES)[0]) {
   const input = fixture();
-  const entry = Object.keys(INTERACTIVE_FEATURES)[0];
   input.manifest["src/route.js"].dynamicImports = [entry];
   input.manifest[entry] = {
     file: "assets/editor.js",
@@ -735,4 +734,23 @@ test("quiet build wrapper preserves structural failures without a success report
   assert.equal(result.status, 1);
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, direct.stderr);
+});
+
+test("CSV review activation has a complete separate limit and cannot be eagerly loaded", () => {
+  const entry = "src/features/security/redteam/ProbeCsvImportDialog.tsx";
+  const input = interactiveFixture(entry);
+  const report = analyze(input);
+  assert.equal(report.passed, true);
+  assert.equal(report.interactive[0].entry, entry);
+  assert.deepEqual(report.interactive[0].limits, { rawBytes: 20_000, wireBytes: 8_000 });
+  input.files.set("assets/editor.js", Buffer.alloc(20_001, " "));
+  assert.equal(analyze(input).passed, false);
+  const wire = interactiveFixture(entry);
+  wire.files.set("assets/editor-font.woff2", Buffer.alloc(8_001));
+  assert.equal(analyze(wire).passed, false);
+  for (const root of ["index.html", "src/route.js"]) {
+    const eager = interactiveFixture(entry);
+    eager.manifest[root].imports.push(entry);
+    assert.throws(() => analyze(eager), /deferred dynamic entry|must not be statically imported/u);
+  }
 });

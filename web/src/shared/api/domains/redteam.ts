@@ -1,3 +1,4 @@
+import { probeCsvReviewedEndpoints } from "./redteam-probe-csv-review";
 import { runPageEndpoint } from "./redteam-run-page";
 import { evidenceReadEndpoint, resultsReadEndpoint } from "./redteam-evidence-read";
 import { redTeamRecordingSchema } from "./redteam-recording";
@@ -17,6 +18,7 @@ import type {
   GetAdminRedteamDashboardData,
   GetAdminRedteamKillSwitchData,
   GetAdminRedteamProbePacksData,
+  PostAdminRedteamProbePacksImportData,
   GetAdminRedteamRemediationsData,
   GetAdminRedteamResultsIdEvidenceData,
   GetAdminRedteamRunsIdResultsData,
@@ -37,7 +39,7 @@ import type {
   PostAdminRedteamSchedulesData,
 } from "@/shared/api/generated";
 import type { OpenApiPath } from "@/shared/api/generated/paths.gen";
-import { operation, pathWithParams, type OperationData } from "@/shared/api/endpoint-factory";
+import { operation, textOperation, pathWithParams, type OperationData } from "@/shared/api/endpoint-factory";
 import { looseObject, numberish, orDefault, unknownRecord } from "@/shared/api/loose";
 
 // The generated `…Data` types for the legacy admin surface document neither a request
@@ -416,11 +418,14 @@ export const redTeamApplyRemediationSchema = looseObject({
   outcome: text(),
 });
 
-/** `POST /admin/redteam/probe-packs/import` — parsed from a raw `fetch` (text/csv body). */
-export const redTeamImportResultSchema = looseObject({
-  imported_cases: count(),
-  packs_touched: count(),
-  skipped: textList(),
+/** `POST /admin/redteam/probe-packs/import` — registered raw CSV write with a strict JSON receipt. */
+export const redTeamImportResultSchema = z.object({
+  imported_cases: z.number().int().nonnegative(),
+  packs_touched: z.number().int().nonnegative(),
+  skipped: z
+    .array(z.string())
+    .nullable()
+    .transform((value) => value ?? []),
 });
 
 export interface RedTeamCampaignInput {
@@ -467,6 +472,13 @@ export const redteamEndpoints = {
     ),
   },
   probePacks: {
+    reviewed: probeCsvReviewedEndpoints,
+    import: textOperation<PostAdminRedteamProbePacksImportData, unknown>()(
+      "POST",
+      "/admin/redteam/probe-packs/import",
+      redTeamImportResultSchema,
+      { contentType: "text/csv", maxBytes: 8 * 1024 * 1024 },
+    ),
     list: operation<GetAdminRedteamProbePacksData, unknown>()(
       "GET",
       "/admin/redteam/probe-packs",

@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useMemo } from "react";
 
 import { PanelFailure, ScoreBars } from "@/features/governance/reports/report-parts";
 import { gradeTone, scoreCell, type ReportWindow } from "@/features/governance/reports/report-window";
 import { downloadExport, exportDateStamp } from "@/features/governance/reports/report-download";
 import { apiClient } from "@/shared/api/client";
+import { fileEndpoints } from "@/shared/api/file-endpoints";
+import { useFileDownload } from "@/shared/hooks/use-file-download";
 import { endpoints } from "@/shared/api/endpoints";
 import type { TeamScorecardRow } from "@/shared/api/domains/governance-reports";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -96,7 +97,8 @@ export function ScorecardTab({
   window: ReportWindow;
 }): React.JSX.Element {
   const columns = useMemo(() => scorecardColumns(), []);
-  const [exporting, setExporting] = useState(false);
+  const exportTask = useFileDownload("governance.reports", reportWindow, canExport);
+  const exporting = exportTask.pending;
   const scorecard = useQuery({
     queryKey: ["governance", "scorecard", reportWindow],
     queryFn: ({ signal }) =>
@@ -124,20 +126,16 @@ export function ScorecardTab({
       display: `${formatNumber(Math.round(team.overall))}점`,
     }));
 
-  const exportCsv = async (): Promise<void> => {
-    setExporting(true);
-    try {
-      await downloadExport(
-        `/admin/teams/scorecard?window=${encodeURIComponent(reportWindow)}&format=csv`,
-        `team-scorecard-${exportDateStamp()}.csv`,
-      );
-      toast.success("팀 성숙도 CSV를 내려받았습니다.");
-    } catch (error) {
-      toast.error(safeAppErrorMessage(error, "CSV를 내려받지 못했습니다."));
-    } finally {
-      setExporting(false);
-    }
-  };
+  const exportCsv = (): Promise<void> =>
+    exportTask.run(
+      (ownership) =>
+        downloadExport(fileEndpoints.scorecard, `team-scorecard-${exportDateStamp()}.csv`, {
+          ...ownership,
+          query: { window: reportWindow, format: "csv" },
+          routeId: "governance.reports",
+        }),
+      { successMessage: "팀 성숙도 CSV를 내려받았습니다.", errorMessage: "CSV를 내려받지 못했습니다." },
+    );
 
   return (
     <div className="gov-stack">
@@ -171,7 +169,7 @@ export function ScorecardTab({
         actions={
           <Button
             onClick={() => void exportCsv()}
-            disabled={!canExport || exporting}
+            disabled={!exportTask.available || exporting}
             title={canExport ? undefined : "CSV를 내려받으려면 admin:read 권한이 필요합니다."}
           >
             <Download aria-hidden="true" /> CSV 다운로드

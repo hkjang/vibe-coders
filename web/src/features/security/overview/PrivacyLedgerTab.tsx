@@ -23,7 +23,7 @@ import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useFileDownload } from "@/shared/hooks/use-file-download";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { formatNumber } from "@/shared/utils/format";
 
@@ -90,14 +90,12 @@ export function PrivacyLedgerTab({ canRead, refreshInterval }: PrivacyLedgerTabP
     refetchIntervalInBackground: false,
   });
 
-  const csv = useMutationFeedback<null, null>({
-    mutate: async () => {
-      await downloadPrivacyLedgerCsv(dimension, days);
-      return null;
-    },
-    successMessage: "프라이버시 원장 CSV를 내려받았습니다.",
-    errorMessage: "프라이버시 원장 CSV를 내려받지 못했습니다.",
-  });
+  const csv = useFileDownload("security.overview", JSON.stringify([dimension, days]), canRead);
+  const exportCsv = () =>
+    csv.run((ownership) => downloadPrivacyLedgerCsv(dimension, days, ownership), {
+      successMessage: "프라이버시 원장 CSV를 내려받았습니다.",
+      errorMessage: "프라이버시 원장 CSV를 내려받지 못했습니다.",
+    });
 
   if (!canRead) return <ScopeNotice scope="admin:read" what="프라이버시 원장" />;
 
@@ -109,8 +107,8 @@ export function PrivacyLedgerTab({ canRead, refreshInterval }: PrivacyLedgerTabP
       <Toolbar
         label="프라이버시 원장 조건"
         end={
-          <Button size="small" onClick={() => csv.mutate(null)} disabled={csv.isPending}>
-            <Download aria-hidden="true" /> {csv.isPending ? "내보내는 중" : "CSV 내보내기"}
+          <Button size="small" onClick={() => void exportCsv()} disabled={!csv.available || csv.pending}>
+            <Download aria-hidden="true" /> {csv.pending ? "내보내는 중" : "CSV 내보내기"}
           </Button>
         }
       >

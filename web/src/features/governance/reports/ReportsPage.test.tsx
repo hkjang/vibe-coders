@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportsPage } from "@/features/governance/reports/ReportsPage";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessContext } from "@/shared/feature-access/context";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] as string[] }));
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -147,7 +148,14 @@ afterEach(() => {
 });
 
 function render(route = "/governance/reports") {
-  return renderScreen(<ReportsPage />, { route, path: "/governance/reports" });
+  return renderScreen(
+    <FeatureAccessContext
+      value={{ featureId: "governance.reports", permitted: true, readOnly: false, status: "preview" }}
+    >
+      <ReportsPage />
+    </FeatureAccessContext>,
+    { route, path: "/governance/reports" },
+  );
 }
 
 describe("ReportsPage", () => {
@@ -200,7 +208,9 @@ describe("ReportsPage", () => {
     mockAllEndpoints();
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response("team,requests\n", { status: 200 }));
+      .mockResolvedValue(
+        new Response("team,requests\n", { status: 200, headers: { "Content-Type": "text/csv" } }),
+      );
     render("/governance/reports?window=7d");
 
     await screen.findByRole("row", { name: /platform/u });

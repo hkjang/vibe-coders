@@ -17,7 +17,9 @@
     "useUnknownInCatchVariables": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "paths": { "@/*": ["./src/*"] },
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "resolveJsonModule": true,
     "isolatedModules": true,
     "moduleDetection": "force",
@@ -53,6 +55,7 @@
     "tests/e2e/account-resource-search.spec.ts",
     "tests/e2e/redteam-evidence-read.spec.ts",
     "tests/e2e/redteam-readonly-controls.spec.ts",
-    "tests/fixtures/agent-code-editor.ts"
+    "tests/fixtures/agent-code-editor.ts",
+    "tests/e2e/probe-csv-ownership.spec.ts"
   ]
 }

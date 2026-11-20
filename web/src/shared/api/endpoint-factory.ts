@@ -38,6 +38,12 @@ export interface ApiRoute<
   readonly [operationData]?: Data;
 }
 
+/** A registered raw-text write; callers cannot choose a transport content type. */
+export interface TextRequestContract {
+  readonly contentType: "text/csv";
+  readonly maxBytes: number;
+}
+
 export interface ApiEndpoint<
   Data extends OperationData,
   Method extends OpenApiMethod = OpenApiMethod,
@@ -46,6 +52,7 @@ export interface ApiEndpoint<
   readonly schema: Schema;
   readonly querySchema?: z.ZodType<object>;
   readonly errorSchemas?: ApiEndpointErrorSchemas;
+  readonly textRequest?: TextRequestContract;
 }
 
 export type ApiEndpointErrorSchemas = Readonly<Partial<Record<number, z.ZodType>>>;
@@ -56,6 +63,7 @@ export interface ApiEndpointBase {
   readonly schema: z.ZodType;
   readonly querySchema?: z.ZodType<object>;
   readonly errorSchemas?: ApiEndpointErrorSchemas;
+  readonly textRequest?: TextRequestContract;
   readonly [endpointBrand]: true;
 }
 
@@ -83,6 +91,27 @@ export function operation<Data extends OperationData, Response>() {
     schema,
     ...(querySchema ? { querySchema } : {}),
     ...(errorSchemas ? { errorSchemas } : {}),
+  });
+}
+
+/** Raw text writes use the JSON response contract and never replay on authentication failure. */
+export function textOperation<Data extends OperationData, Response>() {
+  return <
+    Method extends OpenApiMethodFor<Data["url"]> & ("POST" | "PUT" | "PATCH"),
+    Schema extends z.ZodType<Response>,
+  >(
+    method: Method,
+    path: Data["url"],
+    schema: Schema,
+    textRequest: TextRequestContract,
+    querySchema?: z.ZodType<object>,
+  ): ApiEndpoint<WithBody<Data, string>, Method, Schema> => ({
+    [endpointBrand]: true,
+    method,
+    path,
+    schema,
+    textRequest,
+    ...(querySchema ? { querySchema } : {}),
   });
 }
 
@@ -131,7 +160,7 @@ export function pathWithParams<Path extends OpenApiPath>(
  * `withPathParams(endpoints.domains.access.users.update, { id })`. Values are
  * percent-encoded, so an identifier can never add a path segment of its own.
  */
-export function withPathParams<Endpoint extends ApiEndpointBase>(
+export function withPathParams<Endpoint extends ApiRoute>(
   endpoint: Endpoint,
   params: Readonly<Record<string, string | number>>,
 ): Endpoint {

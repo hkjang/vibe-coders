@@ -4,8 +4,7 @@ import { riskLabel, expectedPolicyLabel, targetTypeLabel, probeCategoryLabel } f
 import { matchesTarget, targetLabel } from "./target-search";
 import { useQuery } from "@tanstack/react-query";
 import { Download, Plus, Upload } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 
 import { ProbeCaseDialog } from "@/features/security/redteam/ProbeCaseDialog";
 import {
@@ -14,7 +13,7 @@ import {
   type ProbeCaseFormValues,
 } from "@/features/security/redteam/probe-case-form";
 import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
-import { exportProbePrompts, importProbePrompts } from "@/features/security/redteam/redteam-csv";
+import { exportProbePrompts } from "@/features/security/redteam/redteam-csv";
 import { riskTone, writeDeniedReason } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, type RedTeamData } from "@/features/security/redteam/use-redteam-data";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
@@ -38,12 +37,14 @@ import { Sheet } from "@/shared/components/ui/Sheet";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useFileDownload } from "@/shared/hooks/use-file-download";
+import { useProbeCsvImport } from "./use-probe-csv-import";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 const redteam = endpoints.domains.redteam;
+const ProbeCsvImportDialog = lazy(() => import("./ProbeCsvImportDialog"));
 
 function targetColumns(): ReadonlyArray<DataTableColumn<RedTeamTarget>> {
   const column = createDataTableColumnHelper<RedTeamTarget>();
@@ -110,6 +111,7 @@ export function RedTeamTargetsTab({
   const { remember: rememberCase, returnFocusRef: caseReturnFocusRef } = useReturnFocus();
   const caseFocus = usePreflightReturnFocus(caseReturnFocusRef);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const csvImportButton = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const focusAfterClear = useRef(false);
   useLayoutEffect(() => {
@@ -168,26 +170,15 @@ export function RedTeamTargetsTab({
     onSuccess: () => setOpenPack(undefined),
   });
 
-  const exportCsv = useMutationFeedback({
-    mutate: () => exportProbePrompts(),
-    successMessage: "프롬프트 CSV를 내려받았습니다.",
-    errorMessage: "프롬프트 CSV를 내보내지 못했습니다.",
-  });
-
-  const importCsv = useRedTeamMutation(canWrite, {
-    mutate: (csv: string) => importProbePrompts(csv),
-    invalidates: [redteamKeys.probePacks],
-    successMessage: (result) =>
-      `프롬프트 ${formatNumber(result.imported_cases)}건, 묶음 ${formatNumber(result.packs_touched)}건을 반영했습니다.`,
-    errorMessage: "프롬프트 CSV를 가져오지 못했습니다.",
-    onSuccess: (result) => {
-      if (result.skipped.length > 0) {
-        toast.warning(`건너뛴 행 ${formatNumber(result.skipped.length)}건`, {
-          description: result.skipped.slice(0, 5).join(" · "),
-        });
-      }
-    },
-  });
+  const csvContext = JSON.stringify([
+    query,
+    selectedTargetId,
+    openPack?.id ?? "",
+    Boolean(caseDefaults),
+    pendingCaseDelete?.id ?? "",
+  ]);
+  const exportCsv = useFileDownload(routeId, csvContext);
+  const importCsv = useProbeCsvImport(canWrite, writeReason, csvContext);
 
   const allTargets = targets.data?.targets ?? [];
   const visibleTargets = allTargets.filter((target) => matchesTarget(target, query));
@@ -209,12 +200,21 @@ export function RedTeamTargetsTab({
         >
           <Plus aria-hidden="true" /> 프롬프트 추가
         </Button>
-        <Button disabled={exportCsv.isPending} onClick={() => exportCsv.mutate(undefined)}>
+        <Button
+          disabled={!exportCsv.available || exportCsv.pending}
+          onClick={() =>
+            void exportCsv.run(exportProbePrompts, {
+              successMessage: "프롬프트 CSV를 내려받았습니다.",
+              errorMessage: "프롬프트 CSV를 내보내지 못했습니다.",
+            })
+          }
+        >
           <Download aria-hidden="true" /> CSV 내보내기(엑셀)
         </Button>
         <Button
-          disabled={!canWrite || importCsv.isPending}
+          disabled={!importCsv.available || importCsv.open}
           title={writeTitle}
+          ref={csvImportButton}
           onClick={() => fileInputRef.current?.click()}
         >
           <Upload aria-hidden="true" /> CSV 가져오기
@@ -225,14 +225,20 @@ export function RedTeamTargetsTab({
           accept=".csv,text/csv"
           className="sr-only"
           aria-label="프롬프트 CSV 파일 선택"
+          disabled={!importCsv.available || importCsv.open}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
             if (!file) return;
-            void file.text().then((text) => importCsv.mutate(text));
+            void importCsv.run(file);
           }}
         />
       </Toolbar>
+      {importCsv.open ? (
+        <Suspense fallback={<p role="status">CSV 검토 화면을 불러오고 있습니다.</p>}>
+          <ProbeCsvImportDialog operation={importCsv} returnFocusRef={csvImportButton} />
+        </Suspense>
+      ) : null}
       <p className="rt-muted">
         레드팀이 보낼 요청 프롬프트를 직접 추가하거나 엑셀로 일괄 편집할 수 있습니다.
       </p>

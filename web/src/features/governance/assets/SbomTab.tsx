@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 
 import { sbomTypeLabels, sbomTypes } from "@/features/governance/assets/sbom-types";
 import { BadgeList, PanelFailure } from "@/features/governance/reports/report-parts";
 import { downloadExport } from "@/features/governance/reports/report-download";
 import { apiClient } from "@/shared/api/client";
+import { fileEndpoints } from "@/shared/api/file-endpoints";
+import { useFileDownload } from "@/shared/hooks/use-file-download";
 import type { SbomEntry } from "@/shared/api/domains/governance-reports";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -79,7 +80,8 @@ export function SbomTab({
 }): React.JSX.Element {
   const columns = useMemo(() => sbomColumns(), []);
   const [gapsOnly, setGapsOnly] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const exportTask = useFileDownload("governance.assets", JSON.stringify([type, gapsOnly]), canExport);
+  const exporting = exportTask.pending;
   const sbom = useQuery({
     queryKey: ["governance", "sbom"],
     queryFn: ({ signal }) =>
@@ -97,17 +99,18 @@ export function SbomTab({
     (entry) => (type === "" || entry.type === type) && (!gapsOnly || entry.gaps.length > 0),
   );
 
-  const exportJson = async (): Promise<void> => {
-    setExporting(true);
-    try {
-      await downloadExport("/admin/sbom", "ai-asset-sbom.json");
-      toast.success("AI 자산 SBOM을 JSON으로 내려받았습니다.");
-    } catch (error) {
-      toast.error(safeAppErrorMessage(error, "JSON을 내려받지 못했습니다."));
-    } finally {
-      setExporting(false);
-    }
-  };
+  const exportJson = (): Promise<void> =>
+    exportTask.run(
+      (ownership) =>
+        downloadExport(fileEndpoints.sbom, "ai-asset-sbom.json", {
+          ...ownership,
+          routeId: "governance.assets",
+        }),
+      {
+        successMessage: "AI 자산 SBOM을 JSON으로 내려받았습니다.",
+        errorMessage: "JSON을 내려받지 못했습니다.",
+      },
+    );
 
   return (
     <div className="gov-stack">
@@ -138,7 +141,7 @@ export function SbomTab({
         actions={
           <Button
             onClick={() => void exportJson()}
-            disabled={!canExport || exporting}
+            disabled={!exportTask.available || exporting}
             title={canExport ? undefined : "내보내려면 admin:read 권한이 필요합니다."}
           >
             <Download aria-hidden="true" /> JSON 내보내기

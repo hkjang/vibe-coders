@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { downloadMultiRunExport, type MultiRunExportFormat } from "./multi-run-export";
 import { chatRouteId } from "./use-chat-console";
 import type { CompareAccess } from "./use-compare-access";
+import { useFeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { apiClient } from "@/shared/api/client";
 import type { MultiRunDiff } from "@/shared/api/domains/gateway.schemas";
 import { withPathParams } from "@/shared/api/endpoint-factory";
@@ -11,6 +12,11 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 /** The read pane can unmount on run change while its owning access hook survives. */
 export function useRunRead(runId: string, access: CompareAccess) {
+  const owner = useFeatureReadOwner(
+    chatRouteId,
+    JSON.stringify(["multi-run-read", runId, access.readAllowed]),
+  );
+  const [stateOwner, setStateOwner] = useState(owner);
   const [diff, setDiff] = useState<MultiRunDiff>();
   const [pending, setPending] = useState<"" | "diff" | "export">("");
   const [error, setError] = useState<{ message: string; requestId?: string }>();
@@ -23,12 +29,13 @@ export function useRunRead(runId: string, access: CompareAccess) {
       flight.current?.abort();
       flight.current = undefined;
     };
-  }, []);
+  }, [owner]);
 
   const run = async (kind: "diff" | "export", format: MultiRunExportFormat = "md") => {
-    if (!mounted.current || flight.current) return;
+    if (!mounted.current || !owner.isCurrent() || flight.current) return;
     const current = new AbortController();
-    const owned = () => mounted.current && access.isCurrent() && flight.current === current;
+    const owned = () =>
+      mounted.current && owner.isCurrent() && access.isCurrent() && flight.current === current;
     const assertCurrent = () => {
       if (!owned()) throw new AppError("현재 실행 조회를 다시 확인하세요.", { kind: "aborted" });
       access.assertRead();
@@ -36,6 +43,8 @@ export function useRunRead(runId: string, access: CompareAccess) {
     try {
       access.assertRead();
       flight.current = current;
+      if (stateOwner !== owner) setDiff(undefined);
+      setStateOwner(owner);
       setPending(kind);
       setError(undefined);
       assertCurrent();
@@ -63,5 +72,10 @@ export function useRunRead(runId: string, access: CompareAccess) {
       }
     }
   };
-  return { diff, pending, error, run };
+  return {
+    diff: stateOwner === owner ? diff : undefined,
+    pending: stateOwner === owner ? pending : "",
+    error: stateOwner === owner ? error : undefined,
+    run,
+  };
 }

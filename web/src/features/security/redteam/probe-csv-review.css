@@ -1,0 +1,48 @@
+.probe-csv-review {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.probe-csv-review p,
+.probe-csv-review h4,
+.probe-csv-review td,
+.probe-csv-review th {
+  overflow-wrap: anywhere;
+}
+.probe-csv-review table {
+  table-layout: fixed;
+  width: 100%;
+}
+.probe-csv-review td,
+.probe-csv-review th {
+  text-align: start;
+  vertical-align: top;
+  padding: var(--space-2);
+}
+.probe-csv-review th:first-child {
+  width: 22%;
+}
+.probe-csv-review pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 14rem;
+  overflow-y: auto;
+  font-size: 0.875rem;
+}
+.probe-csv-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.probe-csv-review-list {
+  list-style: none;
+  padding: 0;
+}
+.probe-csv-review-list > li {
+  margin-block: var(--space-4);
+}
+.probe-csv-changed th {
+  font-weight: 700;
+  text-decoration: underline;
+}

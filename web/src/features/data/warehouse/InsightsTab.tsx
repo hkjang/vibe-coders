@@ -1,5 +1,4 @@
 import { Download, RefreshCw } from "lucide-react";
-import { useState } from "react";
 
 import { DataQueryNotice } from "@/features/data/DataQueryNotice";
 import { SimpleTable } from "@/features/data/SimpleTable";
@@ -33,7 +32,7 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Toolbar } from "@/shared/components/ui/Toolbar";
-import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { useFileDownload } from "@/shared/hooks/use-file-download";
 import { formatDuration, formatKRW, formatNumber, formatPercent } from "@/shared/utils/format";
 
 interface InsightsTabProps {
@@ -67,17 +66,20 @@ export function InsightsTab({
 }: InsightsTabProps): React.JSX.Element {
   const { overview, timeseries, dimensions, latency, quality, routing, text2sql, savings, modelMigration } =
     useInsightsQueries(range, bucket, dimension, order);
-  const [exportError, setExportError] = useState<string | undefined>();
-  const [exporting, setExporting] = useState(false);
-
+  const csv = useFileDownload(
+    "data.warehouse",
+    JSON.stringify([range, bucket, dimension, order]),
+    Boolean(overview.data?.configured),
+  );
+  const exporting = csv.pending;
+  const exportError = csv.error
+    ? `${csv.error.message}${csv.error.requestId ? ` 요청 ID: ${csv.error.requestId}` : ""}`
+    : undefined;
   const exportCsv = (): void => {
-    setExporting(true);
-    setExportError(undefined);
-    void downloadDwDashboardCsv(range, dimension, order)
-      .catch((cause: unknown) => {
-        setExportError(safeAppErrorMessage(cause, "CSV를 내보내지 못했습니다."));
-      })
-      .finally(() => setExporting(false));
+    void csv.run((ownership) => downloadDwDashboardCsv(range, dimension, order, ownership), {
+      errorMessage: "CSV를 내보내지 못했습니다.",
+      toastErrors: false,
+    });
   };
 
   const summary = overview.data;
@@ -93,7 +95,7 @@ export function InsightsTab({
       <Toolbar
         label="데이터 웨어하우스 조회 조건"
         end={
-          <Button variant="secondary" onClick={exportCsv} disabled={exporting || !summary?.configured}>
+          <Button variant="secondary" onClick={exportCsv} disabled={exporting || !csv.available}>
             <Download aria-hidden="true" /> {exporting ? "내보내는 중" : "CSV 내보내기"}
           </Button>
         }
