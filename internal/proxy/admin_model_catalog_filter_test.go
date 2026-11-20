@@ -87,6 +87,13 @@ func TestMonitorModelCatalogSavedViewAndContract(t *testing.T) {
 	paths := buildOpenAPISpec()["paths"].(map[string]any)
 	for _, path := range []string{"/admin/requests", "/admin/scatter", "/admin/xview/delta", "/admin/xview/models", "/admin/xview/model-series", "/admin/xview/model-outliers"} {
 		op := paths[path].(map[string]any)["get"].(map[string]any)
+		responses := op["responses"].(map[string]any)
+		if _, ok := responses["200"]; !ok {
+			t.Errorf("%s lost its successful response while adding a filter", path)
+		}
+		if _, ok := responses["default"]; !ok {
+			t.Errorf("%s lost its error contract", path)
+		}
 		found := false
 		for _, value := range op["parameters"].([]any) {
 			p := value.(map[string]any)

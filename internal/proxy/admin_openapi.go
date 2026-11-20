@@ -909,6 +909,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("UITelemetrySummaryResponse")
 	case "get /admin/scatter", "get /admin/xview/delta", "get /admin/xview/models", "get /admin/xview/model-series", "get /admin/xview/model-outliers":
 		op["parameters"] = []any{modelCatalogExclusionParameter()}
+		// Parameter enrichment must retain the existing successful dynamic payload.
+		responses["200"] = map[string]any{"description": "OK"}
 	case "get /v1/models":
 		op["parameters"] = []any{map[string]any{
 			"name": "provider", "in": "query", "required": false,

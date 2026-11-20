@@ -13801,12 +13801,10 @@ export type GetAdminScatterError = GetAdminScatterErrors[keyof GetAdminScatterEr
 
 export type GetAdminScatterResponses = {
     /**
-     * Error
+     * OK
      */
-    default: AppError;
+    200: unknown;
 };
-
-export type GetAdminScatterResponse = GetAdminScatterResponses[keyof GetAdminScatterResponses];
 
 export type PostAdminSecretsRotateData = {
     body?: never;
@@ -16979,12 +16977,10 @@ export type GetAdminXviewDeltaError = GetAdminXviewDeltaErrors[keyof GetAdminXvi
 
 export type GetAdminXviewDeltaResponses = {
     /**
-     * Error
+     * OK
      */
-    default: AppError;
+    200: unknown;
 };
-
-export type GetAdminXviewDeltaResponse = GetAdminXviewDeltaResponses[keyof GetAdminXviewDeltaResponses];
 
 export type GetAdminXviewModelOutliersData = {
     body?: never;
@@ -17009,12 +17005,10 @@ export type GetAdminXviewModelOutliersError = GetAdminXviewModelOutliersErrors[k
 
 export type GetAdminXviewModelOutliersResponses = {
     /**
-     * Error
+     * OK
      */
-    default: AppError;
+    200: unknown;
 };
-
-export type GetAdminXviewModelOutliersResponse = GetAdminXviewModelOutliersResponses[keyof GetAdminXviewModelOutliersResponses];
 
 export type GetAdminXviewModelSeriesData = {
     body?: never;
@@ -17039,12 +17033,10 @@ export type GetAdminXviewModelSeriesError = GetAdminXviewModelSeriesErrors[keyof
 
 export type GetAdminXviewModelSeriesResponses = {
     /**
-     * Error
+     * OK
      */
-    default: AppError;
+    200: unknown;
 };
-
-export type GetAdminXviewModelSeriesResponse = GetAdminXviewModelSeriesResponses[keyof GetAdminXviewModelSeriesResponses];
 
 export type GetAdminXviewModelsData = {
     body?: never;
@@ -17069,12 +17061,10 @@ export type GetAdminXviewModelsError = GetAdminXviewModelsErrors[keyof GetAdminX
 
 export type GetAdminXviewModelsResponses = {
     /**
-     * Error
+     * OK
      */
-    default: AppError;
+    200: unknown;
 };
-
-export type GetAdminXviewModelsResponse = GetAdminXviewModelsResponses[keyof GetAdminXviewModelsResponses];
 
 export type PostAuthKeycloakBackchannelLogoutData = {
     body?: never;

@@ -32952,6 +32952,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "OK"
+          },
           "default": {
             "content": {
               "application/json": {
@@ -38722,6 +38725,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "OK"
+          },
           "default": {
             "content": {
               "application/json": {
@@ -38760,6 +38766,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "OK"
+          },
           "default": {
             "content": {
               "application/json": {
@@ -38798,6 +38807,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "OK"
+          },
           "default": {
             "content": {
               "application/json": {
@@ -38836,6 +38848,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "OK"
+          },
           "default": {
             "content": {
               "application/json": {
