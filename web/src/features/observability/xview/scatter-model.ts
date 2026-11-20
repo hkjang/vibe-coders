@@ -1,4 +1,5 @@
 import type { ScatterPoint } from "@/shared/api/domains/observability.schemas";
+import { formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
 
 export const scatterMetrics = [
   { value: "latency", label: "응답 지연(ms)" },
@@ -9,6 +10,12 @@ export const scatterMetrics = [
   { value: "health", label: "건강 점수" },
 ] as const;
 export type ScatterMetric = (typeof scatterMetrics)[number]["value"];
+
+export function formatScatterMetric(metric: ScatterMetric, value: number): string {
+  if (metric === "cost") return formatKRW(value);
+  if (metric === "latency" || metric === "first_chunk") return formatDuration(value);
+  return formatNumber(value, value > 0 && value < 1 ? 3 : 0);
+}
 
 export const scatterViewModes = [
   { value: "category", label: "상태별" },

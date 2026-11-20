@@ -27,6 +27,13 @@ export default defineConfig({
       output: {
         codeSplitting: {
           groups: [
+            {
+              // The optional request table shares metrics with the plot. Avoid
+              // importing the whole route back through those pure helpers.
+              name: "xview-scatter-model",
+              test: /[\\/]features[\\/]observability[\\/]xview[\\/]scatter-model\.ts$/u,
+              includeDependenciesRecursively: false,
+            },
             // Keep the loader's CSS/module preload helper independent of React
             // and feature chunks, so their load/evaluation failures are caught.
             {
