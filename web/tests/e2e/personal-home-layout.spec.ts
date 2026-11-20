@@ -1,5 +1,6 @@
 import type { AxeResults } from "axe-core";
 import { expect, test } from "@playwright/test";
+import { installPersonalAccess } from "../fixtures/personal-access-browser";
 import { installPersonalConsole } from "../fixtures/personal-console-browser";
 
 for (const theme of ["light", "dark"] as const) {
@@ -105,13 +106,14 @@ test("할 일이 한 건이어도 알림 카드 높이가 제목과 목록의 �
 });
 
 test("긴 할 일과 동작명도 글자 확대에서 읽고 실행할 수 있다", async ({ page }, info) => {
-  const fixture = await installPersonalConsole(page, true);
-  fixture.state.actions[0] = {
+  const fixture = await installPersonalAccess(page, true);
+  const action = {
     type: "key_expiry",
     severity: "high",
     message: "공백없는긴운영메시지".repeat(12),
     button_label: "만료예정인연결설정과키상태확인",
   };
+  fixture.home.state.actions[0] = action;
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("me");
   const card = page
@@ -121,13 +123,17 @@ test("긴 할 일과 동작명도 글자 확대에서 읽고 실행할 수 있�
   await page.locator("html").evaluate((element) => {
     element.style.fontSize = "20px";
   });
-  await expect(card.getByText(fixture.state.actions[0].message, { exact: true })).toBeVisible();
+  await expect(card.getByText(action.message, { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const row = card.getByRole("listitem");
   expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await card.screenshot({ path: info.outputPath("long-task-card.png") });
-  await card.getByRole("button", { name: fixture.state.actions[0].button_label, exact: true }).click();
+  await card.getByRole("button", { name: action.button_label, exact: true }).click();
   await expect.poll(() => new URL(page.url()).searchParams.get("tab")).toBe("keys");
+  await expect(page.getByRole("heading", { name: "발급한 키가 없습니다.", exact: true })).toBeVisible();
+  await expect(page.getByRole("table", { name: "로그인 세션" })).toContainText("현재 브라우저");
+  expect(fixture.reads.map((read) => read.path).sort()).toEqual(["/me/keys", "/me/sessions"]);
+  expect(fixture.home.writes).toEqual([]);
   expect(fixture.writes).toEqual([]);
   fixture.check();
 });
