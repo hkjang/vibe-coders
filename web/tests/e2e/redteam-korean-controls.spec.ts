@@ -1,3 +1,4 @@
+import { expectReadableTableText } from "../fixtures/table-text-readability";
 import { expect, test, type Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import { installPromptLibrary } from "../fixtures/prompt-library-browser";
@@ -181,3 +182,17 @@ for (const theme of ["light", "dark"] as const)
       expect(api.writes).toEqual([]);
       api.check();
     });
+
+test("레드팀 대상·검사 표의 상태·코드·프롬프트는 최소 13px로 표시한다", async ({ page }) => {
+  const api = await fixture(page);
+  await page.goto("redteam?tab=targets");
+  await expect(page.getByText("model:public", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "공개 검사 묶음 검사 보기", exact: true })).toBeVisible();
+  for (const table of await page.getByRole("table").all()) await expectReadableTableText(table);
+  await page.getByRole("button", { name: "공개 검사 묶음 검사 보기", exact: true }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByText("public_probe", { exact: true })).toBeVisible();
+  await expectReadableTableText(sheet.getByRole("table"));
+  expect(api.writes).toEqual([]);
+  api.check();
+});

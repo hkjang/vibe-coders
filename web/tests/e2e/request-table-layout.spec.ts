@@ -1,3 +1,4 @@
+import { expectReadableTableText } from "../fixtures/table-text-readability";
 import { expect, test, type Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import { installRequestBulk } from "../fixtures/request-bulk-browser";
@@ -7,6 +8,7 @@ async function open(page: Page) {
   const fixture = await installRequestBulk(page);
   await page.goto("observability/requests");
   await expect(page.getByRole("table", { name: "현재 페이지 요청 목록" })).toBeVisible();
+  await expectReadableTableText(page.getByRole("table", { name: "현재 페이지 요청 목록" }));
   return fixture;
 }
 async function settings(page: Page) {

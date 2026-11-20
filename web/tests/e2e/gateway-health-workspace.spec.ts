@@ -1,3 +1,4 @@
+import { expectReadableTableText } from "../fixtures/table-text-readability";
 import { expect, test } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import { installGatewayHealthWorkspace } from "../fixtures/gateway-health-workspace-browser";
@@ -75,6 +76,7 @@ for (const theme of ["light", "dark"] as const)
       await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
       await page.goto("gateway/health?range=7d");
       await expect(page.getByText("세션 해시 분배", { exact: true })).toBeVisible();
+      for (const table of await page.getByRole("table").all()) await expectReadableTableText(table);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(
         await page.locator(".metric-pairs").evaluate((element) => {

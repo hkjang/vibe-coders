@@ -145,7 +145,7 @@
   display: block;
   overflow: hidden;
   color: var(--color-muted);
-  font-size: 0.6875rem;
+  font-size: var(--font-size-table);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -154,8 +154,12 @@
   display: block;
   margin-top: 0.125rem;
   color: var(--color-muted);
-  font-size: 0.75rem;
+  font-size: var(--font-size-table);
   overflow-wrap: anywhere;
+}
+
+.xview-selection-table .io-row-line > span:first-child {
+  font-size: var(--font-size-table);
 }
 
 .xview-selection-table .obs-row-actions {

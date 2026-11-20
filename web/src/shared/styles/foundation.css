@@ -220,8 +220,14 @@
   width: 100%;
   min-width: 42rem;
   border-collapse: collapse;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-table);
   text-align: left;
+}
+
+/* Table data includes status badges, identifiers and secondary labels. Keep
+   their minimum independent of row density and responsive to root text size. */
+table :is(.badge, .mono, small, kbd) {
+  font-size: max(var(--font-size-table), 0.875em);
 }
 
 .data-table th,
@@ -229,6 +235,33 @@
   padding: var(--row-space, var(--space-3)) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+/* Each cell owns its content width, including nested grids and inline code.
+   Wrapping keeps full values selectable without painting into adjacent columns. */
+.data-table-cell-content {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.data-table-cell-content > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.data-table-cell-content :is(.badge, .button) {
+  white-space: normal;
+}
+.data-table-cell-content .provider-patterns,
+.data-table-cell-content .truncate {
+  display: block;
+}
+
+/* Auto-sized columns must stay readable when another column contains a URL or
+   long description. Configurable tables keep the user's chosen column width. */
+.data-table-auto th,
+.data-table-auto td {
+  min-width: 8rem;
 }
 
 .data-table th {
@@ -737,13 +770,18 @@
 .model-provider-cell {
   display: grid;
   gap: var(--space-1);
-  max-width: 24rem;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: min(100%, 24rem);
 }
 
 .provider-name-cell a,
 .model-name-cell a {
-  width: max-content;
+  display: -webkit-box;
   max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   font-weight: 700;
 }
 

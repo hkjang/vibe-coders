@@ -172,13 +172,16 @@ function createProviderColumns(
       cell: ({ row }) => (
         <div className="provider-name-cell">
           <Link
+            title={row.original.displayName}
             data-provider-trigger={row.original.identity}
             to={{ search: detailSearch(row.original.identity) }}
             onClick={(event) => rememberTrigger(event.currentTarget, row.original.identity)}
           >
             {row.original.displayName}
           </Link>
-          <span>{displayProviderBaseURL(row.original.provider.base_url, credentialPrefixes)}</span>
+          <span title={displayProviderBaseURL(row.original.provider.base_url, credentialPrefixes)}>
+            {displayProviderBaseURL(row.original.provider.base_url, credentialPrefixes)}
+          </span>
         </div>
       ),
     }),
@@ -206,7 +209,11 @@ function createProviderColumns(
     column.accessor((row) => displayProviderText(row.provider.model_patterns, credentialPrefixes), {
       id: "patterns",
       header: "모델 패턴",
-      cell: ({ getValue }) => <code className="provider-patterns">{getValue() || "모든 모델"}</code>,
+      cell: ({ getValue }) => (
+        <code className="provider-patterns" title={getValue() || "모든 모델"}>
+          {getValue() || "모든 모델"}
+        </code>
+      ),
     }),
     column.accessor((row) => displayProviderText(row.provider.failover_group, credentialPrefixes), {
       id: "failover",

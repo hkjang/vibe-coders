@@ -154,7 +154,10 @@ export function DataTable<TData extends RowData>({
             }
             onScroll={updateScrollState}
           >
-            <table className="data-table" style={configuredTableStyle}>
+            <table
+              className={layout.configurable ? "data-table" : "data-table data-table-auto"}
+              style={configuredTableStyle}
+            >
               <caption className="sr-only">{caption}</caption>
               <thead>
                 {table.getHeaderGroups().map((group) => (
@@ -291,7 +294,9 @@ export function DataTable<TData extends RowData>({
                           key={cell.id}
                           style={layout.configurable ? { width: cell.column.getSize() } : undefined}
                         >
-                          <table.FlexRender cell={cell} />
+                          <div className="data-table-cell-content">
+                            <table.FlexRender cell={cell} />
+                          </div>
                         </td>
                       ))}
                       {onRowClick && getRowActionLabel ? (

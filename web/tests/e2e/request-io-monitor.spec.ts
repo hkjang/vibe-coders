@@ -1,3 +1,4 @@
+import { expectReadableTableText } from "../fixtures/table-text-readability";
 import { expect, test, type Page } from "@playwright/test";
 import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 
@@ -539,6 +540,7 @@ test("XView 선택 목록은 요약과 함께 오류부터 보여 주고 행을 
   await page.getByRole("button", { name: "오류 요청 보기" }).click();
   const errors = page.getByRole("dialog", { name: "선택한 요청 1건" });
   await expect(errors).toContainText("1건 (100.0%)");
+  await expectReadableTableText(errors.getByRole("table"));
   await page.keyboard.press("Escape");
 
   const plot = page.getByRole("img", { name: /분포 산점도/u });

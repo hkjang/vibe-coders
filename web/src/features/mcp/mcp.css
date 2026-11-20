@@ -77,3 +77,10 @@
   font-family: var(--font-mono);
   font-size: 13px;
 }
+
+/* Keep server names readable beside an endpoint in the auto-width table. */
+.mcp-upstream-name-cell {
+  min-width: 8rem;
+  max-width: 20rem;
+  overflow-wrap: anywhere;
+}

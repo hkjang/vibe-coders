@@ -1,3 +1,4 @@
+import { expectReadableTableText } from "../fixtures/table-text-readability";
 import { expect, type Page } from "@playwright/test";
 import { ordinaryNames, privateRefs, providerPath, test } from "../fixtures/provider-catalog-sorting-gateway";
 
@@ -171,3 +172,38 @@ test("390px 다크에서 한글 정렬·건수 선택을 키보드로 조작하�
   await page.screenshot({ path: info.outputPath("provider-catalog-390-dark.png"), fullPage: true });
   expect(providerGateway.reads).toHaveLength(2);
 });
+
+for (const density of ["compact", "default", "comfortable"] as const) {
+  test(`${density} 표의 상태·식별자는 최소 13px이며 글자 확대와 가로 탐색을 유지한다`, async ({
+    page,
+    providerGateway,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript((value) => {
+      localStorage.setItem(
+        "vibe.app.preferences.v1",
+        JSON.stringify({ state: { density: value }, version: 0 }),
+      );
+    }, density);
+    await page.goto("gateway/providers");
+    await ready(page, 10);
+    await expect(page.locator("html")).toHaveAttribute("data-density", density);
+    await expectReadableTableText(table(page));
+    await page.locator("html").evaluate((element) => {
+      element.style.fontSize = "20px";
+    });
+    const measured = await expectReadableTableText(table(page));
+    expect(measured.minimum).toBe(16.25);
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const scroll = page.locator(".data-table-scroll");
+    await scroll.focus();
+    await scroll.press("ArrowRight");
+    await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    await page.reload();
+    await ready(page, 10);
+    await expect(page.locator("html")).toHaveAttribute("data-density", density);
+    await expectReadableTableText(table(page));
+    expect(providerGateway.reads).toHaveLength(4);
+  });
+}
