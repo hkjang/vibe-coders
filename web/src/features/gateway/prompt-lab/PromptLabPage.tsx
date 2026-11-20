@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import "@/features/gateway/gateway.css";
 import "./prompt-lab.css";
 import { PageHeader } from "@/shared/components/page/PageHeader";
@@ -25,7 +26,7 @@ function PromptLabContent({ owner }: { owner: FeatureReadOwner }) {
         title="프롬프트 실험실"
         status="preview"
         description="프롬프트 실험과 테스트 케이스, 출력 계약과 평가 기준을 관리합니다."
-        legacyHref="/admin#/prompt-lab"
+        legacyHref={legacyRoutes.promptLab}
       />
       <PromptLabPanels lab={lab} />
       <PromptLabForms lab={lab} />

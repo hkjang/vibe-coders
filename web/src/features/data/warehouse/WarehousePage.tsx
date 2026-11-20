@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Zap } from "lucide-react";
 import { useCallback } from "react";
@@ -71,7 +72,7 @@ export function WarehousePage(): React.JSX.Element {
       <PageHeader
         title="데이터 웨어하우스"
         description="ClickHouse 분석 지표, 적재 파이프라인 상태, 표준 지표 정의를 한 화면에서 확인합니다."
-        legacyHref="/admin#/dwdashboard"
+        legacyHref={legacyRoutes.warehouse}
         actions={
           <>
             <Button

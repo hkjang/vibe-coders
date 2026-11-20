@@ -16,10 +16,19 @@ function block(from, to) {
   return source.slice(start, end);
 }
 const auth = block('// ---------- auth (AUTH_ENABLED:', '// ---------- modal ----------');
+const directRequestTarget = block('function legacyRequestDetailIDValid(', 'window.openRequestDetail =');
+const sessionTarget = block('function legacySessionTarget(', 'function validLegacySessionRecorder(');
+const skillTarget = block('function legacySkillTarget(', 'async function renderLegacySkillDetail(');
+const workflowTarget = block('function legacyWorkflowTarget(', '// Project only the persisted definition contract.');
+const workAppTarget = block('function legacyWorkAppTarget(', 'async function renderLegacyWorkAppDetail(');
+const schemaTarget = block('function legacyText2SQLSchemaTarget(', 'function legacyDetailTextPages(');
+const accessTarget = block('function legacyAccessTarget(', 'function legacyAccessKeyLifecycle(');
+const routingTarget = block('function legacyRoutingRuleTarget(', 'async function renderLegacyRoutingRuleDetail(');
+ const modelTarget = block('function legacyModelTarget(', 'async function renderLegacyModelDetail(') + block('function legacyProviderRefValid(', '// Reuse the safe app projection;');
 const http = block('// ---------- HTTP ----------', '// ---------- formatting ----------');
-const nav = (name) => ({ allowed_tabs: ['settings'], default_home: '#/dashboard', marker: name });
+const nav = (name) => ({ scopes: ['admin:read', 'admin:write'], allowed_tabs: ['settings'], default_home: '#/dashboard', marker: name });
 const tokens = (name, access = name + '-access') => ({
-  access_token: access, refresh_token: name + '-refresh', user: { email: name, role: 'super_admin' },
+  access_token: access, refresh_token: name + '-refresh', user: { id: 'same-subject', email: name, role: 'super_admin', team_id: '', scopes: ['admin:read', 'admin:write'] },
 });
 const response = (status, data = {}) => ({
   status, ok: status >= 200 && status < 300, statusText: 'synthetic',
@@ -37,12 +46,15 @@ async function until(check) {
 }
 const outcome = (promise) => promise.then(value => ({ ok: true, value }), () => ({ ok: false }));
 
-function harness(transport) {
+function harness(transport, initialHash = '', initialStorage) {
   const nodes = new Map();
-  const storage = new Map();
+  const storage = initialStorage ?? new Map();
   const calls = [];
   const toasts = [];
   let routes = 0;
+  let reloads = 0;
+  const timers = new Map();
+  const rootStyle = {};
   function node(id) {
     if (!nodes.has(id)) {
       const classes = new Set();
@@ -50,32 +62,41 @@ function harness(transport) {
         id, value: '', style: {}, textContent: '', title: '', disabled: false, listeners: {},
         classList: { add: x => classes.add(x), remove: x => classes.delete(x), contains: x => classes.has(x) },
         addEventListener(type, callback) { this.listeners[type] = callback; },
-        focus() {}, appendChild() {}, getAttribute() { return null; },
+        focus() {}, appendChild(child) { nodes.set(child.id, child); }, attributes: {},
+        setAttribute(key, value) { this.attributes[key] = String(value); },
+        removeAttribute(key) { delete this.attributes[key]; },
+        getAttribute(key) { return this.attributes[key] ?? null; },
       });
     }
     return nodes.get(id);
   }
-  const location = { hash: '', pathname: '/admin', search: '' };
+  const location = { hash: initialHash, pathname: '/admin', search: '', reload() { reloads++; } };
   const context = vm.createContext({
-    document: { getElementById: node, querySelectorAll: () => [] },
+    URLSearchParams, TextEncoder, AbortController,
+    document: { documentElement: { style: { setProperty(k, v) { rootStyle[k] = v; } } }, getElementById: id => id === 'sso-login-btn' ? nodes.get(id) : node(id), querySelectorAll: () => [], createElement: () => node('created-button') },
     sessionStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) },
-    location, history: { replaceState() {} },
-    setTimeout: () => 0,
+    location, history: { replaceState(_state, _title, url) { const next = new URL(url, 'https://gateway.invalid'); Object.assign(location, { pathname: next.pathname, search: next.search, hash: next.hash }); } },
+    setTimeout: (fn, ms) => { const id = {}; timers.set(id, { fn, ms }); return id; },
+    clearTimeout: id => timers.delete(id),
     route: () => { routes++; },
     toast: message => toasts.push(message),
     fetch: async (path, options = {}) => {
       const call = { path, ...options };
       calls.push(call);
-      if (path === '/auth/sso/status') return response(200, { keycloak_enabled: false });
+      if (path === '/auth/sso/status') return response(200, transport.sso ?? { keycloak_enabled: false });
       if (path === '/me/navigation' && !transport.navigation) return response(200, nav('default'));
       return transport(call);
     },
   });
-  vm.runInContext('const tokenInput = document.getElementById("token");\n' + auth + '\n' + http +
-    '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment };', context);
+  vm.runInContext('globalThis.window = globalThis; const tokenInput = document.getElementById("token");\n' + directRequestTarget + sessionTarget + skillTarget + '\n' + workflowTarget + '\n' + workAppTarget + '\n' + schemaTarget + '\n' + accessTarget + '\n' + modelTarget + '\n' + routingTarget + '\n' + auth + '\n' + http +
+    '\nglobalThis.client = { authState, saveAuth, clearAuth, tryRefresh, api, initAuth, bootAfterAuth, captureSSOFragment, loadNavigation, refreshLegacyAppEntry, maybeShowSSOButton };', context);
   const client = context.client;
   return {
-    ...client, calls, storage, toasts, node, location,
+    ...client, calls, storage, toasts, node, location, rootStyle,
+    set skillCache(value) { context._skillsByName = value; },
+    get skillCache() { return context._skillsByName; },
+    get reloads() { return reloads; },
+    expireIdentity() { for (const t of timers.values()) if (t.ms === 5000) t.fn(); },
     get routes() { return routes; },
     seed(name = 'A') { client.authState.enabled = true; client.saveAuth(tokens(name)); },
     async login(name = 'B') {
@@ -83,6 +104,7 @@ function harness(transport) {
       await node('login-form').listeners.submit({ preventDefault() {} });
     },
     logout: () => node('auth-logout').listeners.click(),
+    async startSSO() { await client.maybeShowSSOButton(); nodes.get('sso-login-btn').onclick(); },
     count: path => calls.filter(call => call.path === path).length,
     loginVisible: () => node('login-backdrop').classList.contains('open'),
   };
@@ -344,13 +366,14 @@ test('old refresh finally does not clear a new session refresh flight', async ()
     if (call.path === '/auth/login') return response(200, tokens('B'));
     if (call.path === '/auth/refresh') return JSON.parse(call.body).refresh_token === 'A-refresh' ? oldGate.promise : newGate.promise;
     const count = (attempts.get(call.path) || 0) + 1; attempts.set(call.path, count);
-    return response(count === 1 ? 401 : 200, { current: true });
+    return response(count === 1 && call.headers.Authorization !== 'Bearer B-rotated-access' ? 401 : 200, { current: true });
   }); h.seed();
   const old = outcome(h.api('/old')); await until(() => h.count('/auth/refresh') === 1);
   await h.login();
   const current = outcome(h.api('/current')); await until(() => h.count('/auth/refresh') === 2);
   oldGate.resolve(response(200, tokens('old-rotated'))); await old;
-  const next = outcome(h.api('/next')); await until(() => h.count('/next') === 1); await turn();
+  const next = outcome(h.api('/next')); await turn();
+  assert.equal(h.count('/next'), 0, 'new calls wait until refreshed grants are verified');
   const refreshCount = h.count('/auth/refresh');
   newGate.resolve(response(200, tokens('B-rotated')));
   assert.equal((await current).ok, true); assert.equal((await next).ok, true);
@@ -445,3 +468,495 @@ test('malformed SSO code returns to a usable login without dispatching exchange'
   assert.equal(h.loginVisible(), false);
   assert.equal(h.routes, 1);
 });
+
+
+test('Legacy entry requires a strict current opt-in and always uses the fixed App root', async () => {
+  let flag;
+  const transport = () => response(200, { ...nav('current'), app_entry_enabled: flag, app_entry_url: 'https://untrusted.invalid/' });
+  transport.navigation = true;
+  const h = harness(transport);
+  for (flag of [undefined, false, 'true', 1, true, null]) {
+    await h.loadNavigation();
+    assert.equal(h.node('legacy-app-entry').getAttribute('href'), flag === true ? '/app/' : null);
+    assert.equal(h.node('legacy-app-entry').style.display, flag === true ? '' : 'none');
+  }
+});
+
+test('a late opt-in cannot replace a newer disabled navigation response', async () => {
+  const gate = deferred(); let calls = 0;
+  const transport = () => ++calls === 1 ? gate.promise : response(200, { ...nav('new'), app_entry_enabled: false });
+  transport.navigation = true;
+  const h = harness(transport);
+  const older = h.loadNavigation();
+  await until(() => calls === 1);
+  await h.loadNavigation();
+  gate.resolve(response(200, { ...nav('old'), app_entry_enabled: true }));
+  assert.equal(await older, false);
+  assert.equal(h.authState.nav.marker, 'new');
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+});
+
+test('logout immediately retires the entry and pending navigation cannot restore it', async () => {
+  const navGate = deferred(), logoutGate = deferred(); let calls = 0;
+  const transport = call => call.path === '/auth/logout' ? logoutGate.promise
+    : ++calls === 1 ? response(200, { ...nav('initial'), app_entry_enabled: true }) : navGate.promise;
+  transport.navigation = true;
+  const h = harness(transport); h.seed();
+  await h.loadNavigation();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), '/app/');
+  const pending = h.loadNavigation();
+  await until(() => calls === 2);
+  const logout = h.logout();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+  navGate.resolve(response(200, { ...nav('late'), app_entry_enabled: true }));
+  assert.equal(await pending, false);
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+  logoutGate.resolve(response(200));
+  await logout;
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+});
+
+test('navigation failure hides the entry and a later focus refresh recovers', async () => {
+  let failed = false;
+  const transport = () => response(failed ? 503 : 200, { ...nav('current'), app_entry_enabled: true });
+  transport.navigation = true;
+  const h = harness(transport);
+  await h.loadNavigation();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), '/app/');
+  failed = true; await h.refreshLegacyAppEntry();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), null);
+  failed = false; await h.refreshLegacyAppEntry();
+  assert.equal(h.node('legacy-app-entry').getAttribute('href'), '/app/');
+});
+
+test('opt-in app projection preserves Legacy authentication and is not passed as a fetch option',async()=>{
+ const h=harness(()=>response(200,{providers:[]}));h.seed();
+ await h.api('/admin/providers',{appProjection:true,cache:'no-store',headers:{Authorization:'invalid-overwrite'}});
+ assert.equal(h.calls[0].headers['X-Vibe-UI'],'app');assert.equal(h.calls[0].headers.Authorization,'Bearer A-access');
+ assert.equal(h.calls[0].cache,'no-store');assert.equal(Object.hasOwn(h.calls[0],'appProjection'),false);
+ await h.api('/admin/providers');assert.equal(h.calls[1].headers['X-Vibe-UI'],undefined);
+});
+test('session retirement clears a rendered provider detail immediately',()=>{
+ const h=harness(()=>response(200));h.seed();h.node('legacy-provider-detail').textContent='SYNTHETIC_PRIVATE_DETAIL';
+ h.clearAuth();assert.equal(h.node('legacy-provider-detail').textContent,'');
+});
+
+test('the initial explicit provider detail survives local login',async()=>{
+ const target='#/settings?provider_ref=prv_'+'a'.repeat(43);
+ const h=harness(()=>response(200,tokens('A')),target);
+ await h.login('A');assert.equal(h.location.hash,target);assert.equal(h.routes,1);
+});
+test('the existing read-only request handoff also survives local login',async()=>{
+ const target='#/requests?model=public&request_id=public%20%ED%95%9C%EA%B8%80';
+ const h=harness(()=>response(200,tokens('A')),target);await h.login('A');assert.equal(h.location.hash,target);
+});
+for(const target of ['#/settings?provider_ref=unsafe','#/settings?provider_ref=prv_'+'a'.repeat(43)+'\n','#/redteam?run=1','#sso=private','//outside.invalid','#/requests-other']){
+ test('login does not restore an unapproved initial target '+JSON.stringify(target.slice(0,50)),async()=>{
+  const h=harness(()=>response(200,tokens('A')),target);await h.login('A');assert.equal(h.location.hash,'');
+ });
+}
+test('a changed hash supersedes the original provider handoff',async()=>{
+ const target='#/settings?provider_ref=prv_'+'a'.repeat(43);
+ const h=harness(()=>response(200,tokens('A')),target);h.location.hash='#/settings';await h.login('A');assert.equal(h.location.hash,'');
+});
+test('explicit logout discards an initial read-only handoff before another login',async()=>{
+ const target='#/settings?provider_ref=prv_'+'a'.repeat(43);
+ const h=harness(()=>response(200,tokens('A')),target);h.seed();await h.logout();await h.login('B');assert.equal(h.location.hash,'');
+});
+test('failed credentials do not consume the initial handoff',async()=>{
+ const target='#/settings?provider_ref=prv_'+'a'.repeat(43);let failed=true;
+ const h=harness(()=>response(failed?401:200,tokens('A')),target);await h.login('A');assert.equal(h.location.hash,target);
+ failed=false;await h.login('A');assert.equal(h.location.hash,target);
+});
+
+const ssoReturnKey = 'vibe.admin.auth.sso-return-to';
+const providerHandoff = '#/settings?provider_ref=prv_' + 'a'.repeat(43);
+const ssoTransport = call => response(200, call.path === '/auth/me' ? {auth_enabled:true,user:tokens('SSO').user} : tokens('SSO'));
+ssoTransport.sso = {keycloak_enabled:true,allow_local_login:true,login_url:'/auth/keycloak/login'};
+test('explicit Legacy SSO preserves the same provider through one-use tab storage',async()=>{
+ const departure=harness(ssoTransport,providerHandoff);await departure.startSSO();
+ assert.equal(departure.location.href,'/auth/keycloak/login');
+ const callback=harness(ssoTransport,'#kc_code=synthetic-code',departure.storage);await callback.initAuth();
+ assert.equal(callback.location.hash,providerHandoff);assert.equal(callback.storage.has(ssoReturnKey),false);
+ assert.equal(callback.authState.user.email,'SSO');assert.equal(callback.routes,1);
+});
+
+test('request detail and filter bytes survive SSO without entering the IdP URL',async()=>{
+ const target='#/requests?request_id=%ED%95%9C%EA%B8%80%20%2B%252F%3F%26%23&model=public%2B&limit=37';
+ const d=harness(ssoTransport,target);await d.startSSO();assert.equal(d.location.href,'/auth/keycloak/login');
+ const h=harness(ssoTransport,'#kc_code=synthetic',d.storage);await h.initAuth();assert.equal(h.location.hash,target);
+});
+for(const marker of ['#kc_error=access_denied','#kc_error=%E0%A4%A','#kc_code=%E0%A4%A']){
+ test('SSO failure keeps a one-use safe target for explicit retry '+marker,async()=>{
+  const d=harness(ssoTransport,providerHandoff);await d.startSSO();
+  const h=harness(ssoTransport,marker,d.storage);await h.initAuth();
+  assert.equal(h.location.hash,providerHandoff);assert.equal(h.loginVisible(),true);assert.equal(h.storage.has(ssoReturnKey),false);
+  await h.login();assert.equal(h.location.hash,providerHandoff);
+ });
+}
+for(const failure of ['401','network']){
+ test('exchange failure restores destination but never credentials '+failure,async()=>{
+  const d=harness(ssoTransport,providerHandoff);await d.startSSO();
+  const h=harness(()=>{if(failure==='network')throw Error('private');return response(401)},'#kc_code=synthetic',d.storage);
+  await h.initAuth();assert.equal(h.location.hash,providerHandoff);assert.equal(h.loginVisible(),true);assert.equal(h.storage.has('authAccess'),false);
+ });
+}
+for(const value of ['broken',JSON.stringify({hash:providerHandoff,createdAt:Date.now()-600001}),JSON.stringify({hash:providerHandoff,createdAt:Date.now()+600000}),JSON.stringify({hash:providerHandoff,createdAt:'100'}),JSON.stringify({hash:'//outside.invalid',createdAt:Date.now()}),'x'.repeat(9001)]){
+ test('invalid or stale staged intent is discarded '+value.slice(0,24),async()=>{
+  const storage=new Map([[ssoReturnKey,value]]);const h=harness(ssoTransport,'#kc_code=synthetic',storage);
+  await h.initAuth();assert.equal(h.location.hash,'');assert.equal(h.storage.has(ssoReturnKey),false);
+ });
+}
+for(const change of ['route','logout','login']){
+ test('in-flight SSO cannot restore retired intent after '+change,async()=>{
+  const d=harness(ssoTransport,providerHandoff);await d.startSSO();const exchange=deferred();
+  const h=harness(call=>call.path==='/auth/sso/exchange'?exchange.promise:ssoTransport(call),'#kc_code=synthetic',d.storage);
+  const boot=h.initAuth();await until(()=>h.count('/auth/sso/exchange')===1);
+  if(change==='route')h.location.hash='#/requests?model=new';
+  else if(change==='logout')await h.logout();else await h.login();
+  const current=h.location.hash;exchange.resolve(response(200,tokens('SSO')));await boot;
+  assert.equal(h.location.hash,current);assert.notEqual(h.location.hash,providerHandoff);assert.equal(h.storage.has(ssoReturnKey),false);
+ });
+}
+test('ordinary Legacy boot discards an abandoned SSO intent',async()=>{
+ const d=harness(ssoTransport,providerHandoff);await d.startSSO();
+ const h=harness(ssoTransport,'#/requests',d.storage);await h.initAuth();assert.equal(h.location.hash,'#/requests');assert.equal(h.storage.has(ssoReturnKey),false);
+ h.location.hash='#kc_code=synthetic';await h.initAuth();assert.equal(h.location.hash,'');
+});
+test('explicit logout and local login each discard pending SSO intent',async()=>{
+ for(const action of ['logout','login']){
+  const h=harness(ssoTransport,providerHandoff);await h.startSSO();await h[action]();assert.equal(h.storage.has(ssoReturnKey),false);
+ }
+});
+test('a new SSO selection supersedes an earlier staged target',async()=>{
+ const h=harness(ssoTransport,providerHandoff);await h.startSSO();h.location.hash='#/requests?model=new';await h.startSSO();
+ const c=harness(ssoTransport,'#kc_code=synthetic',h.storage);await c.initAuth();assert.equal(c.location.hash,'#/requests?model=new');
+});
+test('storage failure stops the redirect with a usable login error',async()=>{
+ const storage=new Map();storage.set=()=>{throw Error('unavailable')};
+ const h=harness(ssoTransport,providerHandoff,storage);await h.startSSO();assert.equal(h.location.href,undefined);assert.equal(h.loginVisible(),true);
+ assert.match(h.node('login-error').textContent,/저장할 수 없습니다/);
+});
+
+for (const target of ['#/prompts?q=public&since=2026-11-20T00%3A00%3A00.123Z&fp_window=90d','#/prompt-assets?asset=opaque-id&q=no-match','#/prompt-debt?window=90d']) {
+ test('prompt resource survives local login and SSO '+target, async()=>{
+  const local=harness(ssoTransport,target);await local.login();assert.equal(local.location.hash,target);
+  const departure=harness(ssoTransport,target);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,target);
+ });
+}
+
+
+for(const source of ['live','cache','agent_route']){
+ test('exact model resource survives local login and SSO '+source,async()=>{
+  const hash='#/model-contracts?'+new URLSearchParams({model:'public +%2F?&#',provider_ref:'prv_'+'A'.repeat(43),source});
+  const h=harness(ssoTransport,hash);await h.login();assert.equal(h.location.hash,hash);
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,hash);assert.equal(callback.count('/admin/models/contracts/run'),0);
+ });
+}
+for(const hash of ['#/model-contracts','#/model-contracts?model=missing','#/model-contracts?'+new URLSearchParams({model:'public',provider_ref:'name',source:'live'}),'#/model-contracts?'+new URLSearchParams({model:'public',provider_ref:'prv_'+'A'.repeat(43),source:'live'})+'&run=true']){
+ test('unvalidated model workflow is not staged across SSO '+hash,async()=>{
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,'');
+ });
+}
+test('retiring auth clears the displayed model detail',async()=>{
+ const h=harness(ssoTransport);h.seed();h.node('legacy-model-detail').textContent='PRIVATE_MODEL_DETAIL';
+ await h.logout();assert.equal(h.node('legacy-model-detail').textContent,'');
+});
+
+test('exact routing rule survives local login and independent SSO',async()=>{
+ const hash='#/routing?'+new URLSearchParams({rule_id:'규칙 +%2F?&#/exact'});
+ const local=harness(ssoTransport,hash);await local.login();assert.equal(local.location.hash,hash);
+ const departure=harness(ssoTransport,hash);await departure.startSSO();
+ const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+ assert.equal(callback.location.hash,hash);assert.equal(callback.count('/admin/routing/preview'),0);
+});
+for(const hash of ['#/routing','#/routing/health?rule_id=public','#/routing?rule_id=','#/routing?rule_id=a&rule_id=b','#/routing?rule_id=a&run=true','#/routing?rule_id=%E2%80%8B','#/routing?rule_id=%ED%A0%80','#/routing?rule_id=%zz']){
+ test('unvalidated routing workflow is not staged across SSO '+hash,async()=>{
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,'');
+ });
+}
+test('retiring auth clears displayed routing detail',async()=>{
+ const h=harness(ssoTransport);h.seed();h.node('legacy-routing-rule-detail').textContent='PRIVATE_ROUTING_DETAIL';
+ await h.logout();assert.equal(h.node('legacy-routing-rule-detail').textContent,'');
+});
+
+test('a literal question mark in an exact routing ID survives SSO',async()=>{
+ const hash='#/routing?rule_id=public?tail';
+ const departure=harness(ssoTransport,hash);await departure.startSSO();
+ const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,hash);
+});
+
+for(const [resource,id] of [['key','shared-id'],['account',' 계정 +%2F?&#/ '+'가'.repeat(1300)],['team',' 팀 +%2F?&#/ '+'가'.repeat(1300)]]){
+ test('exact access kind and long ID survive local login and SSO '+resource,async()=>{
+  const hash='#/users?'+new URLSearchParams({resource,id});
+  if(resource!=='key')assert.ok(hash.length>9000);
+  const local=harness(ssoTransport,hash);await local.login();assert.equal(local.location.hash,hash);
+  const departure=harness(ssoTransport,hash);await departure.startSSO();assert.equal(departure.location.href,'/auth/keycloak/login');
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,hash);assert.equal(callback.storage.has(ssoReturnKey),false);
+ });
+}
+for(const hash of ['#/users?resource=team&id=%zz','#/users?resource=account&id=%ED%A0%80','#/users?resource=key&id=a&id=b',
+ '#/users?resource=team&id=a&save=true','#/users?resource=account&id='+('a'.repeat(4097)), '#/requests?q='+('a'.repeat(8193)),
+ '#/users?resource=unknown&id=a','#/users?resource=team&id='+('a'.repeat(16384))]){
+ test('invalid access and overlong old target are not staged '+hash.slice(0,70),async()=>{
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,'');
+ });
+}
+test('logout clears displayed access detail',async()=>{
+ const h=harness(ssoTransport);h.seed();h.node('legacy-access-detail').textContent='PRIVATE_ACCESS_DETAIL';
+ await h.logout();assert.equal(h.node('legacy-access-detail').textContent,'');
+});
+
+for(const name of ['스키마 +%2F?&#/정확','😀'.repeat(512)]){
+ test('exact schema survives local login and independent SSO '+name.slice(0,20),async()=>{
+  const hash='#/text2sql?'+new URLSearchParams({schema_name:name});
+  const local=harness(ssoTransport,hash);await local.login();assert.equal(local.location.hash,hash);
+  const departure=harness(ssoTransport,hash);await departure.startSSO();assert.equal(departure.location.href,'/auth/keycloak/login');
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,hash);assert.equal(callback.storage.has(ssoReturnKey),false);
+ });
+}
+for(const hash of ['#/text2sql?schema_name=%zz','#/text2sql?schema_name=%ED%A0%80','#/text2sql?schema_name=a&schema_name=b',
+ '#/text2sql?schema_name=a&run=true','#/text2sql?schema_name= padded ','#/text2sql?schema_name=',
+ '#/text2sql?schema_name='+('x'.repeat(513)),'#/text2sql?schema_name=%E2%80%8B','#/text2sql?schema_name=x&window=7d']){
+ test('invalid schema target is not staged '+hash.slice(0,80),async()=>{
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();assert.equal(callback.location.hash,'');
+ });
+}
+test('logout clears displayed schema details including expanded source',async()=>{
+ const h=harness(ssoTransport);h.seed();h.node('legacy-text2sql-schema-detail').textContent='PRIVATE_SCHEMA_CONTEXT';
+ await h.logout();assert.equal(h.node('legacy-text2sql-schema-detail').textContent,'');
+});
+
+// Refresh rotates credentials, but role/team/scope changes retire the document.
+// The fixture transports do not perform that retirement on behalf of the client.
+for (const [field, value] of [
+  ['role', 'readonly_admin'], ['team_id', 'other-team'],
+  ['scopes', ['admin:read']], ['id', 'other-subject'],
+]) test('changed refresh grant retires private views and prevents replay: ' + field, async () => {
+  const rotated = tokens('rotated'); rotated.user[field] = value;
+  const h = harness(call => call.path === '/auth/refresh' ? response(200, rotated) : response(401));
+  h.seed(); h.node('legacy-text2sql-schema-detail').textContent = 'private old text';
+  h.node('modal-body').textContent = 'private modal';
+  const result = await outcome(h.api('/mutation', { method: 'POST', success: 'saved' }));
+  assert.equal(result.ok, false);
+  assert.equal(h.reloads, 1);
+  assert.equal(h.rootStyle.visibility, 'hidden');
+  assert.equal(h.node('legacy-text2sql-schema-detail').textContent, '');
+  assert.equal(h.node('modal-body').textContent, '');
+  assert.equal(h.count('/mutation'), 1);
+  assert.equal(h.toasts.length, 0);
+  assert.equal(h.storage.get('authAccess'), 'rotated-access');
+  assert.equal(h.storage.get('authRefresh'), 'rotated-refresh');
+  assert.equal(h.storage.has('authUser'), false);
+  assert.equal(h.storage.get('vibe.admin.auth.grant-review'), '1');
+  assert.equal(h.loginVisible(), false);
+  assert.equal((await outcome(h.api('/after'))).ok, false);
+  assert.equal(h.count('/after'), 0);
+});
+
+test('equal normalized scopes preserve the document and current form', async () => {
+  const rotated = tokens('rotated');
+  rotated.user.scopes = ['admin:write', 'admin:read', 'admin:read'];
+  const h = harness(() => response(200, rotated)); h.seed();
+  h.node('unsaved').value = 'work in progress';
+  h.node('legacy-text2sql-schema-detail').textContent = 'authorized source';
+  assert.equal(await h.tryRefresh(), true);
+  assert.equal(h.reloads, 0);
+  assert.equal(h.node('unsaved').value, 'work in progress');
+  assert.equal(h.node('legacy-text2sql-schema-detail').textContent, 'authorized source');
+  assert.equal(h.count('/auth/me'), 0);
+});
+
+for (const changed of [false, true]) test('older refresh wire verifies actual auth/me before replay, changed=' + changed, async () => {
+  const identity = deferred();
+  const pair = tokens('rotated'); delete pair.user;
+  const h = harness(call => {
+    if (call.path === '/auth/refresh') return response(200, pair);
+    if (call.path === '/auth/me') return identity.promise;
+    return response(call.headers.Authorization === 'Bearer A-access' ? 401 : 200, { current: true });
+  }); h.seed();
+  const pending = outcome(h.api('/business'));
+  await until(() => h.count('/auth/me') === 1);
+  const waiting = outcome(h.api('/during', { method: 'POST' }));
+  await turn();
+  assert.equal(h.count('/during'), 0);
+  assert.equal(h.storage.get('authRefresh'), 'rotated-refresh');
+  const user = tokens('rotated').user;
+  if (changed) user.team_id = 'other-team';
+  identity.resolve(response(200, { auth_enabled: true, user }));
+  assert.equal((await pending).ok, !changed);
+  assert.equal((await waiting).ok, !changed);
+  assert.equal(h.count('/business'), changed ? 1 : 2);
+  assert.equal(h.count('/during'), changed ? 0 : 1);
+  assert.equal(h.reloads, changed ? 1 : 0);
+});
+
+for (const stage of ['headers', 'body']) test('older-wire verification timeout preserves rotation and retires views: ' + stage, async () => {
+  const never = deferred();
+  const pair = tokens('rotated'); delete pair.user;
+  let bodyStarted = false;
+  const h = harness(call => call.path === '/auth/refresh' ? response(200, pair)
+    : stage === 'headers' ? never.promise : { ...response(200), json() { bodyStarted = true; return never.promise; } });
+  h.seed(); const pending = h.tryRefresh();
+  await until(() => h.count('/auth/me') === 1 && (stage === 'headers' || bodyStarted));
+  h.expireIdentity();
+  assert.equal(await pending, false);
+  assert.equal(h.calls.find(c => c.path === '/auth/me').signal.aborted, true);
+  assert.equal(h.reloads, 1);
+  assert.equal(h.storage.get('authRefresh'), 'rotated-refresh');
+  never.resolve(stage === 'headers' ? response(200) : { auth_enabled: true, user: tokens('late').user });
+  await turn();
+  assert.equal(h.storage.has('authUser'), false);
+});
+
+test('logout aborts pending identity lookup without reviving rotated credentials', async () => {
+  const identity = deferred(); const pair = tokens('rotated'); delete pair.user;
+  const h = harness(call => call.path === '/auth/refresh' ? response(200, pair)
+    : call.path === '/auth/me' ? identity.promise : response(200));
+  h.seed(); const pending = h.tryRefresh();
+  await until(() => h.count('/auth/me') === 1);
+  await h.logout();
+  assert.equal(await pending, false);
+  assert.equal(h.reloads, 0);
+  assert.equal(h.storage.has('authAccess'), false);
+  assert.equal(h.calls.find(c => c.path === '/auth/me').signal.aborted, true);
+});
+
+test('old response body completing after a grant transition cannot paint or toast', async () => {
+  const body = deferred(); const rotated = tokens('rotated'); rotated.user.role = 'readonly_admin';
+  const h = harness(call => call.path === '/auth/refresh' ? response(200, rotated)
+    : { ...response(200), json: () => body.promise });
+  h.seed(); const old = outcome(h.api('/old', { success: 'old saved' }));
+  await turn(); assert.equal(await h.tryRefresh(), false);
+  body.resolve({ private: 'old secret' });
+  assert.equal((await old).ok, false);
+  assert.equal(h.toasts.length, 0);
+});
+
+for (const status of [401, 503]) test('grant review boot fails closed and permits explicit recovery, status=' + status, async () => {
+  let recovered = false;
+  const h = harness(() => recovered ? response(200, { auth_enabled: true, user: tokens('rotated').user }) : response(status));
+  h.seed('rotated'); h.storage.set('vibe.admin.auth.grant-review', '1');
+  await h.initAuth();
+  assert.equal(h.routes, 0);
+  assert.equal(h.count('/auth/refresh'), 0);
+  assert.match(h.node('view').innerHTML, /권한 다시 확인/);
+  assert.equal(h.storage.get('authRefresh'), 'rotated-refresh');
+  assert.equal(h.authState.nav.allowed_tabs.length, 0);
+  recovered = true; h.node('legacy-auth-retry').listeners.click();
+  await until(() => h.routes === 1);
+  assert.equal(h.storage.has('vibe.admin.auth.grant-review'), false);
+  assert.equal(h.authState.user.email, 'rotated');
+});
+
+for (const invalid of [false, true]) test('authenticated navigation outage cannot reopen all menus, invalid=' + invalid, async () => {
+  const transport = call => call.path === '/auth/me' ? response(200, { auth_enabled: true, user: tokens('A').user })
+    : invalid ? response(200, { allowed_tabs: ['settings'] }) : response(503);
+  transport.navigation = true;
+  const h = harness(transport); h.seed(); await h.initAuth();
+  assert.equal(h.routes, 0);
+  assert.equal(h.authState.nav.allowed_tabs.length, 0);
+  assert.match(h.node('view').innerHTML, /권한 다시 확인/);
+  assert.equal(h.storage.get('authRefresh'), 'A-refresh');
+});
+
+for (const id of [' 업무 앱 +%2F?&#/ ', ' 앱 ' + '가'.repeat(1300) + ' ']) {
+ test('exact work app handoff survives native SSO staging with long identity ' + id.slice(0,15), async () => {
+  const hash = '#/apps?' + new URLSearchParams({app_id:id});
+  const h = harness(call => call.path === '/auth/sso/exchange' ? response(200,tokens('SSO')) : response(200,{auth_enabled:true,user:tokens('SSO').user}), hash);
+  h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+  h.location.hash='#kc_code=synthetic';
+  await h.initAuth();
+  assert.equal(h.location.hash,hash); assert.equal(h.routes,1);
+ });
+}
+test('logout clears the displayed work app snapshot', async () => {
+ const h=harness(()=>response(200));h.seed();
+ h.node('legacy-work-app-detail').textContent='PRIVATE_APP';
+ await h.logout();assert.equal(h.node('legacy-work-app-detail').textContent,'');
+});
+
+for (const id of [' 워크플로 +%2F?&#/ ', ' 앱 ' + '가'.repeat(1300) + ' ']) {
+ test('exact workflow handoff survives stored SSO return restoration with long identity ' + id.slice(0,15), async () => {
+  const hash = '#/workflows?' + new URLSearchParams({workflow_id:id});
+  const h = harness(call => call.path === '/auth/sso/exchange' ? response(200,tokens('SSO')) : response(200,{auth_enabled:true,user:tokens('SSO').user}), hash);
+  h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+  h.location.hash='#kc_code=synthetic';
+  await h.initAuth();
+  assert.equal(h.location.hash,hash); assert.equal(h.routes,1);
+ });
+}
+test('logout clears the displayed workflow snapshot', async () => {
+ const h=harness(()=>response(200));h.seed();
+ h.node('legacy-workflow-detail').textContent='PRIVATE_WORKFLOW';
+ await h.logout();assert.equal(h.node('legacy-workflow-detail').textContent,'');
+});
+
+for (const id of [' 스킬 +%2F?&#/ ', ' 앱 ' + '가'.repeat(1300) + ' ']) {
+ test('exact skill handoff survives stored SSO return restoration with long identity ' + id.slice(0,15), async () => {
+  const hash = '#/skills?' + new URLSearchParams({skill_name:id});
+  const h = harness(call => call.path === '/auth/sso/exchange' ? response(200,tokens('SSO')) : response(200,{auth_enabled:true,user:tokens('SSO').user}), hash);
+  h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+  h.location.hash='#kc_code=synthetic';
+  await h.initAuth();
+  assert.equal(h.location.hash,hash); assert.equal(h.routes,1);
+ });
+}
+test('logout clears the displayed skill snapshot', async () => {
+ const h=harness(()=>response(200));h.seed();
+ h.node('legacy-skill-detail').textContent='PRIVATE_SKILL';
+ h.skillCache={private:'PRIVATE_SKILL'};
+ await h.logout();assert.equal(h.node('legacy-skill-detail').textContent,'');assert.equal(Object.keys(h.skillCache).length,0);
+});
+
+test('opaque skill reference survives native SSO return without a name',async()=>{
+ const hash='#/skills?skill_ref=skl_'+'A'.repeat(43);
+ const h=harness(call=>call.path==='/auth/sso/exchange'?response(200,tokens('SSO')):response(200,{auth_enabled:true,user:tokens('SSO').user}),hash);
+ h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+ h.location.hash='#kc_code=synthetic';await h.initAuth();
+ assert.equal(h.location.hash,hash);assert.equal(h.routes,1);
+ assert.equal(new URLSearchParams(h.location.hash.split('?')[1]).has('skill_name'),false);
+});
+
+test('exact session selection survives SSO and is cleared on logout',async()=>{
+ const hash='#/sessions?'+new URLSearchParams({session_id:'😀'.repeat(1024)});
+ const h=harness(call=>call.path==='/auth/sso/exchange'?response(200,tokens('SSO')):response(200,{auth_enabled:true,user:tokens('SSO').user}),hash);
+ h.storage.set('vibe.admin.auth.sso-return-to',JSON.stringify({hash,createdAt:Date.now()}));
+ h.location.hash='#kc_code=synthetic';await h.initAuth();
+ assert.equal(h.location.hash,hash);assert.equal(h.routes,1);
+ h.node('legacy-session-detail').innerHTML='PRIVATE_SESSION';await h.logout();
+ assert.equal(h.node('legacy-session-detail').innerHTML,'');
+});
+
+for (const id of [' original +%2F?&# ', 'a'.repeat(4096), '한'.repeat(1365)+'x']) {
+ test('original request path identity survives local login and independent SSO: '+id.length, async()=>{
+  const hash='#/requests?'+new URLSearchParams({request_id:id});
+  const local=harness(ssoTransport,hash);await local.login();assert.equal(local.location.hash,hash);
+  const departure=harness(ssoTransport,hash);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,hash);
+  assert.equal([...callback.storage.keys()].some(key=>key==='vibe.admin.auth.sso-return-to'),false);
+ });
+}
+for (const query of [
+ 'request_id='+encodeURIComponent('한'.repeat(1366)),
+ 'request_id='+encodeURIComponent('한'.repeat(1000))+'&request_id=other',
+ 'request_id='+encodeURIComponent('한'.repeat(1000))+'&reveal=raw',
+ 'request_id='+encodeURIComponent('한'.repeat(1000))+'%ED%A0%80',
+ 'request_id='+encodeURIComponent('한'.repeat(1000))+'%5C',
+]) {
+ test('invalid extended request selection is not staged across SSO: '+query.slice(-12),async()=>{
+  const departure=harness(ssoTransport,'#/requests?'+query);await departure.startSSO();
+  const callback=harness(ssoTransport,'#kc_code=synthetic',departure.storage);await callback.initAuth();
+  assert.equal(callback.location.hash,'');
+ });
+}

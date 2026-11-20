@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import {
   confirmedFitness,
-  exactFitnessSkillName,
+  validFitnessTarget,
   fitnessBody,
   fitnessKey,
   type FitnessFormValues,
@@ -27,31 +27,39 @@ export interface SkillFitnessDraft {
   epoch: number;
   instance: number;
 }
-export function useSkillFitnessQuery(name: string, epoch: number) {
+export function useSkillFitnessQuery(name: string, epoch: number, reference?: string) {
   const client = useQueryClient();
   const owner = useSkillScope();
   const query = useSkillRead({
-    queryKey: fitnessKey(name, epoch),
-    enabled: exactFitnessSkillName(name),
+    queryKey: fitnessKey(name, epoch, reference),
+    enabled: validFitnessTarget(name, reference),
     refetchOnMount: "always",
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.agents.skills.fitness, { query: { skill: name }, signal, routeId }),
+    queryFn: ({ signal }) => {
+      if (!validFitnessTarget(name, reference))
+        throw new AppError("스킬 식별자를 확인하세요.", { kind: "contract" });
+      return apiClient.request(endpoints.domains.agents.skills.fitness, {
+        query: reference ? { skill_ref: reference } : { skill: name },
+        signal,
+        routeId,
+      });
+    },
   });
   const state = useSyncExternalStore(
     useCallback((listener) => client.getQueryCache().subscribe(listener), [client]),
     useCallback(
-      () => client.getQueryState<SkillFitness>(featureOwnedKey(fitnessKey(name, epoch), owner)),
-      [client, epoch, name, owner],
+      () => client.getQueryState<SkillFitness>(featureOwnedKey(fitnessKey(name, epoch, reference), owner)),
+      [client, epoch, name, owner, reference],
     ),
   );
-  return { query, confirmed: confirmedFitness(state, name) };
+  return { query, confirmed: confirmedFitness(state, name, reference) };
 }
 
 export function useSkillFitnessEditor() {
   const auth = useAuth();
   const ownerScope = useSkillScope();
   const queryKey = useCallback(
-    (name: string, epoch: number) => featureOwnedKey(fitnessKey(name, epoch), ownerScope),
+    (name: string, epoch: number, reference?: string) =>
+      featureOwnedKey(fitnessKey(name, epoch, reference), ownerScope),
     [ownerScope],
   );
   const mutationAccess = useSkillOperationAccess(
@@ -70,7 +78,7 @@ export function useSkillFitnessEditor() {
   const flight = useRef<SkillFitnessDraft | undefined>(undefined);
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);
-  const [committed, setCommitted] = useState<{ name: string; epoch: number }>();
+  const [committed, setCommitted] = useState<{ name: string; epoch: number; skill_ref?: string }>();
   const [owner] = useState(() => Symbol("skill-fitness-parent"));
   const leaveAction = useRef<(() => void) | undefined>(undefined);
   const afterClose = useRef<{ action: () => void; epoch: number } | undefined>(undefined);
@@ -124,8 +132,10 @@ export function useSkillFitnessEditor() {
         setCommitted((previous) =>
           previous &&
           event.query ===
-            client.getQueryCache().find({ queryKey: queryKey(previous.name, previous.epoch), exact: true }) &&
-          confirmedFitness(event.query.state, previous.name)
+            client
+              .getQueryCache()
+              .find({ queryKey: queryKey(previous.name, previous.epoch, previous.skill_ref), exact: true }) &&
+          confirmedFitness(event.query.state, previous.name, previous.skill_ref)
             ? undefined
             : previous,
         );
@@ -140,10 +150,14 @@ export function useSkillFitnessEditor() {
       !ownerScope.isCurrent() ||
       active.current ||
       epoch !== tokenStore.getSessionEpoch() ||
-      !exactFitnessSkillName(skill.name)
+      !validFitnessTarget(skill.name, skill.skill_ref)
     )
       return;
-    const latest = confirmedFitness(client.getQueryState(queryKey(skill.name, epoch)), skill.name);
+    const latest = confirmedFitness(
+      client.getQueryState(queryKey(skill.name, epoch, skill.skill_ref)),
+      skill.name,
+      skill.skill_ref,
+    );
     if (!latest) return;
     const draft: SkillFitnessDraft = Object.freeze({
       skill: Object.freeze({ ...skill }),
@@ -172,13 +186,17 @@ export function useSkillFitnessEditor() {
     if (!current(draft) || !access.current)
       throw new AppError("현재 세션의 스킬 쓰기 권한을 확인하세요.", { kind: "permission" });
     if (
-      !exactFitnessSkillName(draft.skill.name) ||
-      !confirmedFitness(client.getQueryState(queryKey(draft.skill.name, draft.epoch)), draft.skill.name)
+      !validFitnessTarget(draft.skill.name, draft.skill.skill_ref) ||
+      !confirmedFitness(
+        client.getQueryState(queryKey(draft.skill.name, draft.epoch, draft.skill.skill_ref)),
+        draft.skill.name,
+        draft.skill.skill_ref,
+      )
     )
       throw new AppError("현재 스킬의 적합성 근거를 다시 조회한 뒤 시도하세요.", { kind: "contract" });
     if (flight.current?.instance === draft.instance)
       throw new AppError("처리 중입니다.", { kind: "aborted" });
-    const body = fitnessBody(draft.skill.name, values);
+    const body = fitnessBody(draft.skill.name, values, draft.skill.skill_ref);
     flight.current = draft;
     setPending(true);
     setCommitted(undefined);
@@ -189,11 +207,14 @@ export function useSkillFitnessEditor() {
         retryUnauthorized: false,
       });
       if (!current(draft) || !mutationAccess.ownsResult()) return;
-      if (saved.skill_name !== draft.skill.name)
+      if (
+        saved.skill_name !== draft.skill.name ||
+        (draft.skill.skill_ref !== undefined && saved.skill_ref !== draft.skill.skill_ref)
+      )
         throw new AppError("기록 응답의 스킬을 확인할 수 없습니다. 다시 전송하기 전에 목록을 조회하세요.", {
           kind: "contract",
         });
-      setCommitted({ name: draft.skill.name, epoch: draft.epoch });
+      setCommitted({ name: draft.skill.name, epoch: draft.epoch, skill_ref: draft.skill.skill_ref });
       toast.success("적합성 근거를 기록했습니다.");
       void mutationAccess.refreshReads(saved).catch(() => undefined);
     } finally {

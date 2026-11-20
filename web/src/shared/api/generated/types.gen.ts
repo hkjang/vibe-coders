@@ -1960,6 +1960,10 @@ export type ModelUsageTagsResponse = {
 
 export type NavigationResponse = {
     allowed_tabs: Array<string>;
+    /**
+     * Optional Legacy-to-App entry flag. Absent means disabled; true requires explicit opt-in, enabled App UI and the current caller authentication.
+     */
+    app_entry_enabled?: boolean;
     default_home: string;
     features: {
         [key: string]: boolean;
@@ -3882,7 +3886,39 @@ export type SettingsBatchResponse = {
     ok: boolean;
 };
 
-export type SkillFitnessAppendRequest = {
+export type SkillCatalogList = {
+    skills: Array<SkillDefinition> | null;
+};
+
+export type SkillDefinition = {
+    allowed_models: string;
+    allowed_teams: string;
+    allowed_tools: string;
+    created_at: string;
+    daily_limit: number;
+    description: string;
+    instructions: string;
+    metadata: string;
+    name: string;
+    owner: string;
+    risk_level: string;
+    /**
+     * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+     */
+    skill_ref?: string;
+    status: string;
+    updated_at: string;
+    updated_by: string;
+    version: string;
+};
+
+export type SkillExactDetail = {
+    skill: SkillDefinition | null;
+};
+
+export type SkillFitnessAppendRequest = ({
+    skill: string;
+} | unknown) & {
     /**
      * multimodel, golden or testcase; omitted/null/unknown values normalize to multimodel, not an enum validation error.
      */
@@ -3892,9 +3928,13 @@ export type SkillFitnessAppendRequest = {
     ref_id?: string | null;
     score?: number | null;
     /**
-     * Must remain nonblank after Go TrimSpace; not required to exist.
+     * Legacy selector must remain nonblank after Go TrimSpace; not required to exist. With skill_ref it may be omitted or exactly echo the selected name.
      */
-    skill: string;
+    skill?: string;
+    /**
+     * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+     */
+    skill_ref?: string;
 };
 
 export type SkillFitnessEvidence = {
@@ -3916,6 +3956,10 @@ export type SkillFitnessEvidence = {
      */
     score: number;
     skill_name: string;
+    /**
+     * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+     */
+    skill_ref?: string;
 };
 
 export type SkillFitnessRecordedResponse = {
@@ -3940,6 +3984,10 @@ export type SkillFitnessRecordedResponse = {
      */
     score: number;
     skill_name: string;
+    /**
+     * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+     */
+    skill_ref?: string;
 };
 
 export type SkillFitnessResponse = {
@@ -3950,6 +3998,10 @@ export type SkillFitnessResponse = {
      */
     required: number;
     skill: string;
+    /**
+     * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+     */
+    skill_ref?: string;
 };
 
 export type StatusBucket = {
@@ -4439,6 +4491,62 @@ export type UiBootstrapResponse = {
     authentication: UiAuthentication;
     backend_version: string;
     capabilities: {
+        /**
+         * Opens the exact API key, login account or registered team in a read-only Legacy detail. Preserves existing authorization and team scope; never exposes credentials or runs mutations.
+         */
+        legacy_access_detail?: boolean;
+        /**
+         * Opens a read-only model catalogue detail in Legacy with exact model/provider identity and explicit source provenance. Does not execute model contracts.
+         */
+        legacy_model_detail?: boolean;
+        /**
+         * Preserves supported prompt library tabs, filters and selected asset in Legacy. Does not grant access or execute mutations.
+         */
+        legacy_prompt_library?: boolean;
+        /**
+         * Supports a read-only provider detail in Legacy settings using the existing app projection and opaque reference. Does not grant provider access.
+         */
+        legacy_provider_detail?: boolean;
+        /**
+         * Supports opening an existing request detail from the Legacy requests hash route. Does not grant request access.
+         */
+        legacy_request_detail?: boolean;
+        /**
+         * Preserves a pure original request selection through Legacy login and SSO for existing UTF-8 path IDs up to 4096 bytes and hash URLs up to 16384 characters. Does not grant access or reveal raw content.
+         */
+        legacy_request_direct_detail?: boolean;
+        /**
+         * Preserves supported request list filters and exact time bounds in the Legacy requests hash route. Does not grant request access.
+         */
+        legacy_request_filters?: boolean;
+        /**
+         * Opens the exact stored routing rule in a read-only Legacy detail using the existing authorized configuration GET. Does not execute routing preview or mutations.
+         */
+        legacy_routing_rule_detail?: boolean;
+        /**
+         * Read-only same-session Legacy detail and SSO return path for existing flight-recorder identifiers. Existing team scope, projection and bounded history apply.
+         */
+        legacy_session_detail?: boolean;
+        /**
+         * Opens one exact stored skill in read-only Legacy using the existing administrator read policy, including saved instructions and metadata. No evaluation, scan, promotion or execution.
+         */
+        legacy_skill_detail?: boolean;
+        /**
+         * Exact skill reference read/mutation selectors and read-only Legacy/SSO detail. Does not grant access; invalid or stale refs never fall back to names.
+         */
+        legacy_skill_reference_detail?: boolean;
+        /**
+         * Opens one exact stored Text2SQL schema in read-only Legacy detail using existing team scope and raw-content permissions. Never executes SQL or changes configuration.
+         */
+        legacy_text2sql_schema_detail?: boolean;
+        /**
+         * Opens one exact stored work app in Legacy using the existing administrator read policy. Shows saved metadata and component references without executing or changing the app.
+         */
+        legacy_work_app_detail?: boolean;
+        /**
+         * Opens one exact stored workflow in read-only Legacy using the existing administrator read policy. Preserves steps, conditions and graph edges without validation, execution, publishing or changes.
+         */
+        legacy_workflow_detail?: boolean;
         raw_prompt_view: boolean;
     };
     legacy_route_map: {
@@ -14105,44 +14213,218 @@ export type GetAdminSkillStudioCandidatesResponses = {
 export type GetAdminSkillStudioReadinessData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Legacy Go-trimmed name selector. Mutually exclusive with skill_ref.
+         */
+        name?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
+    };
     url: '/admin/skill-studio/readiness';
 };
 
+export type GetAdminSkillStudioReadinessErrors = {
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    404: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSkillStudioReadinessError = GetAdminSkillStudioReadinessErrors[keyof GetAdminSkillStudioReadinessErrors];
+
 export type GetAdminSkillStudioReadinessResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminSkillStudioReadinessResponse = GetAdminSkillStudioReadinessResponses[keyof GetAdminSkillStudioReadinessResponses];
+
+export type DeleteAdminSkillsData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref: string;
+    };
+    url: '/admin/skills';
+};
+
+export type DeleteAdminSkillsErrors = {
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    404: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminSkillsError = DeleteAdminSkillsErrors[keyof DeleteAdminSkillsErrors];
+
+export type DeleteAdminSkillsResponses = {
+    /**
+     * Selected skill deleted
+     */
+    200: {
+        deleted: boolean;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref: string;
+    };
+};
+
+export type DeleteAdminSkillsResponse = DeleteAdminSkillsResponses[keyof DeleteAdminSkillsResponses];
 
 export type GetAdminSkillsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        view?: '' | 'detail';
+        /**
+         * Alternative to skill_ref for view=detail. Exact nonempty valid UTF-8 name, at most 4096 bytes, without control characters. No trimming or path normalization. Detail rejects all other query fields except view.
+         */
+        name?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
+        /**
+         * Existing list-only status filter. Omit for all statuses.
+         */
+        status?: string;
+    };
     url: '/admin/skills';
 };
 
-export type GetAdminSkillsResponses = {
+export type GetAdminSkillsErrors = {
     /**
-     * OK
+     * Invalid exact detail query
      */
-    200: unknown;
+    400: AppError;
+    /**
+     * Invalid authentication or missing admin read scope
+     */
+    401: AppError;
+    /**
+     * Skill read failed
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
 };
 
+export type GetAdminSkillsError = GetAdminSkillsErrors[keyof GetAdminSkillsErrors];
+
+export type GetAdminSkillsResponses = {
+    /**
+     * Existing list or exact detail selected by view
+     */
+    200: SkillCatalogList | SkillExactDetail;
+};
+
+export type GetAdminSkillsResponse = GetAdminSkillsResponses[keyof GetAdminSkillsResponses];
+
 export type PostAdminSkillsData = {
-    body?: never;
+    body: ({
+        name: string;
+    } | unknown) & {
+        allowed_models?: string;
+        allowed_teams?: string;
+        allowed_tools?: string;
+        daily_limit?: number;
+        description?: string;
+        instructions?: string;
+        /**
+         * Any valid JSON. When skill_ref is used, omission preserves stored metadata; explicit null resets to the existing empty object default.
+         */
+        metadata?: unknown;
+        name?: string;
+        owner?: string;
+        risk_level?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
+        status?: string;
+        version?: string;
+    };
     path?: never;
     query?: never;
     url: '/admin/skills';
 };
 
+export type PostAdminSkillsErrors = {
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    404: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminSkillsError = PostAdminSkillsErrors[keyof PostAdminSkillsErrors];
+
 export type PostAdminSkillsResponses = {
     /**
-     * OK
+     * Saved skill with opaque reference
      */
-    200: unknown;
+    201: SkillExactDetail;
 };
+
+export type PostAdminSkillsResponse = PostAdminSkillsResponses[keyof PostAdminSkillsResponses];
 
 export type GetAdminSkillsAdoptionData = {
     body?: never;
@@ -14205,18 +14487,56 @@ export type GetAdminSkillsDependencyGraphResponses = {
 };
 
 export type PostAdminSkillsEvaluateData = {
-    body?: never;
+    body: ({
+        name: string;
+    } | unknown) & {
+        model?: string;
+        name?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
+        team?: string;
+        tools?: Array<string>;
+    };
     path?: never;
     query?: never;
     url: '/admin/skills/evaluate';
 };
 
+export type PostAdminSkillsEvaluateErrors = {
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    404: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminSkillsEvaluateError = PostAdminSkillsEvaluateErrors[keyof PostAdminSkillsEvaluateErrors];
+
 export type PostAdminSkillsEvaluateResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type PostAdminSkillsEvaluateResponse = PostAdminSkillsEvaluateResponses[keyof PostAdminSkillsEvaluateResponses];
 
 export type GetAdminSkillsExportData = {
     body?: never;
@@ -14235,11 +14555,15 @@ export type GetAdminSkillsExportResponses = {
 export type GetAdminSkillsFitnessData = {
     body?: never;
     path?: never;
-    query: {
+    query?: {
         /**
          * Skill name after Go TrimSpace; blank names are rejected. Names are not otherwise normalized or required to exist in the skill registry.
          */
-        skill: string;
+        skill?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
     };
     url: '/admin/skills/fitness';
 };
@@ -14253,6 +14577,10 @@ export type GetAdminSkillsFitnessErrors = {
      * invalid_api_key: GET requires admin read scope; POST requires admin write scope. Existing admin-read access includes note and reference text; no separate raw-prompt permission is applied.
      */
     401: AppError;
+    /**
+     * Referenced skill no longer exists or secret rotated
+     */
+    404: AppError;
     /**
      * method_not_allowed: only GET and POST are supported
      */
@@ -14295,6 +14623,10 @@ export type PostAdminSkillsFitnessErrors = {
      */
     401: AppError;
     /**
+     * Referenced skill no longer exists or secret rotated
+     */
+    404: AppError;
+    /**
      * method_not_allowed: only GET and POST are supported
      */
     405: AppError;
@@ -14334,32 +14666,114 @@ export type PostAdminSkillsImportResponses = {
 };
 
 export type PostAdminSkillsPromoteData = {
-    body?: never;
+    body: ({
+        name: string;
+    } | unknown) & {
+        name?: string;
+        note?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
+        to_status: string;
+        version?: string;
+    };
     path?: never;
     query?: never;
     url: '/admin/skills/promote';
 };
 
+export type PostAdminSkillsPromoteErrors = {
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    404: AppError;
+    /**
+     * Existing lifecycle, production policy, security scan or fitness gate rejected the transition
+     */
+    422: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminSkillsPromoteError = PostAdminSkillsPromoteErrors[keyof PostAdminSkillsPromoteErrors];
+
 export type PostAdminSkillsPromoteResponses = {
     /**
-     * OK
+     * Promoted skill with opaque reference
      */
-    200: unknown;
+    200: SkillExactDetail;
 };
+
+export type PostAdminSkillsPromoteResponse = PostAdminSkillsPromoteResponses[keyof PostAdminSkillsPromoteResponses];
 
 export type GetAdminSkillsPromotionsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Legacy Go-trimmed name selector. Mutually exclusive with skill_ref.
+         */
+        skill?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
+        /**
+         * Existing recent-row limit.
+         */
+        limit?: number;
+    };
     url: '/admin/skills/promotions';
 };
 
+export type GetAdminSkillsPromotionsErrors = {
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    404: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSkillsPromotionsError = GetAdminSkillsPromotionsErrors[keyof GetAdminSkillsPromotionsErrors];
+
 export type GetAdminSkillsPromotionsResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminSkillsPromotionsResponse = GetAdminSkillsPromotionsResponses[keyof GetAdminSkillsPromotionsResponses];
 
 export type PostAdminSkillsRecommendData = {
     body?: never;
@@ -14378,30 +14792,106 @@ export type PostAdminSkillsRecommendResponses = {
 export type GetAdminSkillsRunsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Legacy Go-trimmed name selector. Mutually exclusive with skill_ref.
+         */
+        skill?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
+        /**
+         * Existing recent-row limit.
+         */
+        limit?: number;
+    };
     url: '/admin/skills/runs';
 };
 
+export type GetAdminSkillsRunsErrors = {
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    404: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSkillsRunsError = GetAdminSkillsRunsErrors[keyof GetAdminSkillsRunsErrors];
+
 export type GetAdminSkillsRunsResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminSkillsRunsResponse = GetAdminSkillsRunsResponses[keyof GetAdminSkillsRunsResponses];
 
 export type GetAdminSkillsScanData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Legacy Go-trimmed name selector. Mutually exclusive with skill_ref.
+         */
+        name?: string;
+        /**
+         * Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.
+         */
+        skill_ref?: string;
+    };
     url: '/admin/skills/scan';
 };
 
+export type GetAdminSkillsScanErrors = {
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    400: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    401: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    404: AppError;
+    /**
+     * Invalid selector, authorization, missing target or storage failure
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSkillsScanError = GetAdminSkillsScanErrors[keyof GetAdminSkillsScanErrors];
+
 export type GetAdminSkillsScanResponses = {
     /**
-     * OK
+     * Error
      */
-    200: unknown;
+    default: AppError;
 };
+
+export type GetAdminSkillsScanResponse = GetAdminSkillsScanResponses[keyof GetAdminSkillsScanResponses];
 
 export type PostAdminSkillsSeedRecommendedData = {
     body?: never;

@@ -101,6 +101,12 @@ const allowedScenarios = [
   "KEYCLOAK-LIVE-003",
   "KEYCLOAK-LIVE-004",
   "KEYCLOAK-LIVE-005",
+  "KEYCLOAK-LIVE-006",
+  "KEYCLOAK-LIVE-007",
+  "KEYCLOAK-LIVE-008",
+  "KEYCLOAK-LIVE-009",
+  "KEYCLOAK-LIVE-010",
+  "KEYCLOAK-LIVE-011",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -249,7 +255,7 @@ test("Keycloak product reporter preserves only fixed IDs and numeric failure loc
 });
 
 test("Keycloak product reporter rejects forged IDs and source filenames", async () => {
-  const fixtures = ["KEYCLOAK-LIVE-000", "KEYCLOAK-LIVE-006", "KEYCLOAK-LIVE-001suffix"].map((id) => {
+  const fixtures = ["KEYCLOAK-LIVE-000", "KEYCLOAK-LIVE-053", "KEYCLOAK-LIVE-001suffix"].map((id) => {
     const fixture = row(id);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (/private/not-keycloak-product.spec.ts:58:2)`;
     return fixture;

@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryNotice } from "@/features/mcp/mcp-ui";
 import "@/features/mcp/mcp.css";
@@ -60,7 +61,7 @@ function GatewayContent({ owner }: { owner: FeatureReadOwner }) {
       <PageHeader
         title="게이트웨이 MCP"
         description="게이트웨이가 제공하는 MCP 연결 정보와 도구 계약을 관리합니다."
-        legacyHref="/admin#/gateway-mcp"
+        legacyHref={legacyRoutes.gatewayMcp}
         actions={
           <Button onClick={() => void client.invalidateQueries({ queryKey: ["mcp", "gateway"] })}>
             새로고침

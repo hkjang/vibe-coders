@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { UpdatedTime } from "@/features/health/health-ui";
 import { RefreshCw } from "lucide-react";
 import { useCallback } from "react";
@@ -113,7 +114,7 @@ function Text2SqlWorkspace(): React.JSX.Element {
         title="Text2SQL"
         readOnly={!canWrite}
         description="사용자는 vibe/text2sql-* 가상 모델을 호출하고, 게이트웨이가 SQL을 생성·검증하고 선택적으로 실행합니다."
-        legacyHref="/admin#/text2sql"
+        legacyHref={legacyRoutes.text2sql}
         actions={
           <>
             <label className="t2s-inline-field">

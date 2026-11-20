@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
@@ -50,7 +51,7 @@ export function PoliciesLayout({
         title="정책 및 거버넌스"
         readOnly={!canWrite}
         description="긴급 정지·정책·승인·알림·모델 일몰·정책 추천을 관리합니다."
-        legacyHref="/admin#/safety"
+        legacyHref={legacyRoutes.safety}
         actions={
           <Button
             variant="primary"

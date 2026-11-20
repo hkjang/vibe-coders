@@ -100,6 +100,7 @@ func lastUserPromptPreview(prompts []store.PromptPreview) string {
 // handleSessionFlightRecorder assembles the chronological flight recorder for a session.
 // GET /admin/sessions/{session_id}/flight-recorder
 func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

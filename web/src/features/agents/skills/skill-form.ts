@@ -1,3 +1,4 @@
+import { skillReference, skillNameSelector } from "./skill-identity";
 import { z } from "zod";
 
 import type { Skill, SkillWriteBody } from "@/shared/api/domains/agents.schemas";
@@ -42,42 +43,57 @@ export function allowedSkillTransitions(status: string | undefined): readonly st
   return skillTransitions[status?.trim() || "draft"] ?? [];
 }
 
-export const skillFormSchema = z
-  .object({
-    name: z
-      .string()
-      .trim()
-      .min(1, "스킬 이름을 입력하세요.")
-      .regex(/^[a-z0-9][a-z0-9-]*$/u, "소문자, 숫자, 하이픈만 사용할 수 있습니다."),
-    description: z.string(),
-    version: z.string(),
-    owner: z.string(),
-    status: z.string(),
-    risk_level: z.string(),
-    allowed_models: z.string(),
-    allowed_tools: z.string(),
-    allowed_teams: z.string(),
-    daily_limit: z.string(),
-    instructions: z.string(),
-  })
-  .superRefine((values, ctx) => {
-    if (values.daily_limit.trim() !== "" && !/^\d+$/u.test(values.daily_limit.trim())) {
-      ctx.addIssue({ code: "custom", path: ["daily_limit"], message: "0 이상의 정수를 입력하세요." });
-    }
-  })
-  .transform((values) => ({
-    name: values.name.trim(),
-    description: values.description.trim(),
-    version: values.version.trim(),
-    owner: values.owner.trim(),
-    status: values.status,
-    risk_level: values.risk_level,
-    allowed_models: values.allowed_models.trim(),
-    allowed_tools: values.allowed_tools.trim(),
-    allowed_teams: values.allowed_teams.trim(),
-    daily_limit: values.daily_limit.trim() === "" ? 0 : Number(values.daily_limit.trim()),
-    instructions: values.instructions,
-  }));
+export function skillFormSchemaFor(skill?: Skill) {
+  return z
+    .object({
+      name: skill
+        ? z
+            .string()
+            .refine((value) => value === skill.name, "선택한 스킬 이름은 변경할 수 없습니다.")
+            .refine(
+              (value) => Boolean(skillReference(skill)) || /^[a-z0-9][a-z0-9-]*$/u.test(value),
+              "이 스킬을 수정하려면 서버의 스킬 식별자 지원이 필요합니다.",
+            )
+        : z
+            .string()
+            .trim()
+            .min(1, "스킬 이름을 입력하세요.")
+            .regex(/^[a-z0-9][a-z0-9-]*$/u, "소문자, 숫자, 하이픈만 사용할 수 있습니다."),
+      description: z.string(),
+      version: z.string(),
+      owner: z.string(),
+      status: z.string(),
+      risk_level: z.string(),
+      allowed_models: z.string(),
+      allowed_tools: z.string(),
+      allowed_teams: z.string(),
+      daily_limit: z.string(),
+      instructions: z.string(),
+    })
+    .superRefine((values, ctx) => {
+      if (
+        values.daily_limit.trim() !== "" &&
+        !/^\d+$/u.test(values.daily_limit.trim()) &&
+        !(skill && Number(values.daily_limit) === skill.daily_limit)
+      ) {
+        ctx.addIssue({ code: "custom", path: ["daily_limit"], message: "0 이상의 정수를 입력하세요." });
+      }
+    })
+    .transform((values) => ({
+      name: skill ? values.name : values.name.trim(),
+      description: skill ? values.description : values.description.trim(),
+      version: skill ? values.version : values.version.trim(),
+      owner: skill ? values.owner : values.owner.trim(),
+      status: values.status,
+      risk_level: values.risk_level,
+      allowed_models: skill ? values.allowed_models : values.allowed_models.trim(),
+      allowed_tools: skill ? values.allowed_tools : values.allowed_tools.trim(),
+      allowed_teams: skill ? values.allowed_teams : values.allowed_teams.trim(),
+      daily_limit: values.daily_limit.trim() === "" ? 0 : Number(values.daily_limit.trim()),
+      instructions: values.instructions,
+    }));
+}
+export const skillFormSchema = skillFormSchemaFor();
 
 export type SkillFormInput = z.input<typeof skillFormSchema>;
 export type SkillFormOutput = z.output<typeof skillFormSchema>;
@@ -98,8 +114,14 @@ export function skillFormDefaults(skill?: Skill): SkillFormInput {
   };
 }
 
-export function skillWriteBody(values: SkillFormOutput): SkillWriteBody {
-  return { ...values };
+export function skillWriteBody(values: SkillFormOutput, skill?: Skill): SkillWriteBody {
+  if (!skill) return { ...values };
+  if (values.name !== skill.name) throw new Error("선택한 스킬 이름은 변경할 수 없습니다.");
+  const reference = skillReference(skill);
+  if (reference) return { ...values, skill_ref: reference };
+  skillNameSelector(skill);
+  // Older servers replace omitted metadata; retain its complete JSON on an edit.
+  return { ...values, metadata: JSON.parse(skill.metadata || "{}") as unknown };
 }
 
 export function matchesSkillQuery(skill: Skill, query: string): boolean {

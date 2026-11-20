@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -82,7 +83,7 @@ function TeamContent({
         title="팀 대시보드"
         status="preview"
         description="선택한 팀의 사용량과 비용, 운영 위험, 공유 리포트를 확인합니다."
-        legacyHref="/admin#/team"
+        legacyHref={legacyRoutes.team}
         actions={
           <Button
             variant="primary"

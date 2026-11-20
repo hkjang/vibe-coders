@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -101,10 +102,11 @@ export function TeamsTab({ canWrite, writeDeniedReason }: TeamsTabProps): React.
   if (owner.denied)
     return (
       <ErrorState
+        legacyFeatureId="access.users"
         title="팀 조회 권한을 다시 확인하세요."
         message="이전 팀 목록과 초안을 표시하지 않습니다."
         onRetry={owner.restart}
-        legacyHref="/admin#/users"
+        legacyHref={legacyRoutes.users}
       />
     );
   return (

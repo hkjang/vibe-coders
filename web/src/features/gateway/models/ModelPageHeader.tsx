@@ -1,4 +1,5 @@
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { legacyRoutes } from "@/config/legacy-route-map";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 
 import { ExternalLink, RefreshCw } from "lucide-react";
 
@@ -43,9 +44,13 @@ export function ModelPageHeader({
           <FeatureReadOnlyBadge />
           <Badge tone="info">카탈로그 조회 전용</Badge>
           {showLegacyAdmin ? (
-            <LegacyLink className="button button-secondary button-default" href="/admin#/model-contracts">
+            <FeatureLegacyLink
+              featureId="gateway.models"
+              className="button button-secondary button-default"
+              href={legacyRoutes.modelContracts}
+            >
               기존 화면에서 열기 <ExternalLink aria-hidden="true" />
-            </LegacyLink>
+            </FeatureLegacyLink>
           ) : null}
           <Button variant="primary" onClick={onRefresh} disabled={refreshing}>
             <RefreshCw aria-hidden="true" /> {refreshing ? "갱신 중" : "새로고침"}

@@ -112,12 +112,16 @@ func (s *Server) issueTokenPairWithSession(ctx context.Context, user store.AuthU
 	}); err != nil {
 		return nil, "", err
 	}
+	scopes := s.effectiveScopesForRole(ctx, user.Role)
+	if scopes == nil {
+		scopes = []string{}
+	}
 	access, err := s.signAccessToken(accessClaims{
 		Subject:   user.ID,
 		Email:     user.Email,
 		Role:      user.Role,
 		TeamID:    teamID,
-		Scopes:    s.effectiveScopesForRole(ctx, user.Role),
+		Scopes:    scopes,
 		SessionID: sessionID,
 		ExpiresAt: now.Add(s.cfg.Auth.AccessTokenTTL).Unix(),
 		IssuedAt:  now.Unix(),
@@ -132,9 +136,7 @@ func (s *Server) issueTokenPairWithSession(ctx context.Context, user store.AuthU
 		"token_type":         "Bearer",
 		"expires_in":         int(s.cfg.Auth.AccessTokenTTL.Seconds()),
 		"refresh_expires_in": int(s.cfg.Auth.RefreshTokenTTL.Seconds()),
-		"user": map[string]any{
-			"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role, "team_id": teamID,
-		},
+		"user":               tokenResponseUser(user, teamID, scopes),
 	}, sessionID, nil
 }
 
@@ -175,9 +177,13 @@ func (s *Server) rotateRefreshToken(ctx context.Context, raw string, ip, ua stri
 		CreatedAt:   now,
 		RotatedFrom: rec.ID,
 	}
+	scopes := s.effectiveScopesForRole(ctx, user.Role)
+	if scopes == nil {
+		scopes = []string{}
+	}
 	access, err := s.signAccessToken(accessClaims{
 		Subject: user.ID, Email: user.Email, Role: user.Role, TeamID: teamID,
-		Scopes: s.effectiveScopesForRole(ctx, user.Role), SessionID: rec.SessionID,
+		Scopes: scopes, SessionID: rec.SessionID,
 		ExpiresAt: now.Add(s.cfg.Auth.AccessTokenTTL).Unix(), IssuedAt: now.Unix(), Type: "access",
 	})
 	if err != nil {
@@ -198,7 +204,17 @@ func (s *Server) rotateRefreshToken(ctx context.Context, raw string, ip, ua stri
 		"token_type":         "Bearer",
 		"expires_in":         int(s.cfg.Auth.AccessTokenTTL.Seconds()),
 		"refresh_expires_in": int(s.cfg.Auth.RefreshTokenTTL.Seconds()),
+		"user":               tokenResponseUser(user, teamID, scopes),
 	}, nil
+}
+
+// The optional token-response user describes exactly the grants signed into this
+// token. Clients can retire previous views without decoding or trusting JWT claims.
+func tokenResponseUser(user store.AuthUser, teamID string, scopes []string) map[string]any {
+	return map[string]any{
+		"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role,
+		"roles": []string{user.Role}, "team_id": teamID, "scopes": scopes,
+	}
 }
 
 func (s *Server) signAccessToken(claims accessClaims) (string, error) {

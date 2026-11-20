@@ -1,3 +1,4 @@
+import { exactLegacySkillName, validSkillReference } from "./skill-identity";
 import { z } from "zod";
 
 import {
@@ -20,10 +21,16 @@ export const fitnessKindLabel = (kind: string): string =>
 // Existing Go handlers trim targets. Do not retarget imported/ambiguous names:
 // JS trim also strips FEFF, while Go additionally strips edge NEL (U+0085).
 export const exactFitnessSkillName = (name: unknown): name is string =>
-  typeof name === "string" && name !== "" && name.trim() === name && !/^\u0085|\u0085$/u.test(name);
+  typeof name === "string" && exactLegacySkillName(name);
+export const validFitnessTarget = (name: unknown, reference?: string): name is string =>
+  reference !== undefined
+    ? typeof name === "string" && name !== "" && validSkillReference(reference)
+    : exactFitnessSkillName(name);
 
-export const fitnessKey = (name: string, epoch: number) =>
-  ["agents", "skills", name, "fitness", epoch] as const;
+export const fitnessKey = (name: string, epoch: number, reference?: string) =>
+  reference !== undefined
+    ? (["agents", "skills", "reference", reference, "fitness", epoch] as const)
+    : (["agents", "skills", name, "fitness", epoch] as const);
 interface FitnessQueryState {
   status: "pending" | "error" | "success";
   fetchStatus: "fetching" | "paused" | "idle";
@@ -33,9 +40,10 @@ interface FitnessQueryState {
 export function confirmedFitness(
   state: FitnessQueryState | undefined,
   name: string,
+  reference?: string,
 ): SkillFitness | undefined {
   if (
-    !exactFitnessSkillName(name) ||
+    !validFitnessTarget(name, reference) ||
     !state ||
     state.status !== "success" ||
     state.fetchStatus !== "idle" ||
@@ -46,6 +54,7 @@ export function confirmedFitness(
   if (
     !parsed.success ||
     parsed.data.skill !== name ||
+    (reference !== undefined && parsed.data.skill_ref !== reference) ||
     parsed.data.evidence.some((row) => row.skill_name !== name) ||
     parsed.data.passing_count !== parsed.data.evidence.filter((row) => row.passed).length
   )
@@ -75,8 +84,16 @@ export const emptyFitnessForm: FitnessFormValues = {
   score: "",
   note: "",
 };
-export function fitnessBody(name: string, input: FitnessFormValues): Readonly<SkillFitnessBody> {
-  if (!exactFitnessSkillName(name)) throw new Error("스킬 식별자를 변경 없이 확인할 수 없습니다.");
+export function fitnessBody(
+  name: string,
+  input: FitnessFormValues,
+  reference?: string,
+): Readonly<SkillFitnessBody> {
+  if (!validFitnessTarget(name, reference)) throw new Error("스킬 식별자를 변경 없이 확인할 수 없습니다.");
   const values = fitnessFormSchema.parse(input);
-  return Object.freeze({ ...values, skill: name, score: values.score === "" ? 0 : Number(values.score) });
+  return Object.freeze({
+    ...values,
+    ...(reference ? { skill_ref: reference } : { skill: name }),
+    score: values.score === "" ? 0 : Number(values.score),
+  });
 }

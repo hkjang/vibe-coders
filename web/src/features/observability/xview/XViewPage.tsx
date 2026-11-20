@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { RequestNoteBoundary } from "@/features/observability/request-insight/RequestNoteBoundary";
 import { useRequestNoteContext } from "@/features/observability/request-insight/request-note-context";
 import { useQuery } from "@tanstack/react-query";
@@ -391,7 +392,7 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
       <PageHeader
         title="XView 실시간"
         description="최근 요청의 분포와 이상치를 실시간 산점도로 관찰하고, 원인 세션까지 따라갑니다."
-        legacyHref="/admin#/xview"
+        legacyHref={legacyRoutes.xview}
         actions={
           <>
             <Switch

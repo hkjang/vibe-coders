@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { Navigate, useLocation } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -30,7 +31,7 @@ export function PoliciesPage(): React.JSX.Element {
           <AlertRulesSection canWrite={canWrite} />
           <CostGuardSection canWrite={canWrite} />
           <InlineNotice tone="info" title="비용 예측">
-            모델별 비용 예측은 비용(FinOps) 화면이나 기존 화면(/admin#/safety)에서 실행합니다.
+            모델별 비용 예측은 비용(FinOps) 화면이나 기존 화면({legacyRoutes.safety})에서 실행합니다.
           </InlineNotice>
         </div>
       ) : (

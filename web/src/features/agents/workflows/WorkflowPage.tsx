@@ -1,3 +1,4 @@
+import { workflowLegacyHandoff } from "./legacy-workflow-handoff";
 import { versionAtLeast } from "@/config/migration-registry";
 import { WorkflowGraphPublishDialog } from "./WorkflowGraphPublishDialog";
 import { WorkflowGraphDialog } from "./WorkflowGraphDialog";
@@ -83,6 +84,12 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
     !receipt.open &&
     params.getAll("workflow").length === 1 &&
     validWorkflowDetailId(selectedId, auth.credentialPrefixes);
+  const legacyHandoff = workflowLegacyHandoff(
+    auth.features.find((feature) => feature.featureId === "agents.workflows")?.legacyPath,
+    selectedValid ? selectedId : undefined,
+    auth.capabilities?.legacy_workflow_detail === true,
+    auth.credentialPrefixes,
+  );
   const currentSelection = useRef(selectedId);
   useLayoutEffect(() => {
     currentSelection.current = selectedId;
@@ -145,7 +152,7 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
       <PageHeader
         title="워크플로"
         description="여러 단계를 묶어 업무를 자동화하는 워크플로 체인을 정의하고 검증·게시합니다."
-        legacyHref="/admin#/workflows"
+        legacyHref={legacyHandoff.href}
         actions={
           <>
             <Button onClick={() => void list.refetch()} disabled={list.isFetching}>
@@ -284,6 +291,7 @@ function WorkflowPageContent({ owner }: { owner: FeatureReadOwner }): React.JSX.
       />
 
       <WorkflowDetailSheet
+        selectedId={selectedValid ? selectedId : undefined}
         owner={owner}
         key={JSON.stringify([selectedId, selected])}
         canWrite={canWrite}

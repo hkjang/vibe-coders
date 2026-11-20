@@ -1,27 +1,24 @@
+import { RequestLegacyLink } from "./RequestLegacyLink";
 import type { useRequestNoteQuery } from "./use-request-note-editor";
 import { requestNoteContractMessage } from "./request-note-state";
-import { useAuth } from "@/app/auth/AuthProvider";
 import { isAppError } from "@/shared/api/error";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
-import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 export function RequestNoteNotices({
   supported,
+  requestId,
   current,
 }: {
   supported: boolean;
+  requestId: string;
   current: ReturnType<typeof useRequestNoteQuery>;
 }): React.JSX.Element | null {
-  const auth = useAuth();
   if (!supported)
     return (
       <InlineNotice tone="warning" title="메모·태그 편집의 서버 버전을 확인하세요.">
         <p>{requestNoteContractMessage}</p>
-        {canOpenLegacyAdmin(auth) ? (
-          <LegacyLink href="/admin#/requests">기존 관리자에서 요청 열기</LegacyLink>
-        ) : null}
+        <RequestLegacyLink requestId={requestId} />
       </InlineNotice>
     );
   if (current.confirmed) return null;

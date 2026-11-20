@@ -15,6 +15,6 @@ export const agentsFeatureModules = defineFeatureModules([
   {
     featureId: "agents.skills",
     load: () => import("@/features/agents/skills/SkillPage").then((module) => module.SkillPage),
-    queryKeys: ["q", "skill", "status", "tab"],
+    queryKeys: ["q", "skill", "skill_ref", "status", "tab"],
   },
 ]);

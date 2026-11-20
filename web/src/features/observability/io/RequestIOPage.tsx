@@ -1,10 +1,21 @@
+import { useAuth } from "@/app/auth/AuthProvider";
+import { directRequestSelection } from "@/config/legacy-request-map";
+import { useRequestLegacyHandoff } from "../request-insight/use-request-legacy-handoff";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
-import { useRequestDetailReadScope } from "@/features/observability/request-insight/request-detail-read-scope";
-import { useXViewReadOwner } from "@/features/observability/xview/xview-live-access";
+import {
+  useRequestDetailReadScope,
+  type RequestDetailReadScope,
+} from "@/features/observability/request-insight/request-detail-read-scope";
+import {
+  useFeatureReadOwner,
+  featureOwnedKey,
+  assertFeatureRead,
+  type FeatureReadOwner,
+} from "@/shared/hooks/use-feature-read-owner";
 import { apiClient } from "@/shared/api/client";
 import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
 import type { RequestIOCapture, RequestIOPreview } from "@/shared/api/domains/observability.schemas";
@@ -135,15 +146,38 @@ function CaptureNotice({ capture }: { capture: RequestIOCapture | undefined }): 
 }
 
 export function RequestIOPage(): React.JSX.Element {
-  const owner = useXViewReadOwner(routeId);
+  const owner = useFeatureReadOwner(routeId, "request-io");
   const scope = useRequestDetailReadScope(owner, owner.isCurrent);
+  if (!owner.readable || owner.denied) {
+    return (
+      <InlineNotice
+        tone="warning"
+        title="입출력 조회 권한을 확인하세요."
+        actions={owner.readable ? <Button onClick={owner.restart}>다시 조회</Button> : undefined}
+      >
+        이전 조회 내용을 지웠습니다. 현재 계정의 권한을 확인한 뒤 다시 조회하세요.
+      </InlineNotice>
+    );
+  }
+  return <RequestIOPageContent key={scope.id} owner={owner} scope={scope} />;
+}
+
+function RequestIOPageContent({
+  owner,
+  scope,
+}: {
+  owner: FeatureReadOwner;
+  scope: RequestDetailReadScope;
+}): React.JSX.Element {
   const wide = useWideLayout();
   const [params, updateParams] = useSearchState();
   const live = params.get("live") !== "off";
   const cursor = params.get("cursor") ?? "";
   const status = params.get("status") ?? "";
   const model = params.get("model") ?? "";
-  const requestedId = params.get("request_id") ?? "";
+  const auth = useAuth();
+  const location = useLocation();
+  const requested = directRequestSelection(location.search, auth.credentialPrefixes);
   const [modelDraft, setModelDraft] = useState(model);
   const [search, setSearch] = useState("");
 
@@ -157,20 +191,29 @@ export function RequestIOPage(): React.JSX.Element {
     [cursor, model, status],
   );
   const list = useQuery<AppRequestsResponse>({
-    queryKey: ["observability", "io", "list", scope.id, query],
+    queryKey: featureOwnedKey(["observability", "io", "list", scope.id, query], owner),
     enabled: owner.readable,
     gcTime: 0,
     refetchInterval: live && !cursor ? liveIntervalMs : false,
     refetchIntervalInBackground: false,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[3] === scope.id ? previous : undefined,
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.requests, {
-        headers: appRequestsContractHeaders,
-        query,
-        signal,
-        routeId,
-      }),
+    queryFn: async ({ signal }) => {
+      assertFeatureRead(owner, signal);
+      try {
+        const result = await apiClient.request(endpoints.admin.requests, {
+          headers: appRequestsContractHeaders,
+          query,
+          signal,
+          routeId,
+        });
+        assertFeatureRead(owner, signal);
+        return result;
+      } catch (error) {
+        assertFeatureRead(owner, signal);
+        throw error;
+      }
+    },
   });
   const denied = isAppError(list.error) && (list.error.kind === "permission" || list.error.kind === "auth");
   const received = useMemo(() => (denied ? [] : (list.data?.requests ?? [])), [denied, list.data]);
@@ -223,7 +266,9 @@ export function RequestIOPage(): React.JSX.Element {
   const [firstRow, setFirstRow] = useState<string>();
   const firstFilterable = rows.find((row) => row.request_filterable)?.request_id;
   if (wide && firstRow === undefined && firstFilterable) setFirstRow(firstFilterable);
-  const selectedId = requestedId || (wide ? (firstRow ?? "") : "");
+  const selectedId = requested.present ? requested.id : wide ? (firstRow ?? "") : "";
+  const legacyList = { query, localSearch: Boolean(term) };
+  const legacyHandoff = useRequestLegacyHandoff(selectedId, routeId, legacyList);
   const select = (id: string): void => updateParams({ request_id: id }, { replace: true });
 
   const listRefs = useRef<HTMLUListElement>(null);
@@ -248,7 +293,7 @@ export function RequestIOPage(): React.JSX.Element {
       <PageHeader
         title="입출력 모니터"
         description="게이트웨이를 지난 요청의 입력과 출력을 한눈에 봅니다. 목록의 내용은 역할과 관계없이 마스킹됩니다."
-        legacyHref="/admin#/requests"
+        legacyHref={legacyHandoff.href}
         actions={
           <>
             <Switch
@@ -263,6 +308,16 @@ export function RequestIOPage(): React.JSX.Element {
         }
       />
 
+      {legacyHandoff.notice ? (
+        <InlineNotice tone="info" title="기존 화면으로 이동할 때 조회 조건을 확인하세요.">
+          {legacyHandoff.notice}
+        </InlineNotice>
+      ) : null}
+      {requested.present && !requested.id ? (
+        <InlineNotice tone="warning" title="요청 주소를 확인하세요.">
+          요청 ID가 올바르지 않거나 여러 번 지정되어 있습니다. 목록에서 요청을 다시 선택하세요.
+        </InlineNotice>
+      ) : null}
       <CaptureNotice capture={capture} />
 
       <form
@@ -383,7 +438,12 @@ export function RequestIOPage(): React.JSX.Element {
           <div className="io-detail-pane" aria-label="선택한 요청의 입력과 출력" role="region">
             <h2 className="sr-only">선택한 요청의 입력과 출력</h2>
             {selectedId && !denied ? (
-              <RequestIOPanel requestId={selectedId} readScope={scope} />
+              <RequestIOPanel
+                requestId={selectedId}
+                readScope={scope}
+                legacyFeatureId={routeId}
+                legacyList={legacyList}
+              />
             ) : (
               <EmptyState
                 title="요청을 선택하세요."
@@ -405,7 +465,14 @@ export function RequestIOPage(): React.JSX.Element {
           title="요청 입력과 출력"
           description="목록의 미리보기와 달리 메시지 전체를 보여 줍니다."
         >
-          {selectedId ? <RequestIOPanel requestId={selectedId} readScope={scope} /> : null}
+          {selectedId ? (
+            <RequestIOPanel
+              requestId={selectedId}
+              readScope={scope}
+              legacyFeatureId={routeId}
+              legacyList={legacyList}
+            />
+          ) : null}
         </Sheet>
       ) : null}
 

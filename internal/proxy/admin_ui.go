@@ -106,6 +106,7 @@ const adminHTML = `<!doctype html>
     .subtabs a:hover { background: var(--line); }
     .subtabs a.active { background: var(--ink); color: var(--bg); }
     .header-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .legacy-app-entry { color: var(--ink); font-size: 13px; white-space: nowrap; text-underline-offset: 3px; }
     main { width: min(1440px, 100%); margin: 0 auto; padding: 18px 28px 60px; }
     section {
       margin-top: 16px; background: var(--panel);
@@ -724,6 +725,7 @@ const adminHTML = `<!doctype html>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
+      <a id="legacy-app-entry" class="legacy-app-entry" style="display:none">새 콘솔 열기</a>
       <button id="xview-launcher" class="xview-launcher" type="button" title="어디서나 요청의 처리 근거 탐색 (Shift+X)">✦ XView</button>
       <div class="user-menu-wrap">
         <span id="auth-user" class="user-chip" title="개인 메뉴 열기"></span>
@@ -821,6 +823,7 @@ const adminHTML = `<!doctype html>
     tokenInput.value = sessionStorage.getItem('adminToken') || '';
     tokenInput.addEventListener('change', () => {
       sessionStorage.setItem('adminToken', tokenInput.value);
+      void loadNavigation();
       route();
     });
 
@@ -833,12 +836,89 @@ const adminHTML = `<!doctype html>
     };
     // A login/logout retires the old session immediately. Refresh only advances
     // credentials inside that session, even if two access JWT strings are equal.
+    let navigationRevision = 0;
+    let navigationReady = false;
     let authEpoch = 0;
     let authRevision = 0;
     let authChanging = false;
     let authRefreshFlight = null;
+    const legacyGrantReviewKey = 'vibe.admin.auth.grant-review';
+    // Preserve only an initial read-only handoff through the local login prompt.
+    // A deliberate logout or a changed URL must not replay another session's intent.
+    function initialLegacyReadHandoff(hash) {
+      if (typeof hash !== 'string' || hash.length > 16384 || /[\u0000-\u001f\u007f]/.test(hash)) return '';
+      if (hash.startsWith('#/users?') && legacyAccessTarget(hash)) return hash;
+      if (hash.startsWith('#/apps?') && legacyWorkAppTarget(hash)) return hash;
+      if (hash.startsWith('#/workflows?') && legacyWorkflowTarget(hash)) return hash;
+      if (hash.startsWith('#/skills?') && legacySkillTarget(hash)) return hash;
+      if (hash.startsWith('#/sessions?') && legacySessionTarget(hash)) return hash;
+      if (hash.startsWith('#/requests?') && legacyDirectRequestTarget(hash)) return hash;
+      if (hash.length > 8192) return '';
+      const providerPrefix = '#/settings?provider_ref=';
+      if (hash.length === providerPrefix.length + 47 && /^#\/settings\?provider_ref=prv_[A-Za-z0-9_-]{43}$/.test(hash)) return hash;
+      if (/^#\/(?:requests|prompts|prompt-assets|prompt-debt)(?:\?|$)/.test(hash)) return hash;
+      if (hash.startsWith('#/text2sql?') && legacyText2SQLSchemaTarget(hash)) return hash;
+      if (hash.startsWith('#/routing?') && legacyRoutingRuleTarget(undefined, hash)) return hash;
+      if (hash.startsWith('#/model-contracts?') && legacyModelTarget(new URLSearchParams(hash.slice(hash.indexOf('?') + 1)))) return hash;
+      return '';
+    }
+    let initialLegacyHandoff = initialLegacyReadHandoff(location.hash);
+    // The callback uses the fragment for a one-time exchange code. Keep the read
+    // destination in this tab only, never in the IdP URL or a shared credential store.
+    const legacySsoHandoffKey = 'vibe.admin.auth.sso-return-to';
+    function clearLegacySsoHandoff() {
+      try { sessionStorage.removeItem(legacySsoHandoffKey); return true; } catch { return false; }
+    }
+    function stageLegacySsoHandoff() {
+      if (!clearLegacySsoHandoff()) return false;
+      const hash = initialLegacyReadHandoff(location.hash);
+      if (!hash) return true;
+      try {
+        sessionStorage.setItem(legacySsoHandoffKey, JSON.stringify({ hash, createdAt: Date.now() }));
+        return true;
+      } catch { return false; }
+    }
+    function consumeLegacySsoHandoff() {
+      try {
+        const raw = sessionStorage.getItem(legacySsoHandoffKey);
+        sessionStorage.removeItem(legacySsoHandoffKey);
+        if (!raw || raw.length > 17000) return '';
+        const value = JSON.parse(raw);
+        const age = Date.now() - value?.createdAt;
+        if (!Number.isSafeInteger(value?.createdAt) || age < 0 || age > 600000) return '';
+        return initialLegacyReadHandoff(value.hash);
+      } catch { return ''; }
+    }
     function retireAuth(changing = false) {
+      // Retire every modal snapshot, including a private asset behind a newer overlay.
+      if (typeof closeModal === 'function') closeModal();
+      const modalBody = document.getElementById('modal-body');
+      if (modalBody) modalBody.textContent = '';
+      window.__assetHistory = [];
+      const providerDetail = document.getElementById('legacy-provider-detail');
+      if (providerDetail) providerDetail.textContent = '';
+      const modelDetail = document.getElementById('legacy-model-detail');
+      if (modelDetail) modelDetail.textContent = '';
+      const sessionDetail = document.getElementById('legacy-session-detail');
+      if (sessionDetail) sessionDetail.innerHTML = '';
+      const skillDetail = document.getElementById('legacy-skill-detail');
+      if (skillDetail) skillDetail.textContent = '';
+      window._skillsByName = Object.create(null);
+      const workflowDetail = document.getElementById('legacy-workflow-detail');
+      if (workflowDetail) workflowDetail.textContent = '';
+      const appDetail = document.getElementById('legacy-work-app-detail');
+      if (appDetail) appDetail.textContent = '';
+      const schemaDetail = document.getElementById('legacy-text2sql-schema-detail');
+      if (schemaDetail) schemaDetail.textContent = '';
+      const accessDetail = document.getElementById('legacy-access-detail');
+      if (accessDetail) accessDetail.textContent = '';
+      const routingDetail = document.getElementById('legacy-routing-rule-detail');
+      if (routingDetail) routingDetail.textContent = '';
+      authRefreshFlight?.identityController?.abort();
       authEpoch++;
+      navigationRevision++;
+      navigationReady = false;
+      setLegacyAppEntry(false);
       authChanging = changing;
       authRefreshFlight = null;
       return authEpoch;
@@ -858,6 +938,7 @@ const adminHTML = `<!doctype html>
     }
     function clearAuth() {
       retireAuth();
+      sessionStorage.removeItem(legacyGrantReviewKey);
       authState.access = ''; authState.refresh = ''; authState.user = null;
       sessionStorage.removeItem('authAccess');
       sessionStorage.removeItem('authRefresh');
@@ -933,7 +1014,14 @@ const adminHTML = `<!doctype html>
       const btn = document.createElement('button');
       btn.id = 'sso-login-btn'; btn.type = 'button'; btn.textContent = 'SSO 로그인 (Keycloak)';
       btn.style.cssText = 'margin-top:8px;width:100%';
-      btn.onclick = () => { location.href = st.login_url || '/auth/keycloak/login'; };
+      btn.onclick = () => {
+        if (authChanging) return;
+        if (!stageLegacySsoHandoff()) {
+          showLogin('로그인 상태를 저장할 수 없습니다. 브라우저의 사이트 저장소 설정을 확인한 뒤 다시 시도하세요.');
+          return;
+        }
+        location.href = st.login_url || '/auth/keycloak/login';
+      };
       form.appendChild(btn);
       if (st.allow_local_login === false) {
         // SSO-only: hide local email/password inputs.
@@ -946,22 +1034,109 @@ const adminHTML = `<!doctype html>
     function hideLogin() {
       document.getElementById('login-backdrop').classList.remove('open');
     }
+    function legacyGrantKey(user, fallbackScopes) {
+      const scopes = user?.scopes === undefined ? fallbackScopes : user.scopes;
+      if (!user || typeof user.id !== 'string' || !user.id || typeof user.role !== 'string' || !user.role ||
+          typeof user.team_id !== 'string' || !Array.isArray(scopes) || scopes.some(scope => typeof scope !== 'string')) return null;
+      return JSON.stringify([user.id, user.role, user.team_id, Array.from(new Set(scopes)).sort()]);
+    }
+    async function readLegacyRefreshUser(access, flight) {
+      const controller = new AbortController();
+      flight.identityController = controller;
+      const aborted = new Promise((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Identity verification interrupted')), { once:true }));
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        return await Promise.race([(async () => {
+          const res = await fetch('/auth/me', { headers:{ Authorization:'Bearer ' + access }, signal:controller.signal, cache:'no-store' });
+          if (!res.ok) throw new Error('Identity verification failed');
+          const me = await res.json();
+          if (me?.auth_enabled !== true || legacyGrantKey(me.user) === null) throw new Error('Invalid identity response');
+          return me.user;
+        })(), aborted]);
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+        if (flight.identityController === controller) flight.identityController = null;
+      }
+    }
+    function reloadLegacyGrant() {
+      // A full document boundary also discards older renderers, modal closures and
+      // mutation controls that predate the read-owner guards. Never replay them
+      // under the new grant. Keep the rotated credentials for the verified boot.
+      sessionStorage.setItem(legacyGrantReviewKey, '1');
+      retireAuth(true);
+      authState.user = null;
+      authState.nav = { allowed_tabs:[], scopes:[], app_entry_enabled:false };
+      sessionStorage.removeItem('authUser');
+      document.documentElement.style.setProperty('visibility', 'hidden', 'important');
+      location.reload();
+    }
+    function showLegacyAuthRecovery() {
+      retireAuth(true);
+      sessionStorage.setItem(legacyGrantReviewKey, '1');
+      authState.user = null;
+      authState.nav = { allowed_tabs:[], scopes:[], app_entry_enabled:false };
+      sessionStorage.removeItem('authUser');
+      applyNavPermissions();
+      renderAuthHeader();
+      const view = document.getElementById('view');
+      view.innerHTML = '<section role="alert" class="card" style="padding:24px"><h2>로그인 권한을 확인하지 못했습니다.</h2>' +
+        '<p>이전 화면 정보는 표시하지 않습니다. 연결을 확인한 뒤 다시 확인하거나 로그인하세요.</p>' +
+        '<button type="button" id="legacy-auth-retry">권한 다시 확인</button> ' +
+        '<button type="button" id="legacy-auth-signin">다시 로그인</button></section>';
+      const epoch = authEpoch;
+      document.getElementById('legacy-auth-retry').addEventListener('click', () => {
+        if (epoch !== authEpoch) return;
+        document.getElementById('legacy-auth-retry').disabled = true;
+        authChanging = false;
+        void initAuth();
+      });
+      document.getElementById('legacy-auth-signin').addEventListener('click', () => {
+        if (epoch !== authEpoch) return;
+        clearAuth(); showLogin();
+      });
+    }
+    async function waitLegacyRefresh(epoch) {
+      const flight = authRefreshFlight;
+      if (flight && flight.epoch === epoch && !await flight.promise) throw new Error('인증 세션을 다시 확인하세요.');
+      assertAuthCurrent(epoch);
+    }
     async function tryRefresh(epoch = authEpoch) {
       if (!authCurrent(epoch) || !authState.refresh) return false;
       if (authRefreshFlight && authRefreshFlight.epoch === epoch) return authRefreshFlight.promise;
       const refreshToken = authState.refresh;
-      const flight = { epoch, promise: null };
+      const previousGrant = legacyGrantKey(authState.user, authState.nav?.scopes);
+      const flight = { epoch, promise:null, identityController:null };
       flight.promise = (async () => {
         try {
           const res = await fetch('/auth/refresh', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshToken }),
+            method:'POST', headers:{ 'Content-Type':'application/json' },
+            body:JSON.stringify({ refresh_token:refreshToken }),
           });
           if (!authCurrent(epoch) || !res.ok) return false;
           const tokens = await res.json();
           if (!authCurrent(epoch)) return false;
-          saveAuth(tokens); // rotation: 새 access + 새 refresh 저장
+          if (!tokens || typeof tokens.access_token !== 'string' || !tokens.access_token ||
+              typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) return false;
+          // Persist rotation before optional older-server identity lookup. A lookup
+          // failure must not restore a consumed refresh token or drop the new pair.
+          saveAuth({ access_token:tokens.access_token, refresh_token:tokens.refresh_token });
+          const revision = authRevision;
+          let user;
+          try {
+            user = legacyGrantKey(tokens.user) !== null ? tokens.user : await readLegacyRefreshUser(tokens.access_token, flight);
+          } catch {
+            if (authCurrent(epoch) && revision === authRevision) reloadLegacyGrant();
+            return false;
+          }
+          if (!authCurrent(epoch) || revision !== authRevision) return false;
+          if (previousGrant === null || previousGrant !== legacyGrantKey(user)) {
+            reloadLegacyGrant();
+            return false;
+          }
+          authState.user = user;
+          sessionStorage.setItem('authUser', JSON.stringify(user));
+          renderAuthHeader();
           return true;
         } catch { return false; }
       })().finally(() => {
@@ -972,6 +1147,8 @@ const adminHTML = `<!doctype html>
     }
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      clearLegacySsoHandoff();
+      sessionStorage.removeItem(legacyGrantReviewKey);
       const epoch = retireAuth(true);
       const btn = document.getElementById('login-submit');
       const err = document.getElementById('login-error');
@@ -997,7 +1174,9 @@ const adminHTML = `<!doctype html>
         authChanging = false;
         document.getElementById('login-password').value = '';
         hideLogin();
-        location.hash = ''; // let bootAfterAuth route to the role's default home
+        const returnHash = location.hash === initialLegacyHandoff ? initialLegacyHandoff : '';
+        initialLegacyHandoff = '';
+        location.hash = returnHash; // otherwise use the role's default home
         await bootAfterAuth(null, epoch);
       } catch (ex) {
         if (epoch !== authEpoch) return;
@@ -1011,6 +1190,8 @@ const adminHTML = `<!doctype html>
       }
     });
     document.getElementById('auth-logout').addEventListener('click', async () => {
+      initialLegacyHandoff = '';
+      clearLegacySsoHandoff();
       const access = authState.access;
       const refresh = authState.refresh;
       const epoch = retireAuth(true);
@@ -1030,16 +1211,36 @@ const adminHTML = `<!doctype html>
     // loadNavigation fetches the server-computed accessible menu set and stores it. The
     // SPA renders only these menus and guards routes against allowed_tabs — the same
     // policy the server applies — so a hidden menu can never be reached by URL.
+    function setLegacyAppEntry(enabled) {
+      const link = document.getElementById('legacy-app-entry');
+      if (!link) return;
+      if (enabled === true) link.setAttribute('href', '/app/');
+      else link.removeAttribute('href');
+      link.style.display = enabled === true ? '' : 'none';
+    }
+
+    function refreshLegacyAppEntry() {
+      if (!navigationReady || document.hidden || authChanging) return;
+      return loadNavigation();
+    }
+
     async function loadNavigation(epoch = authEpoch) {
       if (!authCurrent(epoch)) return false;
+      const revision = ++navigationRevision;
+      setLegacyAppEntry(false);
       try {
         const nav = await api('/me/navigation');
-        if (!authCurrent(epoch)) return false;
+        if (!authCurrent(epoch) || revision !== navigationRevision) return false;
+        if (authState.enabled && (!nav || !Array.isArray(nav.allowed_tabs) || !Array.isArray(nav.scopes))) {
+          showLegacyAuthRecovery(); return false;
+        }
         authState.nav = nav;
       } catch {
-        if (!authCurrent(epoch)) return false;
-        authState.nav = null; // fall back to showing everything (legacy/no policy)
+        if (!authCurrent(epoch) || revision !== navigationRevision) return false;
+        if (authState.enabled) { showLegacyAuthRecovery(); return false; }
+        authState.nav = null; // unauthenticated legacy/admin-token compatibility
       }
+      navigationReady = true;
       applyNavPermissions();
       return true;
     }
@@ -1047,6 +1248,7 @@ const adminHTML = `<!doctype html>
     // applyNavPermissions hides nav anchors whose tab is not in the caller's allowed_tabs.
     function applyNavPermissions() {
       const nav = authState.nav;
+      setLegacyAppEntry(nav && nav.app_entry_enabled === true);
       const allowed = nav && Array.isArray(nav.allowed_tabs) ? new Set(nav.allowed_tabs) : null;
       document.querySelectorAll('#tabs a[data-tab], #user-menu a[data-tab]').forEach(a => {
         const tab = a.getAttribute('data-tab');
@@ -1092,11 +1294,22 @@ const adminHTML = `<!doctype html>
       const hash = location.hash || '';
       const codeM = hash.match(/[#&]kc_code=([^&]+)/);
       const errM = hash.match(/[#&]kc_error=([^&]+)/);
+      if (!codeM && !errM) { clearLegacySsoHandoff(); return {}; }
+      const returnHash = consumeLegacySsoHandoff();
+      const callbackPath = location.pathname + location.search;
+      // Remove even malformed callback fragments before decoding them.
+      history.replaceState(null, '', callbackPath);
+      const restoreHandoff = () => {
+        if (epoch !== authEpoch || location.pathname + location.search !== callbackPath || location.hash) return;
+        if (returnHash) {
+          initialLegacyHandoff = returnHash;
+          history.replaceState(null, '', callbackPath + returnHash);
+        }
+      };
       if (codeM) {
         epoch = retireAuth(true);
         try {
           const code = decodeURIComponent(codeM[1]);
-          history.replaceState(null, '', location.pathname + location.search);
           const res = await fetch('/auth/sso/exchange', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1105,6 +1318,7 @@ const adminHTML = `<!doctype html>
           if (epoch !== authEpoch) return {};
           if (!res.ok) {
             authChanging = false;
+            restoreHandoff();
             return { epoch, error: 'SSO 일회용 코드가 만료되었거나 다른 브라우저에서 시작되었습니다.' };
           }
           const tokens = await res.json();
@@ -1112,16 +1326,19 @@ const adminHTML = `<!doctype html>
           saveAuth(tokens);
           authState.enabled = true;
           authChanging = false;
+          restoreHandoff();
           return { epoch, ok: true };
         } catch (_) {
           if (epoch !== authEpoch) return {};
           authChanging = false;
+          restoreHandoff();
           return { epoch, error: 'SSO 세션 교환에 실패했습니다.' };
         }
       }
       if (errM) {
-        history.replaceState(null, '', location.pathname + location.search);
-        return { error: decodeURIComponent(errM[1]) };
+        restoreHandoff();
+        try { return { error: decodeURIComponent(errM[1]) }; }
+        catch { return { error: 'SSO 응답을 확인하지 못했습니다.' }; }
       }
       return {};
     }
@@ -1139,13 +1356,19 @@ const adminHTML = `<!doctype html>
         if (res.ok) {
           const me = await res.json();
           if (!authCurrent(epoch)) return;
-          authState.enabled = !!me.auth_enabled;
+          if (typeof me?.auth_enabled !== 'boolean' || (me.auth_enabled && legacyGrantKey(me.user) === null)) {
+            showLegacyAuthRecovery(); return;
+          }
+          if (!me.auth_enabled && (authState.access || authState.refresh)) { clearAuth(); epoch = authEpoch; }
+          authState.enabled = me.auth_enabled;
           if (me.user) { authState.user = me.user; sessionStorage.setItem('authUser', JSON.stringify(me.user)); }
+          sessionStorage.removeItem(legacyGrantReviewKey);
           await bootAfterAuth(me, epoch);
           return;
         }
         if (res.status === 401) { // 인증 모드인데 access 만료/없음 → 조용히 refresh 시도
           authState.enabled = true;
+          if (sessionStorage.getItem(legacyGrantReviewKey)) { showLegacyAuthRecovery(); return; }
           const refreshed = await tryRefresh(epoch);
           if (!authCurrent(epoch)) return;
           if (refreshed) { await bootAfterAuth(null, epoch); return; }
@@ -1155,7 +1378,10 @@ const adminHTML = `<!doctype html>
         }
       } catch {}
       if (!authCurrent(epoch)) return;
-      // /auth/me 자체가 실패해도 화면은 띄움 (레거시 모드 가정)
+      if (authState.access || authState.refresh || authState.enabled || sessionStorage.getItem(legacyGrantReviewKey)) {
+        showLegacyAuthRecovery(); return;
+      }
+      // Without JWT credentials, preserve the original legacy/admin-token fallback.
       renderAuthHeader();
       if (await loadNavigation(epoch) && authCurrent(epoch)) route();
     }
@@ -1170,6 +1396,11 @@ const adminHTML = `<!doctype html>
     // (possibly mutated) content so the "← 뒤로" button can return to it. Closing clears it.
     let modalStack = [];
     let currentModalState = null;
+    let modalGeneration = 0;
+    let legacyRouteGeneration = 0;
+    let requestDetailGeneration = 0;
+    let flightRecorderGeneration = 0;
+    let assetDetailGeneration = 0;
 
     function _applyModalState(state) {
       document.getElementById('modal-title').textContent = state.title;
@@ -1385,6 +1616,7 @@ const adminHTML = `<!doctype html>
     window.openCommandPalette = openCommandPalette;
 
     function openModal(title, html, requestId, opts) {
+      modalGeneration++;
       opts = opts || {};
       const backdrop = document.getElementById('modal-backdrop');
       // If a modal is already open, snapshot its live content (captures appended AI analysis, etc.)
@@ -1407,9 +1639,20 @@ const adminHTML = `<!doctype html>
     }
     function modalBack() {
       if (modalStack.length === 0) return;
+      modalGeneration++;
       _applyModalState(modalStack.pop());
     }
+    function retireAssetDetailModal() {
+      if ((currentModalState && currentModalState.opts && currentModalState.opts.assetDetail) ||
+          modalStack.some(state => state.opts && state.opts.assetDetail)) closeModal();
+    }
     function closeModal() {
+      window.__assetHistory = [];
+      const modalBody = document.getElementById('modal-body');
+      if (modalBody) modalBody.textContent = '';
+      const modalTitle = document.getElementById('modal-title');
+      if (modalTitle) modalTitle.textContent = '';
+      modalGeneration++;
       const backdrop = document.getElementById('modal-backdrop');
       const wasOpen = backdrop.classList.contains('open');
       backdrop.classList.remove('open');
@@ -1465,23 +1708,25 @@ const adminHTML = `<!doctype html>
       const epoch = authEpoch;
       const revision = authRevision;
       assertAuthCurrent(epoch);
+      if (authRefreshFlight) await waitLegacyRefresh(epoch);
       const successMessage = options.success;
       const doFetch = () => {
         assertAuthCurrent(epoch);
         const requestHeaders = headers();
         if (options.body) requestHeaders['Content-Type'] = 'application/json';
-        const { success, ...init } = options;
+        if (options.appProjection === true) requestHeaders['X-Vibe-UI'] = 'app';
+        const { success, appProjection, ...init } = options;
         return fetch(path, { ...init, headers: requestHeaders });
       };
       let res = await doFetch();
-      assertAuthCurrent(epoch);
+      await waitLegacyRefresh(epoch);
       // JWT 모드: access 만료 시 refresh 회전 후 1회 재시도, 실패하면 재로그인 유도
       if (res.status === 401 && authState.enabled) {
         const refreshed = (authRevision !== revision && !!authState.access) || await tryRefresh(epoch);
         assertAuthCurrent(epoch);
         if (refreshed) {
           res = await doFetch();
-          assertAuthCurrent(epoch);
+          await waitLegacyRefresh(epoch);
         } else {
           clearAuth();
           showLogin('세션이 만료되었습니다. 다시 로그인해주세요.');
@@ -1490,11 +1735,11 @@ const adminHTML = `<!doctype html>
       }
       if (!res.ok) {
         const text = await res.text();
-        assertAuthCurrent(epoch);
+        await waitLegacyRefresh(epoch);
         throw new Error(text || res.statusText);
       }
       const data = res.status === 204 ? null : await res.json();
-      assertAuthCurrent(epoch);
+      await waitLegacyRefresh(epoch);
       if (successMessage) toast(successMessage, 'ok');
       return data;
     }
@@ -1986,6 +2231,27 @@ const adminHTML = `<!doctype html>
     }
 
     async function route() {
+      retireAssetDetailModal();
+      const providerDetail = document.getElementById('legacy-provider-detail');
+      if (providerDetail) providerDetail.textContent = '';
+      const modelDetail = document.getElementById('legacy-model-detail');
+      if (modelDetail) modelDetail.textContent = '';
+      const sessionDetail = document.getElementById('legacy-session-detail');
+      if (sessionDetail) sessionDetail.innerHTML = '';
+      const skillDetail = document.getElementById('legacy-skill-detail');
+      if (skillDetail) skillDetail.textContent = '';
+      window._skillsByName = Object.create(null);
+      const workflowDetail = document.getElementById('legacy-workflow-detail');
+      if (workflowDetail) workflowDetail.textContent = '';
+      const appDetail = document.getElementById('legacy-work-app-detail');
+      if (appDetail) appDetail.textContent = '';
+      const schemaDetail = document.getElementById('legacy-text2sql-schema-detail');
+      if (schemaDetail) schemaDetail.textContent = '';
+      const accessDetail = document.getElementById('legacy-access-detail');
+      if (accessDetail) accessDetail.textContent = '';
+      const routingDetail = document.getElementById('legacy-routing-rule-detail');
+      if (routingDetail) routingDetail.textContent = '';
+      const generation = ++legacyRouteGeneration;
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
       // XView owns a short-lived delta poller while its tab is active. Tear it down before
@@ -2019,15 +2285,18 @@ const adminHTML = `<!doctype html>
           case 'data-products': await renderDataProducts(); break;
           case 'remediation': await renderRemediation(); break;
           case 'scorecard': await renderTeamScorecard(); break;
-          case 'model-contracts': await renderModelContracts(); break;
+          case 'model-contracts':
+            if (['model','provider_ref','source'].some(key => params.has(key))) await renderLegacyModelDetail(params);
+            else await renderModelContracts();
+            break;
           case 'policy-advisor': await renderPolicyAdvisor(); break;
           case 'narrative': await renderNarrativeReport(); break;
           case 'skill-graph': await renderSkillGraph(); break;
           case 'chargeback': await renderChargeback(); break;
-          case 'prompt-debt': await renderPromptDebt(); break;
+          case 'prompt-debt': await renderPromptDebt(params); break;
           case 'app-templates': await renderAppTemplates(); break;
           case 'gateway-mcp': await renderGatewayMCP(); break;
-          case 'workflows': await renderWorkflows(); break;
+          case 'workflows': if (params.has('workflow_id')) await renderLegacyWorkflowDetail(); else await renderWorkflows(); break;
           case 'sandbox': renderSandbox(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
@@ -2038,7 +2307,7 @@ const adminHTML = `<!doctype html>
           case 'waterfall': await renderWaterfall(params); break;
           case 'llm':       await renderLLMObservability(); break;
           case 'requests':  await renderRequestsView(params); break;
-          case 'sessions':  await renderSessionsView(); break;
+          case 'sessions': if (params.has('session_id')) await renderLegacySessionDetail(); else await renderSessionsView(); break;
           case 'redteam':   await renderRedTeamView(); break;
           case 'agent-routes': await renderAgentRoutesView(); break;
           case 'sbom':      await renderSBOMView(); break;
@@ -2048,9 +2317,13 @@ const adminHTML = `<!doctype html>
           case 'productivity': await renderProductivityView(); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
-          case 'apps': await renderWorkApps(params); break;
+          case 'apps': if (params.has('app_id')) await renderLegacyWorkAppDetail(); else await renderWorkApps(); break;
           case 'changesets': await renderChangeSets(params); break;
-          case 'users':     rest.length ? await renderUserDetail(rest.join('/')) : await renderUsers(); break;
+          case 'users':
+            if (rest.length) await renderUserDetail(rest.join('/'));
+            else if (params.has('resource') || params.has('id')) await renderLegacyAccessDetail();
+            else await renderUsers();
+            break;
           case 'teams':     rest.length ? await renderTeamDetail(decodeURIComponent(rest.join('/'))) : await renderTeams(); break;
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
           case 'quotas':    await renderQuotas(); break;
@@ -2058,14 +2331,21 @@ const adminHTML = `<!doctype html>
           case 'mcp-upstreams': await renderMCP(params, 'upstreams'); break;
           case 'mcp-tools': await renderMCP(params, 'tools'); break;
           case 'mcp-policy': await renderMCP(params, 'policy'); break;
-          case 'routing':   rest[0] === 'health' ? await renderRoutingHealth(params) : await renderRoutingLearning(params); break;
+          case 'routing':
+            if (rest[0] === 'health') await renderRoutingHealth(params);
+            else if (!rest.length && params.has('rule_id')) await renderLegacyRoutingRuleDetail(params);
+            else await renderRoutingLearning(params);
+            break;
           case 'chat-test': await renderChatTest(params); break;
           case 'prompt-lab': await renderPromptLab(params); break;
           case 'agents':    await renderAgents(params); break;
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
-          case 'text2sql':  await renderText2SQL(); break;
-          case 'skills':    await renderSkills(); break;
+          case 'text2sql':
+            if (!rest.length && params.has('schema_name')) await renderLegacyText2SQLSchemaDetail();
+            else await renderText2SQL();
+            break;
+          case 'skills': if (params.has('skill_name') || params.has('skill_ref')) await renderLegacySkillDetail(); else await renderSkills(); break;
           case 'skill-studio': await renderSkillStudio(params); break;
           case 'modeldeprecations': await renderModelDeprecations(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
@@ -2081,6 +2361,8 @@ const adminHTML = `<!doctype html>
               await renderSystemErrors();
             } else if (rest[0] === 'sso') {
               await renderSSOSettings();
+            } else if (rest.length === 0 && params.has('provider_ref')) {
+              await renderLegacyProviderDetail(params);
             } else {
               await renderSettings();
             }
@@ -2088,6 +2370,7 @@ const adminHTML = `<!doctype html>
           default: await renderDashboard();
         }
       } catch (err) {
+        if (generation !== legacyRouteGeneration) return;
         // A bare message with no context left the operator with nowhere to go: which
         // screen failed, and how to retry. Name the screen, keep the detail, and offer
         // both a retry and a way out.
@@ -2102,8 +2385,10 @@ const adminHTML = `<!doctype html>
             '</div>' +
           '</div>';
       } finally {
-        wrapViewTables();
-        routeProgress(false);
+        if (generation === legacyRouteGeneration) {
+          wrapViewTables();
+          routeProgress(false);
+        }
       }
     }
     // tabLabelFor reads the nav so the error names the screen exactly as the menu does.
@@ -2122,6 +2407,9 @@ const adminHTML = `<!doctype html>
         if (!parent || parent.classList.contains('table-scroll')) return;
         const box = document.createElement('div');
         box.className = 'table-scroll';
+        box.tabIndex = 0;
+        box.role = 'group';
+        box.ariaLabel = '표 스크롤 영역';
         parent.insertBefore(box, table);
         box.appendChild(table);
       });
@@ -2142,6 +2430,8 @@ const adminHTML = `<!doctype html>
       routeProgressTimer = setTimeout(() => bar.classList.remove('done'), 220);
     }
     window.addEventListener('hashchange', route);
+    window.addEventListener('focus', refreshLegacyAppEntry);
+    document.addEventListener('visibilitychange', refreshLegacyAppEntry);
 
     // ---------- nav dropdown hover intent ----------
     // Keep a grouped menu open briefly when the pointer crosses the gap between the parent
@@ -4449,17 +4739,51 @@ const adminHTML = `<!doctype html>
         '<div style="border:1px solid var(--border);border-radius:6px;padding:8px">' + rows + '</div></section>';
     }
 
-    window.openRequestDetail = async (id) => {
+    function legacyRequestDetailIDValid(id) {
+      // Match the existing detail API path contract, including reserved mux routes.
+      return typeof id === 'string' && id !== '' && !['.', '..', 'diff', 'io'].includes(id) &&
+        !/[/\p{Cc}]/u.test(id) && new TextEncoder().encode(id).length <= 4096 &&
+        !Array.from(id).some(c => c.length === 1 && c.charCodeAt(0) >= 0xd800 && c.charCodeAt(0) <= 0xdfff);
+    }
+    function legacyDirectRequestTarget(hash) {
+      if (typeof hash !== 'string' || hash.length > 16384 || !hash.startsWith('#/requests?')) return '';
+      try {
+        const query = hash.slice('#/requests?'.length);
+        decodeURIComponent(query.replace(/\+/g, ' '));
+        const params = new URLSearchParams(query);
+        if (params.size !== 1 || !params.has('request_id')) return '';
+        const id = params.get('request_id');
+        return legacyRequestDetailIDValid(id) && !id.includes('\\') ? id : '';
+      } catch { return ''; }
+    }
+    window.openRequestDetail = async (id, options = {}) => {
+      const fromRow = options.fromRow === true;
+      const selection = ++requestDetailGeneration;
+      const generation = legacyRouteGeneration;
+      let modal = modalGeneration;
+      const epoch = authEpoch;
+      const hash = location.hash;
+      const current = () => selection === requestDetailGeneration && generation === legacyRouteGeneration &&
+        modal === modalGeneration && hash === location.hash && authCurrent(epoch);
+      if (!current()) return;
+      if (!legacyRequestDetailIDValid(id)) {
+        openModal('오류', '<div class="error-line">요청 상세 주소가 올바르지 않습니다.</div>');
+        return;
+      }
       try {
         const [detail, note, links, trace] = await Promise.all([
           api('/admin/requests/' + encodeURIComponent(id)),
           api('/admin/requests/' + encodeURIComponent(id) + '/note').catch(() => ({ tags: [], note: '' })),
-          api('/admin/requests/' + encodeURIComponent(id) + '/links').catch(() => null),
-          api('/admin/requests/' + encodeURIComponent(id) + '/trace').catch(() => null),
+          fromRow ? null : api('/admin/requests/' + encodeURIComponent(id) + '/links').catch(() => null),
+          fromRow ? null : api('/admin/requests/' + encodeURIComponent(id) + '/trace').catch(() => null),
         ]);
-        openModal('요청 상세 - ' + (detail.request.trace_id || id), traceWaterfallHTML(trace) + requestDetailHTML(detail, note, links));
+        if (!current()) return;
+        openModal('요청 상세 - ' + (detail.request.trace_id || id), (fromRow ? '' : traceWaterfallHTML(trace)) + requestDetailHTML(detail, note, links), fromRow ? id : undefined);
+        modal = modalGeneration;
         wireNoteEditor(id);
+        if (fromRow) wireFeedbackEditor(id);
       } catch (err) {
+        if (!current()) return;
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
@@ -4470,9 +4794,7 @@ const adminHTML = `<!doctype html>
     }
 
     // Agent Session Flight Recorder — 한 세션의 게이트웨이 활동을 시간순으로 재구성.
-    window.openFlightRecorder = async (sessionID) => {
-      try {
-        const d = await api('/admin/sessions/' + encodeURIComponent(sessionID) + '/flight-recorder');
+    function flightRecorderHTML(d, exact = false) {
         const ro = d.rollup || {};
         const sm = d.summary || {};
         const vcls = sm.verdict === '위험' ? 'error' : (sm.verdict === '주의' ? 'warn' : '');
@@ -4514,15 +4836,24 @@ const adminHTML = `<!doctype html>
           '<td>' + fmt(e.total_tokens || 0) + '<div class="muted" style="font-size:10px">' + money(e.cost_krw || 0) + '</div></td>' +
           '<td>' + fmt(e.tool_count || 0) + '</td>' +
           '<td>' + (flags.join(' ') || '-') + '</td>' +
-          '<td><a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(e.request_id) + '\');return false">상세</a></td>' +
+          '<td>' + (exact ? '<button type="button" data-legacy-session-request="' + i + '">상세</button>' : '<a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(e.request_id) + '\');return false">상세</a>') + '</td>' +
         '</tr>';
         }).join('') || '<tr><td colspan="11" class="muted">이벤트 없음</td></tr>';
-        openModal('세션 비행기록 - ' + escapeHTML(sessionID),
-          rcaHtml + summary +
+      return rcaHtml + summary +
           '<h3 style="margin-top:14px">타임라인 (' + (d.events || []).length + ')</h3>' +
-          '<table><thead><tr><th>#</th><th>시각</th><th>종류</th><th>모델</th><th>마지막 메시지</th><th>상태</th><th>지연</th><th>토큰/비용</th><th>도구</th><th>위험</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
-          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>');
+          '<table><thead><tr><th>#</th><th>시각</th><th>종류</th><th>모델</th><th>마지막 메시지</th><th>상태</th><th>지연</th><th>토큰/비용</th><th>도구</th><th>위험</th><th>요청 상세</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>';
+    }
+    window.openFlightRecorder = async (sessionID) => {
+      const selection = ++flightRecorderGeneration;
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash, modal = modalGeneration;
+      const current = () => selection === flightRecorderGeneration && generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && modal === modalGeneration && authCurrent(epoch);
+      try {
+        const data = await api('/admin/sessions/' + encodeURIComponent(sessionID) + '/flight-recorder', {cache:'no-store'});
+        if (!current()) return;
+        openModal('세션 비행기록 - ' + escapeHTML(sessionID), flightRecorderHTML(data));
       } catch (err) {
+        if (!current()) return;
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
@@ -5929,17 +6260,7 @@ const adminHTML = `<!doctype html>
           if (e.target.closest('a')) return;
           const id = row.dataset.requestId;
           if (!id) return;
-          try {
-            const [detail, note] = await Promise.all([
-              api('/admin/requests/' + encodeURIComponent(id)),
-              api('/admin/requests/' + encodeURIComponent(id) + '/note').catch(() => ({ tags: [], note: '' })),
-            ]);
-            openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note), id);
-            wireNoteEditor(id);
-            wireFeedbackEditor(id);
-          } catch (err) {
-            openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
-          }
+          await window.openRequestDetail(id, { fromRow: true });
         });
       });
     }
@@ -5947,9 +6268,9 @@ const adminHTML = `<!doctype html>
     function noteEditor(id, note) {
       const tags = (note.tags || []).join(', ');
       return '<section style="margin-top:18px"><h2>태그 · 메모 · 재실행</h2><div style="padding:14px">' +
-        '<label class="muted" style="font-size:12px; font-weight:700">태그 (콤마 구분, # 없이)</label>' +
+        '<label for="note-tags" class="muted" style="font-size:12px; font-weight:700">태그 (콤마 구분, # 없이)</label>' +
         '<input id="note-tags" value="' + escapeHTML(tags) + '" placeholder="예: 의심,재현필요,검토대기">' +
-        '<label class="muted" style="font-size:12px; font-weight:700; margin-top:10px; display:block">메모</label>' +
+        '<label for="note-text" class="muted" style="font-size:12px; font-weight:700; margin-top:10px; display:block">메모</label>' +
         '<textarea id="note-text" rows="4" style="width:100%; height:auto; padding:8px 10px">' + escapeHTML(note.note || '') + '</textarea>' +
         '<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' +
           '<button id="note-save" type="button" data-id="' + escapeHTML(id) + '">저장</button>' +
@@ -6321,7 +6642,72 @@ const adminHTML = `<!doctype html>
     // ---------- requests view ----------
     let diffSelection = JSON.parse(sessionStorage.getItem('diffSelection') || '[]');
     // 세션 비행기록 인덱스 — 최근 코딩 세션 목록, 각 세션의 비행기록 모달로 드릴인.
+    function legacySessionTarget(rawHash) {
+      if (typeof rawHash !== 'string' || !rawHash.startsWith('#/sessions?') || rawHash.length > 16384) return null;
+      const query = rawHash.slice('#/sessions?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('session_id').length !== 1 || Array.from(params.keys()).some(key => key !== 'session_id')) return null;
+      const id = params.get('session_id');
+      if (!id || id === '.' || id === '..' || id.trim() !== id || new TextEncoder().encode(id).length > 4096 || /[\\/\p{C}]/u.test(id)) return null;
+      return id;
+    }
+    function validLegacySessionRecorder(data) {
+      if (!data || typeof data.session_id !== 'string' || !Array.isArray(data.events) || data.events.length > 500) return false;
+      const numbers = (item, keys) => item && keys.every(key => typeof item[key] === 'number' && Number.isFinite(item[key]));
+      const texts = (item, keys) => item && keys.every(key => typeof item[key] === 'string');
+      const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
+      const rollup = data.rollup, summary = data.summary;
+      return numbers(rollup,['requests','total_tokens','total_cost','errors','tool_calls']) &&
+        texts(rollup,['started_at','ended_at']) && ['models','providers','trace_ids'].every(key => strings(rollup[key])) &&
+        rollup.kinds && typeof rollup.kinds === 'object' && !Array.isArray(rollup.kinds) && Object.values(rollup.kinds).every(value => typeof value === 'number' && Number.isFinite(value)) &&
+        numbers(rollup.risk,['secret_requests','policy_block_requests','high_risk_code_requests']) &&
+        texts(summary,['verdict','headline']) && strings(summary.findings) && typeof data.note === 'string' &&
+        data.events.every(event => texts(event,['request_id','trace_id','kind','endpoint','model','provider','created_at','last_message','detail','trace']) &&
+          numbers(event,['status_code','latency_ms','total_tokens','cost_krw','tool_count']) && typeof event.is_error === 'boolean' &&
+          (event.secret_events === undefined || numbers(event,['secret_events'])) &&
+          (event.policy_blocks === undefined || numbers(event,['policy_blocks'])) &&
+          (event.code_risk === undefined || typeof event.code_risk === 'string'));
+    }
+    async function renderLegacySessionDetail() {
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const target = legacySessionTarget(hash);
+      const render = body => {
+        if (!current()) return;
+        document.getElementById('view').innerHTML = section('세션 비행기록',
+          '<div id="legacy-session-detail" tabindex="-1" style="padding:16px;overflow-wrap:anywhere;min-width:0">' +
+          '<p><a href="#/sessions">세션 전체 화면 열기</a> <button type="button" id="legacy-session-retry">다시 조회</button></p>' +
+          body + '</div>');
+        document.getElementById('legacy-session-detail').focus();
+        document.getElementById('legacy-session-retry').addEventListener('click', () => { if (current()) route(); });
+      };
+      if (!target) { render('<p role="alert">세션 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 세션을 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/sessions/' + encodeURIComponent(target) + '/flight-recorder', {cache:'no-store'});
+        if (!current()) return;
+        // The session_id field is a role-projected label. Its masking must not
+        // replace the exact request target or be mistaken for an identity check.
+        if (!validLegacySessionRecorder(data)) throw new Error('Invalid session recorder');
+        render('<p>목록 기간과 별개인 제한된 최근 기록입니다. 현재 계정에 허용된 요청만 표시합니다.</p>' +
+          '<div role="region" aria-label="선택한 세션 기록" tabindex="0" style="overflow:auto;max-width:100%">' + flightRecorderHTML(data, true) + '</div>');
+        const root = document.getElementById('legacy-session-detail');
+        root.querySelectorAll('[data-legacy-session-request]').forEach(button => {
+          button.addEventListener('click', () => {
+            if (!current()) return;
+            const event = data.events[Number(button.dataset.legacySessionRequest)];
+            if (event) openRequestDetail(event.request_id);
+          });
+        });
+      } catch {
+        if (current()) render('<p role="alert">선택한 세션을 불러오지 못했습니다. 권한과 저장된 기록을 확인한 뒤 다시 조회하세요.</p>');
+      }
+    }
+
     async function renderSessionsView() {
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
       const view = document.getElementById('view');
       const days = sessionStorage.getItem('sessionsDays') || '7';
       view.innerHTML = section('세션 비행기록',
@@ -6329,11 +6715,13 @@ const adminHTML = `<!doctype html>
         '<button type="button" id="sess-reload">조회</button></div>' +
         '<div id="sessions-results"><div class="loading">불러오는 중...</div></div>');
       const load = async () => {
+        if (!current()) return;
         const d = document.getElementById('sess-days').value.trim() || '7';
         sessionStorage.setItem('sessionsDays', d);
         const host = document.getElementById('sessions-results');
         try {
           const data = await api('/admin/sessions?days=' + encodeURIComponent(d));
+          if (!current()) return;
           const ss = data.sessions || [];
           if (!ss.length) { host.innerHTML = '<div class="empty">세션 없음 (클라이언트가 session_id를 보내야 집계됩니다)</div>'; return; }
           const rows = ss.map(s => '<tr>' +
@@ -6349,7 +6737,7 @@ const adminHTML = `<!doctype html>
           host.innerHTML = card('최근 세션 (' + ss.length + ')',
             '<div class="card-body"><table><thead><tr><th>세션</th><th>마지막 메시지</th><th>요청</th><th>모델</th><th>토큰</th><th>비용</th><th>마지막 활동</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
             '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(data.note || '') + '</p></div>');
-        } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+        } catch (e) { if (!current()) return; host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
       };
       document.getElementById('sess-reload').addEventListener('click', load);
       await load();
@@ -7611,20 +7999,79 @@ const adminHTML = `<!doctype html>
       });
     }
 
+    // Native datetime-local controls can erase dates, offsets and nanoseconds.
+    // Retain the exact accepted query text when their normalized value differs.
+    function restoreRequestTimeInput(input, value) {
+      input.type = 'datetime-local';
+      input.step = 'any';
+      input.value = value;
+      if (input.value === value) return;
+      input.type = /^\d{4}-\d{2}-\d{2}$/.test(value) ? 'date' : 'text';
+      input.value = value;
+      if (input.value !== value) { input.type = 'text'; input.value = value; }
+      input.placeholder = 'YYYY-MM-DD 또는 RFC3339';
+    }
+    function legacyRequestTimeValid(value) {
+      if (!value) return true;
+      const match = /^(\d{4})-(\d{2})-(\d{2})(?:([T ])(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})?)?$/.exec(value);
+      if (!match) return false;
+      const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+      const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+      const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      if (month < 1 || month > 12 || day < 1 || day > days[month - 1]) return false;
+      if (Number(match[5] || 0) > 23 || Number(match[6] || 0) > 59 || Number(match[7] || 0) > 59) return false;
+      if (match[8] && !match[9]) return false;
+      if (match[9]) {
+        if (match[4] !== 'T' || !match[7]) return false;
+        if (match[9] !== 'Z') {
+          const offset = match[9].slice(1).split(':').map(Number);
+          if (offset[0] > 23 || offset[1] > 59) return false;
+        }
+      }
+      return true;
+    }
+    function legacyRequestTimeZoneValid(value) {
+      if (!value || value.length > 64) return false;
+      try { new Intl.DateTimeFormat('en', { timeZone: value }).format(0); return true; }
+      catch (_) { return false; }
+    }
+    function restoreRequestTimeZone(select, value) {
+      if (!Array.from(select.options).some(option => option.value === value)) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      }
+      select.value = value;
+    }
+
     async function renderRequestsView(initial) {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration;
+      const epoch = authEpoch;
+      const current = () => generation === legacyRouteGeneration && parseHash().parts[0] === 'requests' && authCurrent(epoch);
+      const handoffModal = modalGeneration;
+      const handoffSelection = requestDetailGeneration;
+      const selectedIDs = initial ? initial.getAll('request_id') : [];
+      let selectedID = selectedIDs[0] || '';
+      let queryGeneration = 0;
+      if (selectedIDs.length > 1 || (selectedIDs.length && !legacyRequestDetailIDValid(selectedID))) {
+        view.innerHTML = '<div class="banner error">요청 상세 주소가 올바르지 않습니다.</div>';
+        return;
+      }
       const [models, ips, langs] = await Promise.all([
         suggestList('model'), suggestList('ip'), suggestList('language')
       ]);
+      if (!current()) return;
       view.innerHTML = section('호출 이력 검색',
         '<form class="toolbar" id="req-filter" autocomplete="off">' +
           '<input id="f-ip" placeholder="IP 필터" list="dl-ip">' +
           '<input id="f-model" placeholder="모델 필터" list="dl-model">' +
           '<input id="f-language" placeholder="언어 필터" list="dl-lang">' +
           '<label class="muted" style="font-size:12px" for="f-from">기간</label>' +
-          '<input id="f-from" type="datetime-local" title="조회 시작 일시">' +
+          '<input id="f-from" type="datetime-local" step="any" title="조회 시작 일시" aria-describedby="req-filter-error">' +
           '<span class="muted" style="font-size:12px">~</span>' +
-          '<input id="f-to" type="datetime-local" title="조회 종료 일시">' +
+          '<input id="f-to" type="datetime-local" step="any" title="조회 종료 일시" aria-describedby="req-filter-error">' +
           '<select id="f-tz" title="검색 기준 시간대">' +
             '<option value="Asia/Seoul" selected>서울 (KST, UTC+9)</option>' +
             '<option value="UTC">UTC</option>' +
@@ -7640,6 +8087,7 @@ const adminHTML = `<!doctype html>
           '<span id="diff-count" class="muted" style="font-size:12px"></span>' +
           datalist('dl-ip', ips) + datalist('dl-model', models) + datalist('dl-lang', langs) +
         '</form>' +
+        '<p id="req-filter-error" class="banner error" role="alert" hidden></p>' +
         '<div id="req-results"></div>'
       );
       // restore from hash query if provided
@@ -7647,24 +8095,38 @@ const adminHTML = `<!doctype html>
         const map = { ip: 'f-ip', model: 'f-model', language: 'f-language', limit: 'f-limit', from: 'f-from', to: 'f-to', tz: 'f-tz' };
         Object.entries(map).forEach(([k, id]) => {
           const v = initial.get(k);
-          if (v !== null && v !== undefined) document.getElementById(id).value = v;
+          if (v === null || v === undefined) return;
+          const input = document.getElementById(id);
+          if (k === 'from' || k === 'to') restoreRequestTimeInput(input, v);
+          else if (k === 'tz') restoreRequestTimeZone(input, v);
+          else input.value = v;
         });
       }
       document.getElementById('req-filter').addEventListener('submit', async (e) => {
         e.preventDefault();
+        selectedID = '';
         await loadRequests();
       });
       document.getElementById('req-reset').addEventListener('click', async () => {
+        selectedID = '';
         ['f-ip', 'f-model', 'f-language', 'f-from', 'f-to'].forEach(id => { document.getElementById(id).value = ''; });
+        ['f-from', 'f-to'].forEach(id => restoreRequestTimeInput(document.getElementById(id), ''));
         document.getElementById('f-limit').value = '100';
         document.getElementById('f-tz').value = 'Asia/Seoul';
         await loadRequests();
       });
       document.getElementById('diff-btn').addEventListener('click', openDiffModal);
       updateDiffCount();
-      await loadRequests();
+      const loaded = await loadRequests();
+      if (loaded && selectedID && current() && handoffModal === modalGeneration && handoffSelection === requestDetailGeneration) {
+        await window.openRequestDetail(selectedID);
+      }
 
       async function loadRequests() {
+        if (!current()) return false;
+        const query = ++queryGeneration;
+        const results = document.getElementById('req-results');
+        const active = () => current() && query === queryGeneration && document.getElementById('req-results') === results;
         const params = new URLSearchParams();
         const ip = document.getElementById('f-ip').value.trim();
         const model = document.getElementById('f-model').value.trim();
@@ -7673,6 +8135,20 @@ const adminHTML = `<!doctype html>
         const to = document.getElementById('f-to').value.trim();
         const tz = document.getElementById('f-tz').value;
         const limit = document.getElementById('f-limit').value.trim() || '100';
+        const error = document.getElementById('req-filter-error');
+        const invalidTime = !legacyRequestTimeValid(from) || !legacyRequestTimeValid(to);
+        const invalidZone = (from || to) && !legacyRequestTimeZoneValid(tz);
+        if (invalidTime || invalidZone) {
+          error.textContent = invalidTime
+            ? '날짜와 시각을 YYYY-MM-DD, 로컬 시각 또는 RFC3339 형식으로 입력하세요.'
+            : '올바른 IANA 시간대를 선택하세요.';
+          error.hidden = false;
+          results.innerHTML = '';
+          return false;
+        }
+        error.hidden = true;
+        error.textContent = '';
+
         if (ip) params.set('ip', ip);
         if (model) params.set('model', model);
         if (language) params.set('language', language);
@@ -7682,12 +8158,22 @@ const adminHTML = `<!doctype html>
         // timezone (default Asia/Seoul) instead of UTC.
         if (from || to) params.set('tz', tz);
         params.set('limit', limit);
-        updateHashParams(params);
-        const r = await api('/admin/requests?' + params.toString());
-        document.getElementById('req-results').innerHTML = requestsTable(r.requests || [], { selectable: true });
+        const hashParams = new URLSearchParams(params);
+        if (selectedID) hashParams.set('request_id', selectedID);
+        updateHashParams(hashParams);
+        let r;
+        try {
+          r = await api('/admin/requests?' + params.toString());
+        } catch (error) {
+          if (!active()) return false;
+          throw error;
+        }
+        if (!active()) return false;
+        results.innerHTML = requestsTable(r.requests || [], { selectable: true });
         attachRequestRowHandlers();
         attachDiffSelectionHandlers();
         makeSortable('#req-results', 'requests');
+        return true;
       }
     }
 
@@ -7748,7 +8234,11 @@ const adminHTML = `<!doctype html>
     // ---------- prompts search ----------
     async function renderPromptsView(initial) {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch;
+      const current = () => generation === legacyRouteGeneration && parseHash().parts[0] === 'prompts' && authCurrent(epoch);
+      let searchGeneration = 0, fingerprintGeneration = 0;
       const saved = (await api('/admin/saved-filters').catch(() => ({ filters: [] }))).filters || [];
+      if (!current()) return;
       const promptFilters = saved.filter(f => f.view === 'prompts');
       const savedOptions = '<option value="">저장된 필터 선택…</option>' +
         promptFilters.map(f => '<option value="' + encodeURIComponent(f.params) + '" data-id="' + escapeHTML(f.id) + '">' + escapeHTML(f.name) + '</option>').join('');
@@ -7758,7 +8248,7 @@ const adminHTML = `<!doctype html>
           '<input id="p-language" placeholder="언어">' +
           '<input id="p-ip" placeholder="IP">' +
           '<input id="p-key" placeholder="API 키 ID">' +
-          '<input id="p-since" type="datetime-local" placeholder="이후">' +
+          '<input id="p-since" type="datetime-local" step="any" placeholder="이후">' +
           '<input id="p-limit" type="number" min="1" max="10000" value="100">' +
           '<button type="submit">검색</button>' +
           '<button type="button" id="p-export" class="secondary">CSV 다운로드</button>' +
@@ -7766,10 +8256,10 @@ const adminHTML = `<!doctype html>
           '<button type="button" id="p-save" class="ghost">현재 필터 저장</button>' +
           '<button type="button" id="p-delete-saved" class="ghost" title="선택한 저장된 필터 삭제">선택 삭제</button>' +
         '</form>' +
-        '<div id="prompt-results"></div>'
+        '<p id="p-filter-error" class="banner error" role="alert" hidden></p><div id="prompt-results"></div>'
       ) + section('프롬프트 지문 — 반복 작업 클러스터 (Prompt Fingerprint)',
         '<div class="toolbar"><select id="pf-window">' +
-          ['24h', '7d', '30d'].map(wd => '<option value="' + wd + '"' + (wd === '7d' ? ' selected' : '') + '>' + wd + '</option>').join('') +
+          ['24h', '7d', '30d', '90d'].map(wd => '<option value="' + wd + '"' + (wd === '7d' ? ' selected' : '') + '>' + wd + '</option>').join('') +
         '</select><span class="muted" style="margin-left:auto">유사한 작업 프롬프트를 지문으로 묶어 건수·평균 비용·추천 모델을 집계합니다</span></div>' +
         '<div id="prompt-fingerprints"></div>'
       );
@@ -7785,16 +8275,35 @@ const adminHTML = `<!doctype html>
         if (language) params.set('language', language);
         if (ip) params.set('ip', ip);
         if (key) params.set('api_key_id', key);
+        const error = document.getElementById('p-filter-error');
+        if (since && !Number.isFinite(Date.parse(since))) {
+          error.textContent = '조회 시작 시각을 확인하세요.'; error.hidden = false; return null;
+        }
+        error.hidden = true;
         if (since) params.set('since', new Date(since).toISOString());
         params.set('limit', limit);
         return params;
       };
       if (initial) applyPromptParams(initial);
+      const requestedWindow = initial && initial.get('fp_window');
+      if (['24h','7d','30d','90d'].includes(requestedWindow)) document.getElementById('pf-window').value = requestedWindow;
       const runSearch = async () => {
+        if (!current()) return;
+        const query = ++searchGeneration;
         const params = collectParams();
-        updateHashParams(params);
-        const r = await api('/admin/prompts?' + params.toString());
-        document.getElementById('prompt-results').innerHTML = requestsTable(r.requests || []);
+        if (!params) return;
+        const hashParams = new URLSearchParams(params);
+        hashParams.set('fp_window', document.getElementById('pf-window').value);
+        updateHashParams(hashParams);
+        const host = document.getElementById('prompt-results');
+        try {
+          const r = await api('/admin/prompts?' + params.toString());
+          if (!current() || query !== searchGeneration || host !== document.getElementById('prompt-results')) return;
+          host.innerHTML = requestsTable(r.requests || []);
+        } catch (_) {
+          if (current() && query === searchGeneration) host.innerHTML = '<p role="alert">검색 결과를 불러오지 못했습니다. 검색을 다시 실행하세요.</p>';
+          return;
+        }
         attachRequestRowHandlers();
         makeSortable('#prompt-results', 'prompts');
       };
@@ -7808,6 +8317,7 @@ const adminHTML = `<!doctype html>
       }
       document.getElementById('p-export').addEventListener('click', async () => {
         const params = collectParams();
+        if (!params || !current()) return;
         const res = await fetch('/admin/export.csv?' + params.toString(), { headers: headers() });
         if (!res.ok) { toast('CSV 다운로드 실패: ' + (await res.text())); return; }
         const blob = await res.blob();
@@ -7829,9 +8339,11 @@ const adminHTML = `<!doctype html>
       });
       document.getElementById('p-save').addEventListener('click', async () => {
         const name = prompt('필터 이름을 입력하세요');
-        if (!name) return;
+        if (!name || !current()) return;
+        const params = collectParams();
+        if (!params) return;
         await api('/admin/saved-filters', { method: 'POST', body: JSON.stringify({
-          name: name.trim(), view: 'prompts', params: collectParams().toString(),
+          name: name.trim(), view: 'prompts', params: params.toString(),
         }) });
         route();
       });
@@ -7846,13 +8358,20 @@ const adminHTML = `<!doctype html>
 
       const pfWindow = document.getElementById('pf-window');
       const loadFingerprints = async () => {
+        if (!current()) return;
+        const query = ++fingerprintGeneration;
         const host = document.getElementById('prompt-fingerprints');
         host.innerHTML = '<div class="muted" style="padding:14px">불러오는 중…</div>';
         const d = await api('/admin/prompts/fingerprints?window=' + pfWindow.value + '&limit=100').catch(() => ({ fingerprints: [] }));
+        if (!current() || query !== fingerprintGeneration || host !== document.getElementById('prompt-fingerprints')) return;
         host.innerHTML = promptFingerprintTable(d.fingerprints || []);
         makeSortable('#prompt-fingerprints', 'pf');
       };
-      pfWindow.addEventListener('change', loadFingerprints);
+      pfWindow.addEventListener('change', () => {
+        if (!current()) return;
+        const params = parseHash().params; params.set('fp_window', pfWindow.value);
+        updateHashParams(params); void loadFingerprints();
+      });
       loadFingerprints();
     }
     function promptFingerprintTable(rows) {
@@ -7882,10 +8401,7 @@ const adminHTML = `<!doctype html>
         const el = document.getElementById(id);
         if (!el) return;
         let v = params.get(k) || '';
-        if (k === 'since' && v) {
-          const d = new Date(v);
-          if (!isNaN(d)) v = d.toISOString().slice(0, 16);
-        }
+        if (k === 'since') { restoreRequestTimeInput(el, v); return; }
         el.value = v;
       });
     }
@@ -7901,7 +8417,19 @@ const adminHTML = `<!doctype html>
         : escapeHTML(team);
     }
     // ── 프롬프트 자산 관리소 ──────────────────────────────────────────────
+    function legacyPromptAssetIDValid(id) {
+      return typeof id === 'string' && id.length > 0 && id.length <= 512 && id.trim() === id &&
+        !/[\u0000-\u001f\u007f]/.test(id);
+    }
     async function renderPromptAssets(initial) {
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && hash === location.hash && authCurrent(epoch);
+      const handoffModal = modalGeneration, handoffSelection = assetDetailGeneration;
+      const ids = initial ? initial.getAll('asset') : [];
+      if (ids.length > 1 || (ids.length === 1 && !legacyPromptAssetIDValid(ids[0]))) {
+        document.getElementById('view').innerHTML = '<p role="alert">자산 상세 주소가 올바르지 않습니다.</p>';
+        return;
+      }
       const statusFilter   = (initial && initial.get('status'))   || '';
       const tagFilter      = (initial && initial.get('tag'))      || '';
       const categoryFilter = (initial && initial.get('category')) || '';
@@ -7914,6 +8442,7 @@ const adminHTML = `<!doctype html>
       if (q)              qs.set('q',        q);
 
       const d = await api('/admin/prompt-assets' + (qs.toString() ? '?' + qs.toString() : ''));
+      if (!current()) return;
       const assets      = d.assets    || [];
       const stats       = d.stats     || {};
       const knownTags   = d.known_tags || [];
@@ -8004,6 +8533,7 @@ const adminHTML = `<!doctype html>
 
       document.getElementById('pa-filter').addEventListener('submit', e => {
         e.preventDefault();
+        if (!current()) return;
         const p = new URLSearchParams();
         const qv = document.getElementById('pa-q').value.trim();
         const sv = document.getElementById('pa-status').value;
@@ -8013,9 +8543,13 @@ const adminHTML = `<!doctype html>
         if (sv) p.set('status', sv);
         if (cv) p.set('category', cv);
         if (tv) p.set('tag', tv);
-        location.hash = '#/prompt-assets' + (p.toString() ? '?' + p.toString() : '');
-        route();
+        const next = '#/prompt-assets' + (p.toString() ? '?' + p.toString() : '');
+        if (location.hash === next) void route();
+        else location.hash = next;
       });
+      if (ids.length && current() && handoffModal === modalGeneration && handoffSelection === assetDetailGeneration) {
+        await window.openAssetDetail(ids[0]);
+      }
     }
 
     window.openAddAssetModal = () => {
@@ -8077,14 +8611,32 @@ const adminHTML = `<!doctype html>
     };
 
     window.openAssetDetail = async (id) => {
-      openModal('자산 상세 — ' + id, '<div class="loading">불러오는 중...</div>');
+      const selection = ++assetDetailGeneration, generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      let modal = modalGeneration;
+      const current = () => selection === assetDetailGeneration && generation === legacyRouteGeneration &&
+        epoch === authEpoch && authCurrent(epoch) && hash === location.hash && modal === modalGeneration;
+      if (!current()) return;
+      if (!legacyPromptAssetIDValid(id)) {
+        openModal('자산 상세', '<p role="alert">자산 상세 주소가 올바르지 않습니다.</p>'); return;
+      }
+      openModal('자산 상세 — ' + id, '<div id="legacy-asset-detail" class="loading">불러오는 중...</div>', undefined, { assetDetail: true });
+      modal = modalGeneration;
       try {
         const [resp, histResp, usageResp] = await Promise.all([
-          api('/admin/prompt-assets?q=' + encodeURIComponent(id)),
+          api('/admin/prompt-assets'),
           api('/admin/templates/' + encodeURIComponent(id) + '/history').catch(() => ({ history: [] })),
           api('/admin/templates/' + encodeURIComponent(id) + '/usage').catch(() => ({ usage: [] })),
         ]);
-        const a = (resp.assets || []).find(x => x.id === id) || {};
+        if (!current()) return;
+        if (!resp || !Array.isArray(resp.assets)) throw new Error('Invalid asset list');
+        const matches = resp.assets.filter(x => x && x.id === id);
+        if (matches.length !== 1) {
+          _applyModalState({ title: '자산 상세', html: '<div id="legacy-asset-detail"><p role="alert">선택한 자산을 찾을 수 없습니다.</p></div>', opts: { assetDetail: true } });
+          return;
+        }
+        const a = matches[0];
+        const scopes = authState.nav && authState.nav.scopes;
+        const canWrite = Array.isArray(scopes) && scopes.includes('admin:write');
         const history = histResp.history || [];
         const usage = usageResp.usage || [];
         window.__assetHistory = history; // for diff lookup
@@ -8158,8 +8710,7 @@ const adminHTML = `<!doctype html>
           '</div>'
         ) : '';
 
-        openModal('자산 상세 — ' + escapeHTML(a.name || id),
-          metricsBlock +
+        _applyModalState({ title: '자산 상세 — ' + (a.name || id), html: '<div id="legacy-asset-detail">' + (canWrite ? '' : '<p role="status">읽기 전용입니다. 자산을 변경할 수 없습니다.</p>') + metricsBlock +
           '<div class="kv">' +
             row('상태', statusBadge(a.status)) +
             row('카테고리', escapeHTML(a.category||'')) +
@@ -8190,16 +8741,23 @@ const adminHTML = `<!doctype html>
             (a.status==='approved' ? '<button type="button" class="secondary" onclick="approveAsset(\''+escapeAttr(id)+'\',\'standard\')">표준 승격</button>' : '') +
             ((a.status==='pending'||a.status==='approved'||a.status==='standard') ? '<button type="button" class="secondary" onclick="approveAsset(\''+escapeAttr(id)+'\',\'draft\')">반려</button>' : '') +
             '<button type="button" class="secondary" onclick="closeModal()">닫기</button>' +
-          '</div>'
-        );
-      } catch(err) {
-        openModal('자산 상세 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+          '</div></div>', opts: { assetDetail: true } });
+        if (!canWrite) {
+          document.querySelectorAll('#legacy-asset-detail input, #legacy-asset-detail textarea').forEach(el => { el.readOnly = true; });
+          document.querySelectorAll('#legacy-asset-detail select').forEach(el => { el.disabled = true; });
+          document.querySelectorAll('#legacy-asset-detail button[onclick]').forEach(el => {
+            if (/^(saveAssetEdit|submitAsset|approveAsset|rollbackAsset)\(/.test(el.getAttribute('onclick') || '')) el.disabled = true;
+          });
+        }
+      } catch(_error) {
+        if (!current()) return;
+        _applyModalState({ title: '자산 상세 오류', html: '<div id="legacy-asset-detail"><p role="alert">자산 정보를 불러오지 못했습니다. 목록에서 다시 열어 주세요.</p></div>', opts: { assetDetail: true } });
       }
     };
 
     window.addTagToEditInput = (tag) => {
       const el = document.getElementById('pa-edit-tags');
-      if (!el) return;
+      if (!el || el.readOnly || el.disabled) return;
       const existing = el.value.split(',').map(t=>t.trim()).filter(Boolean);
       if (!existing.includes(tag)) { el.value = [...existing, tag].join(', '); }
     };
@@ -8880,6 +9438,157 @@ const adminHTML = `<!doctype html>
       p.set('limit', defaults.limit || '80');
       return p;
     }
+
+
+    function legacyAccessTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/users?')) return null;
+      const query = rawHash.slice('#/users?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('resource').length !== 1 || params.getAll('id').length !== 1 ||
+          Array.from(params.keys()).some(key => key !== 'resource' && key !== 'id')) return null;
+      const resource = params.get('resource'), id = params.get('id');
+      if (!['key','account','team'].includes(resource) || !id || /\p{C}/u.test(id)) return null;
+      if (resource === 'key' ? !/^[A-Za-z0-9._:-]{1,512}$/.test(id) : new TextEncoder().encode(id).length > 4096) return null;
+      return { resource, id };
+    }
+
+    function legacyAccessKeyLifecycle(row, now) {
+      if (row.revoked_at || row.status === 'revoked') return '폐기';
+      if (row.status !== 'active') return row.status || '상태 확인 필요';
+      const deadline = Math.min(...[row.expires_at, ...(row.replaced_by ? [row.grace_ends_at] : [])].filter(Boolean).map(Date.parse));
+      if ((row.replaced_by && !row.grace_ends_at) || Number.isNaN(deadline)) return '만료 시각 확인 필요';
+      if (deadline <= now) return row.replaced_by ? '유예 종료' : '만료';
+      return row.replaced_by ? '교체 유예 중' : '사용';
+    }
+
+    async function renderLegacyAccessDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const target = legacyAccessTarget(hash);
+      const labels = {key:'API 키 상세',account:'로그인 계정 상세',team:'등록 팀 상세'};
+      const render = body => {
+        if (!current()) return;
+        view.innerHTML = section(target ? labels[target.resource] : '사용자·팀 상세',
+          '<div id="legacy-access-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/users">사용자 이용 현황 열기</a></p></div>');
+        document.getElementById('legacy-access-detail').focus();
+      };
+      if (!target) { render('<p role="alert">상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 항목을 확인하고 있습니다.</p>');
+      const retry = '<button type="button" id="legacy-access-retry">다시 조회</button>';
+      const { resource, id } = target;
+      const paged = resource !== 'key';
+      const path = resource === 'key' ? '/admin/api-keys' : resource === 'account' ? '/admin/users' : '/admin/teams';
+      const query = new URLSearchParams(paged ? { view:resource === 'account' ? 'accounts' : 'registered', id, limit:'1', offset:'0' } : { id });
+      try {
+        const data = await api(path + '?' + query, { cache:'no-store' });
+        if (!current()) return;
+        const rows = data?.[resource === 'key' ? 'api_keys' : resource === 'account' ? 'accounts' : 'auth_teams'];
+        if (!Array.isArray(rows) || rows.length > 1 || (paged && (data.total !== rows.length || data.limit !== 1 || data.offset !== 0))) throw new Error('Invalid access response');
+        if (rows.length === 0) {
+          render('<p role="status">조회 가능한 항목이 없습니다. 삭제되었거나 현재 조회 범위에 포함되지 않습니다.</p>' + retry);
+        } else {
+          const row = rows[0];
+          const strings = resource === 'key' ? ['id','name','owner','team','user_id','service_account_id','role','status','expires_at','revoked_at','created_at'] :
+            resource === 'account' ? ['id','email','name','role','status','team_id','team_name','created_at'] : ['id','name','created_at','updated_at'];
+          if (!row || row.id !== id || strings.some(key => typeof row[key] !== 'string')) throw new Error('Invalid selected resource');
+          let fields;
+          const queriedAt = Date.now();
+          if (resource === 'key') {
+            const lists = ['scopes','allowed_ips','allowed_models','denied_models','allowed_providers','denied_providers'];
+            if (lists.some(key => row[key] !== null && (!Array.isArray(row[key]) || row[key].some(value => typeof value !== 'string'))) ||
+                !Number.isFinite(row.budget_limit_krw) ||
+                ['replaced_by','grace_ends_at'].some(key => row[key] !== undefined && typeof row[key] !== 'string')) throw new Error('Invalid key metadata');
+            const list = (key, empty) => row[key]?.length ? row[key].join(', ') : empty;
+            fields = [['키 ID',row.id],['이름',row.name],['수명 상태(조회 시각 기준)',legacyAccessKeyLifecycle(row,queriedAt)],
+              ['저장된 상태',row.status],['소유자',row.owner],['팀 ID',row.team],['계정 ID',row.user_id],['서비스 계정 ID',row.service_account_id],['역할',row.role],
+              ['권한 범위',list('scopes','선택된 권한 없음')],['허용 IP',list('allowed_ips','제한 없음')],
+              ['허용 모델',list('allowed_models','제한 없음')],['차단 모델',list('denied_models','차단 없음')],
+              ['허용 공급자',list('allowed_providers','제한 없음')],['차단 공급자',list('denied_providers','차단 없음')],
+              ['예산 한도(KRW)',row.budget_limit_krw > 0 ? row.budget_limit_krw : '제한 없음'],
+              ['생성 시각',row.created_at],['만료 시각',row.expires_at || '무기한'],['폐기 시각',row.revoked_at],
+              ['교체된 새 키 ID',row.replaced_by || ''],['교체 유예 종료',row.grace_ends_at || '']];
+          } else if (resource === 'account') {
+            fields = [['계정 ID',row.id],['이메일',row.email],['이름',row.name],['역할',row.role],['상태',row.status],
+              ['주 소속 팀',row.team_name],['팀 ID',row.team_id],['생성 시각',row.created_at]];
+          } else {
+            fields = [['팀 ID',row.id],['팀 이름',row.name],['생성 시각',row.created_at],['수정 시각',row.updated_at]];
+          }
+          // Explicit metadata only: credentials, password hashes and unknown fields are never rendered.
+          fields.push(['조회 시각(UTC)',new Date(queriedAt).toISOString()]);
+          render('<p role="status">조회 시각의 저장 정보입니다. 최신 정보는 다시 조회하세요.</p><dl>' +
+            fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+              '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1] === '' ? '미지정' : pair[1])) + '</dd>').join('') + '</dl>' + retry);
+        }
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 항목을 확인하지 못했습니다. 로그인 상태와 조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+      }
+      if (current()) document.getElementById('legacy-access-retry').addEventListener('click', () => { if (current()) void route(); });
+    }
+
+    function legacyRoutingRuleTarget(params, rawHash) {
+      if (rawHash !== undefined) {
+        if (typeof rawHash !== 'string' || rawHash.length > 8192 || !rawHash.startsWith('#/routing?')) return null;
+        const query = rawHash.slice('#/routing?'.length);
+        // Validate before URLSearchParams can replace invalid UTF-8 in an ID.
+        // Preserve all text after the first ?, including a literal ? in a value.
+        try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+        params = new URLSearchParams(query);
+      }
+      if (!params || params.toString().length > 8192 || params.getAll('rule_id').length !== 1 ||
+          Array.from(params.keys()).some(key => key !== 'rule_id')) return null;
+      const id = params.get('rule_id');
+      if (!id || id.trim() !== id || Array.from(id).length > 512 || /\p{C}/u.test(id)) return null;
+      return id;
+    }
+    async function renderLegacyRoutingRuleDetail(params) {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const id = legacyRoutingRuleTarget(params, hash);
+      const back = '<p><a href="#/routing">라우팅 학습 화면 열기</a></p>';
+      const render = body => {
+        if (!current()) return;
+        view.innerHTML = section('라우팅 규칙 상세', '<div id="legacy-routing-rule-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' + body + back + '</div>');
+        document.getElementById('legacy-routing-rule-detail').focus();
+      };
+      if (!id) { render('<p role="alert">라우팅 규칙 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 라우팅 규칙을 확인하고 있습니다.</p>');
+      const retry = '<button type="button" id="legacy-routing-rule-retry">다시 조회</button>';
+      try {
+        // Preserve the existing authorized raw configuration contract. This read does
+        // not preview traffic, optimize, open an editor, or change the routing cache.
+        const data = await api('/admin/routing-rules?' + new URLSearchParams({ id }), { cache: 'no-store' });
+        if (!current()) return;
+        if (!data || !Array.isArray(data.rules)) throw new Error('Invalid rule response');
+        if (data.rules.length === 0) {
+          render('<p role="status">해당 라우팅 규칙이 없습니다. 삭제되었거나 주소가 변경되었습니다.</p>' + retry);
+        } else {
+          const rule = data.rules[0];
+          if (data.rules.length !== 1 || !rule || rule.id !== id || typeof rule.enabled !== 'boolean' ||
+              ['priority','min_complexity','max_complexity'].some(key => !Number.isSafeInteger(rule[key])) ||
+              ['match_pattern','target_model','target_provider','note','created_at'].some(key => typeof rule[key] !== 'string')) throw new Error('Invalid selected rule');
+          const fields = [
+            ['규칙 ID', rule.id], ['상태', rule.enabled ? '사용 중' : '중지됨'], ['우선순위', rule.priority],
+            ['모델 패턴', rule.match_pattern || '*'], ['복잡도 범위', rule.min_complexity + '–' + rule.max_complexity],
+            ['대상 모델', rule.target_model], ['대상 공급자', rule.target_provider || '자동 선택'],
+            ['메모', rule.note.slice(0,10000) || '없음'], ['생성 시각', rule.created_at],
+          ];
+          render('<p role="status">현재 저장된 규칙입니다. 실제 요청의 라우팅 결과를 실행한 것은 아닙니다.</p>' +
+            '<dl>' + fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+              '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1])) + '</dd>').join('') + '</dl>' +
+            (rule.note.length > 10000 ? '<p>메모는 앞의 10,000자까지 표시합니다.</p>' : '') + retry);
+        }
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 규칙을 확인하지 못했습니다. 로그인 상태와 조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+      }
+      if (current()) document.getElementById('legacy-routing-rule-retry').addEventListener('click', () => { if (current()) void route(); });
+    }
+
     async function renderRoutingLearning(initial) {
       const route = initial ? (initial.get('route') || '') : '';
       const windowValue = initial ? (initial.get('window') || '7d') : '7d';
@@ -9816,12 +10525,96 @@ const adminHTML = `<!doctype html>
     window.csDelete = async (id) => { if (!confirm('이 변경 세트를 삭제할까요? 되돌릴 수 없습니다.')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { toast(e.message); } };
 
     // ---------- AI 업무 앱: Skill/Prompt Product/Text2SQL/MCP/모델 묶음 ----------
+
+    function legacyWorkAppTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/apps?')) return null;
+      const query = rawHash.slice('#/apps?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('app_id').length !== 1 || Array.from(params.keys()).some(key => key !== 'app_id')) return null;
+      const id = params.get('app_id');
+      if (!id || new TextEncoder().encode(id).length > 4096 || /\p{C}/u.test(id)) return null;
+      return id;
+    }
+    async function renderLegacyWorkAppDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const id = legacyWorkAppTarget(hash);
+      const retry = '<button type="button" id="legacy-work-app-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-work-app-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('AI 업무 앱 상세',
+          '<div id="legacy-work-app-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/apps">업무 앱 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (key, action) => {
+        if (current()) document.getElementById(key)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!id) { render('<p role="alert">업무 앱 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 업무 앱을 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/apps?' + new URLSearchParams({ view:'detail', id }), { cache:'no-store' });
+        if (!current()) return;
+        const row = data?.app;
+        if (!row || row.id !== id ||
+            ['id','title','description','icon','allowed_teams','allowed_roles','status','owner','created_at','updated_at'].some(key => typeof row[key] !== 'string') ||
+            !Array.isArray(row.components) || row.components.some(c => !c || ['kind','ref','label'].some(key => typeof c[key] !== 'string'))) throw new Error('Invalid selected work app');
+        const fields = [['앱 ID',row.id],['이름',row.title || '미지정'],['아이콘',row.icon || '미지정'],
+          ['상태',row.status === 'active' ? '활성' : row.status === 'archived' ? '지원 중단' : row.status || '미지정'],
+          ['책임자',row.owner || '미지정'],['허용 팀',row.allowed_teams || '전체'],['허용 역할',row.allowed_roles || '전체'],
+          ['생성 시각',row.created_at || '미확인'],['수정 시각',row.updated_at || '미확인']];
+        const metadata = '<p>현재 저장된 업무 앱과 구성 요소 참조입니다. 허용 팀·역할은 앱 실행 범위이며, 관리자 조회 권한과는 별도로 적용됩니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl>';
+        let descriptionPage = 0, componentPage = 0;
+        const descriptions = legacyDetailTextPages(row.description);
+        const componentCount = Math.max(1, Math.ceil(row.components.length / 50));
+        const kindLabels = { skill:'스킬', prompt_product:'프롬프트 상품', text2sql_report:'SQL 리포트', mcp_tool:'MCP 도구', model:'모델' };
+        const button = (key, label, disabled) => '<button type="button" id="' + key + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+        const paint = focusId => {
+          if (!current()) return;
+          const [start, end] = descriptions[descriptionPage];
+          let body = metadata + '<h3>앱 설명</h3><pre id="legacy-work-app-description" tabindex="0" aria-label="업무 앱 설명" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto">' +
+            escapeHTML(row.description.slice(start,end) || '등록된 설명이 없습니다.') + '</pre>';
+          if (descriptions.length > 1) body += '<nav aria-label="업무 앱 설명 페이지"><span role="status">' + (descriptionPage + 1) + ' / ' + descriptions.length +
+            '페이지</span>' + button('legacy-work-app-description-prev','이전 설명',descriptionPage === 0) + button('legacy-work-app-description-next','다음 설명',descriptionPage + 1 === descriptions.length) + '</nav>';
+          body += '<h3>구성 요소</h3><p>저장된 참조를 표시합니다. 참조 확인이나 앱 실행은 수행하지 않습니다.</p>';
+          if (row.components.length) {
+            body += '<ol aria-label="업무 앱 구성 요소" start="' + (componentPage * 50 + 1) + '">' +
+              row.components.slice(componentPage * 50,(componentPage + 1) * 50).map(c => '<li><dl>' +
+                [['종류',Object.hasOwn(kindLabels,c.kind) ? kindLabels[c.kind] : c.kind || '미지정'],['참조',c.ref || '미지정'],['라벨',c.label || '미지정']]
+                  .map(pair => '<dt>' + escapeHTML(pair[0]) + '</dt><dd style="white-space:pre-wrap;margin:4px 0">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl></li>').join('') +
+              '</ol><nav aria-label="업무 앱 구성 요소 페이지"><span id="legacy-work-app-components-status" role="status" tabindex="-1">' + row.components.length + '개 · ' +
+              (componentPage + 1) + ' / ' + componentCount + '페이지</span>' + button('legacy-work-app-components-prev','이전 구성 요소',componentPage === 0) +
+              button('legacy-work-app-components-next','다음 구성 요소',componentPage + 1 === componentCount) + '</nav>';
+          } else body += '<p>구성 요소가 없습니다.</p>';
+          render(body + retry,focusId);
+          bind('legacy-work-app-retry',() => { void route(); });
+          bind('legacy-work-app-description-prev',() => { if (descriptionPage > 0) { descriptionPage--; paint('legacy-work-app-description'); } });
+          bind('legacy-work-app-description-next',() => { if (descriptionPage + 1 < descriptions.length) { descriptionPage++; paint('legacy-work-app-description'); } });
+          bind('legacy-work-app-components-prev',() => { if (componentPage > 0) { componentPage--; paint('legacy-work-app-components-status'); } });
+          bind('legacy-work-app-components-next',() => { if (componentPage + 1 < componentCount) { componentPage++; paint('legacy-work-app-components-status'); } });
+        };
+        paint();
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 업무 앱을 불러오지 못했습니다. 삭제되었거나 조회할 수 없는 앱일 수 있습니다. 주소·로그인 상태·조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+        bind('legacy-work-app-retry',() => { void route(); });
+      }
+    }
+
     async function renderWorkApps() {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      if (!current()) return;
       view.innerHTML = section('AI 업무 앱', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/apps'); }
-      catch (e) { view.innerHTML = section('AI 업무 앱', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      catch (e) { if (!current()) return; view.innerHTML = section('AI 업무 앱', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      if (!current()) return;
       const apps = d.apps || [];
       const kindLabel = { skill: 'Skill', prompt_product: '프롬프트상품', text2sql_report: 'SQL리포트', mcp_tool: 'MCP', model: '모델' };
       const componentLink = { skill: 'skills', prompt_product: 'prompt-assets', text2sql_report: 'text2sql', mcp_tool: 'mcp-tools', model: 'routing' };
@@ -13885,6 +14678,75 @@ const adminHTML = `<!doctype html>
       } catch (e) { openModal('CSV 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
 
+
+    function legacyModelTarget(params) {
+      const keys = ['model','provider_ref','source'];
+      if (params.toString().length > 8192 || keys.some(key => params.getAll(key).length !== 1) ||
+          Array.from(params.keys()).some(key => !keys.includes(key))) return null;
+      const id = params.get('model'), ref = params.get('provider_ref'), source = params.get('source');
+      if (!id || id.length > 4096 || id.trim() !== id || /[\u0000-\u001f\u007f]/.test(id) ||
+          !legacyProviderRefValid(ref) || !['live','cache','agent_route'].includes(source)) return null;
+      return { id, ref, source };
+    }
+    async function renderLegacyModelDetail(initial) {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && hash === location.hash && authCurrent(epoch);
+      const target = legacyModelTarget(initial);
+      const back = '<p><a href="#/model-contracts">모델 계약 목록 열기</a></p>';
+      const render = (body) => {
+        if (!current()) return;
+        view.innerHTML = section('모델 상세', '<div id="legacy-model-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' + body + back + '</div>');
+        document.getElementById('legacy-model-detail').focus();
+      };
+      if (!target) { render('<p role="alert">모델 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 모델을 확인하고 있습니다.</p>');
+      try {
+        // The provider query uses raw names, not opaque refs. Keep it unset and match the
+        // exact reference/source locally in the existing safe, normalized catalogue.
+        const data = await api('/admin/models?' + new URLSearchParams({ model: target.id }), { appProjection: true, cache: 'no-store' });
+        if (!current()) return;
+        if (!data || !Array.isArray(data.models) || !Array.isArray(data.providers) || !Array.isArray(data.partial_failures)) throw new Error('Invalid catalogue');
+        // live/cache describe the freshness of one physical catalogue, not different models.
+        // An agent route is a different resource and must never replace a physical model.
+        const sources = target.source === 'agent_route' ? ['agent_route'] : ['live','cache'];
+        const matches = data.models.filter(m => m && m.id === target.id && m.provider_ref === target.ref && sources.includes(m.source));
+        const retry = '<button type="button" id="legacy-model-retry">다시 조회</button>';
+        if (matches.length !== 1) {
+          render('<p role="alert">선택한 모델을 확인할 수 없습니다. 삭제되었거나 공급자·모델 유형이 변경되었을 수 있습니다. 같은 이름의 다른 모델은 자동 선택하지 않습니다.</p>' + retry);
+        } else {
+          const model = matches[0];
+          const provider = data.providers.find(p => p && p.provider_ref === target.ref && p.source === model.source);
+          const deprecation = model.deprecation;
+          const labels = { live: '실시간', cache: '저장된 카탈로그', agent_route: '에이전트 경로' };
+          const status = deprecation && deprecation.retired ? '지원 종료' : model.shadowed || model.shadowed_by ? '우선 경로 존재' :
+            deprecation ? '지원 종료 예정' : model.stale ? '마지막 정상 카탈로그' : model.virtual ? '가상 모델' : '사용 가능';
+          const created = typeof model.created === 'number' && Number.isFinite(model.created) && !isNaN(new Date(model.created * 1000).getTime()) ? new Date(model.created * 1000).toISOString() : '—';
+          const fields = [
+            ['모델 ID', model.id], ['공급자', model.provider], ['공급자 참조', model.provider_ref],
+            ['조회 출처', labels[model.source]], ['상태', status], ['공급자 상태', provider && provider.status],
+            ['소유자', model.owned_by], ['객체 유형', model.object], ['생성 시각 (UTC)', created], ['조회 시각', model.fetched_at],
+            ['마지막 정상 데이터', model.stale ? '예' : '아니오'], ['가상 모델', model.virtual ? '예' : '아니오'],
+            ['우선 에이전트 경로', model.shadowed_by],
+          ];
+          if (deprecation) fields.push(['지원 종료 조치', deprecation.action], ['종료 예정일', deprecation.sunset_date],
+            ['대체 모델', deprecation.replacement], ['안내', deprecation.message]);
+          const partial = data.partial_failures.some(p => p && (p.provider_ref === target.ref ||
+            ['models_provider_limit_exceeded','models_response_limit_exceeded'].includes(p.code)));
+          render('<p role="status">선택한 공급자의 모델 카탈로그 정보입니다.</p>' +
+            (model.source !== target.source ? '<p role="status">조회 출처가 ' + escapeHTML(labels[target.source]) + '에서 ' + escapeHTML(labels[model.source]) + '로 변경되었습니다. 같은 공급자의 같은 모델 ID를 확인했습니다.</p>' : '') +
+            (model.stale || partial ? '<p role="alert">최신 카탈로그를 모두 확인하지 못했습니다. 조회 시각과 공급자 상태를 확인하세요.</p>' : '') +
+            '<dl>' + fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+              '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1] == null || pair[1] === '' ? '—' : pair[1])) + '</dd>').join('') + '</dl>' + retry);
+        }
+        document.getElementById('legacy-model-retry').addEventListener('click', () => { if (current()) void route(); });
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">모델 정보를 확인하지 못했습니다. 로그인 상태와 접근 권한을 확인한 뒤 다시 시도하세요.</p><button type="button" id="legacy-model-retry">다시 조회</button>');
+        document.getElementById('legacy-model-retry').addEventListener('click', () => { if (current()) void route(); });
+      }
+    }
+
     // renderModelContracts manages per-task-type model quality contracts and runs a model
     // against them before adoption (model swap / auto-routing / MCP agentic model).
     async function renderModelContracts() {
@@ -14155,12 +15017,17 @@ const adminHTML = `<!doctype html>
     }
 
     // renderPromptDebt ranks recurring prompt clusters by accumulated "prompt debt".
-    async function renderPromptDebt() {
+    async function renderPromptDebt(initial) {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch;
+      const current = () => generation === legacyRouteGeneration && authCurrent(epoch);
+      const requested = initial && initial.get('window');
+      const period = ['7d','30d','90d'].includes(requested) ? requested : '30d';
       view.innerHTML = section('프롬프트 부채', '<div class="loading">분석 중...</div>');
       let d;
-      try { d = await api('/admin/prompts/debt?window=30d'); }
-      catch (e) { view.innerHTML = section('프롬프트 부채', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      try { d = await api('/admin/prompts/debt?window=' + period + '&limit=50'); }
+      catch (e) { if (!current()) return; view.innerHTML = section('프롬프트 부채', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      if (!current()) return;
       const items = d.items || [];
       const won = (v) => '₩' + fmt(Math.round(v || 0));
       const typeBadge = (t) => ({
@@ -14181,7 +15048,7 @@ const adminHTML = `<!doctype html>
       const table = items.length
         ? '<table><thead><tr><th>부채</th><th>유형</th><th>작업/지문</th><th>요청</th><th>성공률</th><th>평균비용</th><th>총비용</th><th>모델</th><th>권장 조치</th></tr></thead><tbody>' + rows + '</tbody></table>'
         : '<p class="muted">부채로 분류된 프롬프트가 없습니다. 👍</p>';
-      view.innerHTML = section('프롬프트 부채 (Prompt Debt) — 최근 30일',
+      view.innerHTML = section('프롬프트 부채 (Prompt Debt) — 최근 ' + period.slice(0, -1) + '일',
         '<div style="padding:8px 14px"><span class="muted" style="font-size:12px">부채 대상 ' + items.length + '건 · 누적 비용 ' + won(d.total_debt_cost_krw) + '</span></div>') +
         card('부채 우선순위 (점수 높은 순)',
           '<div class="card-body">' + table +
@@ -14319,12 +15186,129 @@ const adminHTML = `<!doctype html>
     }
 
     // renderWorkflows manages workflow chain definitions (list / create via JSON / dry-run / delete).
+    function legacyWorkflowTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/workflows?')) return null;
+      const query = rawHash.slice('#/workflows?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('workflow_id').length !== 1 || Array.from(params.keys()).some(key => key !== 'workflow_id')) return null;
+      const id = params.get('workflow_id');
+      if (!id || new TextEncoder().encode(id).length > 4096 || /\p{C}/u.test(id)) return null;
+      return id;
+    }
+
+    // Project only the persisted definition contract. Unknown response fields must
+    // never become visible through a generic object/JSON dump.
+    function legacyWorkflowDefinition(row) {
+      const object = value => value && typeof value === 'object' && !Array.isArray(value);
+      const fail = () => { throw new Error('Invalid selected workflow'); };
+      if (!object(row) || ['id','name','description','allowed_teams','created_by','created_at','updated_at'].some(key => typeof row[key] !== 'string') || typeof row.enabled !== 'boolean') fail();
+      const pick = (value, required, optional) => {
+        if (!object(value)) fail();
+        const result = {};
+        for (const key of required) { if (typeof value[key] !== 'string') fail(); result[key] = value[key]; }
+        for (const key of optional) if (Object.hasOwn(value,key)) { if (typeof value[key] !== 'string') fail(); result[key] = value[key]; }
+        return result;
+      };
+      if (row.steps != null && !Array.isArray(row.steps)) fail();
+      const steps = (row.steps || []).map(step => {
+        const result = pick(step,['name','type'],['id','ref','note']);
+        for (const key of ['timeout_ms','max_cost_krw','max_tokens']) if (Object.hasOwn(step,key)) {
+          if (typeof step[key] !== 'number' || !Number.isFinite(step[key])) fail();
+          result[key] = step[key];
+        }
+        for (const key of ['allowed_tools','allowed_tables']) if (Object.hasOwn(step,key)) {
+          if (!Array.isArray(step[key]) || step[key].some(item => typeof item !== 'string')) fail();
+          result[key] = step[key];
+        }
+        if (Object.hasOwn(step,'condition')) result.condition = pick(step.condition,['operator'],['value']);
+        return result;
+      });
+      let flow;
+      if (Object.hasOwn(row,'flow')) {
+        flow = pick(row.flow,['entry'],[]);
+        if (!Number.isSafeInteger(row.flow.version) || !Array.isArray(row.flow.edges)) fail();
+        flow.version = row.flow.version;
+        flow.edges = row.flow.edges.map(edge => pick(edge,['from','to','when'],[]));
+      }
+      return { steps, ...(flow ? { flow } : {}) };
+    }
+    async function renderLegacyWorkflowDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const id = legacyWorkflowTarget(hash);
+      const retry = '<button type="button" id="legacy-workflow-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-workflow-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('워크플로 상세',
+          '<div id="legacy-workflow-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/workflows">워크플로 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (key, action) => {
+        if (current()) document.getElementById(key)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!id) { render('<p role="alert">워크플로 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 워크플로를 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/workflows?' + new URLSearchParams({ view:'detail', id }), { cache:'no-store' });
+        if (!current()) return;
+        const row = data?.workflow;
+        if (!row || row.id !== id) throw new Error('Invalid selected workflow');
+        const definition = legacyWorkflowDefinition(row);
+        const fields = [['워크플로 ID',row.id],['이름',row.name || '미지정'],['상태',row.enabled ? '사용' : '중지'],
+          ['허용 팀',row.allowed_teams || '전체'],['만든 사람',row.created_by || '미지정'],
+          ['생성 시각',row.created_at || '미확인'],['수정 시각',row.updated_at || '미확인'],
+          ['단계 수',String(definition.steps.length)],['실행 흐름',definition.flow ? '분기 흐름 v' + definition.flow.version + ' · 시작: ' + definition.flow.entry : '등록된 단계 순서']];
+        const metadata = '<p>현재 저장된 워크플로 정의입니다. 허용 팀은 실행 범위이며 관리자 조회 권한과는 별도로 적용됩니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl>';
+        // Full text paging keeps long notes, all steps and every graph edge
+        // reachable without silently truncating or splitting a surrogate pair.
+        const text = JSON.stringify(definition,null,2);
+        const sections = [
+          { key:'description', title:'워크플로 설명', text:row.description, empty:'등록된 설명이 없습니다.', page:0 },
+          { key:'definition', title:'단계와 흐름 정의', text, empty:'', page:0 }
+        ];
+        for (const item of sections) item.pages = legacyDetailTextPages(item.text);
+        const button = (key,label,disabled) => '<button type="button" id="' + key + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+        const paint = focusId => {
+          if (!current()) return;
+          let body = metadata + '<p>단계·조건·제한과 연결선을 저장된 형식으로 조회합니다. 드라이런·게시·실행은 수행하지 않습니다.</p>';
+          for (const item of sections) {
+            const [start,end] = item.pages[item.page], key = 'legacy-workflow-' + item.key;
+            body += '<h3>' + item.title + '</h3><pre id="' + key + '" tabindex="0" aria-label="' + item.title + '" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px;overflow:auto">' +
+              escapeHTML(item.text.slice(start,end) || item.empty) + '</pre>';
+            if (item.pages.length > 1) body += '<nav aria-label="' + item.title + ' 페이지"><span role="status">' + (item.page + 1) + ' / ' + item.pages.length +
+              '페이지</span>' + button(key+'-prev','이전 '+item.title,item.page === 0) + button(key+'-next','다음 '+item.title,item.page + 1 === item.pages.length) + '</nav>';
+          }
+          render(body + retry,focusId);
+          bind('legacy-workflow-retry',() => { void route(); });
+          for (const item of sections) {
+            const key = 'legacy-workflow-' + item.key;
+            bind(key+'-prev',() => { if (item.page > 0) { item.page--; paint(key); } });
+            bind(key+'-next',() => { if (item.page + 1 < item.pages.length) { item.page++; paint(key); } });
+          }
+        };
+        paint();
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 워크플로를 불러오지 못했습니다. 삭제되었거나 조회할 수 없는 워크플로일 수 있습니다. 주소·로그인 상태·조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+        bind('legacy-workflow-retry',() => { void route(); });
+      }
+    }
+
     async function renderWorkflows() {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      if (!current()) return;
       view.innerHTML = section('워크플로', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/workflows'); }
-      catch (e) { view.innerHTML = section('워크플로', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      catch (e) { if (!current()) return; view.innerHTML = section('워크플로', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      if (!current()) return;
       window.wfCreate = async (event) => {
         event.preventDefault();
         const name = document.getElementById('wf-name').value.trim();
@@ -15595,10 +16579,98 @@ const adminHTML = `<!doctype html>
     };
     // ── Skill Studio 끝 ──────────────────────────────────────────────────
 
+    function legacySkillTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 16384 || !rawHash.startsWith('#/skills?')) return null;
+      const query = rawHash.slice('#/skills?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      const key = params.has('skill_ref') ? 'skill_ref' : 'skill_name';
+      if (params.getAll(key).length !== 1 || Array.from(params.keys()).some(value => value !== key)) return null;
+      const id = params.get(key);
+      if (key === 'skill_ref') return /^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(id || '') ? id : null;
+      if (!id || new TextEncoder().encode(id).length > 4096 || /\p{C}/u.test(id)) return null;
+      return id;
+    }
+
+
+    async function renderLegacySkillDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const name = legacySkillTarget(hash);
+      const byRef = new URLSearchParams(hash.split('?')[1] || '').has('skill_ref');
+      const retry = '<button type="button" id="legacy-skill-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-skill-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('스킬 상세',
+          '<div id="legacy-skill-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/skills">스킬 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (key, action) => {
+        if (current()) document.getElementById(key)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!name) { render('<p role="alert">스킬 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 스킬을 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/skills?' + new URLSearchParams(byRef ? { view:'detail', skill_ref:name } : { view:'detail', name }), { cache:'no-store' });
+        if (!current()) return;
+        const row = data?.skill;
+        if (!row || (byRef ? row.skill_ref !== name : row.name !== name) ||
+            ['name','description','version','owner','status','risk_level','allowed_models','allowed_tools','allowed_teams','instructions','metadata','created_at','updated_at','updated_by'].some(key => typeof row[key] !== 'string') ||
+            !Number.isSafeInteger(row.daily_limit)) throw new Error('Invalid selected skill');
+        const statusLabels = {draft:'초안',staging:'검증 중',production:'운영',deprecated:'지원 중단'};
+        const riskLabels = {low:'낮음',medium:'보통',high:'높음'};
+        const fields = [['스킬 이름',row.name],['버전',row.version || '미지정'],['책임자',row.owner || '미지정'],
+          ['상태',Object.hasOwn(statusLabels,row.status) ? statusLabels[row.status] : row.status || '미지정'],
+          ['위험 등급',Object.hasOwn(riskLabels,row.risk_level) ? riskLabels[row.risk_level] : row.risk_level || '미지정'],
+          ['허용 모델',row.allowed_models || '제한 없음'],['허용 도구',row.allowed_tools || '제한 없음'],
+          ['허용 팀',row.allowed_teams || '전체'],['일일 한도',row.daily_limit === 0 ? '무제한' : String(row.daily_limit)],
+          ['생성 시각',row.created_at || '미확인'],['수정 시각',row.updated_at || '미확인'],['수정한 사람',row.updated_by || '미지정']];
+        const metadata = '<p>현재 저장된 스킬 지침과 정책입니다. 허용 팀·모델·도구는 실행 정책이며 관리자 조회 권한과는 별도로 적용됩니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(pair[1]) + '</dd>').join('') + '</dl>';
+        const sections = [
+          {key:'description',title:'스킬 설명',text:row.description,empty:'등록된 설명이 없습니다.',page:0},
+          {key:'instructions',title:'스킬 지침',text:row.instructions,empty:'등록된 지침이 없습니다.',page:0},
+          {key:'metadata',title:'스킬 메타데이터',text:row.metadata,empty:'등록된 메타데이터가 없습니다.',page:0},
+        ];
+        for (const item of sections) item.pages = legacyDetailTextPages(item.text);
+        const button = (key,label,disabled) => '<button type="button" id="' + key + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+        const paint = focusId => {
+          if (!current()) return;
+          let body = metadata + '<p>저장된 내용을 읽기 전용으로 조회합니다. 스캔·평가·승격·실행은 수행하지 않습니다.</p>';
+          for (const item of sections) {
+            const [start,end] = item.pages[item.page], key = 'legacy-skill-' + item.key;
+            body += '<h3>' + item.title + '</h3><pre id="' + key + '" tabindex="0" aria-label="' + item.title + '" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px;overflow:auto">' +
+              escapeHTML(item.text.slice(start,end) || item.empty) + '</pre>';
+            if (item.pages.length > 1) body += '<nav aria-label="' + item.title + ' 페이지"><span role="status">' + (item.page + 1) + ' / ' + item.pages.length +
+              '페이지</span>' + button(key+'-prev','이전 '+item.title,item.page === 0) + button(key+'-next','다음 '+item.title,item.page + 1 === item.pages.length) + '</nav>';
+          }
+          render(body + retry,focusId);
+          bind('legacy-skill-retry',() => { void route(); });
+          for (const item of sections) {
+            const key = 'legacy-skill-' + item.key;
+            bind(key+'-prev',() => { if (item.page > 0) { item.page--; paint(key); } });
+            bind(key+'-next',() => { if (item.page + 1 < item.pages.length) { item.page++; paint(key); } });
+          }
+        };
+        paint();
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 스킬을 불러오지 못했습니다. 삭제되었거나 조회할 수 없는 스킬일 수 있습니다. 주소·로그인 상태·조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+        bind('legacy-skill-retry',() => { void route(); });
+      }
+    }
+
     async function renderSkills() {
       const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      if (!current()) return;
       const statusFilter = sessionStorage.getItem('skillStatusFilter') || '';
       const d = await api('/admin/skills' + (statusFilter ? ('?status=' + encodeURIComponent(statusFilter)) : '')).catch(e => ({ skills: [], _err: e.message }));
+      if (!current()) return;
       const skills = d.skills || [];
       const badge = (st) => '<span class="status ' + (st === 'production' ? '' : (st === 'deprecated' ? 'error' : 'warn')) + '">' + escapeHTML(st || '') + '</span>';
       const riskBadge = (rk) => '<span class="status ' + (rk === 'high' ? 'error' : (rk === 'medium' ? 'warn' : '')) + '">' + escapeHTML(rk || '') + '</span>';
@@ -15620,6 +16692,7 @@ const adminHTML = `<!doctype html>
 
       // Observability/cost summary (last 30d by default).
       const stats = await api('/admin/skills/stats').catch(() => ({ stats: [] }));
+      if (!current()) return;
       const srows = stats.stats || [];
       if (srows.length) {
         const pct = (v) => (v * 100).toFixed(1) + '%';
@@ -15648,7 +16721,9 @@ const adminHTML = `<!doctype html>
             '<td class="muted">' + escapeHTML(sk.allowed_models || '*') + '</td>' +
             '<td class="muted">' + escapeHTML(sk.allowed_tools || '*') + '</td>' +
             '<td>' + ago(sk.updated_at) + '<div class="muted" style="font-size:11px">' + escapeHTML(sk.updated_by || '') + '</div></td>' +
-            '<td><button class="secondary" type="button" onclick="skillEdit(\'' + escapeAttr(sk.name) + '\')">편집</button> ' +
+            '<td>' + (/^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(sk.skill_ref || '') ?
+              '<a href="#/skills?' + new URLSearchParams({skill_ref:sk.skill_ref}) + '">상세</a> ' : '') +
+              '<button class="secondary" type="button" onclick="skillEdit(\'' + escapeAttr(sk.name) + '\')">편집</button> ' +
               '<button class="secondary" type="button" onclick="skillPromote(\'' + escapeAttr(sk.name) + '\',\'' + escapeAttr(sk.status) + '\')">승격</button> ' +
               '<button class="secondary" type="button" onclick="skillRuns(\'' + escapeAttr(sk.name) + '\')">실행로그</button> ' +
               '<button class="secondary" type="button" onclick="skillPromotions(\'' + escapeAttr(sk.name) + '\')">이력</button> ' +
@@ -15660,7 +16735,7 @@ const adminHTML = `<!doctype html>
       html += '<section id="skill-editor" style="display:none"></section>';
       html += '<section id="skill-runs" style="display:none"></section>';
       view.innerHTML = card('Skills', html);
-      window._skillsByName = {};
+      window._skillsByName = Object.create(null);
       skills.forEach(sk => { window._skillsByName[sk.name] = sk; });
     }
     window.skillFilter = (v) => { sessionStorage.setItem('skillStatusFilter', v || ''); renderSkills(); };
@@ -16411,6 +17486,103 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- settings ----------
+
+    function legacyText2SQLSchemaTarget(rawHash) {
+      if (typeof rawHash !== 'string' || rawHash.length > 8192 || !rawHash.startsWith('#/text2sql?')) return null;
+      const query = rawHash.slice('#/text2sql?'.length);
+      try { encodeURI(query); decodeURIComponent(query.replace(/\+/g, ' ')); } catch { return null; }
+      const params = new URLSearchParams(query);
+      if (params.getAll('schema_name').length !== 1 || Array.from(params.keys()).some(key => key !== 'schema_name')) return null;
+      const name = params.get('schema_name');
+      if (!name || name.trim() !== name || Array.from(name).length > 512 || new TextEncoder().encode(name).length > 2048 || /\p{C}/u.test(name)) return null;
+      return name;
+    }
+    function legacyDetailTextPages(text) {
+      const pages = [];
+      for (let start = 0; start < text.length;) {
+        let end = Math.min(start + 16384, text.length);
+        // A page boundary must not split a Unicode surrogate pair.
+        if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]) && /[\uDC00-\uDFFF]/.test(text[end])) end--;
+        pages.push([start, end]);
+        start = end;
+      }
+      return pages.length ? pages : [[0, 0]];
+    }
+    async function renderLegacyText2SQLSchemaDetail() {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration, epoch = authEpoch, hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && epoch === authEpoch && hash === location.hash && authCurrent(epoch);
+      const name = legacyText2SQLSchemaTarget(hash);
+      const retry = '<button type="button" id="legacy-schema-retry">다시 조회</button>';
+      const render = (body, focusId = 'legacy-text2sql-schema-detail') => {
+        if (!current()) return;
+        view.innerHTML = section('Text2SQL 스키마 상세',
+          '<div id="legacy-text2sql-schema-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' +
+          body + '<p><a href="#/text2sql">Text2SQL 전체 화면 열기</a></p></div>');
+        document.getElementById(focusId)?.focus();
+      };
+      const bind = (id, action) => {
+        if (current()) document.getElementById(id)?.addEventListener('click', () => { if (current()) action(); });
+      };
+      if (!name) { render('<p role="alert">스키마 상세 주소가 올바르지 않습니다.</p>'); return; }
+      render('<p role="status">선택한 스키마를 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/text2sql?' + new URLSearchParams({ view:'schema', name }), { cache:'no-store' });
+        if (!current()) return;
+        const row = data?.schema;
+        if (!row || row.name !== name || typeof data.raw_content_available !== 'boolean' ||
+            ['name','team','dialect','schema_text','collected_at','source_fingerprint','updated_at'].some(key => typeof row[key] !== 'string') ||
+            typeof row.enabled !== 'boolean' || typeof row.is_default !== 'boolean' || !Number.isSafeInteger(row.version) ||
+            !Array.isArray(row.allowed_tables) || row.allowed_tables.some(value => typeof value !== 'string') ||
+            (!data.raw_content_available && (row.schema_text !== '[sensitive-content-omitted]' || row.allowed_tables.length !== 0))) throw new Error('Invalid selected schema');
+        const fields = [['스키마 이름',row.name],['소속 팀',row.team || '공용'],['SQL 문법',row.dialect || '미지정'],
+          ['상태',row.enabled ? '사용 중' : '중지됨'],['기본 스키마',row.is_default ? '예' : '아니요'],['스키마 버전',row.version],
+          ['수집 시각',row.collected_at || '미수집'],['수정 시각',row.updated_at || '미확인'],['원본 지문',row.source_fingerprint || '미지정']];
+        const metadata = '<p>현재 저장된 등록 정보입니다. 이 화면은 SQL을 실행하거나 연결·설정을 변경하지 않습니다.</p><dl>' +
+          fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1])) + '</dd>').join('') + '</dl>';
+        let expanded = false, textPage = 0, tablePage = 0;
+        const textPages = data.raw_content_available ? legacyDetailTextPages(row.schema_text) : [];
+        const tableCount = Math.max(1, Math.ceil(row.allowed_tables.length / 50));
+        const button = (id, label, disabled) => '<button type="button" id="' + id + '"' + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+        const paint = focusId => {
+          if (!current()) return;
+          let content = '<p role="status">스키마 설명과 허용 테이블은 비공개입니다. 현재 계정은 등록 정보만 조회할 수 있습니다.</p>';
+          if (data.raw_content_available) {
+            content = '<h3>스키마 설명</h3><button type="button" id="legacy-schema-toggle" aria-expanded="' + expanded +
+              '" aria-controls="legacy-schema-context-section">' + (expanded ? '설명 접기' : '설명 보기') + '</button><div id="legacy-schema-context-section">';
+            if (expanded) {
+              const [start, end] = textPages[textPage];
+              content += '<pre id="legacy-schema-context" tabindex="0" aria-label="스키마 설명 본문" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto">' +
+                escapeHTML(row.schema_text.slice(start, end) || '등록된 설명이 없습니다.') + '</pre>';
+              if (textPages.length > 1) content += '<nav aria-label="스키마 설명 페이지"><span role="status">' + (textPage + 1) + ' / ' + textPages.length +
+                '페이지 · 전체 설명을 나누어 표시합니다.</span>' + button('legacy-schema-text-prev','이전 설명',textPage === 0) +
+                button('legacy-schema-text-next','다음 설명',textPage + 1 === textPages.length) + '</nav>';
+            }
+            content += '</div><h3>허용 테이블</h3><p>실제 실행 권한은 별도로 적용됩니다.</p>';
+            if (row.allowed_tables.length) {
+              content += '<ul aria-label="허용 테이블">' + row.allowed_tables.slice(tablePage * 50, (tablePage + 1) * 50).map(value => '<li>' + escapeHTML(value) + '</li>').join('') +
+                '</ul><nav aria-label="허용 테이블 페이지"><span id="legacy-schema-tables-status" role="status" tabindex="-1">' + row.allowed_tables.length + '개 · ' + (tablePage + 1) + ' / ' + tableCount + '페이지</span>' +
+                button('legacy-schema-table-prev','이전 테이블',tablePage === 0) + button('legacy-schema-table-next','다음 테이블',tablePage + 1 === tableCount) + '</nav>';
+            } else content += '<p>스키마에 별도 테이블 제한이 없습니다.</p>';
+          }
+          render(metadata + content + retry, focusId);
+          bind('legacy-schema-retry', () => { void route(); });
+          if (!data.raw_content_available) return;
+          bind('legacy-schema-toggle', () => { expanded = !expanded; paint('legacy-schema-toggle'); });
+          bind('legacy-schema-text-prev', () => { if (textPage > 0) { textPage--; paint('legacy-schema-context'); } });
+          bind('legacy-schema-text-next', () => { if (textPage + 1 < textPages.length) { textPage++; paint('legacy-schema-context'); } });
+          bind('legacy-schema-table-prev', () => { if (tablePage > 0) { tablePage--; paint('legacy-schema-tables-status'); } });
+          bind('legacy-schema-table-next', () => { if (tablePage + 1 < tableCount) { tablePage++; paint('legacy-schema-tables-status'); } });
+        };
+        paint();
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">선택한 스키마를 불러오지 못했습니다. 삭제되었거나 조회 범위 밖일 수 있습니다. 주소·로그인 상태·조회 권한을 확인한 뒤 다시 시도하세요.</p>' + retry);
+        bind('legacy-schema-retry', () => { void route(); });
+      }
+    }
+
     async function renderText2SQL() {
       const d = await api('/admin/text2sql?window=7d').catch(() => ({ logs: [], profiles: [], stats: {} }));
       const st = d.stats || {};
@@ -17125,6 +18297,56 @@ const adminHTML = `<!doctype html>
       }
     }
 
+    function legacyProviderRefValid(value) {
+      return typeof value === 'string' && value.length === 47 && /^prv_[A-Za-z0-9_-]{43}$/.test(value);
+    }
+    // Reuse the safe app projection; ordinary Legacy GET/POST contracts and editors stay unchanged.
+    // This view is read-only: opening a resource never tests an upstream or submits a mutation.
+    async function renderLegacyProviderDetail(initial) {
+      const view = document.getElementById('view');
+      const generation = legacyRouteGeneration;
+      const epoch = authEpoch;
+      const hash = location.hash;
+      const current = () => generation === legacyRouteGeneration && hash === location.hash && authCurrent(epoch);
+      const refs = initial.getAll('provider_ref');
+      const back = '<p><a href="#/settings">기존 설정 목록 열기</a></p>';
+      const render = (body) => {
+        if (!current()) return;
+        view.innerHTML = section('공급자 상세', '<div id="legacy-provider-detail" class="card-body" tabindex="-1" style="padding:16px;overflow-wrap:anywhere">' + body + back + '</div>');
+        document.getElementById('legacy-provider-detail').focus();
+      };
+      if (refs.length !== 1 || !legacyProviderRefValid(refs[0])) {
+        render('<p role="alert">공급자 상세 주소가 올바르지 않습니다.</p>');
+        return;
+      }
+      render('<p role="status">선택한 공급자를 확인하고 있습니다.</p>');
+      try {
+        const data = await api('/admin/providers', { appProjection: true, cache: 'no-store' });
+        if (!current()) return;
+        if (!data || !Array.isArray(data.providers)) throw new Error('Invalid provider list');
+        const selected = data.providers.filter(p => p && p.provider_ref === refs[0]);
+        if (selected.length !== 1) {
+          render('<p role="alert">선택한 공급자를 찾을 수 없습니다. 삭제되었거나 참조가 변경되었을 수 있습니다.</p>');
+          return;
+        }
+        const p = selected[0];
+        const fields = [
+          ['이름', p.name], ['공급자 참조', p.provider_ref], ['Base URL', p.base_url],
+          ['상태', p.enabled ? '사용' : '중지'], ['API 키', p.api_key_configured ? '설정됨' : '미설정'],
+          ['타임아웃 (ms)', p.timeout_ms], ['모델 패턴', p.model_patterns],
+          ['폴백 그룹', p.failover_group], ['우선순위', p.priority],
+        ];
+        render('<p role="status">선택한 공급자의 저장된 연결 설정입니다. 이 화면에서는 값을 변경하지 않습니다.</p>' +
+          '<dl>' + fields.map(pair => '<dt style="font-weight:600;margin-top:12px">' + escapeHTML(pair[0]) +
+            '</dt><dd style="margin:4px 0;white-space:pre-wrap">' + escapeHTML(String(pair[1] == null || pair[1] === '' ? '—' : pair[1])) + '</dd>').join('') + '</dl>');
+      } catch (_error) {
+        if (!current()) return;
+        render('<p role="alert">공급자 정보를 확인하지 못했습니다. 로그인 상태와 접근 권한을 확인한 뒤 다시 시도하세요.</p><button type="button" id="legacy-provider-retry">다시 시도</button>');
+        document.getElementById('legacy-provider-retry').addEventListener('click', () => {
+          if (current()) void route();
+        });
+      }
+    }
     async function renderSettings() {
       const [keys, providers, patternAnalysis, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([
         api('/admin/api-keys'),

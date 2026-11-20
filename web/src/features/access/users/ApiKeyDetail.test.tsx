@@ -27,6 +27,7 @@ beforeEach(() => {
   state.auth = {
     ...testAuth({ role: "readonly_admin", scopes: ["admin:read"] }),
     credentialPrefixes: ["corp_"],
+    capabilities: { raw_prompt_view: false, legacy_access_detail: true },
   };
 });
 function setup(route = "/access/users?tab=keys", detail?: ApiHandler) {
@@ -161,4 +162,13 @@ it("이전·다음 주소로 상세를 다시 열 수 있다", async () => {
   expect(await within(await screen.findByRole("dialog")).findByText("key_one")).toBeVisible();
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("정확한 선택 항목을 기존 화면 링크에 보존한다", async () => {
+  setup("/access/users?tab=keys&api_key_id=key_one");
+  const panel = within(await screen.findByRole("dialog", { name: "API 키 상세" }));
+  expect(await panel.findByRole("link", { name: "기존 화면에서 같은 API 키 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/users?resource=key&id=key_one",
+  );
 });

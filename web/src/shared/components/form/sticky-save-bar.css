@@ -1,0 +1,30 @@
+.sticky-save-bar {
+  position: sticky;
+  bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  z-index: calc(var(--z-sticky) - 1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card);
+  box-shadow: var(--shadow-small);
+}
+.sticky-save-bar > p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+.sticky-save-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.form-with-sticky-save-bar :is(input, select, textarea, button, [tabindex]):not(.sticky-save-bar *) {
+  scroll-margin-block-start: calc(var(--header-height) + var(--space-4));
+  scroll-margin-block-end: calc(var(--save-bar-height, 8rem) + var(--space-4));
+}

@@ -8,6 +8,7 @@ import { apiClient } from "@/shared/api/client";
 import type { NotificationConfig } from "@/shared/api/domains/system.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormField } from "@/shared/components/form/FormField";
+import { StickySaveBar } from "@/shared/components/form/StickySaveBar";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
@@ -101,7 +102,7 @@ function NotificationEditor({
   };
   return (
     <form
-      className="form-grid"
+      className="form-grid form-with-sticky-save-bar"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
@@ -186,7 +187,7 @@ function NotificationEditor({
           {error}
         </p>
       ) : null}
-      <div className="settings-form-actions">
+      <StickySaveBar label="알림 설정 저장 작업" dirty={editor.dirty} pending={guard.pending}>
         <Button type="submit" variant="primary" disabled={!hasAdminWrite || guard.pending}>
           {guard.pending ? "저장 중" : "알림 설정 저장"}
         </Button>
@@ -194,7 +195,7 @@ function NotificationEditor({
           변경 취소
         </Button>
         {!hasAdminWrite ? <p className="settings-permission-note">admin:write 권한이 필요합니다.</p> : null}
-      </div>
+      </StickySaveBar>
     </form>
   );
 }

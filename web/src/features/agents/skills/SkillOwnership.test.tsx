@@ -254,5 +254,37 @@ it("임의의 상태 필터와 catalog 스킬의 준비도는 서로 다른 결�
   });
   setup("/agents/skills?status=readiness&skill=catalog&tab=studio");
   expect(await screen.findByText("준비 완료", { exact: true })).toBeVisible();
-  expect(screen.getByRole("combobox", { name: "스킬 선택" })).toHaveValue("catalog");
+  expect(screen.getByRole("combobox", { name: "스킬 선택" })).toHaveDisplayValue("catalog (readiness)");
 });
+
+it.each(["계정 변경", "팀 변경", "조회 권한 회수", "화면 나가기"])(
+  "%s 이후 늦은 식별자 상세 응답을 화면과 캐시에 남기지 않는다",
+  async (action) => {
+    const held = heldResponse();
+    const reference = "skl_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+    let detailReads = 0;
+    mockApi({
+      ...stats,
+      "GET /admin/skills": ({ query }) => {
+        if ((query as { view?: string })?.view === "detail") {
+          if (++detailReads === 1) return held.promise;
+          return { skill: null };
+        }
+        return { skills: [] };
+      },
+    });
+    const { client } = setup("/agents/skills?skill_ref=" + reference);
+    await waitFor(() => expect(detailReads).toBe(1));
+    fireEvent.click(screen.getByText(action, { selector: "button" }));
+    await act(async () => held.resolve({ skill: { ...first, skill_ref: reference } }));
+    expect(screen.queryByText(first.instructions)).not.toBeInTheDocument();
+    expect(
+      JSON.stringify(
+        client
+          .getQueryCache()
+          .getAll()
+          .map((q) => q.state.data),
+      ),
+    ).not.toContain(first.instructions);
+  },
+);

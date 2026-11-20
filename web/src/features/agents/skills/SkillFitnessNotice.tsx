@@ -1,4 +1,4 @@
-import { exactFitnessSkillName } from "./skill-fitness-state";
+import { validFitnessTarget } from "./skill-fitness-state";
 import type { useSkillFitnessQuery } from "./use-skill-fitness-editor";
 import { isAppError } from "@/shared/api/error";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -6,12 +6,14 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 export function SkillFitnessNotice({
   name,
+  skillRef,
   current,
 }: {
   name: string;
+  skillRef?: string;
   current: ReturnType<typeof useSkillFitnessQuery>;
 }): React.JSX.Element | null {
-  if (!exactFitnessSkillName(name))
+  if (!validFitnessTarget(name, skillRef))
     return (
       <InlineNotice tone="warning" title="스킬 식별자를 변경 없이 확인할 수 없습니다.">
         앞뒤 공백 등 모호한 식별자를 자동으로 고쳐 다른 스킬에 기록하지 않습니다. 스킬 정의를 확인하세요.

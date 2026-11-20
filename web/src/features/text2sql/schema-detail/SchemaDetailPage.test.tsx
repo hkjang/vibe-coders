@@ -204,3 +204,54 @@ it("계약은 숨김 표시와 원문·테이블의 불일치를 거부한다", 
   );
   expect(text2sqlSchemaDetailSchema.safeParse({ ...response, schemas: [row] }).success).toBe(false);
 });
+
+it("선택한 스키마를 지원하는 기존 화면에 정확히 연결한다", async () => {
+  state.auth = {
+    ...state.auth,
+    capabilities: { raw_prompt_view: false, legacy_text2sql_schema_detail: true },
+  };
+  setup();
+  await screen.findByRole("heading", { name: row.name });
+  expect(screen.getByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/text2sql?" + new URLSearchParams({ schema_name: row.name }),
+  );
+});
+it("구버전과 사용자 지정 목적지는 임의의 상세 쿼리를 붙이지 않는다", async () => {
+  const view = setup();
+  await screen.findByRole("heading", { name: row.name });
+  expect(screen.getByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/text2sql",
+  );
+  state.auth = {
+    ...state.auth,
+    capabilities: { raw_prompt_view: false, legacy_text2sql_schema_detail: true },
+    features: state.auth.features.map((feature) =>
+      feature.featureId === "text2sql.overview"
+        ? { ...feature, legacyPath: "/admin#/custom?public=ok" }
+        : feature,
+    ),
+  };
+  view.refresh();
+  expect(screen.getByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/custom?public=ok",
+  );
+});
+it("조회 권한이 폐기되면 상세 링크도 즉시 숨긴다", async () => {
+  state.auth = {
+    ...state.auth,
+    capabilities: { raw_prompt_view: false, legacy_text2sql_schema_detail: true },
+  };
+  let denied = false;
+  setup(() => {
+    if (denied) throw apiFailure("denied", 403);
+    return response;
+  });
+  await screen.findByRole("heading", { name: row.name });
+  denied = true;
+  await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
+  await screen.findByText("스키마 조회 권한을 확인하세요.");
+  expect(screen.queryByRole("link", { name: "기존 화면에서 열기" })).not.toBeInTheDocument();
+});

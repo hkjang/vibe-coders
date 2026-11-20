@@ -1,3 +1,4 @@
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import { Link, useLocation } from "react-router";
 import { useAuth } from "@/app/auth/AuthProvider";
 import type { IpSummary } from "@/shared/api/domains/ip-usage.schemas";
@@ -143,9 +144,13 @@ function IpUsageContent({ owner }: { owner: FeatureReadOwner }) {
             description="보관된 전체 기간에서 요청 수가 많은 상위 200개 IP까지 조회합니다. IP를 선택하면 상세 사용 내역을 확인할 수 있습니다."
             actions={
               legacyHref ? (
-                <a className="button button-secondary button-default" href={legacyHref}>
+                <FeatureLegacyLink
+                  featureId="access.users"
+                  className="button button-secondary button-default"
+                  href={legacyHref}
+                >
                   기존 관리자에서 보기
-                </a>
+                </FeatureLegacyLink>
               ) : undefined
             }
           >

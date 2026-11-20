@@ -14,6 +14,7 @@ vi.mock("@/app/auth/AuthProvider", async () => {
     useAuth: () => ({
       ...testAuth({ role: "admin", scopes: ["admin:read"] }),
       credentialPrefixes: ["corp_"],
+      capabilities: { raw_prompt_view: false, legacy_access_detail: true },
     }),
   };
 });
@@ -160,4 +161,13 @@ describe("로그인 계정 읽기 전용 상세", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByText(account.email)).not.toBeInTheDocument();
   });
+});
+
+it("정확한 선택 항목을 기존 화면 링크에 보존한다", async () => {
+  setup("/access/users/accounts?account_id=usr_one");
+  const panel = within(await screen.findByRole("dialog", { name: "로그인 계정 상세" }));
+  expect(await panel.findByRole("link", { name: "기존 화면에서 같은 계정 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/users?resource=account&id=usr_one",
+  );
 });

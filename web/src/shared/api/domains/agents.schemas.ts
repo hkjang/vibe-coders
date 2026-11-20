@@ -1,3 +1,4 @@
+import { skillRefPattern } from "@/shared/api/skill-ref";
 // Response contracts for the agents domain (workflows, AI work apps, skills).
 // The legacy admin APIs ship without documented response schemas, so these zod
 // schemas are the contract: only the fields the screens render are declared and
@@ -394,7 +395,9 @@ export interface AppTemplateInstantiateBody {
 
 // ── skills ──────────────────────────────────────────────────────────────────
 
+export const skillReferenceSchema = z.string().regex(skillRefPattern);
 export const skillSchema = looseObject({
+  skill_ref: skillReferenceSchema.optional(),
   name: z.string(),
   description: optionalText,
   version: optionalText,
@@ -415,6 +418,7 @@ export type Skill = z.output<typeof skillSchema>;
 
 export const skillListSchema = looseObject({ skills: z.array(skillSchema).nullish() });
 export const skillWriteSchema = looseObject({ skill: skillSchema.nullish() });
+export const skillExactSchema = z.object({ skill: skillSchema.nullable() });
 
 export const skillPromotionListSchema = looseObject({
   promotions: looseList({
@@ -539,6 +543,7 @@ export const skillEvaluationSchema = looseObject({
 export type SkillEvaluation = z.output<typeof skillEvaluationSchema>;
 
 const skillFitnessEvidenceSchema = z.object({
+  skill_ref: skillReferenceSchema.optional(),
   id: z.string().min(1),
   skill_name: z.string().min(1),
   kind: z.string(),
@@ -550,6 +555,7 @@ const skillFitnessEvidenceSchema = z.object({
   created_at: z.iso.datetime({ offset: true }),
 });
 export const skillFitnessSchema = z.object({
+  skill_ref: skillReferenceSchema.optional(),
   skill: z.string().min(1),
   evidence: z.array(skillFitnessEvidenceSchema),
   passing_count: z.number().int().nonnegative(),
@@ -653,6 +659,8 @@ export interface SkillListQuery {
   status?: string;
 }
 export interface SkillWriteBody {
+  metadata?: unknown;
+  skill_ref?: string;
   name: string;
   description?: string;
   version?: string;
@@ -666,16 +674,19 @@ export interface SkillWriteBody {
   instructions?: string;
 }
 export interface SkillPromoteBody {
-  name: string;
+  skill_ref?: string;
+  name?: string;
   to_status: string;
   version?: string;
   note?: string;
 }
 export interface SkillPromotionsQuery {
+  skill_ref?: string;
   skill?: string;
   limit?: number;
 }
 export interface SkillRunsQuery {
+  skill_ref?: string;
   skill?: string;
   limit?: number;
 }
@@ -683,6 +694,7 @@ export interface SkillStatsQuery {
   window?: string;
 }
 export interface SkillScanQuery {
+  skill_ref?: string;
   name?: string;
 }
 export interface SkillExportQuery {
@@ -698,17 +710,20 @@ export interface SkillRecommendQuery {
   apply?: "1";
 }
 export interface SkillEvaluateBody {
-  name: string;
+  skill_ref?: string;
+  name?: string;
   model?: string;
   tools?: readonly string[];
   team?: string;
 }
 export interface SkillFitnessQuery {
-  skill: string;
+  skill_ref?: string;
+  skill?: string;
 }
 /** Body of `POST /admin/skills/fitness` (see `handleSkillFitness`). */
 export interface SkillFitnessBody {
-  skill: string;
+  skill_ref?: string;
+  skill?: string;
   kind: "multimodel" | "golden" | "testcase";
   ref_id: string;
   passed: boolean;
@@ -735,5 +750,10 @@ export interface SkillAdoptBody {
   source?: string;
 }
 export interface SkillReadinessQuery {
-  name: string;
+  skill_ref?: string;
+  name?: string;
 }
+
+export type SkillDetailQuery = { view: "detail" } & (
+  { skill_ref: string; name?: never } | { name: string; skill_ref?: never }
+);

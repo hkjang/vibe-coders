@@ -65,7 +65,7 @@ export function SkillFitnessDialog({
         열 때 확인한 통과 근거 {target.baseline.passing_count}건 · 승격 기준 {target.baseline.required}건
       </p>
       <p>이 건수만으로 승격 가능 여부가 확정되지는 않습니다.</p>
-      <SkillFitnessNotice name={target.skill.name} current={current} />
+      <SkillFitnessNotice name={target.skill.name} skillRef={target.skill.skill_ref} current={current} />
       {!canWrite ? (
         <InlineNotice tone="warning">
           {editor.writeDisabledReason ?? "스킬 근거 기록에는 admin:write 권한이 필요합니다."}

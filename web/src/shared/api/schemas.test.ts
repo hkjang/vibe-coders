@@ -49,6 +49,93 @@ describe("OpenAPI runtime schemas", () => {
     expect(uiBootstrapSchema.safeParse(validBootstrap).success).toBe(true);
   });
 
+  it("keeps Legacy request filter capability optional and strictly boolean", () => {
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_request_filters).toBeUndefined();
+    for (const value of [true, false]) {
+      expect(
+        uiBootstrapSchema.parse({
+          ...validBootstrap,
+          capabilities: { raw_prompt_view: false, legacy_request_filters: value },
+        }).capabilities.legacy_request_filters,
+      ).toBe(value);
+    }
+    expect(
+      uiBootstrapSchema.safeParse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_request_filters: "true" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("enables Legacy request handoff only through an explicit optional server capability", () => {
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_routing_rule_detail).toBeUndefined();
+    expect(
+      uiBootstrapSchema.parse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_routing_rule_detail: true },
+      }).capabilities.legacy_routing_rule_detail,
+    ).toBe(true);
+    expect(
+      uiBootstrapSchema.safeParse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_routing_rule_detail: "true" },
+      }).success,
+    ).toBe(false);
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_model_detail).toBeUndefined();
+    expect(
+      uiBootstrapSchema.parse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_model_detail: true },
+      }).capabilities.legacy_model_detail,
+    ).toBe(true);
+    expect(
+      uiBootstrapSchema.safeParse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_model_detail: "true" },
+      }).success,
+    ).toBe(false);
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_prompt_library).toBeUndefined();
+    expect(
+      uiBootstrapSchema.parse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_prompt_library: true },
+      }).capabilities.legacy_prompt_library,
+    ).toBe(true);
+    expect(
+      uiBootstrapSchema.safeParse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_prompt_library: "true" },
+      }).success,
+    ).toBe(false);
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_provider_detail).toBeUndefined();
+    expect(
+      uiBootstrapSchema.parse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_provider_detail: true },
+      }).capabilities.legacy_provider_detail,
+    ).toBe(true);
+    expect(
+      uiBootstrapSchema.safeParse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_provider_detail: "true" },
+      }).success,
+    ).toBe(false);
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_request_detail).toBeUndefined();
+    expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_request_direct_detail).toBeUndefined();
+    expect(
+      uiBootstrapSchema.parse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_request_detail: true },
+      }).capabilities.legacy_request_detail,
+    ).toBe(true);
+    expect(
+      uiBootstrapSchema.safeParse({
+        ...validBootstrap,
+        capabilities: { raw_prompt_view: false, legacy_request_detail: "true" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects missing top-level OpenAPI-required bootstrap fields", () => {
     expect(
       uiBootstrapSchema.safeParse({
@@ -385,4 +472,84 @@ describe("OpenAPI runtime schemas", () => {
     ).toBe(true);
     expect(modelUsageTagsResponseSchema.safeParse({ tags: [], extra: true }).success).toBe(false);
   });
+});
+
+it("accepts only an optional boolean access handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_access_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_access_detail: true },
+    }).capabilities.legacy_access_detail,
+  ).toBe(true);
+  expect(
+    uiBootstrapSchema.safeParse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_access_detail: "true" },
+    }).success,
+  ).toBe(false);
+});
+
+it("accepts only an optional boolean schema handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_text2sql_schema_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_text2sql_schema_detail: true },
+    }).capabilities.legacy_text2sql_schema_detail,
+  ).toBe(true);
+  expect(
+    uiBootstrapSchema.safeParse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_text2sql_schema_detail: "true" },
+    }).success,
+  ).toBe(false);
+});
+
+it("keeps exact work-app Legacy capability optional and boolean", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_work_app_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_work_app_detail: true },
+    }).capabilities.legacy_work_app_detail,
+  ).toBe(true);
+  expect(
+    uiBootstrapSchema.safeParse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_work_app_detail: "true" },
+    }).success,
+  ).toBe(false);
+});
+
+it("accepts only the optional boolean workflow handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_workflow_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_workflow_detail: true },
+    }).capabilities.legacy_workflow_detail,
+  ).toBe(true);
+  expect(() =>
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_workflow_detail: "true" },
+    }),
+  ).toThrow();
+});
+
+it("accepts only the optional boolean skill handoff capability", () => {
+  expect(uiBootstrapSchema.parse(validBootstrap).capabilities.legacy_skill_detail).toBeUndefined();
+  expect(
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_skill_detail: true },
+    }).capabilities.legacy_skill_detail,
+  ).toBe(true);
+  expect(() =>
+    uiBootstrapSchema.parse({
+      ...validBootstrap,
+      capabilities: { raw_prompt_view: false, legacy_skill_detail: "true" },
+    }),
+  ).toThrow();
 });

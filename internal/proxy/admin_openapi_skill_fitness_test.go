@@ -29,14 +29,18 @@ func TestSkillFitnessOpenAPIContract(t *testing.T) {
 	}
 	parameters := get["parameters"].([]any)
 	count := 0
+	refCount := 0
 	for _, parameter := range parameters {
 		p := parameter.(map[string]any)
-		if p["name"] == "skill" && p["in"] == "query" && p["required"] == true {
+		if p["name"] == "skill" && p["in"] == "query" && p["required"] == false {
 			count++
 		}
+		if p["name"] == "skill_ref" && p["in"] == "query" && p["required"] != true {
+			refCount++
+		}
 	}
-	if count != 1 {
-		t.Fatal("GET must require exactly one skill query parameter")
+	if count != 1 || refCount != 1 {
+		t.Fatal("GET must document the two mutually exclusive name/reference selectors")
 	}
 	for _, method := range []string{"get", "post"} {
 		for _, status := range []string{"400", "401", "405", "500"} {
@@ -50,8 +54,15 @@ func TestSkillFitnessOpenAPIContract(t *testing.T) {
 	}
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	request := schemas["SkillFitnessAppendRequest"].(map[string]any)
-	if !reflect.DeepEqual(request["required"], []any{"skill"}) || request["nullable"] == true {
-		t.Fatal("append requires only a non-null skill name/body")
+	selectors, ok := request["anyOf"].([]any)
+	if !ok || len(selectors) != 2 || request["nullable"] == true {
+		t.Fatal("append must require a legacy skill or an exact reference")
+	}
+	legacy := selectors[0].(map[string]any)
+	exact := selectors[1].(map[string]any)
+	if !reflect.DeepEqual(legacy["required"], []any{"skill"}) || !reflect.DeepEqual(exact["required"], []any{"skill_ref"}) ||
+		legacy["properties"].(map[string]any)["skill"].(map[string]any)["minLength"] != float64(1) {
+		t.Fatal("legacy nonblank skill selector or exact reference selector lost")
 	}
 	fields := request["properties"].(map[string]any)
 	for _, name := range []string{"kind", "ref_id", "passed", "score", "note"} {

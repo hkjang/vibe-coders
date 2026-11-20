@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { ShieldCheck } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -59,7 +60,7 @@ export function SandboxPage(): React.JSX.Element {
         title="민감 샌드박스"
         status="preview"
         description="고위험 요청을 실제로 실행하지 않고 안전 게이트 통과 여부만 미리 확인합니다."
-        legacyHref="/admin#/sandbox"
+        legacyHref={legacyRoutes.sandbox}
       />
 
       <InlineNotice tone="info" title="격리 프리뷰">

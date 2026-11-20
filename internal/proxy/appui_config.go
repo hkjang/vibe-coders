@@ -20,6 +20,7 @@ const (
 	appUIEnabledKey          = "ui.app.enabled"
 	appUIDefaultEntryKey     = "ui.app.default_entry"
 	appUILegacyFallbackKey   = "ui.app.legacy_fallback"
+	appUILegacyEntryKey      = "ui.app.legacy_entry_link"
 	appUIFeedbackEnabledKey  = "ui.app.feedback_enabled"
 	appUITelemetryEnabledKey = "ui.app.telemetry_enabled"
 )
@@ -28,6 +29,7 @@ type appUIRuntimeConfig struct {
 	Enabled          bool   `json:"enabled"`
 	DefaultEntry     string `json:"default_entry"`
 	LegacyFallback   bool   `json:"legacy_fallback"`
+	LegacyEntryLink  bool   `json:"-"` // Consumed by Legacy navigation, not the React bootstrap.
 	FeedbackEnabled  bool   `json:"feedback_enabled"`
 	TelemetryEnabled bool   `json:"telemetry_enabled"`
 }
@@ -282,6 +284,7 @@ func (s *Server) reloadAppUIRuntime(stored map[string]store.AdminSetting) {
 		Enabled:          boolValue(appUIEnabledKey, true),
 		DefaultEntry:     entry,
 		LegacyFallback:   boolValue(appUILegacyFallbackKey, true),
+		LegacyEntryLink:  boolValue(appUILegacyEntryKey, false),
 		FeedbackEnabled:  boolValue(appUIFeedbackEnabledKey, false),
 		TelemetryEnabled: boolValue(appUITelemetryEnabledKey, false),
 	}
@@ -468,7 +471,7 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 	for _, feature := range features {
 		if feature.Available {
 			allowedFeatures = append(allowedFeatures, feature.FeatureID)
-			if uiConfig.LegacyFallback && feature.LegacyPath != "" && feature.FallbackEnabled {
+			if uiConfig.LegacyFallback && feature.Status != "retired" && feature.LegacyPath != "" && feature.FallbackEnabled {
 				legacyRouteMap[feature.AppPath] = feature.LegacyPath
 			}
 		}
@@ -503,6 +506,21 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 		// letting a screen discover them from a 403 after the operator clicks.
 		"capabilities": map[string]any{
 			"raw_prompt_view": s.canViewRawPrompts(r),
+			// Navigation support only; existing request APIs still enforce authentication and scope.
+			"legacy_request_detail":         true,
+			"legacy_request_direct_detail":  true,
+			"legacy_provider_detail":        true,
+			"legacy_prompt_library":         true,
+			"legacy_model_detail":           true,
+			"legacy_text2sql_schema_detail": true,
+			"legacy_work_app_detail":        true,
+			"legacy_workflow_detail":        true,
+			"legacy_skill_detail":           true,
+			"legacy_skill_reference_detail": true,
+			"legacy_session_detail":         true,
+			"legacy_access_detail":          true,
+			"legacy_routing_rule_detail":    true,
+			"legacy_request_filters":        true,
 		},
 		"permissions":        scopes,
 		"allowed_features":   allowedFeatures,

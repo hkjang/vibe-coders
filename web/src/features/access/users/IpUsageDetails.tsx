@@ -1,3 +1,4 @@
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import type { RefObject } from "react";
 import { Link } from "react-router";
 import type { IpDay, IpGroup, IpLanguage, IpRecent } from "@/shared/api/domains/ip-usage.schemas";
@@ -154,9 +155,13 @@ export function IpUsageDetails({
             </Link>
           ) : null}
           {legacyHref ? (
-            <a className="button button-secondary button-default" href={legacyHref}>
+            <FeatureLegacyLink
+              featureId="access.users"
+              className="button button-secondary button-default"
+              href={legacyHref}
+            >
               기존 관리자에서 보기
-            </a>
+            </FeatureLegacyLink>
           ) : null}
         </>
       }

@@ -1,3 +1,6 @@
+import { RequestLegacyLink } from "../request-insight/RequestLegacyLink";
+import type { RequestLegacyFeature } from "../request-insight/use-request-legacy-handoff";
+import type { RequestLegacyListContext } from "@/config/legacy-request-handoff";
 import { useQuery } from "@tanstack/react-query";
 import { Eye, EyeOff } from "lucide-react";
 import { useId, useRef, useState } from "react";
@@ -326,26 +329,47 @@ function FactStrip({ detail }: { detail: RequestIODetail }): React.JSX.Element {
   );
 }
 
-/** Keyed on the request id, so switching requests discards revealed originals. */
+/** A request or read-owner change retires revealed originals and pending confirmation. */
 export function RequestIOPanel({
   requestId,
   readScope,
+  legacyFeatureId = "observability.requests",
+  legacyList,
 }: {
   requestId: string;
   readScope?: RequestDetailReadScope;
+  legacyFeatureId?: RequestLegacyFeature;
+  legacyList?: RequestLegacyListContext;
 }): React.JSX.Element {
   return (
-    <RequestIOPanelContent key={requestId} requestId={requestId} {...(readScope ? { readScope } : {})} />
+    <RequestIOPanelContent
+      key={JSON.stringify([requestId, readScope?.id])}
+      requestId={requestId}
+      legacyFeatureId={legacyFeatureId}
+      {...(legacyList ? { legacyList } : {})}
+      {...(readScope ? { readScope } : {})}
+    />
   );
 }
 
 function RequestIOPanelContent({
   requestId,
   readScope,
+  legacyFeatureId = "observability.requests",
+  legacyList,
 }: {
   requestId: string;
   readScope?: RequestDetailReadScope;
+  legacyFeatureId?: RequestLegacyFeature;
+  legacyList?: RequestLegacyListContext;
 }): React.JSX.Element {
+  const legacyAction = (
+    <RequestLegacyLink
+      requestId={requestId}
+      featureId={legacyFeatureId}
+      {...(legacyList ? { list: legacyList } : {})}
+    />
+  );
   const inputTitleId = useId();
   const outputTitleId = useId();
   const [revealed, setRevealed] = useState<RequestIODetail>();
@@ -372,14 +396,17 @@ function RequestIOPanelContent({
 
   if (query.isPending) {
     return (
-      <div role="status" aria-live="polite">
-        입력과 출력을 불러오는 중입니다.
+      <div>
+        <div role="status" aria-live="polite">
+          입력과 출력을 불러오는 중입니다.
+        </div>
+        {legacyAction}
       </div>
     );
   }
   if (query.isError) {
     return (
-      <InlineNotice tone="danger" title="입력과 출력을 불러오지 못했습니다.">
+      <InlineNotice tone="danger" title="입력과 출력을 불러오지 못했습니다." actions={legacyAction}>
         {safeAppErrorMessage(query.error, "입력과 출력을 불러오지 못했습니다.")}
         {isAppError(query.error) && query.error.requestId ? (
           <span className="request-id"> 요청 ID: {query.error.requestId}</span>
@@ -396,6 +423,7 @@ function RequestIOPanelContent({
     <div className="io-panel">
       <FactStrip detail={detail} />
       <div className="io-privacy">
+        {legacyAction}
         {detail.masked ? (
           <Badge tone="success">민감정보 마스킹 적용</Badge>
         ) : (

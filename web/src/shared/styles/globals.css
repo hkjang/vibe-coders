@@ -958,6 +958,20 @@ kbd {
   padding: var(--space-4);
 }
 
+.fatal-error .state-actions {
+  flex-direction: column;
+  align-items: center;
+}
+.root-legacy-recovery {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.root-legacy-recovery .request-id {
+  overflow-wrap: anywhere;
+}
+
 .login-page {
   display: grid;
   min-height: 100vh;

@@ -515,3 +515,47 @@ describe("app route query security", () => {
     );
   });
 });
+
+it("preserves canonical skill references even when their prefix resembles credentials", () => {
+  const ref = "skl_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+  expect(sanitizeAppRouteSearch("/app/agents/skills", "?skill_ref=" + ref, ["skl_"])).toEqual({
+    search: "?skill_ref=" + ref,
+    rejectedKeys: [],
+    sensitiveKeys: [],
+  });
+  expect(sanitizeAppRouteSearch("/app/overview", "?skill_ref=" + ref).search).toBe("");
+  for (const query of [
+    "?skill_ref=" + ref + "&skill=corp_" + "x".repeat(43),
+    "?skill_ref=" + ref + "&skill_ref=" + ref,
+    "?skill_ref=invalid&skill=safe",
+    "?skill_ref=" + ref.slice(0, -1) + "9",
+  ]) {
+    const result = sanitizeAppRouteSearch("/app/agents/skills", query, ["corp_"]);
+    expect(result.search).toBe("");
+    expect(result.rejectedKeys).toContain("skill_ref");
+  }
+});
+
+describe("IO original target rejection boundary", () => {
+  it.each([
+    "?request_id=%ED%A0%80",
+    "?request_id=%zz",
+    "?request_id=a&request_id=b",
+    "?request_id=diff",
+    "?request_id=corp_" + "x".repeat(32),
+    "?request_id=corp_" + "x".repeat(32) + "&request_id=public",
+  ])("keeps a value-free refusal instead of retargeting an invalid or secret selection", (query) => {
+    const first = sanitizeAppRouteSearch("/app/observability/io", query, ["corp_"]);
+    expect(first.search).toBe("?request_id=");
+    expect(first.rejectedKeys).toContain("request_id");
+    expect(sanitizeAppRouteSearch("/app/observability/io", first.search, ["corp_"]).search).toBe(
+      first.search,
+    );
+  });
+  it("preserves the full direct path contract while keeping list filter limits unchanged", () => {
+    const id = " " + "한".repeat(1364) + " x ";
+    const query = "?" + new URLSearchParams({ request_id: id });
+    expect(sanitizeAppRouteSearch("/app/observability/io", query).search).toBe(query);
+    expect(sanitizeAppRouteSearch("/app/observability/requests", query).search).toBe("");
+  });
+});

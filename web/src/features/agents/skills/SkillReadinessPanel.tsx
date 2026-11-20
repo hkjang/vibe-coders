@@ -1,3 +1,5 @@
+import { skillIdentityKey, skillNameSelector } from "./skill-identity";
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useSkillRead } from "./skill-scope";
 
 import { severityTone, skillStatusLabels } from "@/features/agents/skills/skill-form";
@@ -16,6 +18,7 @@ interface SkillReadinessPanelProps {
   canWrite: boolean;
   onPromote: (toStatus: string) => void;
   skillName: string;
+  skillRef?: string;
   writeDisabledReason: string;
 }
 
@@ -24,14 +27,15 @@ export function SkillReadinessPanel({
   canWrite,
   onPromote,
   skillName,
+  skillRef,
   writeDisabledReason,
 }: SkillReadinessPanelProps): React.JSX.Element {
   const readiness = useSkillRead({
-    queryKey: ["agents", "skills", skillName, "readiness"],
+    queryKey: ["agents", "skills", skillIdentityKey({ name: skillName, skill_ref: skillRef }), "readiness"],
     enabled: skillName !== "",
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.domains.agents.skills.studioReadiness, {
-        query: { name: skillName },
+        query: skillNameSelector({ name: skillName, skill_ref: skillRef }),
         signal,
         routeId: "agents.skills",
       }),
@@ -164,8 +168,8 @@ export function SkillReadinessPanel({
       ) : null}
 
       <InlineNotice tone="info" title="채팅 테스트는 별도 화면에서">
-        승격 마법사의 채팅 테스트 단계는 채팅 테스트 화면(`/admin#/chat-test`)에서 진행하고, 결과를 적합성
-        근거로 남긴 뒤 이 화면에서 승격하세요.
+        승격 마법사의 채팅 테스트 단계는 채팅 테스트 화면(`{legacyRoutes.chatTest}`)에서 진행하고, 결과를
+        적합성 근거로 남긴 뒤 이 화면에서 승격하세요.
       </InlineNotice>
     </SectionCard>
   );

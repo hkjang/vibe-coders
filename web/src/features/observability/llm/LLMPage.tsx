@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { RequestNoteBoundary } from "@/features/observability/request-insight/RequestNoteBoundary";
 import { useRequestNoteContext } from "@/features/observability/request-insight/request-note-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -66,7 +67,7 @@ export function LLMPage(): React.JSX.Element {
   if (!owner.readable)
     return (
       <div className="page-stack">
-        <PageHeader title="LLM 관측" legacyHref="/admin#/llm" />
+        <PageHeader title="LLM 관측" legacyHref={legacyRoutes.llm} />
         <InlineNotice tone="warning" title="LLM 조회 권한을 확인하세요.">
           현재 사용자 범위의 자료를 조회할 수 없습니다. 이전 자료와 열린 입력은 표시하지 않습니다.
         </InlineNotice>
@@ -321,7 +322,7 @@ function LLMPageContent({ lifetime }: { lifetime: LLMReadLifetime }): React.JSX.
       <div className="page-stack">
         <PageHeader
           title="LLM 관측"
-          legacyHref="/admin#/llm"
+          legacyHref={legacyRoutes.llm}
           actions={
             <Button ref={refreshFocusRef} onClick={refreshAll}>
               새로고침
@@ -341,13 +342,14 @@ function LLMPageContent({ lifetime }: { lifetime: LLMReadLifetime }): React.JSX.
   if (allFailed && !timeseries.data && !evaluations.data && !feedback.data) {
     return (
       <div className="page-stack">
-        <PageHeader title="LLM 관측" legacyHref="/admin#/llm" />
+        <PageHeader title="LLM 관측" legacyHref={legacyRoutes.llm} />
         <ErrorState
+          legacyFeatureId="observability.llm"
           message={safeAppErrorMessage(evaluations.error, "LLM 관측 데이터를 불러오지 못했습니다.")}
           requestId={isAppError(evaluations.error) ? evaluations.error.requestId : undefined}
           onRetry={refreshAll}
           onReset={resetFilters}
-          legacyHref="/admin#/llm"
+          legacyHref={legacyRoutes.llm}
         />
       </div>
     );
@@ -361,7 +363,7 @@ function LLMPageContent({ lifetime }: { lifetime: LLMReadLifetime }): React.JSX.
       <PageHeader
         title="LLM 관측"
         description="모델 호출의 품질 평가, 사용자 피드백, 프롬프트 성능을 함께 확인합니다."
-        legacyHref="/admin#/llm"
+        legacyHref={legacyRoutes.llm}
         actions={
           <Button ref={refreshFocusRef} onClick={refreshAll}>
             <RefreshCw aria-hidden="true" /> 새로고침

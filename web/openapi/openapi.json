@@ -6987,6 +6987,10 @@
             },
             "type": "array"
           },
+          "app_entry_enabled": {
+            "description": "Optional Legacy-to-App entry flag. Absent means disabled; true requires explicit opt-in, enabled App UI and the current caller authentication.",
+            "type": "boolean"
+          },
           "default_home": {
             "type": "string"
           },
@@ -13442,7 +13446,133 @@
         ],
         "type": "object"
       },
+      "SkillCatalogList": {
+        "additionalProperties": false,
+        "properties": {
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillDefinition"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "skills"
+        ],
+        "type": "object"
+      },
+      "SkillDefinition": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_models": {
+            "type": "string"
+          },
+          "allowed_teams": {
+            "type": "string"
+          },
+          "allowed_tools": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "daily_limit": {
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "risk_level": {
+            "type": "string"
+          },
+          "skill_ref": {
+            "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "allowed_models",
+          "allowed_teams",
+          "allowed_tools",
+          "created_at",
+          "daily_limit",
+          "description",
+          "instructions",
+          "metadata",
+          "name",
+          "owner",
+          "risk_level",
+          "status",
+          "updated_at",
+          "updated_by",
+          "version"
+        ],
+        "type": "object"
+      },
+      "SkillExactDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "skill": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SkillDefinition"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "skill"
+        ],
+        "type": "object"
+      },
       "SkillFitnessAppendRequest": {
+        "anyOf": [
+          {
+            "properties": {
+              "skill": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "skill"
+            ]
+          },
+          {
+            "required": [
+              "skill_ref"
+            ]
+          }
+        ],
         "properties": {
           "kind": {
             "description": "multimodel, golden or testcase; omitted/null/unknown values normalize to multimodel, not an enum validation error.",
@@ -13469,14 +13599,17 @@
             "type": "number"
           },
           "skill": {
-            "description": "Must remain nonblank after Go TrimSpace; not required to exist.",
-            "minLength": 1,
+            "description": "Legacy selector must remain nonblank after Go TrimSpace; not required to exist. With skill_ref it may be omitted or exactly echo the selected name.",
+            "type": "string"
+          },
+          "skill_ref": {
+            "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
             "type": "string"
           }
         },
-        "required": [
-          "skill"
-        ],
         "type": "object"
       },
       "SkillFitnessEvidence": {
@@ -13513,6 +13646,13 @@
           },
           "skill_name": {
             "minLength": 1,
+            "type": "string"
+          },
+          "skill_ref": {
+            "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
             "type": "string"
           }
         },
@@ -13575,6 +13715,13 @@
           "skill_name": {
             "minLength": 1,
             "type": "string"
+          },
+          "skill_ref": {
+            "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+            "type": "string"
           }
         },
         "required": [
@@ -13609,6 +13756,13 @@
           },
           "skill": {
             "minLength": 1,
+            "type": "string"
+          },
+          "skill_ref": {
+            "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
             "type": "string"
           }
         },
@@ -15222,6 +15376,62 @@
           "capabilities": {
             "additionalProperties": false,
             "properties": {
+              "legacy_access_detail": {
+                "description": "Opens the exact API key, login account or registered team in a read-only Legacy detail. Preserves existing authorization and team scope; never exposes credentials or runs mutations.",
+                "type": "boolean"
+              },
+              "legacy_model_detail": {
+                "description": "Opens a read-only model catalogue detail in Legacy with exact model/provider identity and explicit source provenance. Does not execute model contracts.",
+                "type": "boolean"
+              },
+              "legacy_prompt_library": {
+                "description": "Preserves supported prompt library tabs, filters and selected asset in Legacy. Does not grant access or execute mutations.",
+                "type": "boolean"
+              },
+              "legacy_provider_detail": {
+                "description": "Supports a read-only provider detail in Legacy settings using the existing app projection and opaque reference. Does not grant provider access.",
+                "type": "boolean"
+              },
+              "legacy_request_detail": {
+                "description": "Supports opening an existing request detail from the Legacy requests hash route. Does not grant request access.",
+                "type": "boolean"
+              },
+              "legacy_request_direct_detail": {
+                "description": "Preserves a pure original request selection through Legacy login and SSO for existing UTF-8 path IDs up to 4096 bytes and hash URLs up to 16384 characters. Does not grant access or reveal raw content.",
+                "type": "boolean"
+              },
+              "legacy_request_filters": {
+                "description": "Preserves supported request list filters and exact time bounds in the Legacy requests hash route. Does not grant request access.",
+                "type": "boolean"
+              },
+              "legacy_routing_rule_detail": {
+                "description": "Opens the exact stored routing rule in a read-only Legacy detail using the existing authorized configuration GET. Does not execute routing preview or mutations.",
+                "type": "boolean"
+              },
+              "legacy_session_detail": {
+                "description": "Read-only same-session Legacy detail and SSO return path for existing flight-recorder identifiers. Existing team scope, projection and bounded history apply.",
+                "type": "boolean"
+              },
+              "legacy_skill_detail": {
+                "description": "Opens one exact stored skill in read-only Legacy using the existing administrator read policy, including saved instructions and metadata. No evaluation, scan, promotion or execution.",
+                "type": "boolean"
+              },
+              "legacy_skill_reference_detail": {
+                "description": "Exact skill reference read/mutation selectors and read-only Legacy/SSO detail. Does not grant access; invalid or stale refs never fall back to names.",
+                "type": "boolean"
+              },
+              "legacy_text2sql_schema_detail": {
+                "description": "Opens one exact stored Text2SQL schema in read-only Legacy detail using existing team scope and raw-content permissions. Never executes SQL or changes configuration.",
+                "type": "boolean"
+              },
+              "legacy_work_app_detail": {
+                "description": "Opens one exact stored work app in Legacy using the existing administrator read policy. Shows saved metadata and component references without executing or changing the app.",
+                "type": "boolean"
+              },
+              "legacy_workflow_detail": {
+                "description": "Opens one exact stored workflow in read-only Legacy using the existing administrator read policy. Preserves steps, conditions and graph edges without validation, execution, publishing or changes.",
+                "type": "boolean"
+              },
               "raw_prompt_view": {
                 "type": "boolean"
               }
@@ -33469,10 +33679,80 @@
     },
     "/admin/skill-studio/readiness": {
       "get": {
+        "description": "Existing read behavior when using the legacy name selector. Alternatively skill_ref selects one existing exact skill without putting its name in the URL. It cannot be mixed with the name selector; malformed refs 400, stale/missing refs 404. References do not expand visibility.",
         "operationId": "get__admin_skill_studio_readiness",
+        "parameters": [
+          {
+            "description": "Legacy Go-trimmed name selector. Mutually exclusive with skill_ref.",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact existing identity; no name fallback.",
+            "in": "query",
+            "name": "skill_ref",
+            "schema": {
+              "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+              "maxLength": 47,
+              "minLength": 47,
+              "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -33487,11 +33767,214 @@
       }
     },
     "/admin/skills": {
-      "get": {
-        "operationId": "get__admin_skills",
+      "delete": {
+        "description": "Deletes exactly the existing skill selected by skill_ref under unchanged admin write authorization. Requires exactly one skill_ref query and no other query keys. Missing/stale references return 404, invalid/mixed selectors 400, with no name fallback or path normalization.",
+        "operationId": "delete__admin_skills",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skill_ref",
+            "required": true,
+            "schema": {
+              "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+              "maxLength": 47,
+              "minLength": 47,
+              "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "skill_ref": {
+                      "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+                      "maxLength": 47,
+                      "minLength": 47,
+                      "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "skill_ref",
+                    "deleted"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Selected skill deleted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List (all statuses) / create-upsert a skill",
+        "tags": [
+          "skills"
+        ]
+      },
+      "get": {
+        "description": "Existing admin:read skill catalog. Without name or skill_ref and with an omitted or empty view, the status-filtered full list is unchanged. view=detail requires exactly view and one of name or skill_ref, returns one exact complete stored skill or null, and is no-store. Names preserve whitespace, slash and reserved characters. skill_ref is an opaque HMAC identity stable across servers sharing GATEWAY_SECRET, intentionally invalidated by secret rotation; it does not grant access. Invalid or mixed references fail closed and missing references return null. Reference reads cover long and protected names without putting them in URLs. Allowed teams/models/tools are execution policy, not catalog visibility; existing authorized instructions and metadata remain available. No evaluation, scan, promotion or execution is performed.",
+        "operationId": "get__admin_skills",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "enum": [
+                "",
+                "detail"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Alternative to skill_ref for view=detail. Exact nonempty valid UTF-8 name, at most 4096 bytes, without control characters. No trimming or path normalization. Detail rejects all other query fields except view.",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Alternative to name. Exactly one canonical reference; no literal-name fallback.",
+            "in": "query",
+            "name": "skill_ref",
+            "schema": {
+              "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+              "maxLength": 47,
+              "minLength": 47,
+              "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing list-only status filter. Omit for all statuses.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SkillCatalogList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SkillExactDetail"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Existing list or exact detail selected by view"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid exact detail query"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid authentication or missing admin read scope"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Skill read failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -33505,10 +33988,141 @@
         ]
       },
       "post": {
+        "description": "Name-only callers retain legacy Go TrimSpace behavior. Optional skill_ref selects an existing exact identity without trimming; name may be omitted or echo that exact identity. Invalid/mismatched refs 400; missing/stale refs 404; no fallback to names. Existing authorization, mutation and security gates remain unchanged. Creates/upserts legacy names; a reference updates only its existing skill. Omitted metadata is preserved on a reference update.",
         "operationId": "post__admin_skills",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "skill_ref"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "allowed_models": {
+                    "type": "string"
+                  },
+                  "allowed_teams": {
+                    "type": "string"
+                  },
+                  "allowed_tools": {
+                    "type": "string"
+                  },
+                  "daily_limit": {
+                    "type": "integer"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "metadata": {
+                    "description": "Any valid JSON. When skill_ref is used, omission preserves stored metadata; explicit null resets to the existing empty object default."
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "risk_level": {
+                    "type": "string"
+                  },
+                  "skill_ref": {
+                    "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+                    "maxLength": 47,
+                    "minLength": 47,
+                    "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
-            "description": "OK"
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillExactDetail"
+                }
+              }
+            },
+            "description": "Saved skill with opaque reference"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -33618,10 +34232,110 @@
     },
     "/admin/skills/evaluate": {
       "post": {
+        "description": "Name-only callers retain legacy Go TrimSpace behavior. Optional skill_ref selects an existing exact identity without trimming; name may be omitted or echo that exact identity. Invalid/mismatched refs 400; missing/stale refs 404; no fallback to names. Existing authorization, mutation and security gates remain unchanged.",
         "operationId": "post__admin_skills_evaluate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "skill_ref"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "skill_ref": {
+                    "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+                    "maxLength": 47,
+                    "minLength": 47,
+                    "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                    "type": "string"
+                  },
+                  "team": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
-            "description": "OK"
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -33656,16 +34370,28 @@
     },
     "/admin/skills/fitness": {
       "get": {
-        "description": "Returns confirmed evidence rows and the number of passing rows for the exact Go-trimmed skill name. An unknown skill returns an empty array, not 404. Duplicate references count as separate rows. required is the existing production-gate threshold, not a claim that this skill requires the gate or can be promoted. Listing performs no model execution, reference verification or promotion.",
+        "description": "Returns confirmed evidence rows and the number of passing rows for the exact Go-trimmed skill name. An unknown skill returns an empty array, not 404. Duplicate references count as separate rows. required is the existing production-gate threshold, not a claim that this skill requires the gate or can be promoted. Listing performs no model execution, evidence-reference verification or promotion. Alternatively skill_ref resolves one existing exact skill; invalid/mixed refs fail400 and stale/missing refs404. It never falls back to the legacy trimmed name.",
         "operationId": "get__admin_skills_fitness",
         "parameters": [
           {
             "description": "Skill name after Go TrimSpace; blank names are rejected. Names are not otherwise normalized or required to exist in the skill registry.",
             "in": "query",
             "name": "skill",
-            "required": true,
+            "required": false,
             "schema": {
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Alternative to skill. Resolves an existing exact skill without trimming; cannot be mixed with skill.",
+            "in": "query",
+            "name": "skill_ref",
+            "schema": {
+              "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+              "maxLength": 47,
+              "minLength": 47,
+              "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
               "type": "string"
             }
           }
@@ -33700,6 +34426,16 @@
               }
             },
             "description": "invalid_api_key: GET requires admin read scope; POST requires admin write scope. Existing admin-read access includes note and reference text; no separate raw-prompt permission is applied."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Referenced skill no longer exists or secret rotated"
           },
           "405": {
             "content": {
@@ -33743,7 +34479,7 @@
         ]
       },
       "post": {
-        "description": "Appends one new evidence row on every successful request, including duplicate references; no idempotency or automatic retry guarantee is provided. The skill and reference need not exist and are not verified. kind is Go-trimmed and defaults to multimodel when omitted, null or unrecognized. Omitted/null passed is false and omitted/null score is 0; zero is a real recorded score, not an unscored marker. Skill, reference and note are Go-trimmed; names are otherwise opaque. Success returns the submitted row with created_at empty under the existing legacy contract; GET returns the timestamp generated by storage. created_by is the existing skill actor, whereas audit uses its existing pseudonymous token actor and kind/passed/ref payload. Audit is post-write best-effort, not atomic. Recording does not execute a model or promote a skill.",
+        "description": "Appends one new evidence row on every successful request, including duplicate references; no idempotency or automatic retry guarantee is provided. The skill and reference need not exist and are not verified. kind is Go-trimmed and defaults to multimodel when omitted, null or unrecognized. Omitted/null passed is false and omitted/null score is 0; zero is a real recorded score, not an unscored marker. Skill, reference and note are Go-trimmed; names are otherwise opaque. Success returns the submitted row with created_at empty under the existing legacy contract; GET returns the timestamp generated by storage. created_by is the existing skill actor, whereas audit uses its existing pseudonymous token actor and kind/passed/ref payload. Audit is post-write best-effort, not atomic. Recording does not execute a model or promote a skill. Alternatively skill_ref resolves an existing exact skill without trimming. skill may be omitted or echo that exact name; mismatches/invalid refs fail400 and missing/stale refs404. Invalid refs never fall back to a legacy name.",
         "operationId": "post__admin_skills_fitness",
         "requestBody": {
           "content": {
@@ -33785,6 +34521,16 @@
               }
             },
             "description": "invalid_api_key: GET requires admin read scope; POST requires admin write scope. Existing admin-read access includes note and reference text; no separate raw-prompt permission is applied."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Referenced skill no longer exists or secret rotated"
           },
           "405": {
             "content": {
@@ -33849,10 +34595,130 @@
     },
     "/admin/skills/promote": {
       "post": {
+        "description": "Name-only callers retain legacy Go TrimSpace behavior. Optional skill_ref selects an existing exact identity without trimming; name may be omitted or echo that exact identity. Invalid/mismatched refs 400; missing/stale refs 404; no fallback to names. Existing authorization, mutation and security gates remain unchanged.",
         "operationId": "post__admin_skills_promote",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "skill_ref"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "skill_ref": {
+                    "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+                    "maxLength": 47,
+                    "minLength": 47,
+                    "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                    "type": "string"
+                  },
+                  "to_status": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "to_status"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillExactDetail"
+                }
+              }
+            },
+            "description": "Promoted skill with opaque reference"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing lifecycle, production policy, security scan or fitness gate rejected the transition"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -33868,10 +34734,88 @@
     },
     "/admin/skills/promotions": {
       "get": {
+        "description": "Existing read behavior when using the legacy name selector. Alternatively skill_ref selects one existing exact skill without putting its name in the URL. It cannot be mixed with the name selector; malformed refs 400, stale/missing refs 404. References do not expand visibility.",
         "operationId": "get__admin_skills_promotions",
+        "parameters": [
+          {
+            "description": "Legacy Go-trimmed name selector. Mutually exclusive with skill_ref.",
+            "in": "query",
+            "name": "skill",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact existing identity; no name fallback.",
+            "in": "query",
+            "name": "skill_ref",
+            "schema": {
+              "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+              "maxLength": 47,
+              "minLength": 47,
+              "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing recent-row limit.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -33906,10 +34850,88 @@
     },
     "/admin/skills/runs": {
       "get": {
+        "description": "Existing read behavior when using the legacy name selector. Alternatively skill_ref selects one existing exact skill without putting its name in the URL. It cannot be mixed with the name selector; malformed refs 400, stale/missing refs 404. References do not expand visibility.",
         "operationId": "get__admin_skills_runs",
+        "parameters": [
+          {
+            "description": "Legacy Go-trimmed name selector. Mutually exclusive with skill_ref.",
+            "in": "query",
+            "name": "skill",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact existing identity; no name fallback.",
+            "in": "query",
+            "name": "skill_ref",
+            "schema": {
+              "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+              "maxLength": 47,
+              "minLength": 47,
+              "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Existing recent-row limit.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -33925,10 +34947,80 @@
     },
     "/admin/skills/scan": {
       "get": {
+        "description": "Existing read behavior when using the legacy name selector. Alternatively skill_ref selects one existing exact skill without putting its name in the URL. It cannot be mixed with the name selector; malformed refs 400, stale/missing refs 404. References do not expand visibility.",
         "operationId": "get__admin_skills_scan",
+        "parameters": [
+          {
+            "description": "Legacy Go-trimmed name selector. Mutually exclusive with skill_ref.",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact existing identity; no name fallback.",
+            "in": "query",
+            "name": "skill_ref",
+            "schema": {
+              "description": "Canonical unpadded base64url HMAC reference; final pad bits must be zero. Identity only, never authorization. Changes when GATEWAY_SECRET rotates.",
+              "maxLength": 47,
+              "minLength": 47,
+              "pattern": "^skl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid selector, authorization, missing target or storage failure"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

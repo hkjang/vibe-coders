@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { useNavigationItems } from "@/app/layouts/use-navigation-items";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featurePath } from "@/config/migration-registry";
-import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+import { FeatureLegacyLink } from "@/shared/components/ui/FeatureLegacyLink";
 import type { HealthRange } from "@/features/health/health-utils";
 
 /** Resolve links through the same permissions, rollout and fallback policy as the sidebar. */
@@ -35,10 +35,14 @@ export function OverviewDestination({
   );
   if (item.effective.status === "legacy")
     return (
-      <LegacyLink className="overview-destination" href={item.feature.legacyPath}>
+      <FeatureLegacyLink
+        featureId={item.feature.featureId}
+        className="overview-destination"
+        href={item.feature.legacyPath}
+      >
         {content}
         <span>기존 화면</span>
-      </LegacyLink>
+      </FeatureLegacyLink>
     );
   const base = featurePath(item.feature);
   const to =

@@ -14,6 +14,7 @@ vi.mock("@/app/auth/AuthProvider", async () => {
     useAuth: () => ({
       ...testAuth({ role: "admin", scopes: ["admin:read"] }),
       credentialPrefixes: ["corp_"],
+      capabilities: { raw_prompt_view: false, legacy_access_detail: true },
     }),
   };
 });
@@ -139,4 +140,13 @@ describe("등록 팀 읽기 전용 상세", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByText("플랫폼 팀")).not.toBeInTheDocument();
   });
+});
+
+it("정확한 팀을 기존 화면 링크에 보존한다", async () => {
+  setup("/access/users?tab=teams&registered_team=team_one");
+  const panel = within(await screen.findByRole("dialog", { name: "등록 팀 상세" }));
+  expect(await panel.findByRole("link", { name: "기존 화면에서 같은 팀 열기" })).toHaveAttribute(
+    "href",
+    "/admin#/users?resource=team&id=team_one",
+  );
 });

@@ -10,6 +10,7 @@ import {
 } from "@/shared/hooks/use-feature-read-owner";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { OverviewRefreshContext } from "./overview-refresh-context";
+import { OverviewReadQueueContext } from "./overview-read-context";
 
 export interface OverviewQuery<Data> {
   data: Data | undefined;
@@ -39,6 +40,7 @@ export function useOverviewQuery<Data>({
   const auth = useAuth();
   const client = useQueryClient();
   const refreshers = useContext(OverviewRefreshContext);
+  const readQueue = useContext(OverviewReadQueueContext);
   const owner = useFeatureReadOwner("overview", "overview-widget", [], scope);
   const enabled = owner.readable && !owner.denied;
   const query = useQuery({
@@ -53,9 +55,14 @@ export function useOverviewQuery<Data>({
     refetchOnReconnect: false,
     queryFn: async ({ signal }) => {
       assertFeatureRead(owner, signal);
-      const data = await read(signal);
-      assertFeatureRead(owner, signal);
-      return data;
+      const execute = async () => {
+        // A queued widget may have lost its account, permissions or view before dispatch.
+        assertFeatureRead(owner, signal);
+        const data = await read(signal);
+        assertFeatureRead(owner, signal);
+        return data;
+      };
+      return readQueue ? readQueue.run(execute, signal) : execute();
     },
   });
   const entry = client

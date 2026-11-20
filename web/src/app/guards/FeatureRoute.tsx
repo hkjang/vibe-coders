@@ -20,8 +20,10 @@ export function FeatureRoute({ feature, children }: FeatureRouteProps): React.JS
       effective.reason === "permission_denied" || effective.reason === runtimeFeature.requiredPermission
         ? runtimeFeature.requiredPermission
         : undefined;
-    return effective.reason === "ui_not_implemented" || effective.reason === "legacy_fallback_disabled" ? (
-      <FeatureUnavailable />
+    return effective.reason === "ui_not_implemented" ||
+      effective.reason === "legacy_fallback_disabled" ||
+      effective.reason === "api_version" ? (
+      <FeatureUnavailable reason={effective.reason === "api_version" ? "api_version" : undefined} />
     ) : (
       <PermissionDenied permission={missingPermission} reason={effective.reason} />
     );

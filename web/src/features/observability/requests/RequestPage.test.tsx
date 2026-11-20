@@ -17,32 +17,41 @@ const authRuntime = vi.hoisted(() => ({
   credentialPrefixes: ["corp_"],
   featureFallback: true,
   legacyFallback: true,
+  legacyRequestDetail: false,
+  legacyRequestFilters: false,
   legacyPath: "/admin#/requests" as `/admin${string}`,
   scopes: ["admin:read"] as string[],
 }));
 
-vi.mock("@/app/auth/AuthProvider", () => ({
-  useAuth: () => ({
-    authenticationMode: "session",
-    credentialPrefixes: authRuntime.credentialPrefixes,
-    features: [
-      {
-        appPath: "/app/observability/requests",
-        fallbackEnabled: authRuntime.featureFallback,
-        featureId: "observability.requests",
-        legacyPath: authRuntime.legacyPath,
-      },
-    ],
-    legacyFallback: authRuntime.legacyFallback,
-    mode: "authenticated",
-    user: {
-      id: "admin-1",
-      role: "admin",
-      roles: ["admin"],
-      scopes: authRuntime.scopes,
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return {
+    useAuth: () => {
+      const auth = testAuth({
+        scopes: authRuntime.scopes,
+        legacyFallback: authRuntime.legacyFallback,
+        rawPromptView: false,
+        user: { id: "admin-1" },
+      });
+      return {
+        ...auth,
+        credentialPrefixes: authRuntime.credentialPrefixes,
+        capabilities: {
+          ...auth.capabilities,
+          legacy_request_detail: authRuntime.legacyRequestDetail,
+          legacy_request_filters: authRuntime.legacyRequestFilters,
+        },
+        features: auth.features
+          .filter((feature) => feature.featureId === "observability.requests")
+          .map((feature) => ({
+            ...feature,
+            fallbackEnabled: authRuntime.featureFallback,
+            legacyPath: authRuntime.legacyPath,
+          })),
+      };
     },
-  }),
-}));
+  };
+});
 
 const providerRef = `prv_${"a".repeat(43)}`;
 const requestRef = `req_${"a".repeat(22)}.${"a".repeat(21)}`;
@@ -121,6 +130,8 @@ function renderPage(initialEntry = "/observability/requests") {
 
 describe("RequestPage", () => {
   beforeEach(() => {
+    authRuntime.legacyRequestDetail = false;
+    authRuntime.legacyRequestFilters = false;
     authRuntime.featureFallback = true;
     authRuntime.legacyFallback = true;
     authRuntime.legacyPath = "/admin#/requests";
@@ -670,6 +681,81 @@ describe("RequestPage", () => {
     expect(await screen.findByText("요청 목록을 확인할 수 없습니다.")).toBeInTheDocument();
     expect(screen.queryByText("목록 실패")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "기존 관리자 화면 열기" })).not.toBeInTheDocument();
+  });
+
+  it("opens only the selected filterable request when the server advertises Legacy detail support", async () => {
+    authRuntime.legacyRequestDetail = true;
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+    expect(screen.getByRole("link", { name: "기존 화면에서 이 요청 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/requests?request_id=req-001",
+    );
+    expect(screen.queryByRole("link", { name: "기존 요청 화면 열기" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { version: 1, filterable: true, base: "/admin#/requests" },
+    { version: 2, filterable: false, base: "/admin#/requests" },
+    { version: 2, filterable: true, base: "/admin#/runtime-requests" },
+  ])(
+    "keeps an honestly labelled list fallback for incompatible request handoff %o",
+    async ({ version, filterable, base }) => {
+      authRuntime.legacyRequestDetail = true;
+      authRuntime.legacyPath = base as typeof authRuntime.legacyPath;
+      vi.spyOn(apiClient, "request").mockResolvedValue({
+        ...response,
+        request_contract_version: version,
+        requests: [{ ...row, request_filterable: filterable }],
+      } as never);
+      const user = userEvent.setup();
+      renderPage();
+      await user.click(await screen.findByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+      expect(screen.queryByRole("link", { name: "기존 화면에서 이 요청 열기" })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "기존 요청 화면 열기" })).toHaveAttribute("href", base);
+    },
+  );
+
+  it("preserves supported filters in header and detail links and describes omitted filters accessibly", async () => {
+    authRuntime.legacyRequestFilters = true;
+    authRuntime.legacyRequestDetail = true;
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    renderPage(
+      "/observability/requests?model=public%20model&from=2026-11-19&to=2026-11-20&tz=Asia%2FKathmandu&status=500&request_id=list-id&limit=37",
+    );
+    const link = await screen.findByRole("link", { name: "기존 화면 보기" });
+    expect(link).toHaveAccessibleDescription(/상태, 요청 ID/);
+    const href = link.getAttribute("href") ?? "";
+    const params = new URLSearchParams(href.split("?")[1]);
+    expect(params.get("from")).toBe("2026-11-19");
+    expect(params.get("tz")).toBe("Asia/Kathmandu");
+    expect(params.get("limit")).toBe("37");
+    expect(params.has("request_id")).toBe(false);
+    await userEvent.setup().click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+    const detail = screen.getByRole("link", { name: "기존 화면에서 이 요청 열기" });
+    expect(detail).toHaveAccessibleDescription(/상태, 요청 ID/);
+    const selected = new URLSearchParams(detail.getAttribute("href")?.split("?")[1]);
+    expect(selected.get("request_id")).toBe("req-001");
+    expect(selected.get("model")).toBe("public model");
+  });
+
+  it("preserves filter recovery and omission guidance in a terminal error", async () => {
+    authRuntime.legacyRequestFilters = true;
+    vi.spyOn(apiClient, "request").mockRejectedValue(new AppError("内部", { kind: "http" }));
+    renderPage("/observability/requests?model=public&status=500");
+    const link = await screen.findByRole("link", { name: "기존 관리자 화면 열기" });
+    expect(link).toHaveAttribute("href", "/admin#/requests?model=public&limit=50");
+    expect(link).toHaveAccessibleDescription(/상태/);
+  });
+
+  it("announces filter loss when the server cannot preserve filters", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    renderPage("/observability/requests?model=public");
+    const link = await screen.findByRole("link", { name: "기존 화면 보기" });
+    expect(link).toHaveAttribute("href", "/admin#/requests");
+    expect(link).toHaveAccessibleDescription(/모델/);
   });
 
   it("uses the runtime request Legacy path and honors its feature fallback toggle", async () => {

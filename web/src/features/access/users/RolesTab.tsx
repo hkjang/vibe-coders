@@ -1,3 +1,4 @@
+import { legacyRoutes } from "@/config/legacy-route-map";
 import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
@@ -142,10 +143,11 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
   if (owner.denied)
     return (
       <ErrorState
+        legacyFeatureId="access.users"
         title="역할 조회 권한을 다시 확인하세요."
         message="이전 역할과 초안을 표시하지 않습니다."
         onRetry={owner.restart}
-        legacyHref="/admin#/users"
+        legacyHref={legacyRoutes.users}
       />
     );
   return (

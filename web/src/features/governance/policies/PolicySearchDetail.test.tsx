@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "@/shared/api/client";
 import { AppError } from "@/shared/api/error";
@@ -30,7 +30,15 @@ const response = {
   ],
 };
 function Location() {
-  return <output aria-label="현재 주소">{useLocation().search}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output aria-label="현재 주소">{useLocation().search}</output>
+      <button type="button" onClick={() => navigate("?policy=policy-one&policy=policy-two")}>
+        중복 주소로 이동
+      </button>
+    </>
+  );
 }
 function setup(url = "/governance/policies?policy=policy-one&tab=safety") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -103,10 +111,44 @@ describe("read-only policy search detail", () => {
     "/governance/policies",
     "/governance/policies?policy=",
     "/governance/policies?policy=corp_" + "x".repeat(43),
+    "/governance/policies?policy=policy-one&policy=policy-two",
+    "/governance/policies?policy=policy-one&policy=policy-one",
+    "/governance/policies?policy=%ED%A0%80",
+    "/governance/policies?policy=%zz",
   ])("does not fetch for an absent or invalid selection", (url) => {
     const request = vi.spyOn(apiClient, "request").mockResolvedValue(response);
     setup(url);
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("keeps a literal encoded sequence as an exact policy identity", async () => {
+    const id = "정책 +%2F?&#";
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+      policies: [{ ...response.policies[0], id }],
+    });
+    setup("/governance/policies?" + new URLSearchParams({ policy: id, tab: "safety" }));
+    expect(await screen.findByRole("heading", { name: "정산 정책" })).toBeVisible();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0].method).toBe("GET");
+  });
+
+  it("retires an in-flight read when navigation makes the selection ambiguous", async () => {
+    let complete: (value: typeof response) => void = () => undefined;
+    const request = vi.spyOn(apiClient, "request").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    setup();
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    // The fixture simulates browser address/history navigation while the modal owns focus.
+    fireEvent.click(screen.getByRole("button", { name: "중복 주소로 이동", hidden: true }));
+    expect(await screen.findByText("정책 주소를 확인하세요.")).toBeVisible();
+    expect(request.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    await act(async () => complete(response));
+    expect(screen.queryByRole("heading", { name: "정산 정책" })).not.toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it.each(["scope", "feature"])("removes detail immediately after %s access is lost", async (boundary) => {

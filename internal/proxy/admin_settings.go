@@ -241,6 +241,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: appUIEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_ENABLED", "true") }},
 		{Key: appUIDefaultEntryKey, Category: "ui.app", Type: stString, validate: validateAppUIPath, envValue: func(config.Config) string { return appUIEnv("UI_APP_DEFAULT_ENTRY", "/app/overview") }},
 		{Key: appUILegacyFallbackKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_LEGACY_FALLBACK", "true") }},
+		{Key: appUILegacyEntryKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_LEGACY_ENTRY_LINK", "false") }},
 		{Key: appUIFeedbackEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_FEEDBACK_ENABLED", "false") }},
 		{Key: appUITelemetryEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_TELEMETRY_ENABLED", "false") }},
 
@@ -289,6 +290,7 @@ var settingDescriptions = map[string]string{
 	appUIEnabledKey:          "React 기반 Next Admin Console(/app) 활성화. 비활성 시 Legacy Admin 안내 화면만 제공합니다.",
 	appUIDefaultEntryKey:     "Next Admin Console의 기본 진입 경로. 외부 URL이 아닌 /app/ 내부 경로만 허용합니다.",
 	appUILegacyFallbackKey:   "신규 화면에서 동일 기능의 Legacy Admin(/admin) 이동 링크 제공 여부.",
+	appUILegacyEntryKey:      "기존 관리자(/admin)에 새 콘솔 열기 링크 표시. 기본 비활성화이며 /app이 활성화된 경우에만 표시합니다.",
 	appUIFeedbackEnabledKey:  "신규 UI의 사용자 피드백 진입점 활성화 여부.",
 	appUITelemetryEnabledKey: "민감 원문을 제외한 신규 UI 사용성 텔레메트리 활성화 여부.",
 	// ClickHouse

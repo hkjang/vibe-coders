@@ -22,7 +22,7 @@ export function SkillFitnessPanel({
 }): React.JSX.Element {
   const editor = useSkillFitnessContext();
   const skill = editor.target?.skill ?? selectedSkill;
-  const current = useSkillFitnessQuery(skill.name, editor.epoch);
+  const current = useSkillFitnessQuery(skill.name, editor.epoch, skill.skill_ref);
   const confirmed = current.confirmed;
   const allowed = canWrite && editor.writable;
   return (
@@ -31,7 +31,7 @@ export function SkillFitnessPanel({
       headingLevel={3}
       description="높은 위험도 또는 적합성 검증을 요구한 스킬의 프로덕션 승격에 통과한 기록 건수가 사용됩니다."
     >
-      <SkillFitnessNotice name={skill.name} current={current} />
+      <SkillFitnessNotice name={skill.name} skillRef={skill.skill_ref} current={current} />
       {!allowed ? (
         <InlineNotice tone="warning" title="쓰기 권한이 없습니다.">
           {editor.writeDisabledReason ?? "스킬 근거 기록에는 admin:write 권한이 필요합니다."}
@@ -86,7 +86,9 @@ export function SkillFitnessPanel({
           )}
         </>
       ) : null}
-      {editor.committed?.name === skill.name && !confirmed ? (
+      {editor.committed?.name === skill.name &&
+      editor.committed.skill_ref === skill.skill_ref &&
+      !confirmed ? (
         <InlineNotice tone="warning" title="적합성 근거 기록은 완료됐습니다.">
           후속 조회가 완료되지 않았습니다. 같은 근거를 다시 기록하지 말고 목록을 다시 조회하세요.
         </InlineNotice>
