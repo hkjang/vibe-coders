@@ -34,9 +34,11 @@ func (limits redTeamRunLimits) valid() bool {
 // A reviewed runner executes these already loaded definitions. It does not
 // reselect targets or silently resolve a different model after confirmation.
 type redTeamRunPlan struct {
-	ReplaySource    *redTeamReplaySource `json:",omitempty"`
-	ExecutionID     string               `json:"-"` // allocated only after review revalidation, recorded in the admission audit
-	ReviewID        string               `json:"-"`
+	JobProgress     func(store.RedTeamJobProgress) error `json:"-"`
+	JobBeforeCall   func() error                         `json:"-"`
+	ReplaySource    *redTeamReplaySource                 `json:",omitempty"`
+	ExecutionID     string                               `json:"-"` // allocated only after review revalidation, recorded in the admission audit
+	ReviewID        string                               `json:"-"`
 	Campaign        store.RedTeamCampaign
 	Targets         []store.RedTeamTarget
 	Packs           []store.RedTeamProbePack

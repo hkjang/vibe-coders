@@ -7,6 +7,7 @@ import { redTeamRecordingSchema } from "./redteam-recording";
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
 import { redTeamReviewedEndpoints } from "./redteam-reviewed";
+import { redTeamJobEndpoints } from "./redteam-jobs";
 import { redTeamReplayEndpoints } from "./redteam-replay";
 
 import type {
@@ -499,6 +500,7 @@ export const redteamEndpoints = {
   },
   campaigns: {
     ...redTeamReviewedEndpoints,
+    jobs: redTeamJobEndpoints,
     list: operation<GetAdminRedteamCampaignsData, unknown>()(
       "GET",
       "/admin/redteam/campaigns",

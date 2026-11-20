@@ -18,6 +18,7 @@ export const INTERACTIVE_FEATURES = {
   "src/features/security/redteam/redteam-csv.ts": { rawBytes: 5_000, wireBytes: 2_500 },
   "src/features/security/redteam/probe-csv-file.ts": { rawBytes: 12_000, wireBytes: 6_000 },
   "src/features/security/redteam/ProbeCsvImportDialog.tsx": { rawBytes: 20_000, wireBytes: 8_000 },
+  "src/features/security/redteam/RedTeamReviewedExecution.tsx": { rawBytes: 65_000, wireBytes: 25_000 },
   "src/features/system/settings/SettingsRecoveryDialog.tsx": { rawBytes: 20_000, wireBytes: 8_000 },
   "src/shared/code-editor/MonacoEditor.tsx": { rawBytes: 6_000_000, wireBytes: 1_500_000 },
   "src/shared/data-table/ColumnTooltip.tsx": { rawBytes: 8_000, wireBytes: 4_000 },
