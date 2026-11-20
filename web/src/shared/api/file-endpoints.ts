@@ -33,6 +33,8 @@ const privacyQuery = z
   .strict();
 const warehouseQuery = z
   .object({
+    since_day: z.string().optional(),
+    until_day: z.string().optional(),
     window: z.enum(["7d", "30d", "90d"]),
     dimension: z.enum(["model", "provider", "project", "cost_center"]),
     order_by: z.enum(["cost", "requests", "tokens", "errors"]),
@@ -91,7 +93,7 @@ export const fileEndpoints = {
     { contentTypes: ["text/csv"] },
     privacyQuery,
   ),
-  warehouse: fileOperation<WithQuery<GetAdminDwDashboardExportCsvData, z.infer<typeof warehouseQuery>>>()(
+  warehouse: fileOperation<GetAdminDwDashboardExportCsvData>()(
     "GET",
     "/admin/dw/dashboard/export.csv",
     { contentTypes: ["text/csv"] },

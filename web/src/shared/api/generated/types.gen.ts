@@ -557,6 +557,36 @@ export type CostGuardConfigResponse = {
     threshold_krw: number;
 };
 
+export type DwDashboardDimensions = {
+    configured: boolean;
+    dimension?: string;
+    order_by?: string;
+    rows?: Array<{
+        cost_krw: number;
+        error_rate: number;
+        errors: number;
+        requests: number;
+        tokens: number;
+        value: string;
+    }>;
+    since?: string;
+    until?: string;
+};
+
+export type DwDashboardTimeseries = {
+    bucket?: string;
+    configured: boolean;
+    date_bounds_supported?: boolean;
+    points?: Array<{
+        cost_krw: number;
+        day: string;
+        errors: number;
+        requests: number;
+        tokens: number;
+    }>;
+    since?: string;
+};
+
 export type DwRetryDimension = {
     dimension: string;
     estimated_rows: number;
@@ -7107,30 +7137,90 @@ export type GetAdminDwConsistencyResponses = {
 export type GetAdminDwDashboardDimensionsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query: {
+        window?: string;
+        dimension: 'model' | 'provider' | 'project' | 'cost_center';
+        order_by?: 'cost' | 'requests' | 'tokens' | 'errors';
+        limit?: number;
+        since_day?: string;
+        until_day?: string;
+    };
     url: '/admin/dw/dashboard/dimensions';
 };
+
+export type GetAdminDwDashboardDimensionsErrors = {
+    /**
+     * Invalid dimension or UTC date range; CSV also rejects an unconfigured DW.
+     */
+    400: AppError;
+    /**
+     * Existing admin authentication/scope rejection.
+     */
+    401: AppError;
+    /**
+     * ClickHouse query failed.
+     */
+    502: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminDwDashboardDimensionsError = GetAdminDwDashboardDimensionsErrors[keyof GetAdminDwDashboardDimensionsErrors];
 
 export type GetAdminDwDashboardDimensionsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: DwDashboardDimensions;
 };
+
+export type GetAdminDwDashboardDimensionsResponse = GetAdminDwDashboardDimensionsResponses[keyof GetAdminDwDashboardDimensionsResponses];
 
 export type GetAdminDwDashboardExportCsvData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        window?: string;
+        dimension?: 'model' | 'provider' | 'project' | 'cost_center' | 'all';
+        order_by?: 'cost' | 'requests' | 'tokens' | 'errors';
+        limit?: number;
+        since_day?: string;
+        until_day?: string;
+    };
     url: '/admin/dw/dashboard/export.csv';
 };
 
+export type GetAdminDwDashboardExportCsvErrors = {
+    /**
+     * Invalid dimension or UTC date range; CSV also rejects an unconfigured DW.
+     */
+    400: AppError;
+    /**
+     * Existing admin authentication/scope rejection.
+     */
+    401: AppError;
+    /**
+     * ClickHouse query failed.
+     */
+    502: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminDwDashboardExportCsvError = GetAdminDwDashboardExportCsvErrors[keyof GetAdminDwDashboardExportCsvErrors];
+
 export type GetAdminDwDashboardExportCsvResponses = {
     /**
-     * OK
+     * UTF-8 CSV with BOM, same aggregation and bounds as the dimension read.
      */
-    200: unknown;
+    200: string;
 };
+
+export type GetAdminDwDashboardExportCsvResponse = GetAdminDwDashboardExportCsvResponses[keyof GetAdminDwDashboardExportCsvResponses];
 
 export type GetAdminDwDashboardLatencyData = {
     body?: never;
@@ -7219,16 +7309,46 @@ export type GetAdminDwDashboardText2SqlResponses = {
 export type GetAdminDwDashboardTimeseriesData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        window?: string;
+        bucket?: 'day' | 'week';
+        model?: string;
+        provider?: string;
+        project?: string;
+        cost_center?: string;
+    };
     url: '/admin/dw/dashboard/timeseries';
 };
+
+export type GetAdminDwDashboardTimeseriesErrors = {
+    /**
+     * Invalid dimension or UTC date range; CSV also rejects an unconfigured DW.
+     */
+    400: AppError;
+    /**
+     * Existing admin authentication/scope rejection.
+     */
+    401: AppError;
+    /**
+     * ClickHouse query failed.
+     */
+    502: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminDwDashboardTimeseriesError = GetAdminDwDashboardTimeseriesErrors[keyof GetAdminDwDashboardTimeseriesErrors];
 
 export type GetAdminDwDashboardTimeseriesResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: DwDashboardTimeseries;
 };
+
+export type GetAdminDwDashboardTimeseriesResponse = GetAdminDwDashboardTimeseriesResponses[keyof GetAdminDwDashboardTimeseriesResponses];
 
 export type GetAdminDwMetricsData = {
     body?: never;

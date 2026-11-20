@@ -31,6 +31,7 @@ export type DwOverview = z.output<typeof dwOverviewSchema>;
 
 export const dwTimeseriesSchema = looseObject({
   configured,
+  date_bounds_supported: flag,
   since: text,
   bucket: text,
   points: orDefault(
@@ -48,6 +49,7 @@ export type DwTimeseriesPoint = z.output<typeof dwTimeseriesSchema>["points"][nu
 
 export const dwDimensionsSchema = looseObject({
   configured,
+  until: text,
   since: text,
   dimension: text,
   order_by: text,

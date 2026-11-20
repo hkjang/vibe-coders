@@ -1,3 +1,4 @@
+import type { DwDashboardTimeseries, DwDashboardDimensions } from "@/shared/api/generated";
 import { dwRetryEndpoints } from "./dw-retry";
 import { z } from "zod";
 
@@ -71,6 +72,8 @@ type LegacyResponse = unknown;
 const windowQuerySchema = z.object({ window: z.string() });
 const savingsQuerySchema = z.object({ window: z.string(), dimension: z.string() });
 const dimensionQuerySchema = z.object({
+  since_day: z.string().optional(),
+  until_day: z.string().optional(),
   window: z.string(),
   dimension: z.string(),
   order_by: z.string(),
@@ -142,17 +145,18 @@ export const dataEndpoints = {
       dwOverviewSchema,
       windowQuerySchema,
     ),
-    timeseries: operation<
-      WithQuery<GetAdminDwDashboardTimeseriesData, { window: string; bucket: string }>,
-      LegacyResponse
-    >()("GET", "/admin/dw/dashboard/timeseries", dwTimeseriesSchema, timeseriesQuerySchema),
-    dimensions: operation<
-      WithQuery<
-        GetAdminDwDashboardDimensionsData,
-        { window: string; dimension: string; order_by: string; limit: number }
-      >,
-      LegacyResponse
-    >()("GET", "/admin/dw/dashboard/dimensions", dwDimensionsSchema, dimensionQuerySchema),
+    timeseries: operation<GetAdminDwDashboardTimeseriesData, DwDashboardTimeseries>()(
+      "GET",
+      "/admin/dw/dashboard/timeseries",
+      dwTimeseriesSchema,
+      timeseriesQuerySchema,
+    ),
+    dimensions: operation<GetAdminDwDashboardDimensionsData, DwDashboardDimensions>()(
+      "GET",
+      "/admin/dw/dashboard/dimensions",
+      dwDimensionsSchema,
+      dimensionQuerySchema,
+    ),
     text2sql: operation<WithQuery<GetAdminDwDashboardText2SqlData, { window: string }>, LegacyResponse>()(
       "GET",
       "/admin/dw/dashboard/text2sql",

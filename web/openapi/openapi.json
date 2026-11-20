@@ -2192,6 +2192,117 @@
         ],
         "type": "object"
       },
+      "DwDashboardDimensions": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "dimension": {
+            "type": "string"
+          },
+          "order_by": {
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cost_krw": {
+                  "type": "number"
+                },
+                "error_rate": {
+                  "type": "number"
+                },
+                "errors": {
+                  "type": "number"
+                },
+                "requests": {
+                  "type": "number"
+                },
+                "tokens": {
+                  "type": "number"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "requests",
+                "tokens",
+                "cost_krw",
+                "errors",
+                "error_rate"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured"
+        ],
+        "type": "object"
+      },
+      "DwDashboardTimeseries": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "date_bounds_supported": {
+            "type": "boolean"
+          },
+          "points": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cost_krw": {
+                  "type": "number"
+                },
+                "day": {
+                  "type": "string"
+                },
+                "errors": {
+                  "type": "number"
+                },
+                "requests": {
+                  "type": "number"
+                },
+                "tokens": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "day",
+                "requests",
+                "tokens",
+                "cost_krw",
+                "errors"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured"
+        ],
+        "type": "object"
+      },
       "DwRetryDimension": {
         "additionalProperties": false,
         "properties": {
@@ -17243,7 +17354,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.176"
+    "version": "v0.86.177"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -20875,10 +20986,118 @@
     },
     "/admin/dw/dashboard/dimensions": {
       "get": {
+        "description": "Existing daily rollup aggregation. Optional since_day (inclusive) and until_day (exclusive) must both occur exactly once and define 1–90 UTC calendar days within the ClickHouse Date range. Invalid, partial or repeated dates return invalid_dw_date_range before any query. When absent, existing window semantics are preserved. Explicit absolute dates take precedence over window. Dimension reads echo since and exclusive until; CSV uses identical date predicates.",
         "operationId": "get__admin_dw_dashboard_dimensions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dimension",
+            "required": true,
+            "schema": {
+              "enum": [
+                "model",
+                "provider",
+                "project",
+                "cost_center"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order_by",
+            "schema": {
+              "enum": [
+                "cost",
+                "requests",
+                "tokens",
+                "errors"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since_day",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until_day",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DwDashboardDimensions"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid dimension or UTC date range; CSV also rejects an unconfigured DW."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing admin authentication/scope rejection."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "ClickHouse query failed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -20894,10 +21113,118 @@
     },
     "/admin/dw/dashboard/export.csv": {
       "get": {
+        "description": "Existing daily rollup aggregation. Optional since_day (inclusive) and until_day (exclusive) must both occur exactly once and define 1–90 UTC calendar days within the ClickHouse Date range. Invalid, partial or repeated dates return invalid_dw_date_range before any query. When absent, existing window semantics are preserved. Explicit absolute dates take precedence over window. Dimension reads echo since and exclusive until; CSV uses identical date predicates.",
         "operationId": "get__admin_dw_dashboard_export_csv",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dimension",
+            "schema": {
+              "enum": [
+                "model",
+                "provider",
+                "project",
+                "cost_center",
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order_by",
+            "schema": {
+              "enum": [
+                "cost",
+                "requests",
+                "tokens",
+                "errors"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since_day",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until_day",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "UTF-8 CSV with BOM, same aggregation and bounds as the dimension read."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid dimension or UTC date range; CSV also rejects an unconfigured DW."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing admin authentication/scope rejection."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "ClickHouse query failed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -21028,9 +21355,104 @@
     "/admin/dw/dashboard/timeseries": {
       "get": {
         "operationId": "get__admin_dw_dashboard_timeseries",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "schema": {
+              "enum": [
+                "day",
+                "week"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cost_center",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DwDashboardTimeseries"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid dimension or UTC date range; CSV also rejects an unconfigured DW."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Existing admin authentication/scope rejection."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "ClickHouse query failed."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [

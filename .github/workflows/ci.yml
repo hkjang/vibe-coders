@@ -407,6 +407,9 @@ jobs:
       - name: Verify PostgreSQL reviewed DW retry, source plans, durable jobs and audit rollback
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^(TestClickHouse|TestRedTeamFact)' -count=1 -timeout=7m
 
+      - name: Verify real ClickHouse date bounds, weekly drilldown and CSV parity
+        run: bash scripts/test-dw-date-selection.sh
+
   sdk-typecheck:
     name: TypeScript SDK typecheck
     runs-on: ubuntu-latest
@@ -436,7 +439,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.176
+      SOURCE_SBOM_VERSION: v0.86.177
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

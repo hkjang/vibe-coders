@@ -1,6 +1,10 @@
-import { Download, RefreshCw } from "lucide-react";
+import { DwSavingsPanel } from "./DwSavingsPanel";
+import { Download } from "lucide-react";
 
-import { DataQueryNotice } from "@/features/data/DataQueryNotice";
+import { InsightQueryStatus } from "./InsightQueryStatus";
+import { DwTrendPanel } from "./DwTrendPanel";
+import { DwDimensionsPanel } from "./DwDimensionsPanel";
+import { dwBoundsLabel, type DwDateSelection } from "@/shared/utils/dw-date-bounds";
 import { SimpleTable } from "@/features/data/SimpleTable";
 import { downloadDwDashboardCsv } from "@/features/data/warehouse/export-dw-csv";
 import { useInsightsQueries } from "@/features/data/warehouse/use-warehouse-queries";
@@ -18,13 +22,7 @@ import {
   type DwOrder,
   type DwWindow,
 } from "@/features/data/warehouse/warehouse-filters";
-import type {
-  DwDimensionRow,
-  DwLatencyModelRow,
-  DwTimeseriesPoint,
-  ModelMigrationRecommendation,
-  SavingsScope,
-} from "@/shared/api/domains/data.schemas";
+import type { DwLatencyModelRow } from "@/shared/api/domains/data.schemas";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -36,6 +34,7 @@ import { useFileDownload } from "@/shared/hooks/use-file-download";
 import { formatDuration, formatKRW, formatNumber, formatPercent } from "@/shared/utils/format";
 
 interface InsightsTabProps {
+  selection: DwDateSelection;
   bucket: DwBucket;
   dimension: DwDimension;
   onFilterChange: (updates: Record<string, string | undefined>) => void;
@@ -58,6 +57,7 @@ const countColumns = [
 ];
 
 export function InsightsTab({
+  selection,
   bucket,
   dimension,
   onFilterChange,
@@ -65,18 +65,22 @@ export function InsightsTab({
   range,
 }: InsightsTabProps): React.JSX.Element {
   const { overview, timeseries, dimensions, latency, quality, routing, text2sql, savings, modelMigration } =
-    useInsightsQueries(range, bucket, dimension, order);
+    useInsightsQueries(range, bucket, dimension, order, selection);
+  const bounds = selection.kind === "selected" ? selection.bounds : undefined;
+  const selectionReady =
+    selection.kind === "none" ||
+    (selection.kind === "selected" && timeseries.data?.date_bounds_supported === true);
   const csv = useFileDownload(
     "data.warehouse",
-    JSON.stringify([range, bucket, dimension, order]),
-    Boolean(overview.data?.configured),
+    JSON.stringify([range, bucket, dimension, order, selection]),
+    Boolean(dimensions.data?.configured) && !dimensions.isError && selectionReady,
   );
   const exporting = csv.pending;
   const exportError = csv.error
     ? `${csv.error.message}${csv.error.requestId ? ` 요청 ID: ${csv.error.requestId}` : ""}`
     : undefined;
   const exportCsv = (): void => {
-    void csv.run((ownership) => downloadDwDashboardCsv(range, dimension, order, ownership), {
+    void csv.run((ownership) => downloadDwDashboardCsv(range, dimension, order, ownership, bounds), {
       errorMessage: "CSV를 내보내지 못했습니다.",
       toastErrors: false,
     });
@@ -138,20 +142,35 @@ export function InsightsTab({
         </label>
       </Toolbar>
 
+      {selection.kind !== "none" ? (
+        <div className="dw-date-selection" role="status">
+          <div>
+            <p>
+              <strong>
+                {bounds ? `상세 집계 · ${dwBoundsLabel(bounds)}` : "선택 기간이 올바르지 않습니다."}
+              </strong>
+            </p>
+            <small>
+              {bounds
+                ? "차원별 집계와 CSV에 적용됩니다. CSV는 같은 조건의 상위 100개 항목을 포함합니다."
+                : "시작일과 종료일을 확인하거나 전체 기간으로 돌아가세요."}
+            </small>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => onFilterChange({ since_day: undefined, until_day: undefined })}
+          >
+            전체 기간으로 돌아가기
+          </Button>
+        </div>
+      ) : null}
       {exportError ? (
         <InlineNotice tone="danger" title="CSV 내보내기 실패">
           {exportError}
         </InlineNotice>
       ) : null}
 
-      {overview.isError ? (
-        <DataQueryNotice
-          error={overview.error}
-          hasPreviousData={Boolean(summary)}
-          label="DW 요약"
-          onRetry={() => void overview.refetch()}
-        />
-      ) : null}
+      <InsightQueryStatus query={overview} label="DW 요약" />
 
       <StatGrid label="DW 핵심 지표">
         <StatCard label="요청" value={value(summary?.requests, (input) => formatNumber(input))} />
@@ -174,101 +193,26 @@ export function InsightsTab({
         />
       ) : (
         <>
-          <SectionCard
-            title="비용 추이"
-            description={`집계 기준 ${dwBucketLabels[bucket]} · ${dwWindowLabels[range]}`}
-          >
-            {timeseries.isError ? (
-              <DataQueryNotice
-                error={timeseries.error}
-                hasPreviousData={Boolean(timeseries.data)}
-                label="비용 추이"
-                onRetry={() => void timeseries.refetch()}
-              />
-            ) : null}
-            <SimpleTable<DwTimeseriesPoint>
-              caption="일자별 요청, 토큰, 비용, 오류"
-              loading={timeseries.isPending}
-              rows={timeseries.data?.points ?? []}
-              emptyMessage="선택한 구간에 집계된 데이터가 없습니다."
-              columns={[
-                { id: "day", header: "기간", cell: (row) => row.day },
-                {
-                  id: "requests",
-                  header: "요청",
-                  cell: (row) => <span className="cell-number">{formatNumber(row.requests)}</span>,
-                },
-                {
-                  id: "tokens",
-                  header: "토큰",
-                  cell: (row) => <span className="cell-number">{formatNumber(row.tokens)}</span>,
-                },
-                {
-                  id: "cost",
-                  header: "비용",
-                  cell: (row) => <span className="cell-number">{formatKRW(row.cost_krw)}</span>,
-                },
-                {
-                  id: "errors",
-                  header: "오류",
-                  cell: (row) => <span className="cell-number">{formatNumber(row.errors)}</span>,
-                },
-              ]}
-            />
-          </SectionCard>
-
-          <SectionCard
-            title={`${dwDimensionLabels[dimension]}별 Top 10`}
-            description={`${dwOrderLabels[order]} 정렬`}
-          >
-            {dimensions.isError ? (
-              <DataQueryNotice
-                error={dimensions.error}
-                hasPreviousData={Boolean(dimensions.data)}
-                label="차원별 집계"
-                onRetry={() => void dimensions.refetch()}
-              />
-            ) : null}
-            <SimpleTable<DwDimensionRow>
-              caption={`${dwDimensionLabels[dimension]}별 사용량과 비용`}
-              loading={dimensions.isPending}
-              rows={dimensions.data?.rows ?? []}
-              emptyMessage="집계된 항목이 없습니다."
-              columns={[
-                { id: "value", header: dwDimensionLabels[dimension], cell: (row) => row.value || "—" },
-                {
-                  id: "requests",
-                  header: "요청",
-                  cell: (row) => <span className="cell-number">{formatNumber(row.requests)}</span>,
-                },
-                {
-                  id: "tokens",
-                  header: "토큰",
-                  cell: (row) => <span className="cell-number">{formatNumber(row.tokens)}</span>,
-                },
-                {
-                  id: "cost",
-                  header: "비용",
-                  cell: (row) => <span className="cell-number">{formatKRW(row.cost_krw)}</span>,
-                },
-                {
-                  id: "error_rate",
-                  header: "오류율",
-                  cell: (row) => <span className="cell-number">{formatPercent(row.error_rate)}</span>,
-                },
-              ]}
-            />
-          </SectionCard>
-
+          <DwTrendPanel
+            query={timeseries}
+            bucket={bucket}
+            range={range}
+            selection={selection}
+            onSelect={(selected) => onFilterChange({ ...selected })}
+          />
+          <DwDimensionsPanel
+            dimensions={dimensions}
+            dimension={dimension}
+            order={order}
+            periodLabel={bounds ? dwBoundsLabel(bounds) : `${dwWindowLabels[range]} 전체`}
+            ready={selectionReady}
+          />
+          <p className="dw-trend-help">
+            아래 분석은 {dwWindowLabels[range]} 전체 기준입니다. 추이에서 선택한 기간은 위 차원별 집계와
+            CSV에만 적용됩니다.
+          </p>
           <SectionCard title="성능 분석" description="요청 팩트 기반 지연과 스트리밍 비율">
-            {latency.isError ? (
-              <DataQueryNotice
-                error={latency.error}
-                hasPreviousData={Boolean(latency.data)}
-                label="성능 분석"
-                onRetry={() => void latency.refetch()}
-              />
-            ) : null}
+            <InsightQueryStatus query={latency} label="성능 분석" />
             {latency.data?.configured === false ? (
               <InlineNotice tone="info" title="요청 팩트 테이블이 설정되지 않았습니다.">
                 clickhouse.request_fact_table 설정을 채우면 지연 분석을 볼 수 있습니다.
@@ -312,14 +256,7 @@ export function InsightsTab({
           </SectionCard>
 
           <SectionCard title="품질 분석" description="자동 평가와 사용자 피드백">
-            {quality.isError ? (
-              <DataQueryNotice
-                error={quality.error}
-                hasPreviousData={Boolean(quality.data)}
-                label="품질 분석"
-                onRetry={() => void quality.refetch()}
-              />
-            ) : null}
+            <InsightQueryStatus query={quality} label="품질 분석" />
             {quality.data && !quality.data.configured ? (
               <InlineNotice tone="info" title="품질 팩트 테이블이 설정되지 않았습니다.">
                 clickhouse.eval_fact_table 또는 feedback_fact_table 설정이 필요합니다.
@@ -363,14 +300,7 @@ export function InsightsTab({
           </SectionCard>
 
           <SectionCard title="라우팅 분석" description="자동 라우팅 결정 근거와 모델 재작성">
-            {routing.isError ? (
-              <DataQueryNotice
-                error={routing.error}
-                hasPreviousData={Boolean(routing.data)}
-                label="라우팅 분석"
-                onRetry={() => void routing.refetch()}
-              />
-            ) : null}
+            <InsightQueryStatus query={routing} label="라우팅 분석" />
             {routing.data && !routing.data.configured ? (
               <InlineNotice tone="info" title="라우팅 팩트 테이블이 설정되지 않았습니다.">
                 clickhouse.routing_fact_table 설정을 채우면 라우팅 분석을 볼 수 있습니다.
@@ -408,14 +338,7 @@ export function InsightsTab({
           </SectionCard>
 
           <SectionCard title="Text2SQL 분석" description="질의 검증, 실행, 차단 현황">
-            {text2sql.isError ? (
-              <DataQueryNotice
-                error={text2sql.error}
-                hasPreviousData={Boolean(text2sql.data)}
-                label="Text2SQL 분석"
-                onRetry={() => void text2sql.refetch()}
-              />
-            ) : null}
+            <InsightQueryStatus query={text2sql} label="Text2SQL 분석" />
             {text2sql.data && !text2sql.data.configured ? (
               <InlineNotice tone="info" title="Text2SQL 팩트 테이블이 설정되지 않았습니다.">
                 clickhouse.text2sql_fact_table 설정을 채우면 Text2SQL 분석을 볼 수 있습니다.
@@ -441,116 +364,9 @@ export function InsightsTab({
             )}
           </SectionCard>
 
-          <SectionCard
-            title="비용 절감·모델 전환"
-            description="다운시프트와 캐시로 아낀 금액, 그리고 지금 바꿀 만한 모델 후보입니다. 운영 데이터베이스에서 실시간으로 계산합니다."
-          >
-            {savings.isError ? (
-              <DataQueryNotice
-                error={savings.error}
-                hasPreviousData={Boolean(savings.data)}
-                label="비용 절감"
-                onRetry={() => void savings.refetch()}
-              />
-            ) : null}
-            {modelMigration.isError ? (
-              <DataQueryNotice
-                error={modelMigration.error}
-                hasPreviousData={Boolean(modelMigration.data)}
-                label="모델 전환 추천"
-                onRetry={() => void modelMigration.refetch()}
-              />
-            ) : null}
-            <StatGrid label="절감 지표">
-              <StatCard
-                label="총 절감액"
-                value={formatKRW(savings.data?.total_savings_krw)}
-                hint="다운시프트 + 캐시"
-              />
-              <StatCard
-                label="다운시프트 절감"
-                value={formatKRW(savings.data?.total_downshift_savings_krw)}
-              />
-              <StatCard
-                label="캐시 절감"
-                value={formatKRW(savings.data?.total_cache_savings_krw)}
-                hint={savings.data?.cache_savings_estimated ? "추정치" : undefined}
-              />
-              <StatCard
-                label="전환 예상 절감"
-                value={formatKRW(modelMigration.data?.total_estimated_savings_krw)}
-                hint={`추천 ${formatNumber(modelMigration.data?.count ?? 0)}건`}
-              />
-            </StatGrid>
-            <SimpleTable<SavingsScope>
-              caption={`${dwDimensionLabels[dimension]}별 절감액`}
-              loading={savings.isPending}
-              rows={savings.data?.scopes ?? []}
-              emptyMessage="집계된 절감액이 없습니다."
-              columns={[
-                { id: "scope", header: dwDimensionLabels[dimension], cell: (row) => row.scope || "—" },
-                {
-                  id: "downshift",
-                  header: "다운시프트",
-                  cell: (row) => <span className="cell-number">{formatNumber(row.downshift_requests)}</span>,
-                },
-                {
-                  id: "downshift_krw",
-                  header: "다운시프트 절감",
-                  cell: (row) => <span className="cell-number">{formatKRW(row.downshift_savings_krw)}</span>,
-                },
-                {
-                  id: "cache",
-                  header: "캐시 적중",
-                  cell: (row) => <span className="cell-number">{formatNumber(row.cache_hits)}</span>,
-                },
-                {
-                  id: "total",
-                  header: "합계",
-                  cell: (row) => <span className="cell-number">{formatKRW(row.total_savings_krw)}</span>,
-                },
-              ]}
-            />
-            <SimpleTable<ModelMigrationRecommendation>
-              caption="모델 전환 추천"
-              loading={modelMigration.isPending}
-              rows={modelMigration.data?.recommendations ?? []}
-              emptyMessage="전환을 추천할 만한 작업 유형이 없습니다."
-              columns={[
-                { id: "task", header: "작업 유형", cell: (row) => row.task_type || "—" },
-                {
-                  id: "requests",
-                  header: "요청",
-                  cell: (row) => <span className="cell-number">{formatNumber(row.requests)}</span>,
-                },
-                { id: "current", header: "현재 모델", cell: (row) => row.current_model || "—" },
-                { id: "recommended", header: "추천 모델", cell: (row) => row.recommended_model || "—" },
-                {
-                  id: "success",
-                  header: "성공률",
-                  cell: (row) =>
-                    `${formatPercent(row.current_success_rate)} → ${formatPercent(row.recommended_success_rate)}`,
-                },
-                {
-                  id: "savings",
-                  header: "예상 절감",
-                  cell: (row) => <span className="cell-number">{formatKRW(row.estimated_savings_krw)}</span>,
-                },
-              ]}
-            />
-          </SectionCard>
+          <DwSavingsPanel savings={savings} modelMigration={modelMigration} dimension={dimension} />
         </>
       )}
-
-      <p className="data-updated-at" role="status">
-        {overview.isFetching ? (
-          <>
-            <RefreshCw aria-hidden="true" /> 갱신 중입니다.
-          </>
-        ) : (
-          `마지막 갱신: ${overview.dataUpdatedAt ? new Date(overview.dataUpdatedAt).toLocaleString("ko-KR") : "—"}`
-        )}
-      </p>
     </div>
   );
 }

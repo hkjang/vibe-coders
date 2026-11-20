@@ -159,14 +159,14 @@ func (s *Server) handleDWDashboardTimeseries(w http.ResponseWriter, r *http.Requ
 	// bucket=day (default) groups by calendar day; bucket=week groups by ISO week (Monday).
 	// The daily rollup has day grain, so hour is not available here.
 	bucket := strings.TrimSpace(r.URL.Query().Get("bucket"))
-	bucketExpr := "day"
+	bucketExpr := "rollup.day"
 	if bucket == "week" {
-		bucketExpr = "toMonday(day)"
+		bucketExpr = "toMonday(rollup.day)"
 	} else {
 		bucket = "day"
 	}
 	q := "SELECT toString(" + bucketExpr + ") AS day, sum(requests) AS requests, sum(tokens) AS tokens, sum(cost_krw) AS cost_krw, sum(errors) AS errors FROM " +
-		ref + " FINAL WHERE " + dwScopeClause(r) + " AND day >= '" + sinceStr + "' GROUP BY " + bucketExpr + " ORDER BY " + bucketExpr
+		ref + " AS rollup FINAL WHERE " + dwScopeClause(r) + " AND rollup.day >= '" + sinceStr + "' GROUP BY " + bucketExpr + " ORDER BY " + bucketExpr
 	rows, err := s.dwQueryJSON(r.Context(), cfg, q)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
@@ -179,7 +179,7 @@ func (s *Server) handleDWDashboardTimeseries(w http.ResponseWriter, r *http.Requ
 			"cost_krw": asFloat(row["cost_krw"]), "errors": asFloat(row["errors"]),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "since": sinceStr, "bucket": bucket, "points": points})
+	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "since": sinceStr, "bucket": bucket, "points": points, "date_bounds_supported": true})
 }
 
 // handleDWDashboardDimensions returns Top-N rows for a dimension (model/provider/project/cost_center).
@@ -187,6 +187,10 @@ func (s *Server) handleDWDashboardTimeseries(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleDWDashboardDimensions(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	bounds, valid := readDWRollupRange(w, r)
+	if !valid {
 		return
 	}
 	cfg, ref, ok := s.dwReady()
@@ -204,9 +208,8 @@ func (s *Server) handleDWDashboardDimensions(w http.ResponseWriter, r *http.Requ
 		orderCol = "cost_krw"
 	}
 	limit := recentLimit(r)
-	sinceStr, _ := dwSinceDate(r)
 	q := "SELECT dim_value, sum(requests) AS requests, sum(tokens) AS tokens, sum(cost_krw) AS cost_krw, sum(errors) AS errors FROM " +
-		ref + " FINAL WHERE dimension = '" + chEscape(dim) + "' AND day >= '" + sinceStr + "' GROUP BY dim_value ORDER BY " +
+		ref + " FINAL WHERE dimension = '" + chEscape(dim) + "' AND " + bounds.clause() + " GROUP BY dim_value ORDER BY " +
 		orderCol + " DESC LIMIT " + fmt.Sprintf("%d", limit)
 	rows, err := s.dwQueryJSON(r.Context(), cfg, q)
 	if err != nil {
@@ -226,7 +229,11 @@ func (s *Server) handleDWDashboardDimensions(w http.ResponseWriter, r *http.Requ
 			"cost_krw": asFloat(row["cost_krw"]), "errors": errN, "error_rate": rate,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "since": sinceStr, "dimension": dim, "order_by": orderCol, "rows": items})
+	response := map[string]any{"configured": true, "since": bounds.Since, "dimension": dim, "order_by": orderCol, "rows": items}
+	if bounds.Until != "" {
+		response["until"] = bounds.Until
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // dwText2SQLReady reports whether the Text2SQL fact table is configured for dashboard reads.
@@ -590,12 +597,15 @@ func (s *Server) handleDWDashboardExportCSV(w http.ResponseWriter, r *http.Reque
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	bounds, valid := readDWRollupRange(w, r)
+	if !valid {
+		return
+	}
 	cfg, ref, ok := s.dwReady()
 	if !ok {
 		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse DW is not configured", "invalid_request_error", "dw_disabled")
 		return
 	}
-	sinceStr, _ := dwSinceDate(r)
 	dim := strings.TrimSpace(r.URL.Query().Get("dimension"))
 	var header []string
 	var query string
@@ -607,11 +617,11 @@ func (s *Server) handleDWDashboardExportCSV(w http.ResponseWriter, r *http.Reque
 		}
 		header = []string{dim, "requests", "tokens", "cost_krw", "errors"}
 		query = "SELECT dim_value, sum(requests) AS requests, sum(tokens) AS tokens, sum(cost_krw) AS cost_krw, sum(errors) AS errors FROM " +
-			ref + " FINAL WHERE dimension = '" + chEscape(dim) + "' AND day >= '" + sinceStr + "' GROUP BY dim_value ORDER BY " + orderCol + " DESC LIMIT " + strconv.Itoa(recentLimit(r))
+			ref + " FINAL WHERE dimension = '" + chEscape(dim) + "' AND " + bounds.clause() + " GROUP BY dim_value ORDER BY " + orderCol + " DESC LIMIT " + strconv.Itoa(recentLimit(r))
 	} else {
 		header = []string{"day", "requests", "tokens", "cost_krw", "errors"}
 		query = "SELECT toString(day) AS day, sum(requests) AS requests, sum(tokens) AS tokens, sum(cost_krw) AS cost_krw, sum(errors) AS errors FROM " +
-			ref + " FINAL WHERE " + dwScopeClause(r) + " AND day >= '" + sinceStr + "' GROUP BY day ORDER BY day"
+			ref + " FINAL WHERE " + dwScopeClause(r) + " AND " + bounds.clause() + " GROUP BY day ORDER BY day"
 	}
 	rows, err := s.dwQueryJSON(r.Context(), cfg, query)
 	if err != nil {
@@ -639,5 +649,9 @@ func (s *Server) handleDWDashboardExportCSV(w http.ResponseWriter, r *http.Reque
 		})
 	}
 	wr.Flush()
-	s.auditAdmin(r, "dw.dashboard.export", "", auditJSON(map[string]any{"dimension": dim, "since": sinceStr, "rows": len(rows)}))
+	audit := map[string]any{"dimension": dim, "since": bounds.Since, "rows": len(rows)}
+	if bounds.Until != "" {
+		audit["until"] = bounds.Until
+	}
+	s.auditAdmin(r, "dw.dashboard.export", "", auditJSON(audit))
 }
