@@ -282,3 +282,64 @@ it("다른 계정의 작업 조회가 거절되면 조회를 멈추고 권한 �
   await userEvent.click(screen.getByRole("button", { name: "작업 주소 지우기" }));
   await waitFor(() => expect(screen.getByLabelText("현재 주소")).toBeEmptyDOMElement());
 });
+it("완료된 작업 뒤 같은 화면에서 새 실패분을 다시 검토하고 접수한다", async () => {
+  let reviews = 0;
+  const next = {
+    ...reviewed,
+    revision: "b".repeat(64),
+    run_id: `dwr_${"b".repeat(64)}`,
+    estimated_rows: 2002,
+  };
+  const partial: DwRetryRunView = { ...running, status: "partial_failed" };
+  const api = mockApi({
+    [getKey]: ({ query }) =>
+      query ? { ...partial, id: "job_id" in query ? String(query.job_id) : id } : reviews++ ? next : reviewed,
+    [postKey]: ({ body }) => ({ ...partial, id: `dwr_${(body as { revision: string }).revision}` }),
+  });
+  render();
+  let dialog = await open();
+  await userEvent.type(within(dialog).getByRole("textbox", { name: /실행 사유/u }), "첫 번째 실패 복구");
+  await userEvent.click(within(dialog).getByRole("button", { name: "검토한 대상 재처리" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(await screen.findByText("일부 재처리 미완료")).toBeInTheDocument();
+  dialog = await open();
+  await within(dialog).findByText(/예상 2,002행/u);
+  const reason = within(dialog).getByRole("textbox", { name: /실행 사유/u });
+  expect(reason).toBeEnabled();
+  expect(reason).toHaveValue("");
+  await userEvent.type(reason, "남은 실패분 재검토");
+  await userEvent.click(within(dialog).getByRole("button", { name: "검토한 대상 재처리" }));
+  await waitFor(() => expect(api.bodies(postKey)).toHaveLength(2));
+  expect(api.bodies(postKey)[1]).toEqual({
+    revision: next.revision,
+    reviewed_at: next.reviewed_at,
+    all: false,
+    reason: "남은 실패분 재검토",
+  });
+});
+
+it("접수 여부를 확인하지 못한 검토는 닫았다 다시 열어도 재전송 잠금을 유지한다", async () => {
+  const api = mockApi({
+    [getKey]: ({ query }) => {
+      if (query) throw apiFailure("unknown job", 404);
+      return reviewed;
+    },
+    [postKey]: () => {
+      throw apiFailure("response lost", 503);
+    },
+  });
+  render();
+  let dialog = await open();
+  await userEvent.type(
+    within(dialog).getByRole("textbox", { name: /실행 사유/u }),
+    "접수 확인 전 재전송 금지",
+  );
+  await userEvent.click(within(dialog).getByRole("button", { name: "검토한 대상 재처리" }));
+  await within(dialog).findByRole("button", { name: "접수 결과 확인" });
+  await userEvent.click(within(dialog).getByRole("button", { name: /^닫기$/u }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  dialog = await open();
+  expect(within(dialog).getByRole("textbox", { name: /실행 사유/u })).toBeDisabled();
+  expect(within(dialog).getByRole("button", { name: "검토한 대상 재처리" })).toBeDisabled();
+  expect(api.bodies(postKey)).toHaveLength(1);
+});

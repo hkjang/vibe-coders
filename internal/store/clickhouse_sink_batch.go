@@ -9,7 +9,12 @@ import (
 // ClickHouseSinkRange is the closed source interval of one sink attempt. A fixed
 // upper bound prevents a busy source from extending an attempt indefinitely.
 type ClickHouseSinkRange struct{ Dimension, Since, Until string }
-type ClickHouseSinkCursor struct{ Position, ID string }
+type ClickHouseSinkCursor struct {
+	Position, ID string
+	// Old fact watermarks have no identity. Preserve their strict timestamp
+	// boundary until the next successful batch records a complete cursor.
+	ExclusiveTimestamp bool
+}
 type ClickHouseSinkSummary struct {
 	Rows  int64  `json:"rows"`
 	First string `json:"first"`
@@ -103,19 +108,24 @@ func (s *SQLStore) SummarizeClickHouseSink(ctx context.Context, r ClickHouseSink
 	return out, err
 }
 
-// ReadClickHouseSinkBatch uses a stable (time, identity) key, not OFFSET or a
+// clickHouseSinkBatchQuery uses a stable (time, identity) key, not OFFSET or a
 // count-based cutoff. Tied timestamps and more than 5000 source rows are covered.
-func (s *SQLStore) ReadClickHouseSinkBatch(ctx context.Context, r ClickHouseSinkRange, cursor ClickHouseSinkCursor, limit int) (ClickHouseSinkBatch, error) {
+func clickHouseSinkBatchQuery(r ClickHouseSinkRange, cursor ClickHouseSinkCursor, limit int) (string, []any, error) {
 	if limit < 1 || limit > 1000 {
-		return ClickHouseSinkBatch{}, fmt.Errorf("invalid sink batch size")
+		return "", nil, fmt.Errorf("invalid sink batch size")
 	}
 	from, where, at, id, args, err := sinkSource(r)
 	if err != nil {
-		return ClickHouseSinkBatch{}, err
+		return "", nil, err
 	}
 	if cursor.Position != "" {
-		where += " AND (" + at + " > ? OR (" + at + " = ? AND " + id + " > ?))"
-		args = append(args, cursor.Position, cursor.Position, cursor.ID)
+		if cursor.ExclusiveTimestamp {
+			where += " AND " + at + " > ?"
+			args = append(args, cursor.Position)
+		} else {
+			where += " AND (" + at + "," + id + ") > (?,?)"
+			args = append(args, cursor.Position, cursor.ID)
+		}
 	}
 	columns := "r.day,r.dimension,r.dim_value,r.requests,r.tokens,r.cost_krw,r.errors"
 	switch r.Dimension {
@@ -125,7 +135,15 @@ func (s *SQLStore) ReadClickHouseSinkBatch(ctx context.Context, r ClickHouseSink
 		columns = `t.id,t.target_type,t.target_ref,t.owner_team,COALESCE(cs.pack_id,''),COALESCE(p.category,''),r.decision,r.severity,run.risk_score`
 	}
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, s.bind("SELECT "+columns+","+at+","+id+" FROM "+from+" WHERE "+where+" ORDER BY "+at+","+id+" LIMIT ?"), args...)
+	return "SELECT " + columns + "," + at + "," + id + " FROM " + from + " WHERE " + where + " ORDER BY " + at + "," + id + " LIMIT ?", args, nil
+}
+
+func (s *SQLStore) ReadClickHouseSinkBatch(ctx context.Context, r ClickHouseSinkRange, cursor ClickHouseSinkCursor, limit int) (ClickHouseSinkBatch, error) {
+	query, args, err := clickHouseSinkBatchQuery(r, cursor, limit)
+	if err != nil {
+		return ClickHouseSinkBatch{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(query), args...)
 	if err != nil {
 		return ClickHouseSinkBatch{}, err
 	}

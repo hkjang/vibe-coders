@@ -76,6 +76,7 @@ async function install(context: BrowserContext) {
   const reads: string[] = [];
   const unexpected: string[] = [];
   let job: DwRetryRun | undefined;
+  let review = structuredClone(retryReview);
   let loseResponse = false;
   await context.route("**/*", async (route) => {
     const request = route.request();
@@ -98,18 +99,27 @@ async function install(context: BrowserContext) {
     if (call === "GET /admin/dw/sink-retry") {
       reads.push(url.search);
       if (url.searchParams.has("job_id"))
-        return job
+        return job && job.id === url.searchParams.get("job_id")
           ? json(job)
           : json(
               { error: { message: "No job", code: "sink_run_not_found", type: "invalid_request_error" } },
               404,
             );
-      return json(retryReview);
+      return json(review);
     }
     if (call === "POST /admin/dw/sink-retry") {
       expect(url.search).toBe("?reviewed=1");
       writes.push(request.postDataJSON());
-      job = structuredClone(retryRunning);
+      job = {
+        ...structuredClone(retryRunning),
+        id: review.run_id,
+        reviewed_at: review.reviewed_at,
+        progress: {
+          ...structuredClone(retryRunning.progress),
+          estimated_rows: review.estimated_rows,
+          dimensions: structuredClone(review.dimensions),
+        },
+      };
       return loseResponse ? route.abort("failed") : json(job, 202);
     }
     if (/^\/(admin|auth|me|v1|mcp)(\/|$)/u.test(url.pathname)) {
@@ -122,6 +132,17 @@ async function install(context: BrowserContext) {
     writes,
     reads,
     unexpected,
+    requeue() {
+      review = {
+        ...structuredClone(retryReview),
+        revision: "b".repeat(64),
+        run_id: `dwr_${"b".repeat(64)}`,
+        estimated_rows: 1,
+        dimensions: retryReview.dimensions.map((row) =>
+          row.dimension === "model" ? { ...row, estimated_rows: 1 } : { ...row },
+        ),
+      };
+    },
     loseResponse() {
       loseResponse = true;
     },

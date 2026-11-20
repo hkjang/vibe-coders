@@ -50,6 +50,8 @@ function RetrySession({ owner, ...props }: Props & { owner: FeatureReadOwner }):
   const access = useFeatureMutationAccess([routeId], props.canWrite);
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
+  const attemptedJob = useRef<string | undefined>(undefined);
+  const previousOpen = useRef(props.open);
   const [pendingJobAddress, setPendingJobAddress] = useState<string>();
   const jobId = pendingJobAddress ?? props.jobId;
   const [fieldError, setFieldError] = useState<string>();
@@ -122,6 +124,20 @@ function RetrySession({ owner, ...props }: Props & { owner: FeatureReadOwner }):
     },
     errorMessage: "재처리 접수 결과를 확인하지 못했습니다. 작업 상태를 조회하세요.",
   });
+  const resetMutation = mutation.reset;
+  useEffect(() => {
+    const opened = props.open && !previousOpen.current;
+    previousOpen.current = props.open;
+    if (!opened || sending.current || !owner.isCurrent() || !attemptedJob.current) return;
+    // Reopening is a fresh review only after the prior admission was confirmed.
+    // Closing an uncertain submission must not unlock an automatic re-send.
+    if (mutation.data?.id !== attemptedJob.current && job.data?.id !== attemptedJob.current) return;
+    attemptedJob.current = undefined;
+    setAttempted(false);
+    setReason("");
+    setFieldError(undefined);
+    resetMutation();
+  }, [props.open, owner, mutation.data?.id, job.data?.id, resetMutation]);
   const lastInvalidated = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (
@@ -162,6 +178,7 @@ function RetrySession({ owner, ...props }: Props & { owner: FeatureReadOwner }):
     await guard.run(
       async () => {
         sending.current = true;
+        attemptedJob.current = snapshot.run_id;
         setAttempted(true);
         setFieldError(undefined);
         setPendingJobAddress(snapshot.run_id);

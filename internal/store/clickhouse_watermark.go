@@ -14,6 +14,7 @@ import (
 type ClickHouseSinkState struct {
 	Dimension     string `json:"dimension"`
 	LastSyncedDay string `json:"last_synced_day"`
+	LastSyncedID  string `json:"-"`
 	LastSuccessAt string `json:"last_success_at"`
 	RowsSent      int64  `json:"rows_sent"`
 	UpdatedAt     string `json:"updated_at"`
@@ -43,7 +44,7 @@ func (s *SQLStore) RecordClickHouseSinkFailure(ctx context.Context, dimension, s
 
 // ListClickHouseSinkState returns every dimension's watermark, newest success first.
 func (s *SQLStore) ListClickHouseSinkState(ctx context.Context) ([]ClickHouseSinkState, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT dimension, COALESCE(last_synced_day,''), COALESCE(last_success_at,''), COALESCE(rows_sent,0), COALESCE(updated_at,'')
+	rows, err := s.db.QueryContext(ctx, `SELECT dimension, COALESCE(last_synced_day,''), COALESCE(last_synced_id,''), COALESCE(last_success_at,''), COALESCE(rows_sent,0), COALESCE(updated_at,'')
 		FROM clickhouse_sink_state ORDER BY last_success_at DESC`)
 	if err != nil {
 		return nil, err
@@ -52,7 +53,7 @@ func (s *SQLStore) ListClickHouseSinkState(ctx context.Context) ([]ClickHouseSin
 	out := []ClickHouseSinkState{}
 	for rows.Next() {
 		var st ClickHouseSinkState
-		if err := rows.Scan(&st.Dimension, &st.LastSyncedDay, &st.LastSuccessAt, &st.RowsSent, &st.UpdatedAt); err != nil {
+		if err := rows.Scan(&st.Dimension, &st.LastSyncedDay, &st.LastSyncedID, &st.LastSuccessAt, &st.RowsSent, &st.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, st)
@@ -97,6 +98,10 @@ func (s *SQLStore) ClickHouseSinkRetrySnapshot(ctx context.Context, dimension st
 // failure observed before the attempt. An overlapping worker's newer failure is
 // never deleted. No network request occurs inside this short transaction.
 func (s *SQLStore) CompleteClickHouseSink(ctx context.Context, dimension, syncedDay string, rows int64, expected *ClickHouseSinkRetry) (bool, error) {
+	return s.CompleteClickHouseSinkCursor(ctx, dimension, ClickHouseSinkCursor{Position: syncedDay}, rows, expected)
+}
+
+func (s *SQLStore) CompleteClickHouseSinkCursor(ctx context.Context, dimension string, cursor ClickHouseSinkCursor, rows int64, expected *ClickHouseSinkRetry) (bool, error) {
 	if expected != nil && expected.Dimension != dimension {
 		return false, errors.New("sink acknowledgement identity mismatch")
 	}
@@ -111,10 +116,14 @@ func (s *SQLStore) CompleteClickHouseSink(ctx context.Context, dimension, synced
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO clickhouse_sink_state (dimension,last_synced_day,last_success_at,rows_sent,updated_at)
- VALUES (?,?,?,?,?) ON CONFLICT(dimension) DO UPDATE SET
- last_synced_day = CASE WHEN `+appRequestCreatedAtExpr("COALESCE(clickhouse_sink_state.last_synced_day,'')")+` > `+appRequestCreatedAtExpr("excluded.last_synced_day")+` THEN clickhouse_sink_state.last_synced_day ELSE excluded.last_synced_day END,
- last_success_at = excluded.last_success_at,rows_sent = excluded.rows_sent,updated_at = excluded.updated_at`), dimension, syncedDay, now, rows, now)
+	existingTime := appRequestCreatedAtExpr("COALESCE(clickhouse_sink_state.last_synced_day,'')")
+	nextTime := appRequestCreatedAtExpr("excluded.last_synced_day")
+	advance := nextTime + " > " + existingTime + " OR (" + nextTime + " = " + existingTime + " AND excluded.last_synced_id > COALESCE(clickhouse_sink_state.last_synced_id,''))"
+	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO clickhouse_sink_state (dimension,last_synced_day,last_synced_id,last_success_at,rows_sent,updated_at)
+ VALUES (?,?,?,?,?,?) ON CONFLICT(dimension) DO UPDATE SET
+ last_synced_day = CASE WHEN `+advance+` THEN excluded.last_synced_day ELSE clickhouse_sink_state.last_synced_day END,
+ last_synced_id = CASE WHEN `+advance+` THEN excluded.last_synced_id ELSE COALESCE(clickhouse_sink_state.last_synced_id,'') END,
+ last_success_at = excluded.last_success_at,rows_sent = excluded.rows_sent,updated_at = excluded.updated_at`), dimension, cursor.Position, cursor.ID, now, rows, now)
 	if err != nil {
 		return false, err
 	}

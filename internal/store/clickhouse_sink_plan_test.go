@@ -63,15 +63,36 @@ func TestClickHouseSinkNaturalSourceWindowPlans(t *testing.T) {
 	}
 	for _, source := range []struct{ dimension, index, table string }{{"model", "idx_analytics_sink_cursor", "analytics_daily"}, {"text2sql_fact", "idx_text2sql_sink_cursor", "text2sql_query_logs"}, {"redteam_fact", "idx_redteam_sink_cursor", "redteam_case_results"}} {
 		interval := ClickHouseSinkRange{Dimension: source.dimension, Since: now.Add(-time.Hour).Format(time.RFC3339Nano), Until: now.Format(time.RFC3339Nano)}
-		from, where, at, id, args, err := sinkSource(interval)
+		from, where, at, _, args, err := sinkSource(interval)
 		if err != nil {
 			t.Fatal(err)
 		}
-		queries := []string{
-			"SELECT COUNT(*),MIN(" + at + "),MAX(" + at + ") FROM " + from + " WHERE " + where,
-			"SELECT r.* FROM " + from + " WHERE " + where + " ORDER BY " + at + "," + id + " LIMIT 1000",
+		pageQuery, pageArgs, err := clickHouseSinkBatchQuery(interval, ClickHouseSinkCursor{}, 1000)
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, query := range queries {
+		deep := ClickHouseSinkRange{Dimension: source.dimension, Since: now.Add(-366 * 24 * time.Hour).Format(time.RFC3339Nano), Until: now.Format(time.RFC3339Nano)}
+		lastOld := now.Add(-365 * 24 * time.Hour).Add(7999 * time.Minute)
+		position := appRequestFixedTime(lastOld)
+		if source.dimension == "model" {
+			position = lastOld.Format("2006-01-02")
+		}
+		deepCursor := ClickHouseSinkCursor{Position: position, ID: "sink-plan-07999"}
+		deepQuery, deepArgs, err := clickHouseSinkBatchQuery(deep, deepCursor, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		queries := []struct {
+			sql   string
+			args  []any
+			label string
+		}{
+			{"SELECT COUNT(*),MIN(" + at + "),MAX(" + at + ") FROM " + from + " WHERE " + where, args, "count"},
+			{pageQuery, pageArgs, "first-page"},
+			{deepQuery, deepArgs, "after-8000-processed"},
+		}
+		for _, planned := range queries {
+			query, args := planned.sql, planned.args
 			plan := ""
 			if db.dialect == "postgres" {
 				root, raw := appFlowNaturalPostgresPlan(t, db, db.bind(query), args...)
@@ -85,7 +106,7 @@ func TestClickHouseSinkNaturalSourceWindowPlans(t *testing.T) {
 						if node.NodeType == "Seq Scan" || node.NodeType == "Parallel Seq Scan" || visits > 5 || node.SharedHitBlocks+node.SharedReadBlocks > 72 {
 							t.Fatalf("source window scanned outside its bounded candidates: %s", plan)
 						}
-						t.Logf("source scan dimension=%s type=%s index=%s visited=%.0f", source.dimension, node.NodeType, node.IndexName, visits)
+						t.Logf("source scan dimension=%s page=%s type=%s index=%s visited=%.0f", source.dimension, planned.label, node.NodeType, node.IndexName, visits)
 					}
 					for _, child := range node.Plans {
 						inspect(child)
@@ -121,6 +142,10 @@ func TestClickHouseSinkNaturalSourceWindowPlans(t *testing.T) {
 				t.Fatalf("%s source lost indexed window: %s", source.dimension, plan)
 			}
 			t.Logf("sink_window_plan dialect=%s dimension=%s retained=8000 selected=5", db.dialect, source.dimension)
+		}
+		deepPage, err := db.ReadClickHouseSinkBatch(ctx, deep, deepCursor, 1000)
+		if err != nil || deepPage.Len() != 5 {
+			t.Fatal("deep cursor lost remaining source rows", err)
 		}
 		summary, err := db.SummarizeClickHouseSink(ctx, interval)
 		if err != nil || summary.Rows != 5 {

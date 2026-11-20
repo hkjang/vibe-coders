@@ -1150,6 +1150,7 @@ func migrationStatements() []string {
 				first_failed_at TEXT,
 				last_attempt_at TEXT
 			)`,
+		`ALTER TABLE clickhouse_sink_state ADD COLUMN last_synced_id TEXT NOT NULL DEFAULT ''`,
 		clickHouseSinkRunsTable,
 		`CREATE TABLE IF NOT EXISTS text2sql_replay_bundles (
 				id TEXT PRIMARY KEY,

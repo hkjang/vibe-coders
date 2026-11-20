@@ -37,6 +37,18 @@ test("실패분 검토부터 접수·새로고침·부분 실패 확인까지 �
     page.getByRole("table", { name: "구분별 재처리 결과" }).getByText("1,000", { exact: true }),
   ).toBeVisible();
   expect(gateway.writes).toHaveLength(1);
+  gateway.requeue();
+  await page.getByRole("button", { name: "실패분 재처리", exact: true }).click();
+  await expect(dialog.getByText(/예상 1행/u)).toBeVisible();
+  const reason = dialog.getByRole("textbox", { name: "실행 사유" });
+  await expect(reason).toBeEnabled();
+  await expect(reason).toHaveValue("");
+  await reason.fill("남은 실패분 재검토 후 실행");
+  await dialog.getByRole("button", { name: "검토한 대상 재처리" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(new RegExp(`retry_job=dwr_${"b".repeat(64)}`));
+  expect(gateway.writes).toHaveLength(2);
+  expect(gateway.writes[1]).toMatchObject({ revision: "b".repeat(64), reason: "남은 실패분 재검토 후 실행" });
 });
 test("접수 응답 유실은 작업 조회로 복구하며 재전송하지 않는다", async ({ page, gateway }) => {
   gateway.loseResponse();

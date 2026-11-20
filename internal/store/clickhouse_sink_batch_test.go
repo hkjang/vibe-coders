@@ -199,3 +199,39 @@ func TestClickHouseSinkRetryKeepsEarliestMixedPrecisionBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestClickHouseSinkCursorUpgradeAndMonotonicAcknowledgement(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := t.Context()
+	if _, err := db.db.ExecContext(ctx, "ALTER TABLE clickhouse_sink_state DROP COLUMN last_synced_id"); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 20, 1, 2, 3, 0, time.UTC)
+	if _, err := db.db.ExecContext(ctx, db.bind("INSERT INTO clickhouse_sink_state(dimension,last_synced_day,rows_sent) VALUES(?,?,?)"), "text2sql_fact", at.Format(time.RFC3339Nano), 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	states, err := db.ListClickHouseSinkState(ctx)
+	if err != nil || len(states) != 1 || states[0].LastSyncedID != "" || states[0].LastSyncedDay != at.Format(time.RFC3339Nano) {
+		t.Fatal("legacy watermark changed during upgrade", err)
+	}
+	for _, next := range []ClickHouseSinkCursor{{Position: appRequestFixedTime(at), ID: "fact-002"}, {Position: appRequestFixedTime(at), ID: "fact-001"}, {Position: appRequestFixedTime(at.Add(-time.Second)), ID: "fact-999"}} {
+		if _, err := db.CompleteClickHouseSinkCursor(ctx, "text2sql_fact", next, 1, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	states, err = db.ListClickHouseSinkState(ctx)
+	if err != nil || len(states) != 1 || states[0].LastSyncedID != "fact-002" || states[0].LastSyncedDay != appRequestFixedTime(at) {
+		t.Fatal("older retry regressed confirmed cursor", err)
+	}
+	if _, err := db.CompleteClickHouseSinkCursor(ctx, "text2sql_fact", ClickHouseSinkCursor{Position: appRequestFixedTime(at.Add(time.Second)), ID: "fact-001"}, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	states, err = db.ListClickHouseSinkState(ctx)
+	if err != nil || states[0].LastSyncedID != "fact-001" || states[0].LastSyncedDay != appRequestFixedTime(at.Add(time.Second)) {
+		t.Fatal("later timestamp did not advance cursor")
+	}
+}

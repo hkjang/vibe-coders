@@ -40,6 +40,10 @@ func (s *Server) sendClickHouseInterval(ctx context.Context, cfg config.ClickHou
 }
 
 func (s *Server) sendClickHouseIntervalProgress(ctx context.Context, cfg config.ClickHouseConfig, interval store.ClickHouseSinkRange, pending *store.ClickHouseSinkRetry, progress func(int) error) (total int, err error) {
+	return s.sendClickHouseIntervalAfter(ctx, cfg, interval, pending, progress, store.ClickHouseSinkCursor{})
+}
+
+func (s *Server) sendClickHouseIntervalAfter(ctx context.Context, cfg config.ClickHouseConfig, interval store.ClickHouseSinkRange, pending *store.ClickHouseSinkRetry, progress func(int) error, cursor store.ClickHouseSinkCursor) (total int, err error) {
 	if cfg.URL == "" {
 		return 0, errors.New("ClickHouse is not configured")
 	}
@@ -62,8 +66,6 @@ func (s *Server) sendClickHouseIntervalProgress(ctx context.Context, cfg config.
 			err = errors.Join(err, fmt.Errorf("could not persist sink retry: %w", recordErr))
 		}
 	}()
-	cursor := store.ClickHouseSinkCursor{}
-	last := interval.Since
 	for {
 		if progress != nil {
 			if progressErr := progress(total); progressErr != nil {
@@ -102,9 +104,14 @@ func (s *Server) sendClickHouseIntervalProgress(ctx context.Context, cfg config.
 			}
 		}
 		cursor = batch.Next
-		last = cursor.Position
 	}
-	_, completeErr := s.db.CompleteClickHouseSink(ctx, interval.Dimension, last, int64(total), pending)
+	if total == 0 {
+		if pending == nil {
+			return 0, nil // No delivered rows: preserve the confirmed cursor.
+		}
+		cursor = store.ClickHouseSinkCursor{Position: interval.Since}
+	}
+	_, completeErr := s.db.CompleteClickHouseSinkCursor(ctx, interval.Dimension, cursor, int64(total), pending)
 	if completeErr != nil {
 		return total, completeErr
 	}
@@ -128,6 +135,7 @@ func (s *Server) syncClickHouseFactDimension(ctx context.Context, dimension stri
 		return 0, nil
 	}
 	since := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339Nano)
+	var after store.ClickHouseSinkCursor
 	states, err := s.db.ListClickHouseSinkState(ctx)
 	if err != nil {
 		return 0, err
@@ -135,6 +143,7 @@ func (s *Server) syncClickHouseFactDimension(ctx context.Context, dimension stri
 	for _, state := range states {
 		if state.Dimension == dimension && state.LastSyncedDay != "" {
 			since = state.LastSyncedDay
+			after = store.ClickHouseSinkCursor{ID: state.LastSyncedID, ExclusiveTimestamp: state.LastSyncedID == ""}
 			break
 		}
 	}
@@ -142,5 +151,12 @@ func (s *Server) syncClickHouseFactDimension(ctx context.Context, dimension stri
 	if err != nil {
 		return 0, err
 	}
-	return s.sendClickHouseInterval(ctx, cfg, interval, pending)
+	if pending != nil {
+		// Pending work is an explicit inclusive replay, even before a newer
+		// confirmed watermark. Its acknowledgement still checks generation.
+		after = store.ClickHouseSinkCursor{}
+	} else if after.ID != "" || after.ExclusiveTimestamp {
+		after.Position = interval.Since
+	}
+	return s.sendClickHouseIntervalAfter(ctx, cfg, interval, pending, nil, after)
 }
