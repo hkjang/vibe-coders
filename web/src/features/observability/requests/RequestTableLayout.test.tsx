@@ -93,7 +93,17 @@ it("기본값으로 초기화하면 표시·순서·너비를 복원한다", asy
   dialog = await openSettings();
   await userEvent.click(within(dialog).getByRole("button", { name: "기본값으로 초기화" }));
   await userEvent.click(within(dialog).getByRole("button", { name: "설정 완료" }));
-  expect(headers()).toEqual(["시각", "상태", "요청 ID", "모델", "공급자", "지연", "토큰", "비용", "작업"]);
+  expect(headers()).toEqual([
+    "시각",
+    "상태",
+    "요청 ID",
+    "모델",
+    "공급자",
+    "지연 (ms)",
+    "토큰 (개)",
+    "비용",
+    "작업",
+  ]);
   expect(screen.getByRole("separator", { name: "모델 열 너비 조절" })).toHaveAttribute(
     "aria-valuenow",
     "144",

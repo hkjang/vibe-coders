@@ -1,6 +1,5 @@
 import type { Page } from "@playwright/test";
 import { installSettingsWorkspace } from "./settings-workspace-browser";
-import { migrationRegistry } from "../../src/config/migration-registry";
 import type { AppRequestsResponse } from "../../src/shared/api/generated";
 import type { SavedFilter } from "../../src/shared/api/domains/observability.schemas";
 
@@ -8,8 +7,15 @@ export async function installRequestSavedFilters(page: Page) {
   const fixture = await installSettingsWorkspace(page);
   const bootstrap = fixture.bootstrap;
   const base = bootstrap.migration_registry[0];
-  const feature = migrationRegistry.find((item) => item.featureId === "observability.requests");
-  if (!base || !feature || !bootstrap.user) throw new Error("Missing request fixture identity");
+  // API fixture data stays independent from the application's route loaders.
+  const feature = {
+    featureId: "observability.requests",
+    title: "요청 탐색기",
+    appPath: "/app/observability/requests",
+    legacyPath: "/admin#/requests",
+    minimumApiVersion: "v0.83.0",
+  };
+  if (!base || !bootstrap.user) throw new Error("Missing request fixture identity");
   bootstrap.backend_version = "v0.86.127";
   bootstrap.ui.default_entry = feature.appPath;
   bootstrap.migration_registry = [

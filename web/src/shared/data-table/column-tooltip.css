@@ -1,0 +1,23 @@
+.data-table-column-help {
+  position: fixed;
+  inset: auto;
+  z-index: calc(var(--z-modal) + 1);
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 1rem));
+  max-height: calc(100vh - 1rem);
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card-raised);
+  color: var(--color-foreground);
+  box-shadow: var(--shadow-medium);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.data-table-column-help p {
+  margin: var(--space-1) 0 0;
+}
