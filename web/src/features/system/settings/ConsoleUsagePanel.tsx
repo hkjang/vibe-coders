@@ -10,6 +10,8 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { useSearchState } from "@/shared/hooks/use-search-state";
+import { ConsoleLoadMetrics } from "@/features/system/settings/ConsoleLoadMetrics";
+import { formatLoad } from "@/features/system/settings/console-load-format";
 
 const featureTitles = new Map(migrationRegistry.map((feature) => [feature.featureId, feature.title]));
 const percentage = new Intl.NumberFormat("ko-KR", { style: "percent", maximumFractionDigits: 1 });
@@ -66,8 +68,9 @@ export function ConsoleUsagePanel(): React.JSX.Element {
       </div>
       <p>
         수집은 기본 꺼짐입니다. 전체 설정의 ‘콘솔 사용 관측’을 켠 환경에서만 기록합니다. 방문별 임시 식별값의
-        해시와 기능·시각·이동 여부만 최근 30일, 최대 10만 방문까지 집계합니다. 만료 기록은 서버 시작 시와
-        매시간 정리합니다. 사용자·팀·IP·검색어·프롬프트는 이 집계에 저장하지 않습니다.
+        해시와 기능·시각·이동 여부·첫 화면 표시 시간·릴리즈 버전을 최근 30일, 최대 10만 방문까지 집계합니다.
+        만료 기록은 서버 시작 시와 매시간 정리합니다. 사용자·팀·IP·검색어·프롬프트는 이 집계에 저장하지
+        않습니다.
       </p>
       {usage.isError ? (
         <InlineNotice tone="warning" title="사용 관측을 불러오지 못했습니다.">
@@ -100,6 +103,13 @@ export function ConsoleUsagePanel(): React.JSX.Element {
                     <th scope="col">방문</th>
                     <th scope="col">기존 화면 이동</th>
                     <th scope="col">이동 비율</th>
+                    {usage.data.load_metrics_available ? (
+                      <>
+                        <th scope="col">측정된 방문</th>
+                        <th scope="col">평균 표시 시간</th>
+                        <th scope="col">최대 표시 시간</th>
+                      </>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -109,12 +119,24 @@ export function ConsoleUsagePanel(): React.JSX.Element {
                       <td>{row.visits.toLocaleString("ko-KR")}</td>
                       <td>{row.legacy_opens.toLocaleString("ko-KR")}</td>
                       <td>{percentage.format(row.legacy_opens / row.visits)}</td>
+                      {usage.data.load_metrics_available ? (
+                        <>
+                          <td>{(row.load_samples ?? 0).toLocaleString("ko-KR")}</td>
+                          <td>
+                            {formatLoad(
+                              row.load_samples ? (row.load_total_ms ?? 0) / row.load_samples : undefined,
+                            )}
+                          </td>
+                          <td>{formatLoad(row.load_samples ? row.load_max_ms : undefined)}</td>
+                        </>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+          <ConsoleLoadMetrics usage={usage.data} />
           <p>
             <time dateTime={usage.data.from}>{new Date(usage.data.from).toLocaleString("ko-KR")}</time> ~{" "}
             <time dateTime={usage.data.to}>{new Date(usage.data.to).toLocaleString("ko-KR")}</time>

@@ -54,16 +54,22 @@ type appUITelemetryEvent struct {
 	FeatureID string `json:"feature_id"`
 	VisitID   string `json:"visit_id"`
 	Event     string `json:"event"`
+	LoadMS    *int64 `json:"load_ms,omitempty"`
 }
 
 type appUITelemetrySummary struct {
-	Enabled       bool                        `json:"enabled"`
-	Days          int                         `json:"days"`
-	From          string                      `json:"from"`
-	To            string                      `json:"to"`
-	RetentionDays int                         `json:"retention_days"`
-	VisitLimit    int                         `json:"visit_limit"`
-	Features      []store.AppUITelemetryCount `json:"features"`
+	Enabled              bool                               `json:"enabled"`
+	Days                 int                                `json:"days"`
+	From                 string                             `json:"from"`
+	To                   string                             `json:"to"`
+	RetentionDays        int                                `json:"retention_days"`
+	VisitLimit           int                                `json:"visit_limit"`
+	Features             []store.AppUITelemetryCount        `json:"features"`
+	LoadMetricsAvailable bool                               `json:"load_metrics_available"`
+	LoadLimitMS          int                                `json:"load_limit_ms"`
+	VersionLimit         int                                `json:"version_limit"`
+	Versions             []store.AppUITelemetryVersionCount `json:"versions"`
+	OtherVersionVisits   int64                              `json:"other_version_visits"`
 }
 
 // Read effective opt-in at admission, not from the eventually convergent runtime
@@ -154,7 +160,7 @@ func (s *Server) handleAppUITelemetryEvent(w http.ResponseWriter, r *http.Reques
 		if feature.FeatureID != event.FeatureID || !feature.Available {
 			continue
 		}
-		allowed = event.Event == "visit" || (legacyFallback && feature.FallbackEnabled && feature.LegacyPath != "" && feature.Status != "retired")
+		allowed = event.Event == "visit" || event.Event == "page_load" || (legacyFallback && feature.FallbackEnabled && feature.LegacyPath != "" && feature.Status != "retired")
 		break
 	}
 	if !allowed {
@@ -162,9 +168,10 @@ func (s *Server) handleAppUITelemetryEvent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Identity is used only for existing RBAC/rollout and the ephemeral intake
-	// quota. The store receives no identity or browser metadata; it hashes the
-	// ephemeral random visit ID.
-	if _, err := s.db.RecordAppUITelemetry(ctx, event.FeatureID, event.VisitID, event.Event == "legacy_fallback", time.Now().UTC()); err != nil {
+	// quota. Only a normalized numeric release and bounded duration accompany
+	// the hashed visit nonce. Arbitrary version headers are never persisted.
+	metrics := store.AppUITelemetryMetrics{UIVersion: store.NormalizeAppUIReleaseVersion(r.Header.Get("X-Vibe-UI-Version")), LoadMS: event.LoadMS}
+	if _, err := s.db.RecordAppUITelemetryMetrics(ctx, event.FeatureID, event.VisitID, event.Event == "legacy_fallback", metrics, time.Now().UTC()); err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "UI telemetry temporarily unavailable", "server_error", "ui_telemetry_unavailable")
 		return
 	}
@@ -178,7 +185,7 @@ func decodeAppUITelemetryEvent(decoder *json.Decoder) (appUITelemetryEvent, bool
 	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
 		return event, false
 	}
-	seen := make(map[string]bool, 3)
+	seen := make(map[string]bool, 4)
 	for decoder.More() {
 		token, err := decoder.Token()
 		key, ok := token.(string)
@@ -194,6 +201,11 @@ func decodeAppUITelemetryEvent(decoder *json.Decoder) (appUITelemetryEvent, bool
 			destination = &event.VisitID
 		case "event":
 			destination = &event.Event
+		case "load_ms":
+			if err := decoder.Decode(&event.LoadMS); err != nil || event.LoadMS == nil {
+				return event, false
+			}
+			continue
 		default:
 			return event, false
 		}
@@ -201,14 +213,21 @@ func decodeAppUITelemetryEvent(decoder *json.Decoder) (appUITelemetryEvent, bool
 			return event, false
 		}
 	}
-	if token, err := decoder.Token(); err != nil || token != json.Delim('}') || len(seen) != 3 {
+	if token, err := decoder.Token(); err != nil || token != json.Delim('}') || !seen["feature_id"] || !seen["visit_id"] || !seen["event"] {
 		return event, false
 	}
 	return event, decoder.Decode(new(any)) == io.EOF
 }
 
 func validAppUITelemetryEvent(event appUITelemetryEvent) bool {
-	if event.Event != "visit" && event.Event != "legacy_fallback" {
+	if event.Event != "visit" && event.Event != "legacy_fallback" && event.Event != "page_load" {
+		return false
+	}
+	if event.Event == "page_load" {
+		if event.LoadMS == nil || *event.LoadMS < 0 || *event.LoadMS > store.AppUITelemetryLoadLimitMS {
+			return false
+		}
+	} else if event.LoadMS != nil {
 		return false
 	}
 	if len(event.VisitID) != 32 {
@@ -263,17 +282,24 @@ func (s *Server) handleAppUITelemetrySummary(w http.ResponseWriter, r *http.Requ
 	}
 	now := time.Now().UTC()
 	from := now.Add(-time.Duration(days) * 24 * time.Hour)
-	counts, err := s.db.AppUITelemetrySummary(r.Context(), from, now)
+	features := effectiveAppUIFeaturesWithFallback(stored, s, user.ID, user.Role, user.Scopes, true, s.appUITelemetryFlag(stored, appUILegacyFallbackKey))
+	allowedIDs := make([]string, 0, len(features))
+	for _, feature := range features {
+		if feature.Available {
+			allowedIDs = append(allowedIDs, feature.FeatureID)
+		}
+	}
+	usage, err := s.db.AppUITelemetryUsageSummary(r.Context(), from, now, allowedIDs)
 	if err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "UI telemetry temporarily unavailable", "server_error", "ui_telemetry_unavailable")
 		return
 	}
-	byFeature := make(map[string]store.AppUITelemetryCount, len(counts))
-	for _, count := range counts {
+	byFeature := make(map[string]store.AppUITelemetryCount, len(usage.Features))
+	for _, count := range usage.Features {
 		byFeature[count.FeatureID] = count
 	}
 	visible := make([]store.AppUITelemetryCount, 0, len(appUIFeatures))
-	for _, feature := range effectiveAppUIFeaturesWithFallback(stored, s, user.ID, user.Role, user.Scopes, true, s.appUITelemetryFlag(stored, appUILegacyFallbackKey)) {
+	for _, feature := range features {
 		if feature.Available {
 			count := byFeature[feature.FeatureID]
 			count.FeatureID = feature.FeatureID
@@ -284,6 +310,8 @@ func (s *Server) handleAppUITelemetrySummary(w http.ResponseWriter, r *http.Requ
 		Enabled: s.appUITelemetryFlag(stored, appUIEnabledKey) && s.appUITelemetryFlag(stored, appUITelemetryEnabledKey),
 		Days:    days, From: from.Format(time.RFC3339), To: now.Format(time.RFC3339),
 		RetentionDays: store.AppUITelemetryRetentionDays, VisitLimit: store.AppUITelemetryVisitLimit, Features: visible,
+		LoadMetricsAvailable: true, LoadLimitMS: store.AppUITelemetryLoadLimitMS, VersionLimit: store.AppUITelemetryVersionLimit,
+		Versions: usage.Versions, OtherVersionVisits: usage.OtherVersionVisits,
 	})
 }
 

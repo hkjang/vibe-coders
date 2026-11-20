@@ -23,7 +23,81 @@ const summary = {
   features: [{ feature_id: "gateway.providers", visits: 20, legacy_opens: 5 }],
 };
 
+const measured = {
+  ...summary,
+  load_metrics_available: true,
+  load_limit_ms: 120_000,
+  version_limit: 20,
+  other_version_visits: 0,
+  features: [
+    {
+      feature_id: "gateway.providers",
+      visits: 20,
+      legacy_opens: 5,
+      load_samples: 2,
+      load_total_ms: 500,
+      load_max_ms: 500,
+    },
+  ],
+  versions: [
+    { ui_version: "v0.86.179", visits: 10, load_samples: 1, load_total_ms: 0, load_max_ms: 0 },
+    { ui_version: "", visits: 10, load_samples: 1, load_total_ms: 500, load_max_ms: 500 },
+  ],
+};
+
 describe("ConsoleUsagePanel", () => {
+  it("shows measured coverage, averages over samples and unknown versions with an accessible table", async () => {
+    mockApi({ "GET /admin/ui-telemetry/summary": () => measured });
+    const { container } = renderScreen(<ConsoleUsagePanel />);
+    const region = await screen.findByRole("region", { name: "첫 화면 표시 시간과 UI 버전" });
+    expect(within(region).getByText(/측정된 방문 2 \/ 20회/)).toHaveTextContent("평균 250 ms · 최대 500 ms");
+    const table = within(region).getByRole("table");
+    expect(within(table).getByRole("row", { name: /v0.86.179/ })).toHaveTextContent("0 ms");
+    expect(within(table).getByRole("row", { name: /버전 확인 불가/ })).toHaveTextContent("500 ms");
+    expect((await axe.run(container)).violations).toEqual([]);
+  });
+
+  it("distinguishes missing measurements from a measured zero and explains old-server compatibility", async () => {
+    mockApi({
+      "GET /admin/ui-telemetry/summary": () => ({
+        ...measured,
+        features: measured.features.map((row) => ({
+          ...row,
+          load_samples: 0,
+          load_total_ms: 0,
+          load_max_ms: 0,
+        })),
+        versions: measured.versions.map((row) => ({
+          ...row,
+          load_samples: 0,
+          load_total_ms: 0,
+          load_max_ms: 0,
+        })),
+      }),
+    });
+    renderScreen(<ConsoleUsagePanel />);
+    const region = await screen.findByRole("region", { name: "첫 화면 표시 시간과 UI 버전" });
+    expect(within(region).getByText(/측정된 방문 0 \/ 20회/)).toHaveTextContent(
+      "평균 측정 없음 · 최대 측정 없음",
+    );
+    expect(within(region).queryByText("0 ms")).not.toBeInTheDocument();
+  });
+
+  it("rejects impossible duration summaries and version channels without breaking old-server responses", () => {
+    expect(uiTelemetrySummarySchema.safeParse(summary).success).toBe(true);
+    expect(uiTelemetrySummarySchema.safeParse(measured).success).toBe(true);
+    for (const invalid of [
+      { ...measured, features: [{ ...measured.features[0], load_samples: 21 }] },
+      { ...measured, features: [{ ...measured.features[0], load_samples: 0 }] },
+      { ...measured, features: [{ ...measured.features[0], load_total_ms: 1001 }] },
+      { ...measured, features: [{ ...measured.features[0], load_max_ms: undefined }] },
+      { ...measured, other_version_visits: 1 },
+      { ...measured, versions: [{ ...measured.versions[0], ui_version: "private-user" }] },
+      { ...measured, versions: [measured.versions[0], measured.versions[0]] },
+      { ...measured, versions: undefined },
+    ])
+      expect(uiTelemetrySummarySchema.safeParse(invalid).success).toBe(false);
+  });
   it("shows Korean per-feature counts and a non-user rate with an accessible table", async () => {
     mockApi({ "GET /admin/ui-telemetry/summary": () => summary });
     const { container } = renderScreen(<ConsoleUsagePanel />);
@@ -31,6 +105,9 @@ describe("ConsoleUsagePanel", () => {
     expect(within(table).getByText("AI 공급자")).toBeVisible();
     expect(within(table).getByText("25%")).toBeVisible();
     expect(screen.getByText(/순사용자 수나 전체 채택률이 아닙니다/)).toBeVisible();
+    expect(
+      screen.getByText(/이 서버 버전은 화면 표시 시간과 UI 버전 집계를 제공하지 않습니다/),
+    ).toBeVisible();
     expect((await axe.run(container)).violations).toEqual([]);
   });
 

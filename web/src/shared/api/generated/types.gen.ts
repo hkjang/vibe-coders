@@ -4752,9 +4752,14 @@ export type UiSystemStatus = {
     status: 'healthy' | 'degraded';
 };
 
-export type UiTelemetryEventRequest = {
-    event: 'visit' | 'legacy_fallback';
+export type UiTelemetryEventRequest = ({
+    event?: 'visit' | 'legacy_fallback';
+} | {
+    event?: 'page_load';
+}) & {
+    event: 'visit' | 'legacy_fallback' | 'page_load';
     feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    load_ms?: number;
     /**
      * 128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.
      */
@@ -4764,6 +4769,9 @@ export type UiTelemetryEventRequest = {
 export type UiTelemetryFeatureCount = {
     feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     legacy_opens: number;
+    load_max_ms?: number;
+    load_samples?: number;
+    load_total_ms?: number;
     visits: number;
 };
 
@@ -4772,9 +4780,25 @@ export type UiTelemetrySummaryResponse = {
     enabled: boolean;
     features: Array<UiTelemetryFeatureCount>;
     from: string;
+    load_limit_ms?: 120000;
+    load_metrics_available?: boolean;
+    other_version_visits?: number;
     retention_days: 30;
     to: string;
+    version_limit?: 20;
+    versions?: Array<UiTelemetryVersionCount>;
     visit_limit: 100000;
+};
+
+export type UiTelemetryVersionCount = {
+    load_max_ms: number;
+    load_samples: number;
+    load_total_ms: number;
+    /**
+     * Empty means unknown or a custom build; never an arbitrary build label.
+     */
+    ui_version: string;
+    visits: number;
 };
 
 export type UserSummary = {
