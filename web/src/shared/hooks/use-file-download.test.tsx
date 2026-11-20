@@ -2,12 +2,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLayoutEffect, type ReactNode } from "react";
+import { createPath, Router, type Navigator } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useFileDownload, type FileDownloadContext } from "@/shared/hooks/use-file-download";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { tokenStore } from "@/shared/auth/token-store";
 import { AppError } from "@/shared/api/error";
+import { SearchLocationContext } from "@/shared/hooks/search-location";
+
+let location = { pathname: "/app/governance/reports", search: "", key: "initial" };
+const readLocation = () => location;
+const navigator: Navigator = {
+  createHref: (to) => (typeof to === "string" ? to : createPath(to)),
+  go: vi.fn(),
+  push: vi.fn(),
+  replace: vi.fn(),
+};
 
 const runtime = vi.hoisted(() => ({ id: "account_a", read: true, permitted: true, readOnly: false }));
 const notifications = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -54,18 +65,20 @@ function setup(task: (value: FileDownloadContext) => Promise<void>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <QueryClientProvider client={client}>
-        <FeatureAccessContext
-          value={{
-            featureId: "governance.reports",
-            permitted: runtime.permitted,
-            readOnly: runtime.readOnly,
-            status: "preview",
-          }}
-        >
-          {children}
-        </FeatureAccessContext>
-      </QueryClientProvider>
+      <Router location={location} navigator={navigator}>
+        <QueryClientProvider client={client}>
+          <FeatureAccessContext
+            value={{
+              featureId: "governance.reports",
+              permitted: runtime.permitted,
+              readOnly: runtime.readOnly,
+              status: "preview",
+            }}
+          >
+            <SearchLocationContext value={readLocation}>{children}</SearchLocationContext>
+          </FeatureAccessContext>
+        </QueryClientProvider>
+      </Router>
     );
   }
   const view = render(<Harness task={task} />, { wrapper: Wrapper });
@@ -77,6 +90,7 @@ function setup(task: (value: FileDownloadContext) => Promise<void>) {
 }
 beforeEach(() => {
   Object.assign(runtime, { id: "account_a", read: true, permitted: true, readOnly: false });
+  location = { pathname: "/app/governance/reports", search: "", key: "initial" };
   tokenStore.clearAll();
 });
 afterEach(() => {
@@ -145,6 +159,44 @@ describe("file export ownership", () => {
     expect(task).toHaveBeenCalledTimes(2);
     expect(notifications.success).toHaveBeenCalledOnce();
   });
+
+  it.each(["query", "page", "history"])(
+    "discards a file after event-time %s navigation before React commits and permits a fresh export",
+    async (boundary) => {
+      const held = deferred();
+      const saved = vi.fn();
+      const task = vi.fn(async (context: FileDownloadContext) => {
+        await held.promise;
+        context.assertCurrent();
+        saved();
+      });
+      const view = setup(task);
+      await userEvent.click(screen.getByRole("button", { name: "download" }));
+      const oldRun = latestRun;
+      // Router state changes synchronously; React may still render the old filters.
+      location = {
+        pathname: boundary === "page" ? "/app/governance/assets" : location.pathname,
+        search: boundary === "query" ? "?window=7d" : location.search,
+        key: "next-navigation",
+      };
+      await act(async () => {
+        held.resolve();
+      });
+      await act(async () => {
+        await oldRun();
+      });
+      expect(task).toHaveBeenCalledOnce();
+      expect(saved).not.toHaveBeenCalled();
+      expect(notifications.success).not.toHaveBeenCalled();
+      expect(notifications.error).not.toHaveBeenCalled();
+      view.refresh(boundary === "query" ? "7d" : "30d");
+      expect(screen.getByRole("status")).toHaveTextContent("ready");
+      await userEvent.click(screen.getByRole("button", { name: "download" }));
+      await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+      expect(task).toHaveBeenCalledTimes(2);
+      expect(notifications.success).toHaveBeenCalledOnce();
+    },
+  );
 
   it("serializes synchronous clicks and keeps read-only exports available", async () => {
     runtime.readOnly = true;
