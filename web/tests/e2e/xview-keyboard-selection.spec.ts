@@ -37,6 +37,7 @@ async function selectRequest(page: Page, id: string) {
   await checkbox.focus();
   await page.keyboard.press("Space");
   await expect(checkbox).toBeChecked();
+  await expect(checkbox).toBeFocused();
 }
 
 test("최근 200건 밖의 요청을 키보드로 열고 원래 버튼으로 초점을 복원한다", async ({ page, liveGateway }) => {
@@ -130,6 +131,36 @@ test("6,000건의 마지막 페이지까지 접근하며 표 행 수를 제한�
   await expect(page.getByRole("combobox", { name: "페이지 이동", exact: true })).toHaveValue("119");
   await selectRequest(page, "public-buffer-0");
   await expect(table.getByRole("row")).toHaveCount(51);
+});
+
+test("Tab과 Space로 연속 선택하며 펼친 내용과 전체 선택의 초점을 유지한다", async ({ page, liveGateway }) => {
+  await page.clock.install({ time: serverStart });
+  const model = "선택 중에도 펼친 모델 정보를 유지합니다_".repeat(5);
+  liveGateway.points = [
+    { ...livePoint(firstId, serverStart - 30_000), model },
+    livePoint("public-newer", serverStart - 10_000),
+  ];
+  await enter(page);
+  const disclosure = page.locator(".data-table-expandable-text").filter({ hasText: model });
+  await disclosure.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(disclosure).toHaveAttribute("open", "");
+  await selectRequest(page, "public-newer");
+  await expect(disclosure).toHaveAttribute("open", "");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "public-newer 선택", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  const next = page.getByRole("checkbox", { name: `${firstId} 비교 대상으로 선택`, exact: true });
+  await expect(next).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(next).toBeChecked();
+  await expect(next).toBeFocused();
+  const all = page.getByRole("checkbox", { name: "산점도에 표시된 전체 2건 선택", exact: true });
+  await all.focus();
+  await page.keyboard.press("Space");
+  await expect(all).not.toBeChecked();
+  await expect(all).toBeFocused();
+  await expect(disclosure).toHaveAttribute("open", "");
 });
 
 for (const theme of ["light", "dark"] as const) {

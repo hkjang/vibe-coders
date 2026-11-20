@@ -17,6 +17,54 @@ const points = (count: number) =>
   );
 const categoryLabel = () => "정상";
 
+it("Space 선택 후 같은 체크박스와 초점을 유지하고 Tab으로 다음 요청을 선택한다", async () => {
+  const user = userEvent.setup();
+  render(
+    <ScatterRequestTable
+      points={points(2)}
+      metric="latency"
+      categoryLabel={categoryLabel}
+      onSelect={vi.fn()}
+    />,
+  );
+  const first = screen.getByRole("checkbox", { name: "request-1 비교 대상으로 선택" });
+  first.focus();
+  await user.keyboard(" ");
+  expect(first).toBeChecked();
+  expect(first).toHaveFocus();
+  await user.tab();
+  expect(screen.getByRole("button", { name: "request-1 선택" })).toHaveFocus();
+  await user.tab();
+  const next = screen.getByRole("checkbox", { name: "request-0 비교 대상으로 선택" });
+  expect(next).toHaveFocus();
+  await user.keyboard(" ");
+  expect(next).toBeChecked();
+  expect(next).toHaveFocus();
+  expect(screen.getByRole("button", { name: "선택한 2건 비교" })).toBeEnabled();
+});
+
+it("다른 행이나 전체 선택을 바꿔도 펼친 내용과 헤더 초점을 유지한다", async () => {
+  const user = userEvent.setup();
+  const model = "긴 모델 이름의 전체 내용을 선택 중에도 유지합니다_".repeat(5);
+  const data = points(2).map((point, index) => (index === 0 ? { ...point, model } : point));
+  render(
+    <ScatterRequestTable points={data} metric="latency" categoryLabel={categoryLabel} onSelect={vi.fn()} />,
+  );
+  const summary = screen.getByLabelText(`${model} 전체 내용 펼치기 또는 접기`);
+  await user.click(summary);
+  const details = summary.closest("details");
+  expect(details).toHaveAttribute("open");
+  await user.click(screen.getByRole("checkbox", { name: "request-1 비교 대상으로 선택" }));
+  expect(details).toBeInTheDocument();
+  expect(details).toHaveAttribute("open");
+  const all = screen.getByRole("checkbox", { name: "산점도에 표시된 전체 2건 선택" });
+  all.focus();
+  await user.keyboard(" ");
+  expect(all).toBeChecked();
+  expect(all).toHaveFocus();
+  expect(details).toHaveAttribute("open");
+});
+
 it("200건 밖의 요청과 최근 요청을 서로 다른 페이지에서 골라 함께 비교한다", async () => {
   const user = userEvent.setup();
   const onSelect = vi.fn();
