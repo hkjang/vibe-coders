@@ -190,12 +190,31 @@ test("열린 공급자 상세의 기본 링크는 서버 주소 갱신을 따르
       body: '<!doctype html><html lang="ko"><meta charset="utf-8"><title>공개 Legacy 테스트</title><h1>공개 Legacy 테스트 화면</h1></html>',
     }),
   );
-  const popupReady = context.waitForEvent("page");
+  // Observe the native default action after React's bubbling handlers. Chromium
+  // can lose a synthetic background tab despite an uncancelled auxclick; assert
+  // the app's responsibility here, then verify real navigation with Enter below.
+  await page.evaluate(() => {
+    window.addEventListener(
+      "auxclick",
+      (event) => {
+        const target = event.target;
+        document.documentElement.dataset.legacyMiddleClick = JSON.stringify({
+          button: event.button,
+          preventedByApp: event.defaultPrevented,
+          href: target instanceof Element ? target.closest("a")?.getAttribute("href") : null,
+        });
+        // Test-only cancellation avoids creating an unmanaged background target.
+        event.preventDefault();
+      },
+      { once: true },
+    );
+  });
   await detailLink().click({ button: "middle" });
-  const popup = await popupReady;
-  await expect(popup).toHaveURL(origin + next);
-  await expect(popup.getByRole("heading", { name: "공개 Legacy 테스트 화면" })).toBeVisible();
-  await popup.close();
+  expect(
+    await page.evaluate(
+      () => JSON.parse(document.documentElement.dataset.legacyMiddleClick ?? "null") as unknown,
+    ),
+  ).toEqual({ button: 1, preventedByApp: false, href: next });
   await detailLink().focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(origin + next);
