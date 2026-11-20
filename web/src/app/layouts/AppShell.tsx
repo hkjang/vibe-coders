@@ -33,6 +33,7 @@ import {
 
 const refreshValues = new Set([0, 60, 300]);
 const FavoritesDialog = lazy(() => import("./FavoritesDialog"));
+const SessionPermissionsDialog = lazy(() => import("./SessionPermissionsDialog"));
 
 function shortcutReturnTarget(): HTMLElement | null {
   const active = document.activeElement;
@@ -48,6 +49,8 @@ export function AppShell(): React.JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const permissionsReturnFocusRef = useRef<HTMLElement | null>(null);
   const favoritesReturnFocusRef = useRef<HTMLElement | null>(null);
   const userMenuRef = useRef<HTMLDetailsElement>(null);
   const mobileMenuTriggerRef = useRef<HTMLButtonElement>(null);
@@ -289,6 +292,17 @@ export function AppShell(): React.JSX.Element {
                   <span>백엔드 {auth.backendVersion}</span>
                   <span>UI {auth.uiVersion}</span>
                   <span>API {auth.apiVersion}</span>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      permissionsReturnFocusRef.current =
+                        userMenuRef.current?.querySelector("summary") ?? null;
+                      if (userMenuRef.current) userMenuRef.current.open = false;
+                      setPermissionsOpen(true);
+                    }}
+                  >
+                    내 권한 확인
+                  </Button>
                   <RecentScreens
                     onNavigate={() => {
                       if (userMenuRef.current) userMenuRef.current.open = false;
@@ -326,6 +340,20 @@ export function AppShell(): React.JSX.Element {
           onOpenChange={setShortcutsOpen}
           returnFocusRef={shortcutReturnFocusRef}
         />
+        {permissionsOpen ? (
+          <Suspense
+            fallback={
+              <span role="status" className="sr-only">
+                권한 정보를 준비하고 있습니다.
+              </span>
+            }
+          >
+            <SessionPermissionsDialog
+              onClose={() => setPermissionsOpen(false)}
+              returnFocusRef={permissionsReturnFocusRef}
+            />
+          </Suspense>
+        ) : null}
         {favoritesOpen ? (
           <Suspense
             fallback={

@@ -133,6 +133,7 @@ const scenarios = new Set([
   "AUTH-LIVE-058",
   "AUTH-LIVE-059",
   "AUTH-LIVE-060",
+  "AUTH-LIVE-061",
 ]);
 const sourceFiles = new Set([
   "dw-retry-live.spec.ts",

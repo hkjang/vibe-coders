@@ -1,0 +1,107 @@
+.session-permissions {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  font-size: 0.875rem;
+}
+.session-permissions p {
+  margin: 0;
+}
+.session-permission-identity {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+.session-permission-identity div {
+  min-width: 0;
+}
+.session-permission-identity dt {
+  color: var(--color-muted);
+  margin-bottom: var(--space-1);
+}
+.session-permission-identity dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.session-permission-boundary {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-muted-soft);
+  border-radius: var(--radius-medium);
+  color: var(--color-muted);
+}
+.session-permission-raw {
+  display: grid;
+  gap: var(--space-1);
+}
+.session-permission-raw > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.session-permission-raw h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+.session-permission-raw p {
+  color: var(--color-muted);
+}
+.session-permission-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8rem;
+  gap: var(--space-3);
+}
+.session-permission-filters label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.session-permission-filters input,
+.session-permission-filters select {
+  width: 100%;
+  min-width: 0;
+}
+.session-permission-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.session-permission-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+.session-permission-list li > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.session-permission-list code {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-table);
+}
+.session-permission-list p {
+  color: var(--color-muted);
+  margin-top: var(--space-1);
+}
+@media (max-width: 480px) {
+  .session-permission-identity {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .session-permission-identity div {
+    display: grid;
+    grid-template-columns: 4rem minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .session-permission-identity dt {
+    margin: 0;
+  }
+}

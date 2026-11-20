@@ -1429,3 +1429,106 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+test("내 권한은 역할 이름이 아닌 현재 부여값을 표시하고 갱신·검색·초점 복귀를 지원한다", async ({ page }) => {
+  const current = { ...structuredClone(bootstrap), capabilities: { raw_prompt_view: false } };
+  await mockGateway(page, { bootstrapPayload: current });
+  const apiCalls: string[] = [];
+  const loadedScripts: string[] = [];
+  page.on("request", (request) => {
+    if (request.resourceType() === "script") loadedScripts.push(new URL(request.url()).pathname);
+    if (new URL(request.url()).pathname.startsWith("/admin/")) apiCalls.push(new URL(request.url()).pathname);
+  });
+  await page.goto("overview");
+  const menu = page.getByLabel("사용자 메뉴");
+  await expect(menu).toBeVisible();
+  expect(loadedScripts.some((path) => path.includes("/SessionPermissionsDialog-"))).toBe(false);
+  await menu.focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "내 권한 확인" }).focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "내 권한 확인" });
+  await expect(dialog).toBeVisible();
+  expect(loadedScripts.some((path) => path.includes("/SessionPermissionsDialog-"))).toBe(true);
+  await expect(dialog.getByRole("listitem")).toHaveCount(2);
+  await dialog.getByLabel("부여 상태").selectOption("all");
+  await expect(page.locator("details.user-menu")).not.toHaveAttribute("open");
+  const writeRow = dialog
+    .getByRole("listitem")
+    .filter({ has: page.getByText("admin:write", { exact: true }) });
+  await expect(writeRow).toContainText("미부여");
+  await expect(dialog.getByRole("region", { name: "요청 원문 열람" })).toContainText("제한됨");
+  current.user.scopes.push("admin:write");
+  current.capabilities.raw_prompt_view = true;
+  const refreshed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/admin/ui-bootstrap",
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await (await refreshed).finished();
+  await expect(writeRow).toContainText("부여됨");
+  await expect(dialog.getByRole("region", { name: "요청 원문 열람" })).toContainText("허용됨");
+  await dialog.getByLabel("권한 검색").fill("저장하지 않는 권한 검색어");
+  await expect(dialog.getByText("검색 조건에 맞는 권한이 없습니다.")).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      JSON.stringify({
+        local: { ...localStorage },
+        session: { ...sessionStorage },
+        url: location.href,
+      }).includes("저장하지 않는 권한 검색어"),
+    ),
+  ).toBe(false);
+  await dialog.getByLabel("권한 검색").fill("ROUTING:");
+  await dialog.getByLabel("부여 상태").selectOption("granted");
+  await expect(dialog.getByRole("listitem")).toHaveCount(1);
+  await expect(dialog.getByRole("listitem")).toContainText("라우팅 조회");
+  expect(apiCalls).not.toContain("/admin/roles");
+  await dialog.getByRole("button", { name: "닫기", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeFocused();
+});
+
+for (const colorScheme of ["light", "dark"] as const) {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 844, height: 390 },
+  ]) {
+    test(`내 권한 접근성·긴 팀 이름 ${colorScheme} ${viewport.width}`, async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-09-02T04:00:00.000Z"));
+      await page.setViewportSize(viewport);
+      await page.emulateMedia({ colorScheme });
+      await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+      const current = structuredClone(bootstrap);
+      current.user.team_id = "플랫폼-서비스-운영팀-".repeat(9);
+      await mockGateway(page, { bootstrapPayload: current });
+      await page.goto("overview");
+      await page.getByLabel("사용자 메뉴").click();
+      await page.getByRole("button", { name: "내 권한 확인" }).click();
+      const dialog = page.getByRole("dialog", { name: "내 권한 확인" });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "닫기", exact: true })).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await axeViolations(page)).toEqual([]);
+      if (viewport.width !== 844)
+        await expect(page).toHaveScreenshot(`session-permissions-${colorScheme}-${viewport.width}.png`, {
+          animations: "disabled",
+        });
+      const teamDisclosure = dialog.locator(".session-permission-identity summary");
+      await teamDisclosure.focus();
+      await page.keyboard.press("Enter");
+      await expect(dialog.locator(".session-permission-identity details")).toHaveAttribute("open");
+      await page.keyboard.press("Enter");
+      await expect(dialog.locator(".session-permission-identity details")).not.toHaveAttribute("open");
+      await dialog.getByLabel("부여 상태").selectOption("all");
+      await dialog.getByRole("listitem").last().scrollIntoViewIfNeeded();
+      await expect(dialog.getByRole("listitem").last()).toBeInViewport();
+      await expect(dialog.getByRole("button", { name: "닫기", exact: true })).toBeInViewport();
+      await page.keyboard.press("Escape");
+      await expect(page.getByLabel("사용자 메뉴")).toBeFocused();
+    });
+  }
+}
