@@ -128,7 +128,7 @@ func TestAppUITelemetryDeduplicationReorderingAndPrivacy(t *testing.T) {
 	}
 	columns, err := rows.Columns()
 	rows.Close()
-	if err != nil || !reflect.DeepEqual(columns, []string{"visit_hash", "feature_id", "first_seen_epoch", "legacy_open"}) {
+	if err != nil || !reflect.DeepEqual(columns, []string{"visit_hash", "feature_id", "first_seen_epoch", "legacy_open", "ui_version", "load_ms"}) {
 		t.Fatalf("unexpected telemetry columns: %v err=%v", columns, err)
 	}
 	if err := db.Migrate(ctx); err != nil {

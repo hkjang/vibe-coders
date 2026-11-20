@@ -111,7 +111,7 @@ it.each(writes)("$tab $kind 응답 직후 자동 조회가 반영 완료이면 �
     await user.click(screen.getByRole("button", { name: fixture.kind === "revert" ? "되돌리기" : "롤백" }));
   } else {
     if (fixture.kind === "feature") {
-      await user.selectOptions(screen.getByLabelText("전환 상태"), "preview");
+      await user.selectOptions(await screen.findByLabelText("전환 상태"), "preview");
     } else if (fixture.tab === "console") {
       await user.selectOptions(screen.getByLabelText("새 값"), "false");
     } else {

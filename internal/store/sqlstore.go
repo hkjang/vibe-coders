@@ -1404,13 +1404,18 @@ func migrationStatements() []string {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_setting_history_key ON admin_setting_history(key, changed_at)`,
 		// Opt-in console adoption counts. A visit's random ID is stored only as a
-		// digest; this table must never gain caller, request, or navigation metadata.
+		// digest. Only a canonical release and bounded render duration accompany
+		// counts; never store caller, request, or navigation metadata.
 		`CREATE TABLE IF NOT EXISTS app_ui_telemetry_visits (
 			visit_hash TEXT PRIMARY KEY CHECK (length(visit_hash) = 64),
 			feature_id TEXT NOT NULL CHECK (length(feature_id) BETWEEN 1 AND 64),
 			first_seen_epoch BIGINT NOT NULL CHECK (first_seen_epoch > 0),
-			legacy_open INTEGER NOT NULL DEFAULT 0 CHECK (legacy_open IN (0, 1))
+			legacy_open INTEGER NOT NULL DEFAULT 0 CHECK (legacy_open IN (0, 1)),
+			ui_version TEXT NOT NULL DEFAULT '' CHECK (length(ui_version) <= 32),
+			load_ms INTEGER CHECK (load_ms BETWEEN 0 AND 120000)
 		)`,
+		`ALTER TABLE app_ui_telemetry_visits ADD COLUMN ui_version TEXT NOT NULL DEFAULT '' CHECK (length(ui_version) <= 32)`,
+		`ALTER TABLE app_ui_telemetry_visits ADD COLUMN load_ms INTEGER CHECK (load_ms BETWEEN 0 AND 120000)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_ui_telemetry_first_seen ON app_ui_telemetry_visits(first_seen_epoch)`,
 		// Writers lock this one row before touching visits, including expiry. The
 		// count reserves capacity without a full-table count inside that lock.

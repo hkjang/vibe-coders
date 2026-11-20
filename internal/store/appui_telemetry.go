@@ -15,6 +15,7 @@ import (
 const (
 	AppUITelemetryRetentionDays = 30
 	AppUITelemetryVisitLimit    = 100_000
+	AppUITelemetryLoadLimitMS   = 120_000
 )
 
 var (
@@ -29,6 +30,9 @@ type AppUITelemetryCount struct {
 	FeatureID   string `json:"feature_id"`
 	Visits      int64  `json:"visits"`
 	LegacyOpens int64  `json:"legacy_opens"`
+	LoadSamples int64  `json:"load_samples"`
+	LoadTotalMS int64  `json:"load_total_ms"`
+	LoadMaxMS   int64  `json:"load_max_ms"`
 }
 
 // RecordAppUITelemetry records one authorized feature visit or Legacy click.
@@ -40,8 +44,15 @@ type AppUITelemetryCount struct {
 // and a delayed visit never clears the flag. The first receipt time never moves.
 // Reusing an ID for another feature fails, while a full store returns false,nil.
 func (s *SQLStore) RecordAppUITelemetry(ctx context.Context, featureID, visitID string, legacyOpen bool, now time.Time) (bool, error) {
+	return s.RecordAppUITelemetryMetrics(ctx, featureID, visitID, legacyOpen, AppUITelemetryMetrics{}, now)
+}
+
+// RecordAppUITelemetryMetrics adds optional release/render metadata to the same
+// bounded visit. The first accepted duration and nonempty release are immutable;
+// a reordered visit or fallback neither extends retention nor clears a sample.
+func (s *SQLStore) RecordAppUITelemetryMetrics(ctx context.Context, featureID, visitID string, legacyOpen bool, metrics AppUITelemetryMetrics, now time.Time) (bool, error) {
 	if len(featureID) == 0 || len(featureID) > 64 || !appUITelemetryFeaturePattern.MatchString(featureID) ||
-		len(visitID) != 32 || now.IsZero() || now.Unix() <= 0 {
+		len(visitID) != 32 || now.IsZero() || now.Unix() <= 0 || !metrics.valid() {
 		return false, ErrAppUITelemetryInvalidInput
 	}
 	// Require the canonical lowercase hex spelling so one visit cannot acquire
@@ -62,17 +73,28 @@ func (s *SQLStore) RecordAppUITelemetry(ctx context.Context, featureID, visitID 
 		return false, err
 	}
 
-	var storedFeature string
+	var storedFeature, storedVersion string
 	var storedLegacy int
-	err = tx.QueryRowContext(ctx, s.bind(`SELECT feature_id, legacy_open
-		FROM app_ui_telemetry_visits WHERE visit_hash = ?`), visitHash).Scan(&storedFeature, &storedLegacy)
+	var storedLoad sql.NullInt64
+	err = tx.QueryRowContext(ctx, s.bind(`SELECT feature_id, legacy_open, ui_version, load_ms
+		FROM app_ui_telemetry_visits WHERE visit_hash = ?`), visitHash).Scan(&storedFeature, &storedLegacy, &storedVersion, &storedLoad)
 	if err == nil {
-		if storedFeature != featureID {
+		if storedFeature != featureID || (storedVersion != "" && metrics.UIVersion != "" && storedVersion != metrics.UIVersion) {
 			return false, ErrAppUITelemetryVisitConflict
 		}
+		changed := false
 		if legacyOpen && storedLegacy == 0 {
+			storedLegacy, changed = 1, true
+		}
+		if storedVersion == "" && metrics.UIVersion != "" {
+			storedVersion, changed = metrics.UIVersion, true
+		}
+		if !storedLoad.Valid && metrics.LoadMS != nil {
+			storedLoad, changed = sql.NullInt64{Int64: *metrics.LoadMS, Valid: true}, true
+		}
+		if changed {
 			if _, err := tx.ExecContext(ctx, s.bind(`UPDATE app_ui_telemetry_visits
-				SET legacy_open = 1 WHERE visit_hash = ?`), visitHash); err != nil {
+				SET legacy_open = ?, ui_version = ?, load_ms = ? WHERE visit_hash = ?`), storedLegacy, storedVersion, storedLoad, visitHash); err != nil {
 				return false, err
 			}
 		}
@@ -102,8 +124,8 @@ func (s *SQLStore) RecordAppUITelemetry(ctx context.Context, featureID, visitID 
 		legacy = 1
 	}
 	if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO app_ui_telemetry_visits
-		(visit_hash, feature_id, first_seen_epoch, legacy_open) VALUES (?, ?, ?, ?)`),
-		visitHash, featureID, now.Unix(), legacy); err != nil {
+		(visit_hash, feature_id, first_seen_epoch, legacy_open, ui_version, load_ms) VALUES (?, ?, ?, ?, ?, ?)`),
+		visitHash, featureID, now.Unix(), legacy, metrics.UIVersion, metrics.LoadMS); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -126,7 +148,7 @@ func (s *SQLStore) AppUITelemetrySummary(ctx context.Context, since, now time.Ti
 	if since.Unix() < cutoff {
 		since = time.Unix(cutoff, 0)
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT feature_id, COUNT(*), SUM(legacy_open)
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT feature_id, COUNT(*), SUM(legacy_open), COUNT(load_ms), COALESCE(SUM(load_ms), 0), COALESCE(MAX(load_ms), 0)
 		FROM app_ui_telemetry_visits
 		WHERE first_seen_epoch > ? AND first_seen_epoch >= ? AND first_seen_epoch <= ?
 		GROUP BY feature_id ORDER BY feature_id`), cutoff, since.Unix(), now.Unix())
@@ -136,7 +158,7 @@ func (s *SQLStore) AppUITelemetrySummary(ctx context.Context, since, now time.Ti
 	defer rows.Close()
 	for rows.Next() {
 		var count AppUITelemetryCount
-		if err := rows.Scan(&count.FeatureID, &count.Visits, &count.LegacyOpens); err != nil {
+		if err := rows.Scan(&count.FeatureID, &count.Visits, &count.LegacyOpens, &count.LoadSamples, &count.LoadTotalMS, &count.LoadMaxMS); err != nil {
 			return nil, err
 		}
 		counts = append(counts, count)

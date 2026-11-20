@@ -5,10 +5,8 @@ import { useSearchState } from "@/shared/hooks/use-search-state";
 import { RuntimeSettingUnavailable } from "./RuntimeSettingUnavailable";
 
 import { featureTitles } from "./console-rollout-display";
-import {
-  ConsoleFeatureDialog,
-  type ConsoleFeatureEdit,
-} from "@/features/system/settings/ConsoleFeatureDialog";
+import type { ConsoleFeatureEdit } from "@/features/system/settings/ConsoleFeatureDialog";
+import { LazyConsoleFeatureDialog } from "@/features/system/settings/LazyConsoleFeatureDialog";
 import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
 import type { SettingRecovery } from "./SettingsRecoveryDialog";
 import { LazySettingsRecovery } from "./LazySettingsRecovery";
@@ -309,7 +307,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
           returnFocusRef={triggerRef}
         />
       ) : null}
-      <ConsoleFeatureDialog
+      <LazyConsoleFeatureDialog
         selectedKey={selectedKey}
         open={editing !== undefined}
         onOpenChange={(next) => {

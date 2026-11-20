@@ -11,6 +11,7 @@ import { NotFoundPage, RouteErrorPage } from "@/app/router/RouteErrorPage";
 import { UnsavedChangesBoundary } from "@/app/router/UnsavedChangesBoundary";
 import { featurePath, migrationRegistry, type MigrationFeature } from "@/config/migration-registry";
 import { featureModule } from "@/features/registry";
+import { observeRouteLoads } from "@/shared/telemetry/route-load";
 
 function featureRoute(feature: MigrationFeature): RouteObject {
   const path = featurePath(feature).replace(/^\//, "");
@@ -42,7 +43,7 @@ function featureRoute(feature: MigrationFeature): RouteObject {
 const featureRoutes: RouteObject[] = migrationRegistry.map(featureRoute);
 
 export function createAppRouter(): ReturnType<typeof createBrowserRouter> {
-  return createBrowserRouter(
+  const router = createBrowserRouter(
     [
       {
         element: <UnsavedChangesBoundary />,
@@ -81,4 +82,6 @@ export function createAppRouter(): ReturnType<typeof createBrowserRouter> {
     ],
     { basename: "/app" },
   );
+  observeRouteLoads(router);
+  return router;
 }

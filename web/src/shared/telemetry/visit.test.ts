@@ -31,6 +31,27 @@ afterEach(() => {
 });
 
 describe("feature visit transport", () => {
+  it("sends one bounded load sample with the same nonce, including a valid zero", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    const transport = mockTransport(fetch);
+    const visit = createFeatureVisit("overview");
+    for (const invalid of [-1, 120_001, 0.5, Number.NaN, Number.POSITIVE_INFINITY])
+      visit.recordPageLoad(invalid);
+    expect(fetch).not.toHaveBeenCalled();
+    visit.recordPageLoad(0);
+    visit.recordPageLoad(99);
+    visit.recordVisit();
+    await transport.settled();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const first = transport.request.mock.calls[0]?.[1];
+    const second = transport.request.mock.calls[1]?.[1];
+    expect(first?.body).toEqual({ ...(second?.body as object), event: "page_load", load_ms: 0 });
+    expect(first).toMatchObject({
+      retryUnauthorized: false,
+      timeoutMs: 2_000,
+      referrerPolicy: "no-referrer",
+    });
+  });
   it("sends each event once with one fresh 32-hex visit ID and accepts empty 204 responses", async () => {
     const fetch = vi.fn(async () => new Response(null, { status: 204 }));
     const transport = mockTransport(fetch);
