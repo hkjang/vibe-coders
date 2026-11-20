@@ -10,7 +10,7 @@ import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
-import { DataTable } from "@/shared/data-table/DataTable";
+import { VirtualDataTable as DataTable } from "@/shared/data-table/VirtualDataTable";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { useFeatureReadOwner, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
@@ -19,7 +19,7 @@ import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/
 import { formatNumber } from "@/shared/utils/format";
 import { toolColumns, serverColumns, catalogColumns, trustColumns, type ToolRow } from "./mcp-tool-columns";
 import { useMcpToolData } from "./use-mcp-tool-data";
-import { ToolRiskDialog } from "./ToolRiskDialog";
+import { ToolRiskDialogLoader as ToolRiskDialog } from "./ToolRiskDialogLoader";
 
 const riskOptions = [
   { value: "", label: "전체 위험도" },
@@ -71,6 +71,14 @@ function McpToolsContent({ owner, scopeCanWrite }: { owner: FeatureReadOwner; sc
   const [searchError, setSearchError] = useState<string | undefined>();
   const [editing, setEditing] = useState<ToolRow | undefined>();
   const { remember: rememberTrigger, returnFocusRef: editTriggerRef } = useReturnFocus();
+  const columns = useMemo(
+    () =>
+      toolColumns(canWrite, (row, trigger) => {
+        rememberTrigger(trigger);
+        setEditing(row);
+      }),
+    [canWrite, rememberTrigger],
+  );
 
   const server = params.get("server") ?? "";
   const tool = params.get("tool") ?? "";
@@ -227,10 +235,7 @@ function McpToolsContent({ owner, scopeCanWrite }: { owner: FeatureReadOwner; sc
         ) : (
           <DataTable
             caption="MCP 도구 위험 등급"
-            columns={toolColumns(canWrite, (row, trigger) => {
-              rememberTrigger(trigger);
-              setEditing(row);
-            })}
+            columns={columns}
             data={toolRows}
             loading={tools.isPending}
             error={tools.isError && !tools.data ? "도구 위험 등급을 불러오지 못했습니다." : undefined}

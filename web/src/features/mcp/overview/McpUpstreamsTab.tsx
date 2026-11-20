@@ -8,7 +8,7 @@ import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 
 import { QueryNotice } from "@/features/mcp/mcp-ui";
-import { UpstreamFormDialog } from "@/features/mcp/overview/UpstreamFormDialog";
+import { UpstreamFormDialogLoader as UpstreamFormDialog } from "./UpstreamFormDialogLoader";
 import { apiClient } from "@/shared/api/client";
 import { isAppError } from "@/shared/api/error";
 import { withPathParams } from "@/shared/api/endpoint-factory";
@@ -242,14 +242,16 @@ function McpUpstreamsContent({
         />
       )}
 
-      <UpstreamFormDialog
-        key={`upstream-form-${formInstance}`}
-        canWrite={canWrite}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        returnFocusRef={createButtonRef}
-        upstream={editing}
-      />
+      {formOpen ? (
+        <UpstreamFormDialog
+          key={`upstream-form-${formInstance}`}
+          canWrite={canWrite}
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          returnFocusRef={createButtonRef}
+          upstream={editing}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={deleteTarget !== undefined}

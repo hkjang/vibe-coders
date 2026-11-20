@@ -1,0 +1,15 @@
+.data-table-scroll-virtual {
+  max-height: min(65vh, 36rem);
+  min-height: 16rem;
+  overscroll-behavior-y: contain;
+  /* The virtualizer owns height corrections; browser anchoring would apply them twice. */
+  overflow-anchor: none;
+}
+.data-table-scroll-virtual .data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.data-table .data-table-virtual-spacer td {
+  padding: 0;
+  border: 0;
+}

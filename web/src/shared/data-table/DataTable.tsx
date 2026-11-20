@@ -20,6 +20,7 @@ import {
   useDataTableOverflow,
 } from "@/shared/data-table/use-data-table-layout";
 import type { DataTableHeaderContentProps } from "./DataTableColumnHelp";
+import type { VirtualRowAttributes, VirtualTableBodyProps } from "./virtual-table-types";
 import { TableStateCell } from "@/shared/data-table/TableStateCell";
 import { DataTableResizeHandle } from "@/shared/data-table/DataTableResizeHandle";
 
@@ -61,13 +62,15 @@ interface DataTableBaseProps<TData extends RowData> {
    * widths. Row data, filters and cursors are never written to storage.
    */
   tableId?: string;
+  /** Optional large-row renderer. Server data and pagination remain owned by the caller. */
+  virtualRows?: ComponentType<VirtualTableBodyProps>;
 }
 
 type DataTableRowAction<TData extends RowData> =
   | { getRowActionLabel?: never; onRowClick?: never }
   | { getRowActionLabel: (row: TData) => string; onRowClick: (row: TData) => void };
 
-type DataTableProps<TData extends RowData> = DataTableBaseProps<TData> & DataTableRowAction<TData>;
+export type DataTableProps<TData extends RowData> = DataTableBaseProps<TData> & DataTableRowAction<TData>;
 
 const skeletonRowCount = 5;
 
@@ -94,6 +97,7 @@ export function DataTable<TData extends RowData>({
   pageSizeControl,
   sorting,
   tableId,
+  virtualRows: RowWindow,
 }: DataTableProps<TData>): React.JSX.Element {
   const layout = useDataTableLayout({ columns, data, getRowId, lockedColumnIds, tableId });
   const { scrollRef, scrollState, updateScrollState } = useDataTableOverflow(
@@ -106,6 +110,8 @@ export function DataTable<TData extends RowData>({
   const { table } = layout;
   const columnCount = Math.max(1, layout.visibleColumnCount + (onRowClick ? 1 : 0));
   const rows = table.getRowModel().rows;
+  const windowed = Boolean(RowWindow && !loading && !error && rows.length > 0);
+  const fixedColumns = layout.configurable || windowed;
   const currentPage = Math.min(Math.max(pageIndex, 0), Math.max(pageCount - 1, 0));
   const activateRow = (event: ReactMouseEvent<HTMLTableRowElement>, original: TData): void => {
     if (!onRowClick || event.defaultPrevented || interactiveRowTarget(event.target, event.currentTarget))
@@ -113,8 +119,43 @@ export function DataTable<TData extends RowData>({
     onRowClick(original);
   };
 
+  const renderRow = (rowIndex: number, attributes?: VirtualRowAttributes) => {
+    const row = rows[rowIndex];
+    if (!row) return null;
+    return (
+      <tr
+        key={row.id}
+        data-table-row-index={rowIndex}
+        className={onRowClick ? "data-table-row-action" : undefined}
+        onClick={onRowClick ? (event) => activateRow(event, row.original) : undefined}
+        {...attributes}
+      >
+        {row.getVisibleCells().map((cell) => (
+          <td key={cell.id} style={fixedColumns ? { width: cell.column.getSize() } : undefined}>
+            <div className="data-table-cell-content">
+              <table.FlexRender cell={cell} />
+            </div>
+          </td>
+        ))}
+        {onRowClick && getRowActionLabel ? (
+          <td className="data-table-action-cell">
+            <Button
+              size="small"
+              variant="ghost"
+              aria-label={getRowActionLabel(row.original)}
+              data-table-row-action
+              onClick={() => onRowClick(row.original)}
+            >
+              상세
+            </Button>
+          </td>
+        ) : null}
+      </tr>
+    );
+  };
+
   const configuredTableWidth = table.getTotalSize() + (onRowClick ? 72 : 0);
-  const configuredTableStyle: CSSProperties | undefined = layout.configurable
+  const configuredTableStyle: CSSProperties | undefined = fixedColumns
     ? {
         minWidth: `${configuredTableWidth}px`,
         tableLayout: "fixed",
@@ -159,17 +200,20 @@ export function DataTable<TData extends RowData>({
         >
           <div
             ref={scrollRef}
-            className="data-table-scroll"
-            tabIndex={layout.configurable ? (scrollState.overflowing ? 0 : undefined) : 0}
+            className={windowed ? "data-table-scroll data-table-scroll-virtual" : "data-table-scroll"}
+            tabIndex={windowed || !layout.configurable || scrollState.overflowing ? 0 : undefined}
             aria-label={
-              scrollState.overflowing
-                ? `${caption} 표 영역. 좌우로 스크롤하면 추가 열을 볼 수 있습니다.`
-                : `${caption} 표 영역`
+              windowed
+                ? `${caption} 표 영역. 위아래로 이동해 전체 행을 볼 수 있습니다.`
+                : scrollState.overflowing
+                  ? `${caption} 표 영역. 좌우로 스크롤하면 추가 열을 볼 수 있습니다.`
+                  : `${caption} 표 영역`
             }
             onScroll={updateScrollState}
           >
             <table
-              className={layout.configurable ? "data-table" : "data-table data-table-auto"}
+              className={fixedColumns ? "data-table" : "data-table data-table-auto"}
+              aria-rowcount={windowed ? rows.length + table.getHeaderGroups().length : undefined}
               style={configuredTableStyle}
             >
               <caption className="sr-only">{caption}</caption>
@@ -209,7 +253,7 @@ export function DataTable<TData extends RowData>({
                                 ? "descending"
                                 : undefined
                           }
-                          style={layout.configurable ? { width: size } : undefined}
+                          style={fixedColumns ? { width: size } : undefined}
                         >
                           <HeaderContent
                             label={label}
@@ -258,81 +302,61 @@ export function DataTable<TData extends RowData>({
                   </tr>
                 ))}
               </thead>
-              <tbody>
-                {loading ? (
-                  Array.from({ length: skeletonRowCount }, (_, rowIndex) => (
-                    <tr className="data-table-skeleton-row" aria-hidden="true" key={`skeleton-${rowIndex}`}>
-                      {layout.visibleLeafColumns.length === 0 ? (
-                        <td colSpan={columnCount}>
-                          <span className="skeleton data-table-skeleton-line" />
-                        </td>
-                      ) : (
-                        layout.visibleLeafColumns.map((column) => (
-                          <td
-                            key={column.id}
-                            style={layout.configurable ? { width: column.getSize() } : undefined}
-                          >
+              {windowed && RowWindow ? (
+                <RowWindow
+                  rowKeys={rows.map((row) => row.id)}
+                  columnCount={columnCount}
+                  headerRowCount={table.getHeaderGroups().length}
+                  scrollRef={scrollRef}
+                  layoutVersion={layout.layoutVersion}
+                  renderRow={renderRow}
+                />
+              ) : (
+                <tbody>
+                  {loading ? (
+                    Array.from({ length: skeletonRowCount }, (_, rowIndex) => (
+                      <tr className="data-table-skeleton-row" aria-hidden="true" key={`skeleton-${rowIndex}`}>
+                        {layout.visibleLeafColumns.length === 0 ? (
+                          <td colSpan={columnCount}>
                             <span className="skeleton data-table-skeleton-line" />
                           </td>
-                        ))
-                      )}
-                      {onRowClick && layout.visibleLeafColumns.length > 0 ? (
-                        <td className="data-table-action-cell">
-                          <span className="skeleton data-table-skeleton-action" />
-                        </td>
-                      ) : null}
-                    </tr>
-                  ))
-                ) : error ? (
-                  <tr>
-                    <TableStateCell colSpan={columnCount} error>
-                      <span>{error}</span>
-                      {onRetry ? (
-                        <Button size="small" onClick={onRetry}>
-                          다시 시도
-                        </Button>
-                      ) : null}
-                    </TableStateCell>
-                  </tr>
-                ) : rows.length === 0 ? (
-                  <tr>
-                    <TableStateCell colSpan={columnCount}>{emptyMessage}</TableStateCell>
-                  </tr>
-                ) : (
-                  rows.map((row, rowIndex) => (
-                    <tr
-                      key={row.id}
-                      data-table-row-index={rowIndex}
-                      className={onRowClick ? "data-table-row-action" : undefined}
-                      onClick={onRowClick ? (event) => activateRow(event, row.original) : undefined}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <td
-                          key={cell.id}
-                          style={layout.configurable ? { width: cell.column.getSize() } : undefined}
-                        >
-                          <div className="data-table-cell-content">
-                            <table.FlexRender cell={cell} />
-                          </div>
-                        </td>
-                      ))}
-                      {onRowClick && getRowActionLabel ? (
-                        <td className="data-table-action-cell">
-                          <Button
-                            size="small"
-                            variant="ghost"
-                            aria-label={getRowActionLabel(row.original)}
-                            data-table-row-action
-                            onClick={() => onRowClick(row.original)}
-                          >
-                            상세
+                        ) : (
+                          layout.visibleLeafColumns.map((column) => (
+                            <td
+                              key={column.id}
+                              style={layout.configurable ? { width: column.getSize() } : undefined}
+                            >
+                              <span className="skeleton data-table-skeleton-line" />
+                            </td>
+                          ))
+                        )}
+                        {onRowClick && layout.visibleLeafColumns.length > 0 ? (
+                          <td className="data-table-action-cell">
+                            <span className="skeleton data-table-skeleton-action" />
+                          </td>
+                        ) : null}
+                      </tr>
+                    ))
+                  ) : error ? (
+                    <tr>
+                      <TableStateCell colSpan={columnCount} error>
+                        <span>{error}</span>
+                        {onRetry ? (
+                          <Button size="small" onClick={onRetry}>
+                            다시 시도
                           </Button>
-                        </td>
-                      ) : null}
+                        ) : null}
+                      </TableStateCell>
                     </tr>
-                  ))
-                )}
-              </tbody>
+                  ) : rows.length === 0 ? (
+                    <tr>
+                      <TableStateCell colSpan={columnCount}>{emptyMessage}</TableStateCell>
+                    </tr>
+                  ) : (
+                    rows.map((_, index) => renderRow(index))
+                  )}
+                </tbody>
+              )}
             </table>
           </div>
         </div>

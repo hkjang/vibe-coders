@@ -13,6 +13,8 @@ export const ROUTE_RAW_LIMIT = 250_000;
 // a route exemption: static reachability still fails and ordinary routes keep
 // their original limit. Browser tests verify the activation boundary.
 export const INTERACTIVE_FEATURES = {
+  "src/features/mcp/overview/ToolRiskDialog.tsx": { rawBytes: 55_000, wireBytes: 22_000 },
+  "src/features/mcp/overview/UpstreamFormDialog.tsx": { rawBytes: 65_000, wireBytes: 25_000 },
   "src/features/security/redteam/redteam-csv.ts": { rawBytes: 5_000, wireBytes: 2_500 },
   "src/features/security/redteam/probe-csv-file.ts": { rawBytes: 12_000, wireBytes: 6_000 },
   "src/features/security/redteam/ProbeCsvImportDialog.tsx": { rawBytes: 20_000, wireBytes: 8_000 },
