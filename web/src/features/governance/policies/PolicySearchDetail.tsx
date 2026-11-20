@@ -15,6 +15,7 @@ import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 import { formatNumber } from "@/shared/utils/format";
+import { PolicyLegacyLink } from "./PolicyLegacyLink";
 
 /** Read-only navigation detail; policy execution and editing remain in their existing flows. */
 export function PolicySearchDetail(): React.JSX.Element | null {
@@ -176,6 +177,7 @@ function PolicyDetailContent({
             </div>
           </dl>
           <p>조건·동작 본문은 이 요약에 표시하지 않습니다. 변경은 정책 목록의 검토 절차를 이용하세요.</p>
+          <PolicyLegacyLink id={selected.id} />
         </>
       )}
       <Button

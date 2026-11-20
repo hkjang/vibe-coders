@@ -78,6 +78,7 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 		ClientID: "vibe-browser", ClientSecret: fixture.ClientSecret,
 		RedirectURI: "https://127.0.0.1:4187/auth/keycloak/callback",
 		Scopes:      []string{"openid", "profile", "email"}, DefaultRole: "viewer",
+		RoleMap:   map[string]string{"vibe-admin": "admin", "vibe-team-admin": "team_admin", "vibe-auditor": "readonly_admin", "vibe-ops": "ops_admin"},
 		RoleClaim: "realm_access.roles", GroupClaim: "groups", AllowLocalLogin: true,
 	}
 
@@ -214,6 +215,40 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 		return string(encoded)
 	}
 	accessBefore := accessSnapshot()
+
+	policyID := "SSO 정책 +%2F?&#/exact"
+	policyIDs := []string{policyID, strings.Repeat("😀", 512), "other-policy", "__proto__"}
+	for i, id := range policyIDs {
+		description := "선택한 정책 설명"
+		if i == 1 {
+			description = strings.Repeat("가", 16383) + "😀policy-final-tail"
+		}
+		if i == 2 {
+			description = "다른 정책 설명"
+		}
+		rules := []store.PolicyRule{}
+		if i != 2 {
+			for j := 0; j < 2; j++ {
+				rules = append(rules, store.PolicyRule{ID: fmt.Sprintf("policy-handoff-%d-%d", i, j), PolicyID: id, Name: fmt.Sprintf("저장된 정책 규칙 %d", j), Enabled: j == 1, Priority: j + 10,
+					Conditions: map[string]any{"team_id": "shared-access-id", "model": "saved-policy-model", "note": description}, Actions: map[string]any{"require_approval": true, "deny_models": []string{"denied-policy-model"}}})
+			}
+		}
+		if err := db.UpsertPolicyWithRules(t.Context(), store.Policy{ID: id, Name: "동일 정책 제목", Description: description, Enabled: false, Priority: 7 + i, RolloutPercent: 25}, rules); err != nil {
+			t.Fatal("policy fixture unavailable")
+		}
+	}
+	policiesSnapshot := func() string {
+		policies, err := db.ListPolicies(t.Context())
+		if err != nil {
+			t.Fatal("policy snapshot unavailable")
+		}
+		raw, err := json.Marshal(policies)
+		if err != nil {
+			t.Fatal("policy snapshot invalid")
+		}
+		return string(raw)
+	}
+	policiesBefore := policiesSnapshot()
 
 	schemaName := "SSO 스키마 +%2F?&#/exact"
 	schemaTables := make([]string, 51)
@@ -553,17 +588,17 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 			Status   string `json:"status"`
 		} `json:"tests"`
 	}
-	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 52 {
+	if json.Unmarshal(summaryBytes, &summary) != nil || summary.Status != "passed" || len(summary.Tests) != 56 {
 		t.Fatal("Keycloak product summary incomplete")
 	}
 	seen := map[string]bool{}
 	for _, test := range summary.Tests {
-		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024" && test.Scenario != "KEYCLOAK-LIVE-025" && test.Scenario != "KEYCLOAK-LIVE-026" && test.Scenario != "KEYCLOAK-LIVE-027" && test.Scenario != "KEYCLOAK-LIVE-028" && test.Scenario != "KEYCLOAK-LIVE-029" && test.Scenario != "KEYCLOAK-LIVE-030" && test.Scenario != "KEYCLOAK-LIVE-031" && test.Scenario != "KEYCLOAK-LIVE-032" && test.Scenario != "KEYCLOAK-LIVE-033" && test.Scenario != "KEYCLOAK-LIVE-034" && test.Scenario != "KEYCLOAK-LIVE-035" && test.Scenario != "KEYCLOAK-LIVE-036" && test.Scenario != "KEYCLOAK-LIVE-037" && test.Scenario != "KEYCLOAK-LIVE-038" && test.Scenario != "KEYCLOAK-LIVE-039" && test.Scenario != "KEYCLOAK-LIVE-040" && test.Scenario != "KEYCLOAK-LIVE-041" && test.Scenario != "KEYCLOAK-LIVE-042" && test.Scenario != "KEYCLOAK-LIVE-043" && test.Scenario != "KEYCLOAK-LIVE-044" && test.Scenario != "KEYCLOAK-LIVE-045" && test.Scenario != "KEYCLOAK-LIVE-046" && test.Scenario != "KEYCLOAK-LIVE-047" && test.Scenario != "KEYCLOAK-LIVE-048" && test.Scenario != "KEYCLOAK-LIVE-049" && test.Scenario != "KEYCLOAK-LIVE-050" && test.Scenario != "KEYCLOAK-LIVE-051" && test.Scenario != "KEYCLOAK-LIVE-052") {
+		if test.Status != "passed" || seen[test.Scenario] || (test.Scenario != "KEYCLOAK-LIVE-001" && test.Scenario != "KEYCLOAK-LIVE-002" && test.Scenario != "KEYCLOAK-LIVE-003" && test.Scenario != "KEYCLOAK-LIVE-004" && test.Scenario != "KEYCLOAK-LIVE-005" && test.Scenario != "KEYCLOAK-LIVE-006" && test.Scenario != "KEYCLOAK-LIVE-007" && test.Scenario != "KEYCLOAK-LIVE-008" && test.Scenario != "KEYCLOAK-LIVE-009" && test.Scenario != "KEYCLOAK-LIVE-010" && test.Scenario != "KEYCLOAK-LIVE-011" && test.Scenario != "KEYCLOAK-LIVE-012" && test.Scenario != "KEYCLOAK-LIVE-013" && test.Scenario != "KEYCLOAK-LIVE-014" && test.Scenario != "KEYCLOAK-LIVE-015" && test.Scenario != "KEYCLOAK-LIVE-016" && test.Scenario != "KEYCLOAK-LIVE-017" && test.Scenario != "KEYCLOAK-LIVE-018" && test.Scenario != "KEYCLOAK-LIVE-019" && test.Scenario != "KEYCLOAK-LIVE-020" && test.Scenario != "KEYCLOAK-LIVE-021" && test.Scenario != "KEYCLOAK-LIVE-022" && test.Scenario != "KEYCLOAK-LIVE-023" && test.Scenario != "KEYCLOAK-LIVE-024" && test.Scenario != "KEYCLOAK-LIVE-025" && test.Scenario != "KEYCLOAK-LIVE-026" && test.Scenario != "KEYCLOAK-LIVE-027" && test.Scenario != "KEYCLOAK-LIVE-028" && test.Scenario != "KEYCLOAK-LIVE-029" && test.Scenario != "KEYCLOAK-LIVE-030" && test.Scenario != "KEYCLOAK-LIVE-031" && test.Scenario != "KEYCLOAK-LIVE-032" && test.Scenario != "KEYCLOAK-LIVE-033" && test.Scenario != "KEYCLOAK-LIVE-034" && test.Scenario != "KEYCLOAK-LIVE-035" && test.Scenario != "KEYCLOAK-LIVE-036" && test.Scenario != "KEYCLOAK-LIVE-037" && test.Scenario != "KEYCLOAK-LIVE-038" && test.Scenario != "KEYCLOAK-LIVE-039" && test.Scenario != "KEYCLOAK-LIVE-040" && test.Scenario != "KEYCLOAK-LIVE-041" && test.Scenario != "KEYCLOAK-LIVE-042" && test.Scenario != "KEYCLOAK-LIVE-043" && test.Scenario != "KEYCLOAK-LIVE-044" && test.Scenario != "KEYCLOAK-LIVE-045" && test.Scenario != "KEYCLOAK-LIVE-046" && test.Scenario != "KEYCLOAK-LIVE-047" && test.Scenario != "KEYCLOAK-LIVE-048" && test.Scenario != "KEYCLOAK-LIVE-049" && test.Scenario != "KEYCLOAK-LIVE-050" && test.Scenario != "KEYCLOAK-LIVE-051" && test.Scenario != "KEYCLOAK-LIVE-052" && test.Scenario != "KEYCLOAK-LIVE-053" && test.Scenario != "KEYCLOAK-LIVE-054" && test.Scenario != "KEYCLOAK-LIVE-055" && test.Scenario != "KEYCLOAK-LIVE-056") {
 			t.Fatal("Keycloak product scenario failed or duplicated")
 		}
 		seen[test.Scenario] = true
 	}
-	for _, expected := range []struct{ email, role string }{{"existing@example.invalid", "admin"}, {"new@example.invalid", "admin"}, {"reader@example.invalid", "readonly_admin"}, {"routing-reader@example.invalid", "team_admin"}} {
+	for _, expected := range []struct{ email, role string }{{"existing@example.invalid", "admin"}, {"new@example.invalid", "admin"}, {"reader@example.invalid", "readonly_admin"}, {"routing-reader@example.invalid", "team_admin"}, {"policy-denied@example.invalid", "ops_admin"}} {
 		user, found, err := db.AuthUserByEmail(t.Context(), expected.email)
 		if err != nil || !found || user.Role != expected.role || user.Status != "active" {
 			t.Fatal("real IdP provisioning did not persist the expected account and role")
@@ -573,7 +608,7 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 		}
 	}
 	users, err := db.ListAuthUsers(t.Context())
-	if err != nil || len(users) != 8 {
+	if err != nil || len(users) != 9 {
 		t.Fatal("real IdP provisioning duplicated or lost a local/SSO account")
 	}
 	conflictAccounts := 0
@@ -584,6 +619,9 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	}
 	if conflictAccounts != 1 {
 		t.Fatal("email collision did not produce exactly one separate SSO-only account")
+	}
+	if policiesBefore != policiesSnapshot() {
+		t.Fatal("read-only handoff changed stored policy definitions or rules")
 	}
 	if accessBefore != accessSnapshot() {
 		t.Fatal("read-only handoff changed accounts, teams, memberships or credentials")
@@ -623,5 +661,5 @@ func TestKeycloakProductBrowserIntegration(t *testing.T) {
 	if modelUpstreamMutations.Load() != 0 {
 		t.Fatal("model navigation mutated an upstream")
 	}
-	t.Log("thirty-three real Keycloak HTTPS browser scenarios, scoped schema/access and persisted data preservation checks passed")
+	t.Log("fifty-six real Keycloak HTTPS browser scenarios and persisted data preservation checks passed")
 }

@@ -183,6 +183,7 @@ export const uiBootstrapSchema = z.object({
       legacy_session_detail: z.boolean().optional(),
       legacy_access_detail: z.boolean().optional(),
       legacy_routing_rule_detail: z.boolean().optional(),
+      legacy_policy_detail: z.boolean().optional(),
       legacy_request_filters: z.boolean().optional(),
     })
     .default({ raw_prompt_view: false }),

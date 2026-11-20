@@ -4500,6 +4500,10 @@ export type UiBootstrapResponse = {
          */
         legacy_model_detail?: boolean;
         /**
+         * Opens the exact policy in a read-only Legacy detail through login and SSO using the existing authorized policy GET. Does not execute, simulate or modify policies.
+         */
+        legacy_policy_detail?: boolean;
+        /**
          * Preserves supported prompt library tabs, filters and selected asset in Legacy. Does not grant access or execute mutations.
          */
         legacy_prompt_library?: boolean;
