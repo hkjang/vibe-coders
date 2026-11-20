@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { apiClient } from "@/shared/api/client";
 import type { RoutingRule } from "@/shared/api/domains/routing";
 import { routingDeleteEndpoints } from "@/shared/api/domains/routing-delete";

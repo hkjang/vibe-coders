@@ -216,11 +216,14 @@ test("전송 중 피드백은 현재 읽기401 뒤 늦은 성공에서 토스트
   await page.getByRole("button", { name: "피드백 남기기", exact: true }).click();
   const form = page.getByRole("dialog", { name: "피드백 남기기", exact: true });
   await form.getByLabel("의견", { exact: true }).fill(replacement);
+  // Reach the end of the existing one-minute read interval before sending.
+  // Holding the write for 61 seconds would test its 15-second timeout instead.
+  await page.clock.runFor(55_000);
   gateway.holdFeedback();
   await form.getByRole("button", { name: "등록", exact: true }).click();
   await expect.poll(() => gateway.writes.length).toBe(1);
   gateway.revokeBackendRead();
-  await page.clock.runFor(61_000); // Existing operator-selected background read.
+  await page.clock.runFor(6_000); // Read denial occurs while the write is still pending.
   await expect(page.getByText("조회 권한을 다시 확인하세요.", { exact: true })).toBeVisible();
   await expect(form).toHaveCount(0);
   await noDraftInputs(page);

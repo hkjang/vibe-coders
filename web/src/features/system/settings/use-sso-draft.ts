@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { useInlineSettingsDraft } from "@/features/system/settings/use-inline-settings-draft";
 import { routeId, systemSettingsKeys } from "@/features/system/settings/use-system-settings";

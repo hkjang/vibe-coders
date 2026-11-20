@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { apiClient } from "@/shared/api/client";
 import {
   domainReviewAckMatches,

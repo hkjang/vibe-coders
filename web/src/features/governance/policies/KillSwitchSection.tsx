@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { OctagonAlert, Play } from "lucide-react";
 import { useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { tokenStore } from "@/shared/auth/token-store";
 import { FeatureAccessContext } from "@/shared/feature-access/context";

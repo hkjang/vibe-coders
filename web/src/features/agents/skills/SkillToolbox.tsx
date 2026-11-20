@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useSkillScope, useSkillReadAction, useSkillOperationAccess } from "./skill-scope";
 import { useId, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { severityTone, skillStatusLabels } from "@/features/agents/skills/skill-form";
 import { apiClient } from "@/shared/api/client";

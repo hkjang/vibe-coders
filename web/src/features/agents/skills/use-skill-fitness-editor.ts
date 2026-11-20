@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSkillRead, useSkillScope, useSkillOperationAccess } from "./skill-scope";
 import { featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import {
   confirmedFitness,

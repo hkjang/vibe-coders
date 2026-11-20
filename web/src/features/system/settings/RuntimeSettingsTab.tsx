@@ -3,7 +3,7 @@ import { settingColumns } from "./runtime-setting-columns";
 import { RuntimeSettingUnavailable } from "./RuntimeSettingUnavailable";
 import { Download, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/shared/notifications/toast";
 
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
