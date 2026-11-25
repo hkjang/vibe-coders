@@ -16,6 +16,7 @@ function newVisitId(): string | undefined {
 export interface FeatureVisit {
   recordVisit: () => void;
   recordLegacyOpen: () => void;
+  recordPageLoad: (milliseconds: number) => void;
 }
 
 /** No queue, storage, retry, logging, raw URL, resource ID, or page content. */
@@ -24,11 +25,17 @@ export function createFeatureVisit(featureId: string): FeatureVisit {
   const visitId = newVisitId();
   let visitSent = false;
   let legacySent = false;
-  const send = (event: "visit" | "legacy_fallback"): void => {
+  let loadSent = false;
+  const send = (event: "visit" | "legacy_fallback" | "page_load", loadMS?: number): void => {
     if (!visitId || !feature.success) return;
     void apiClient
       .request(endpoints.uiTelemetry.events, {
-        body: { feature_id: feature.data, visit_id: visitId, event },
+        body: {
+          feature_id: feature.data,
+          visit_id: visitId,
+          event,
+          ...(loadMS === undefined ? {} : { load_ms: loadMS }),
+        },
         routeId: "ui.telemetry",
         keepalive: true,
         referrerPolicy: "no-referrer",
@@ -38,6 +45,11 @@ export function createFeatureVisit(featureId: string): FeatureVisit {
       .catch(() => undefined);
   };
   return {
+    recordPageLoad: (milliseconds) => {
+      if (loadSent || !Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > 120_000) return;
+      loadSent = true;
+      send("page_load", milliseconds);
+    },
     recordVisit: () => {
       if (visitSent) return;
       visitSent = true;

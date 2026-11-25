@@ -16235,11 +16235,42 @@
       },
       "UITelemetryEventRequest": {
         "additionalProperties": false,
+        "description": "Opt-in, lossy observation. page_load measures initial route display, not completion of all data queries. The first accepted sample is immutable. X-Vibe-UI-Version is stored only when it is a bounded numeric release; all other labels become unknown.",
+        "oneOf": [
+          {
+            "not": {
+              "required": [
+                "load_ms"
+              ]
+            },
+            "properties": {
+              "event": {
+                "enum": [
+                  "visit",
+                  "legacy_fallback"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "event": {
+                "enum": [
+                  "page_load"
+                ]
+              }
+            },
+            "required": [
+              "load_ms"
+            ]
+          }
+        ],
         "properties": {
           "event": {
             "enum": [
               "visit",
-              "legacy_fallback"
+              "legacy_fallback",
+              "page_load"
             ],
             "type": "string"
           },
@@ -16286,6 +16317,11 @@
               "system.settings"
             ],
             "type": "string"
+          },
+          "load_ms": {
+            "maximum": 120000,
+            "minimum": 0,
+            "type": "integer"
           },
           "visit_id": {
             "description": "128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.",
@@ -16354,6 +16390,21 @@
             "minimum": 0,
             "type": "integer"
           },
+          "load_max_ms": {
+            "maximum": 120000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "load_samples": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "load_total_ms": {
+            "maximum": 12000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
           "visits": {
             "maximum": 100000,
             "minimum": 0,
@@ -16391,6 +16442,20 @@
             "format": "date-time",
             "type": "string"
           },
+          "load_limit_ms": {
+            "enum": [
+              120000
+            ],
+            "type": "integer"
+          },
+          "load_metrics_available": {
+            "type": "boolean"
+          },
+          "other_version_visits": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
           "retention_days": {
             "enum": [
               30
@@ -16400,6 +16465,19 @@
           "to": {
             "format": "date-time",
             "type": "string"
+          },
+          "version_limit": {
+            "enum": [
+              20
+            ],
+            "type": "integer"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/UITelemetryVersionCount"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "visit_limit": {
             "enum": [
@@ -16416,6 +16494,45 @@
           "retention_days",
           "visit_limit",
           "features"
+        ],
+        "type": "object"
+      },
+      "UITelemetryVersionCount": {
+        "additionalProperties": false,
+        "properties": {
+          "load_max_ms": {
+            "maximum": 120000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "load_samples": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "load_total_ms": {
+            "maximum": 12000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ui_version": {
+            "description": "Empty means unknown or a custom build; never an arbitrary build label.",
+            "maxLength": 32,
+            "pattern": "^(v(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5}))?$",
+            "type": "string"
+          },
+          "visits": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ui_version",
+          "visits",
+          "load_samples",
+          "load_total_ms",
+          "load_max_ms"
         ],
         "type": "object"
       },
@@ -17544,7 +17661,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.178"
+    "version": "v0.86.179"
   },
   "openapi": "3.0.3",
   "paths": {

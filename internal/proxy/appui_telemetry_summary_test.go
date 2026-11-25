@@ -48,7 +48,7 @@ func TestAppUITelemetrySummaryIsAggregateOnlyAndKeepsOptOutHistory(t *testing.T)
 		}
 	}
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil || len(raw) != 7 {
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil || len(raw) != 12 {
 		t.Fatalf("unexpected summary fields=%v err=%v", raw, err)
 	}
 	var features []map[string]json.RawMessage
@@ -56,7 +56,7 @@ func TestAppUITelemetrySummaryIsAggregateOnlyAndKeepsOptOutHistory(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, feature := range features {
-		if len(feature) != 3 || feature["feature_id"] == nil || feature["visits"] == nil || feature["legacy_opens"] == nil {
+		if len(feature) != 6 || feature["feature_id"] == nil || feature["visits"] == nil || feature["legacy_opens"] == nil || feature["load_samples"] == nil || feature["load_total_ms"] == nil || feature["load_max_ms"] == nil {
 			t.Fatalf("row crosses privacy allowlist: %v", feature)
 		}
 	}
@@ -162,7 +162,7 @@ func TestAppUITelemetryOpenAPIContract(t *testing.T) {
 		t.Fatalf("intake response contract=%v", responses)
 	}
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
-	for _, name := range []string{"UITelemetryEventRequest", "UITelemetrySummaryResponse", "UITelemetryFeatureCount"} {
+	for _, name := range []string{"UITelemetryEventRequest", "UITelemetrySummaryResponse", "UITelemetryFeatureCount", "UITelemetryVersionCount"} {
 		schema, ok := schemas[name].(map[string]any)
 		if !ok || schema["additionalProperties"] != false {
 			t.Fatalf("missing closed privacy schema %s", name)
@@ -170,8 +170,8 @@ func TestAppUITelemetryOpenAPIContract(t *testing.T) {
 	}
 	eventSchema := schemas["UITelemetryEventRequest"].(map[string]any)
 	props := eventSchema["properties"].(map[string]any)
-	if len(props) != 3 || len(eventSchema["required"].([]string)) != 3 {
-		t.Fatal("event must have exactly three required fields")
+	if len(props) != 4 || len(eventSchema["required"].([]string)) != 3 || props["load_ms"] == nil || len(eventSchema["oneOf"].([]any)) != 2 {
+		t.Fatal("event must have three common fields and a conditional bounded duration")
 	}
 	ids := props["feature_id"].(map[string]any)["enum"].([]string)
 	if len(ids) != len(appUIFeatures) {

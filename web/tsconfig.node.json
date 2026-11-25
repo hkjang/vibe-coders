@@ -54,6 +54,7 @@
     "tests/e2e/notification-lifetime.spec.ts",
     "tests/e2e/table-column-help.spec.ts",
     "tests/e2e/table-virtual-scroll.spec.ts",
-    "tests/e2e/auth-startup-settings.spec.ts"
+    "tests/e2e/auth-startup-settings.spec.ts",
+    "tests/e2e/console-load-observability.spec.ts"
   ]
 }
