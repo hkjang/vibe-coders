@@ -42,6 +42,7 @@ export function SavedPromptFilters({
   });
   const savedRows = savedFilters.data?.filters ?? [];
   const saveFilter = useLibraryMutation({
+    observation: "save",
     prepare: async (value: { name: string; params: string }) => {
       if (!value.name || containsPotentialSecret(value.name, credentialPrefixes)) throw libraryError();
       searchUpdatesFrom(new URLSearchParams(value.params), credentialPrefixes);
@@ -68,6 +69,7 @@ export function SavedPromptFilters({
     onSuccess: () => setSavingName(""),
   });
   const removeFilter = useLibraryMutation({
+    observation: "delete",
     prepare: async (expected: SavedFilter) => {
       const current = await readLibraryFilters(credentialPrefixes);
       if (JSON.stringify(current.filters.find((row) => row.id === expected.id)) !== JSON.stringify(expected))

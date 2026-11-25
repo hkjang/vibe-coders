@@ -17,6 +17,7 @@ export function useAssetActions(editing: PromptAsset | undefined) {
   // Creating upserts by slug (POST); editing an existing asset sends only the
   // changed fields (PATCH), so its review status and counters stay untouched.
   const createAsset = useLibraryMutation({
+    observation: "save",
     prepare: review.create,
     validate: (result, values: AssetFormValues) =>
       assertAssetReceipt(result.template, newAssetID(values), {
@@ -45,6 +46,7 @@ export function useAssetActions(editing: PromptAsset | undefined) {
   });
 
   const updateAsset = useLibraryMutation({
+    observation: "save",
     prepare: async (values: AssetFormValues) => {
       if (!editing || values.id !== editing.id) throw libraryError("changed");
       if (Object.keys(assetPatch(values, editing)).length === 0) throw libraryError();
@@ -66,6 +68,7 @@ export function useAssetActions(editing: PromptAsset | undefined) {
   });
 
   const toggleAsset = useLibraryMutation({
+    observation: "save",
     prepare: async (value: { asset: PromptAsset; enabled: boolean }) => {
       await review.current(value.asset);
     },
@@ -84,6 +87,7 @@ export function useAssetActions(editing: PromptAsset | undefined) {
   });
 
   const submitAsset = useLibraryMutation({
+    observation: "save",
     prepare: async (asset: PromptAsset) => {
       await review.current(asset);
     },
@@ -99,6 +103,7 @@ export function useAssetActions(editing: PromptAsset | undefined) {
   });
 
   const decideAsset = useLibraryMutation({
+    observation: (value) => (value.status === "approved" || value.status === "standard" ? "approve" : "save"),
     prepare: async (value: { asset: PromptAsset; status: string; note: string }) => {
       await review.current(value.asset);
     },
@@ -118,6 +123,7 @@ export function useAssetActions(editing: PromptAsset | undefined) {
   });
 
   const removeAsset = useLibraryMutation({
+    observation: "delete",
     prepare: async (asset: PromptAsset) => {
       await review.current(asset);
     },

@@ -60,6 +60,7 @@ function TrackingWorkspace({
 
   const key = featureOwnedKey(systemSettingsKeys.tracking, owner);
   const actions = useRecordActionReview({
+    observation: (value) => (value.kind === "clear" ? "delete" : "save"),
     owner,
     query: status,
     queryKey: key,

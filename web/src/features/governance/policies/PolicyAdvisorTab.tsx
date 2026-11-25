@@ -97,6 +97,7 @@ function AdvisorSession({ canWrite }: { canWrite: boolean }): React.JSX.Element 
       throw new AppError("정책 원본을 다시 조회하고 검토하세요.", { kind: "permission" });
   };
   const bumpRollout = useMutationFeedback({
+    observation: "save",
     ownsResult: () => {
       try {
         access.assertSuggestionsRead();

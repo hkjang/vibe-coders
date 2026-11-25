@@ -210,6 +210,7 @@ function SkillPageContent(): React.JSX.Element {
   const closeSheet = useCallback((): void => chooseSkill(undefined), [chooseSkill]);
 
   const save = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: mutationAccess.ownsResult,
     mutate: (values: SkillFormOutput) => {
@@ -227,6 +228,7 @@ function SkillPageContent(): React.JSX.Element {
   });
 
   const promote = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: mutationAccess.ownsResult,
     mutate: (variables: SkillPromoteBody) => {
@@ -245,6 +247,7 @@ function SkillPageContent(): React.JSX.Element {
   });
 
   const remove = useMutationFeedback({
+    observation: "delete",
     gcTime: 0,
     ownsResult: mutationAccess.ownsResult,
     mutate: (target: Skill | string) => {
@@ -269,6 +272,7 @@ function SkillPageContent(): React.JSX.Element {
   });
 
   const adopt = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: mutationAccess.ownsResult,
     mutate: (body: SkillAdoptBody) => {

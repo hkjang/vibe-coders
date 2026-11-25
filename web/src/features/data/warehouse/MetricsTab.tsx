@@ -77,6 +77,7 @@ export function MetricsTab({ canWrite }: MetricsTabProps): React.JSX.Element {
   const form = useZodForm(metricFormSchema, emptyMetric);
 
   const upsert = useMutationFeedback({
+    observation: "save",
     mutate: (values: z.infer<typeof metricFormSchema>) =>
       apiClient.request(metrics.upsert, {
         body: {
@@ -107,6 +108,7 @@ export function MetricsTab({ canWrite }: MetricsTabProps): React.JSX.Element {
   const metricPathKey = (row: MetricEntry): string => row.id || row.metric_key;
 
   const revalidate = useMutationFeedback({
+    observation: "test",
     mutate: (row: MetricEntry) =>
       apiClient.request(withPathParams(metrics.validate, { key: metricPathKey(row) })),
     successMessage: (_result, row) => `지표 ${row.metric_key}의 쿼리를 재검증했습니다.`,
@@ -118,6 +120,7 @@ export function MetricsTab({ canWrite }: MetricsTabProps): React.JSX.Element {
   });
 
   const remove = useMutationFeedback({
+    observation: "delete",
     mutate: (row: MetricEntry) =>
       apiClient.request(withPathParams(metrics.remove, { key: metricPathKey(row) })),
     invalidates: [dataQueryKeys.metrics],

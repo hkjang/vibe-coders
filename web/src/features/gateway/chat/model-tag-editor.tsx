@@ -130,6 +130,7 @@ export function ModelTagEditor({ original, access, data, onClose, returnFocusRef
   };
   return (
     <FormDialog
+      observation="save"
       open
       form={form}
       onOpenChange={(open) => {

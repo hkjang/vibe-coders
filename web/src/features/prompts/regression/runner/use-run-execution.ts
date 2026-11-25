@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -49,6 +50,7 @@ export function useRunExecution(owner: FeatureReadOwner) {
       if (pending.has(principal)) throw runError("golden_run_busy");
       pending.add(principal);
       let dispatched = false;
+      const observation = captureAction("run_request", undefined, assertCurrent);
       try {
         assertCurrent();
         dispatched = true;
@@ -81,6 +83,7 @@ export function useRunExecution(owner: FeatureReadOwner) {
               };
         assertCurrent();
         validateRunReceipt(plan, receipt.result);
+        observation?.success();
         const projected = projectRunReceipt({ ...receipt, receivedAt: Date.now() }, auth.credentialPrefixes);
         // A receipt is independent of a later history refresh. Never let a failed
         // refresh turn an acknowledged run into a suggestion to execute it again.
@@ -95,6 +98,7 @@ export function useRunExecution(owner: FeatureReadOwner) {
         assertCurrent();
         return projected;
       } catch (error) {
+        if (dispatched) observation?.failure(error);
         const rejected = isAppError(error) && [400, 401, 403, 404, 405, 409, 413].includes(error.status ?? 0);
         if (dispatched && !rejected) {
           uncertainNow.current = true;

@@ -121,6 +121,7 @@ function McpUpstreamsContent({
   });
 
   const remove = useMutationFeedback({
+    observation: "delete",
     mutate: (id: string) => {
       mutationAccess.assertCurrent();
       return apiClient.request(withPathParams(endpoints.domains.mcp.deleteUpstream, { id }), {
@@ -136,6 +137,7 @@ function McpUpstreamsContent({
   // POST .../probe forces a fresh handshake and records a discovery run, so it is the
   // real "is this registration working, and what does it expose?" check.
   const probe = useMutationFeedback({
+    observation: "test",
     mutate: (id: string) => {
       mutationAccess.assertCurrent();
       return apiClient.request(withPathParams(endpoints.domains.mcp.probeUpstream, { id }), {
@@ -152,6 +154,7 @@ function McpUpstreamsContent({
     errorMessage: "연결 진단을 실행하지 못했습니다.",
   });
   const toggleEnabled = useMutationFeedback({
+    observation: "save",
     mutate: (variables: { enabled: boolean; id: string }) => {
       mutationAccess.assertCurrent();
       return apiClient.request(withPathParams(endpoints.domains.mcp.patchUpstream, { id: variables.id }), {

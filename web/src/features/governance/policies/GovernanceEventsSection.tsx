@@ -99,6 +99,7 @@ export function GovernanceEventsSection({ canWrite }: { canWrite: boolean }): Re
   });
 
   const decide = useMutationFeedback({
+    observation: (input) => input.decision,
     mutate: (variables: { id: string; decision: "approve" | "reject" }) =>
       apiClient.request(
         withPathParams(

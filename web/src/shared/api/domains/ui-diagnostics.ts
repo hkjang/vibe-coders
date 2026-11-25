@@ -61,6 +61,7 @@ function validDiagnostic(row: z.infer<typeof baseSchema>): boolean {
     operations.has(`${row.method} ${row.endpoint}`) &&
     !row.endpoint.startsWith("/auth/") &&
     !row.endpoint.startsWith("/admin/ui-telemetry/") &&
+    !row.endpoint.startsWith("/admin/ui-actions/") &&
     !row.endpoint.startsWith("/admin/ui-diagnostics/") &&
     ["http", "auth", "permission", "contract", "network", "timeout"].includes(row.failure) &&
     (row.failure !== "http" || row.status >= 400) &&

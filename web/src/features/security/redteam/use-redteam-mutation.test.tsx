@@ -19,13 +19,16 @@ for (const [label, access, allowed] of [
     const client = new QueryClient();
     const request = vi.fn(async () => ({ ok: true })),
       success = vi.fn();
-    const view = renderHook(() => useRedTeamMutation(allowed, { mutate: request, onSuccess: success }), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>
-          <FeatureAccessContext.Provider value={access}>{children}</FeatureAccessContext.Provider>
-        </QueryClientProvider>
-      ),
-    });
+    const view = renderHook(
+      () => useRedTeamMutation(allowed, { observation: "save", mutate: request, onSuccess: success }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={client}>
+            <FeatureAccessContext.Provider value={access}>{children}</FeatureAccessContext.Provider>
+          </QueryClientProvider>
+        ),
+      },
+    );
     await act(async () => {
       await expect(view.result.current.mutateAsync(undefined)).rejects.toMatchObject({ kind: "aborted" });
     });
@@ -46,7 +49,13 @@ it("이미 전송한 변경의 늦은 응답은 화면 종료 뒤 성공 알림�
     success = vi.fn();
   const invalidate = vi.spyOn(client, "invalidateQueries");
   const view = renderHook(
-    () => useRedTeamMutation(true, { mutate: request, onSuccess: success, invalidates: [["redteam"]] }),
+    () =>
+      useRedTeamMutation(true, {
+        observation: "save",
+        mutate: request,
+        onSuccess: success,
+        invalidates: [["redteam"]],
+      }),
     {
       wrapper: ({ children }: { children: ReactNode }) => (
         <QueryClientProvider client={client}>

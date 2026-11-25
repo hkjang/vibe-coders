@@ -1,11 +1,14 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
 import { useLayoutEffect, useRef, useState } from "react";
-import { useMutation, useQueryClient, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AppError, isAppError } from "@/shared/api/error";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { assertFeatureRead, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { safeLabError } from "./prompt-lab-model";
+import type { ActionSelection } from "@/shared/telemetry/action-channel";
 
 const flights = new WeakMap<QueryClient, Set<string>>();
 export function useLabAccess() {
@@ -17,6 +20,7 @@ export function useLabAccess() {
   );
 }
 interface Options<V, R> {
+  observation: ActionSelection<V>;
   prepare?: (value: V) => Promise<void>;
   mutate: (value: V) => Promise<R>;
   validate?: (result: R, value: V) => void;
@@ -42,6 +46,7 @@ export function useLabMutation<V, R>(owner: FeatureReadOwner, options: Options<V
     };
   }, []);
   const mutation = useMutation({
+    observation: false,
     retry: false,
     gcTime: 0,
     mutationFn: async (value: V) => {
@@ -70,15 +75,18 @@ export function useLabMutation<V, R>(owner: FeatureReadOwner, options: Options<V
           code: "prompt_lab_busy",
         });
       pending.add(principal);
+      let completion: ReturnType<typeof captureAction>;
       let sent = false,
         acknowledged = false;
       try {
         await options.prepare?.(value);
         assertCurrent();
+        completion = captureAction(options.observation, value, assertCurrent);
         sent = true;
         const result = await options.mutate(value);
         acknowledged = true;
         options.validate?.(result, value);
+        completion?.success();
         assertCurrent();
         const keys =
           typeof options.invalidates === "function" ? options.invalidates(value) : options.invalidates;
@@ -94,6 +102,7 @@ export function useLabMutation<V, R>(owner: FeatureReadOwner, options: Options<V
         // receipt in the caller; do not retain response bodies in Mutation cache.
         return;
       } catch (error) {
+        completion?.failure(error);
         const knownRejection =
           isAppError(error) && error.status !== undefined && error.status >= 400 && error.status < 500;
         if (sent && (!knownRejection || acknowledged) && mounted.current && owner.isCurrent())

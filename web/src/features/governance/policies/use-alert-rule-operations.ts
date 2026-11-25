@@ -54,6 +54,7 @@ export function useAlertRuleOperations(canWrite: boolean) {
   };
   const feedback = { ownsResult, invalidates: [key] };
   const createRule = useMutationFeedback({
+    observation: "save",
     ...feedback,
     mutate: (body: AlertRuleBody) =>
       guard.run("create", () =>
@@ -67,6 +68,7 @@ export function useAlertRuleOperations(canWrite: boolean) {
     errorMessage: "알림 규칙을 추가하지 못했습니다.",
   });
   const updateRule = useMutationFeedback({
+    observation: "save",
     ...feedback,
     mutate: ({ row, body }: { row: AlertRule; body: AlertRuleUpdateBody }) =>
       guard.run(`rule:${row.id}`, () => {
@@ -81,6 +83,7 @@ export function useAlertRuleOperations(canWrite: boolean) {
     errorMessage: "알림 규칙을 수정하지 못했습니다.",
   });
   const toggleRule = useMutationFeedback({
+    observation: "save",
     ...feedback,
     mutate: ({ row, enabled }: { row: AlertRule; enabled: boolean }) =>
       guard.run(`rule:${row.id}`, () => {
@@ -96,6 +99,7 @@ export function useAlertRuleOperations(canWrite: boolean) {
     errorMessage: "알림 규칙 사용 여부를 바꾸지 못했습니다.",
   });
   const removeRule = useMutationFeedback({
+    observation: "delete",
     ...feedback,
     mutate: (row: AlertRule) =>
       guard.run(`rule:${row.id}`, () => {

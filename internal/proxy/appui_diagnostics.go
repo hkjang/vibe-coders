@@ -17,7 +17,7 @@ import (
 var appUIDiagnosticOperations = sync.OnceValue(func() map[string]bool {
 	allowed := map[string]bool{}
 	for _, endpoint := range apiEndpoints {
-		if strings.HasPrefix(endpoint.path, "/admin/ui-telemetry/") || strings.HasPrefix(endpoint.path, "/admin/ui-diagnostics/") || strings.HasPrefix(endpoint.path, "/auth/") {
+		if strings.HasPrefix(endpoint.path, "/admin/ui-telemetry/") || strings.HasPrefix(endpoint.path, "/admin/ui-diagnostics/") || strings.HasPrefix(endpoint.path, "/admin/ui-actions/") || strings.HasPrefix(endpoint.path, "/auth/") {
 			continue
 		}
 		for _, method := range endpoint.methods {

@@ -1,5 +1,7 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
 import { useLayoutEffect, useRef, useState } from "react";
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { isAppError } from "@/shared/api/error";
@@ -45,6 +47,7 @@ export function useDefinitionWrite(owner: FeatureReadOwner, target: DefinitionTa
     };
   }, []);
   const mutation = useMutation({
+    observation: false,
     retry: false,
     gcTime: 0,
     mutationFn: async (values: DefinitionValues) => {
@@ -63,6 +66,7 @@ export function useDefinitionWrite(owner: FeatureReadOwner, target: DefinitionTa
       }
       if (pending.has(principal)) throw definitionError("golden_busy");
       pending.add(principal);
+      const completion = captureAction(uncertain ? false : "save", values, assertCurrent);
       let acknowledged = false;
       const read = async (selected: DefinitionTarget) => {
         let latest: DefinitionTarget | undefined;
@@ -93,6 +97,7 @@ export function useDefinitionWrite(owner: FeatureReadOwner, target: DefinitionTa
         else await saveDefinition(target, values, assertCurrent, read);
         acknowledged = true;
         assertCurrent();
+        completion?.success();
         await client.invalidateQueries({
           predicate: ({ queryKey }) =>
             queryKey[0] === regressionId &&
@@ -105,6 +110,7 @@ export function useDefinitionWrite(owner: FeatureReadOwner, target: DefinitionTa
           uncertain ? "현재 저장된 정의가 전송한 내용과 일치합니다." : "회귀 검증 정의를 저장했습니다.",
         );
       } catch (error) {
+        completion?.failure(error);
         if (
           mounted.current &&
           owner.isCurrent() &&

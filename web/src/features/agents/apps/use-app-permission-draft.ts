@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/shared/notifications/toast";
@@ -143,6 +144,7 @@ export function useAppPermissionDraft(canWrite: boolean) {
     }
     flight.current = draft;
     setPending(true);
+    const observation = captureAction(draft.kind === "grant" ? "save" : "revoke", undefined, isCurrent);
     try {
       if (draft.kind === "grant")
         await apiClient.request(
@@ -157,6 +159,7 @@ export function useAppPermissionDraft(canWrite: boolean) {
       if (!isCurrent()) return;
       access.assertCurrent();
       if (!writable.current) throw new AppError("앱 변경 권한이 변경되었습니다.", { kind: "permission" });
+      observation?.success();
       await client.invalidateQueries({ queryKey: featureOwnedKey(appPermissionKey(draft.app.id), owner) });
       access.assertCurrent();
       if (!writable.current) throw new AppError("앱 변경 권한이 변경되었습니다.", { kind: "permission" });
@@ -164,6 +167,9 @@ export function useAppPermissionDraft(canWrite: boolean) {
         toast.success(
           draft.kind === "grant" ? "추가 접근 권한을 저장했습니다." : "추가 접근 권한을 회수했습니다.",
         );
+    } catch (cause) {
+      observation?.failure(cause);
+      throw cause;
     } finally {
       if (flight.current?.instance === draft.instance) flight.current = undefined;
       if (isCurrent()) setPending(false);

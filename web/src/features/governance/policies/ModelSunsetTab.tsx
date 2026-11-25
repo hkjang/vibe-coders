@@ -57,6 +57,7 @@ export function ModelSunsetTab({ canWrite }: { canWrite: boolean }): React.JSX.E
   });
 
   const createDeprecation = useMutationFeedback({
+    observation: "save",
     mutate: (values: DeprecationValues) =>
       apiClient.request(endpoints.domains.governance.modelDeprecations.create, {
         body: {
@@ -73,6 +74,7 @@ export function ModelSunsetTab({ canWrite }: { canWrite: boolean }): React.JSX.E
   });
 
   const removeDeprecation = useMutationFeedback({
+    observation: "delete",
     mutate: (id: string) =>
       apiClient.request(
         {

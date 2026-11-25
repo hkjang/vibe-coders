@@ -38,6 +38,7 @@ export function SandboxPage(): React.JSX.Element {
   const errors = form.formState.errors;
 
   const run = useMutationFeedback<SandboxFormValues, SandboxPreview>({
+    observation: "run_request",
     mutate: (values) =>
       apiClient.request(endpoints.domains.security.sandboxPreview, {
         body: sandboxRequestBody(values),

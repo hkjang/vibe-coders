@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { toast } from "@/shared/notifications/toast";
@@ -45,6 +46,7 @@ export function useLLMFeedback(owner: LLMReadOwner, assertWrite: () => void, pri
       assertLLMReadOwner(owner);
       if (operation.current !== sent) throw new AppError("종료된 피드백 편집입니다.", { kind: "aborted" });
     };
+    const observation = captureAction("feedback", undefined, assertOperation);
     try {
       await apiClient.request(endpoints.domains.observability.llm.submitFeedback, {
         body: {
@@ -61,6 +63,7 @@ export function useLLMFeedback(owner: LLMReadOwner, assertWrite: () => void, pri
       sent.outcome = "acknowledged";
       publishOutcome();
       assertOperation();
+      observation?.success();
       await client.invalidateQueries({
         predicate: ({ queryKey }) =>
           ownsLLMQuery(queryKey, owner) && (queryKey[2] === "feedback" || queryKey[2] === "trace"),
@@ -68,6 +71,7 @@ export function useLLMFeedback(owner: LLMReadOwner, assertWrite: () => void, pri
       assertOperation();
       toast.success("피드백을 등록했습니다.");
     } catch (cause) {
+      observation?.failure(cause);
       if (sent.outcome === "pending") sent.outcome = "uncertain";
       publishOutcome();
       assertOperation();

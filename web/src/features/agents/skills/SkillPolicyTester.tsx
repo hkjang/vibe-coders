@@ -1,5 +1,6 @@
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
 import { skillNameSelector } from "./skill-identity";
-import { useMutation } from "@tanstack/react-query";
+
 import { useId, useState } from "react";
 import { useSkillReadAction } from "./skill-scope";
 
@@ -48,6 +49,7 @@ export function SkillPolicyTester({
     : undefined;
 
   const evaluate = useMutation({
+    observation: "test",
     gcTime: 0,
     retry: false,
     mutationFn: (input: NonNullable<typeof body>) =>

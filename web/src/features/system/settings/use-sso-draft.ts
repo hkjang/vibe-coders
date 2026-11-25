@@ -155,6 +155,7 @@ export function useSsoDraft(config: KeycloakConfig, hasAdminWrite: boolean) {
         setOutcome(reloadPending ? "reload_pending" : !latest ? "read_failed" : "none");
         if (!reloadPending) toast.success("SSO 설정을 저장했습니다.");
       },
+      "save",
     );
   };
   const reload = (): void =>

@@ -130,6 +130,7 @@ export function useRoleAdmin(owner: FeatureReadOwner, canWrite: boolean, reason:
     }
   };
   const save = useMutationFeedback({
+    observation: "save",
     mutate: ({
       body,
       baseline,
@@ -151,6 +152,7 @@ export function useRoleAdmin(owner: FeatureReadOwner, canWrite: boolean, reason:
     successMessage: "역할을 저장했습니다.",
   });
   const remove = useMutationFeedback({
+    observation: "delete",
     mutate: (baseline: RoleRow) =>
       run(baseline, baseline.role, async () => {
         assertCurrent();

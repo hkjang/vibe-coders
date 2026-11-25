@@ -31,6 +31,7 @@ export function useMcpPolicyOperation(owner: FeatureReadOwner, canWrite: boolean
     write.assertCurrent();
   };
   const operation = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: () => {
       try {

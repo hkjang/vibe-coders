@@ -161,6 +161,7 @@ export function usePolicyEditorOperation({
           }
         },
         () => {},
+        "save",
       )
       .finally(() => {
         if (flight.current === controller) {

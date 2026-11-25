@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { UnsavedChangesContext } from "@/shared/unsaved/context";
 import { UnsavedChangesCoordinator } from "@/shared/unsaved/coordinator";
 import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
+import { installActionSink } from "@/shared/telemetry/action-channel";
+import { AppError } from "@/shared/api/error";
 
 function setup({
   keepMounted = false,
@@ -22,6 +24,65 @@ function setup({
 }
 
 describe("useDraftGuard inline 확장", () => {
+  it("records an explicit completed operation once before a presentation callback can fail", async () => {
+    const send = vi.fn();
+    const dispose = installActionSink(
+      () => "system.settings",
+      () => true,
+      send,
+    );
+    try {
+      const hook = setup({ keepMounted: true });
+      const error = vi.fn();
+      await act(async () =>
+        hook.result.current.run(
+          async () => "saved",
+          error,
+          () => {
+            throw new Error("presentation failed");
+          },
+          "save",
+        ),
+      );
+      expect(error).toHaveBeenCalledOnce();
+      expect(send).toHaveBeenCalledExactlyOnceWith({
+        feature_id: "system.settings",
+        action: "save",
+        outcome: "success",
+      });
+    } finally {
+      dispose();
+    }
+  });
+  it.each(["success", "rejected"])("discards late %s from a retired draft owner", async (outcome) => {
+    const send = vi.fn(),
+      dispose = installActionSink(
+        () => "system.settings",
+        () => true,
+        send,
+      );
+    try {
+      const hook = setup({ keepMounted: true });
+      let finish!: () => void, fail!: (error: Error) => void;
+      const pending = new Promise<void>((resolve, reject) => {
+        finish = resolve;
+        fail = reject;
+      });
+      let submission!: Promise<void>;
+      act(() => {
+        submission = hook.result.current.run(() => pending, vi.fn(), vi.fn(), "delete");
+      });
+      hook.unmount();
+      await act(async () => {
+        if (outcome === "success") finish();
+        else fail(new AppError("private", { kind: "http", status: 409 }));
+        await submission;
+      });
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+    }
+  });
   it("기존 zero-argument 폐기 callback과 성공 시 닫기를 그대로 유지한다", async () => {
     const { result, onDiscard, coordinator } = setup();
     const operation = vi.fn(async () => "saved");

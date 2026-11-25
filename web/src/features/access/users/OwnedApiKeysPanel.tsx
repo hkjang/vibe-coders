@@ -101,6 +101,7 @@ export function OwnedApiKeysPanel({
   });
 
   const createKey = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: (body: CreateApiKeyBody) => {
       assertCurrent();
@@ -111,6 +112,7 @@ export function OwnedApiKeysPanel({
     onSuccess: (result) => setIssuedSecret(result.secret),
   });
   const updateKey = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: ({ id, body }: { id: string; body: UpdateApiKeyBody }) => {
       assertCurrent();
@@ -124,6 +126,7 @@ export function OwnedApiKeysPanel({
     successMessage: "API 키를 변경했습니다.",
   });
   const revokeKey = useMutationFeedback({
+    observation: "revoke",
     ownsResult,
     mutate: ({ id, hard, reason, expected_revision }: KeyRevokeSubmission) => {
       assertCurrent();

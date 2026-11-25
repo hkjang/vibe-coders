@@ -7,8 +7,11 @@ import { Dialog } from "@/shared/components/ui/Dialog";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
 import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
+import { captureAction, type ActionKind } from "@/shared/telemetry/action-channel";
 
 interface FormDialogProps<Input extends FieldValues, Output> {
+  /** Only imperative handlers; leave off when the handler already uses an observed mutation. */
+  observation?: ActionKind;
   children: ReactNode;
   description: string;
   /** Route-owned, allowlisted messages; never return a raw server error. */
@@ -69,6 +72,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   form,
   onOpenChange,
   onSubmit,
+  observation,
   open,
   returnFocusRef,
   submitLabel = "저장",
@@ -160,15 +164,21 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
       await form.handleSubmit(async (values) => {
         if (!isCurrent() || !submissionAllowed.current) return;
         setError(undefined);
+        const completion = captureAction(observation ?? false, undefined);
         try {
           await onSubmit(values);
-          if (isCurrent()) close();
+          if (isCurrent()) {
+            completion?.success();
+            close();
+          }
         } catch (cause) {
-          if (isCurrent())
+          if (isCurrent()) {
+            completion?.failure(cause);
             setError({
               message: errorFormatter(cause, "저장하지 못했습니다."),
               requestId: isAppError(cause) ? cause.requestId : undefined,
             });
+          }
         }
       })(event);
     } finally {

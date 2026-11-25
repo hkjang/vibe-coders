@@ -149,6 +149,7 @@ export function Text2SqlSchemaTab({
   });
 
   const saveSchema = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (values: SchemaFormValues) =>
       apiClient.request(endpoints.domains.text2sql.schemas.save, {
@@ -168,6 +169,7 @@ export function Text2SqlSchemaTab({
     successMessage: "스키마 카탈로그를 저장했습니다.",
   });
   const removeSchema = useText2SqlMutation({
+    observation: "delete",
     authorized: canWrite,
     mutate: (name: string) =>
       apiClient.request(endpoints.domains.text2sql.schemas.remove, {
@@ -178,6 +180,7 @@ export function Text2SqlSchemaTab({
     successMessage: "스키마 카탈로그를 삭제했습니다.",
   });
   const saveTable = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (values: TableFormValues) =>
       apiClient.request(endpoints.domains.text2sql.registry.saveTable, {
@@ -188,6 +191,7 @@ export function Text2SqlSchemaTab({
     successMessage: "테이블을 등록했습니다.",
   });
   const removeTable = useText2SqlMutation({
+    observation: "delete",
     authorized: canWrite,
     mutate: (table: string) =>
       apiClient.request(endpoints.domains.text2sql.registry.removeTable, {
@@ -198,6 +202,7 @@ export function Text2SqlSchemaTab({
     successMessage: "테이블을 삭제했습니다.",
   });
   const removeColumn = useText2SqlMutation({
+    observation: "delete",
     authorized: canWrite,
     mutate: (target: { table: string; column: string }) =>
       apiClient.request(endpoints.domains.text2sql.registry.removeColumn, {
@@ -208,6 +213,7 @@ export function Text2SqlSchemaTab({
     successMessage: "컬럼을 삭제했습니다.",
   });
   const saveColumn = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (values: ColumnFormValues) =>
       apiClient.request(endpoints.domains.text2sql.registry.saveColumn, {
@@ -218,6 +224,7 @@ export function Text2SqlSchemaTab({
     successMessage: "컬럼을 등록했습니다.",
   });
   const collect = useText2SqlMutation({
+    observation: "run_request",
     authorized: canWrite,
     mutate: () =>
       apiClient.request(endpoints.domains.text2sql.registry.collect, {

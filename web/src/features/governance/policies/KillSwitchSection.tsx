@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OctagonAlert, Play } from "lucide-react";
 import { useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/shared/notifications/toast";
@@ -110,6 +111,7 @@ function KillSwitchPanel({ canWrite, owner }: { canWrite: boolean; owner: string
   });
 
   const setKillSwitch = useMutation({
+    observation: (value) => (value.disabled ? "deactivate" : "activate"),
     retry: false,
     gcTime: 0,
     mutationFn: async (variables: { review: Review; disabled: boolean; reason: string }) => {

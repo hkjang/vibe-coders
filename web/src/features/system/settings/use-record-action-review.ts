@@ -4,9 +4,11 @@ import { AppError } from "@/shared/api/error";
 import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mutation-access";
 import { assertFeatureRead, type FeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import type { ActionSelection } from "@/shared/telemetry/action-channel";
 
 /** One confirmed attempt per successful read; an uncertain response needs a new read and review. */
 export function useRecordActionReview<Data, Action>({
+  observation,
   owner,
   query,
   queryKey,
@@ -15,6 +17,7 @@ export function useRecordActionReview<Data, Action>({
   invalidates,
   successMessage,
 }: {
+  observation: ActionSelection<Action>;
   owner: FeatureReadOwner;
   query: UseQueryResult<Data>;
   queryKey: QueryKey;
@@ -35,6 +38,7 @@ export function useRecordActionReview<Data, Action>({
     latest.current = { count, ready, review };
   }, [count, ready, review]);
   const mutation = useMutationFeedback({
+    observation: (input) => (typeof observation === "function" ? observation(input.action) : observation),
     gcTime: 0,
     ownsResult: owner.isCurrent,
     mutate: async (selected: NonNullable<typeof review>) => {

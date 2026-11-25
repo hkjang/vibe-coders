@@ -101,6 +101,7 @@ it.each(writes)("$tab $kind 응답 직후 자동 조회가 반영 완료이면 �
     },
   );
   await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
+  await screen.findByRole("dialog");
   if (fixture.kind === "revert" || fixture.kind === "rollback") {
     const action = screen.getByRole("button", {
       name: fixture.kind === "revert" ? "기본값(환경변수)으로 되돌리기" : "이전 값으로 롤백",

@@ -126,6 +126,7 @@ export function UserAccountDialog({
   const selected = form.watch("role");
   const known = names?.includes(selected) === true;
   const save = useMutationFeedback<Values, unknown>({
+    observation: "save",
     gcTime: 0,
     ownsResult: () => {
       if (!owner.isCurrent()) return false;

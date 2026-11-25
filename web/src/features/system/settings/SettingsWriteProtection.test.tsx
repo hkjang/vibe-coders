@@ -93,6 +93,7 @@ function setup(fixture: (typeof cases)[number], overrides: Record<string, ApiHan
 }
 
 async function changeValue(user: ReturnType<typeof userEvent.setup>, value: string) {
+  await screen.findByRole("dialog");
   const select = screen.queryByRole("combobox", { name: "새 값" });
   if (select) await user.selectOptions(select, value);
   else {

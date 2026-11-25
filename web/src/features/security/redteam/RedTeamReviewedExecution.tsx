@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { apiClient } from "@/shared/api/client";
@@ -166,6 +167,7 @@ export function RedTeamReviewedExecution({
   const execute = async () => {
     const candidate = reviewRef.current;
     if (!candidate || sent.current || confirmation !== candidate.campaign_name) return;
+    let observation: ReturnType<typeof captureAction>;
     try {
       assertCurrent();
       if (Date.parse(candidate.expires_at) <= Date.now()) throw unavailable();
@@ -177,6 +179,7 @@ export function RedTeamReviewedExecution({
           !validRunRef(campaign.id, credentialPrefixes))
       )
         throw unavailable();
+      observation = captureAction("run_request", undefined, assertCurrent);
       sent.current = true;
       setConsumed(true);
       setPending(true);
@@ -185,6 +188,7 @@ export function RedTeamReviewedExecution({
         onJobTracked?.({ id: candidate.job_id, campaign: campaign.id });
         const job = await submitReviewedJob(candidate, originalKey);
         assertCurrent();
+        observation?.success();
         onJobAccepted?.({ id: job.id, campaign: job.campaign_id });
         return;
       }
@@ -208,10 +212,14 @@ export function RedTeamReviewedExecution({
         JSON.stringify(result.limits) !== JSON.stringify(candidate.limits) ||
         result.planned_live_calls !== candidate.planned_live_calls ||
         result.planned_case_executions !== candidate.case_executions
-      )
+      ) {
+        observation?.failure(new AppError("실행 응답을 확인할 수 없습니다.", { kind: "contract" }));
         throw unavailable();
+      }
+      observation?.success();
       onResult(result);
     } catch (e) {
+      observation?.failure(e);
       if (active.current)
         setError({
           message: sent.current

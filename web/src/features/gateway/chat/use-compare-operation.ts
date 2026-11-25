@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { CompareAccess } from "./use-compare-access";
 import { AppError, isAppError } from "@/shared/api/error";
@@ -30,6 +31,7 @@ export function useCompareOperation(access: CompareAccess) {
       if (!mounted.current || flight.current) return;
       const current = new AbortController();
       let admitted = false;
+      let observation: ReturnType<typeof captureAction>;
       const owned = () => mounted.current && access.isCurrent() && flight.current === current;
       const assertPermission = () => {
         if (kind === "predict") access.assertPredict();
@@ -48,9 +50,18 @@ export function useCompareOperation(access: CompareAccess) {
         setPending({ identity, kind });
         setError(undefined);
         assertAdmission();
+        observation = captureAction(
+          kind === "run" || kind === "judge" ? "run_request" : false,
+          undefined,
+          owned,
+        );
         const result = await request(current.signal, assertAdmission);
-        if (owned()) commit(result);
+        if (owned()) {
+          observation?.success();
+          commit(result);
+        }
       } catch (cause) {
+        observation?.failure(cause);
         if (owned() || (!admitted && mounted.current && access.isCurrent()))
           setError({
             identity,

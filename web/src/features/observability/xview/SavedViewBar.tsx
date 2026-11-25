@@ -63,6 +63,7 @@ export function SavedViewBar({
   const form = useZodForm<NameInput, NameOutput>(nameSchema, { name: "" });
 
   const create = useMutationFeedback<NameOutput, unknown>({
+    observation: "save",
     mutate: (values) => {
       access.assertCurrent();
       return apiClient.request(endpoints.domains.observability.savedFilters.create, {
@@ -76,6 +77,7 @@ export function SavedViewBar({
   });
 
   const update = useMutationFeedback<SavedFilter, unknown>({
+    observation: "save",
     mutate: (view) => {
       access.assertCurrent();
       return apiClient.request(
@@ -92,6 +94,7 @@ export function SavedViewBar({
   });
 
   const remove = useMutationFeedback<SavedFilter, unknown>({
+    observation: "delete",
     mutate: (view) => {
       access.assertCurrent();
       return apiClient.request(

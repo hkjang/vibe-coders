@@ -87,6 +87,7 @@ export function ProfileDetailSheet({
   });
 
   const snapshot = useMutationFeedback({
+    observation: "save",
     mutate: () =>
       apiClient.request(personalizationSnapshotEndpoint(userId), {
         query: { window: reportWindow },

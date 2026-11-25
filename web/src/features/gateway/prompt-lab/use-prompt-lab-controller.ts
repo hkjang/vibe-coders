@@ -96,6 +96,7 @@ export function usePromptLabController(owner: FeatureReadOwner) {
   });
 
   const createExperiment = useLabMutation(owner, {
+    observation: "save",
     mutate: (values: ExperimentOutput) =>
       apiClient.request(lab.experiments.create, {
         body: {
@@ -112,6 +113,7 @@ export function usePromptLabController(owner: FeatureReadOwner) {
   });
 
   const createContract = useLabMutation(owner, {
+    observation: "save",
     mutate: (values: ContractOutput) =>
       apiClient.request(lab.contracts.create, {
         body: {
@@ -129,6 +131,7 @@ export function usePromptLabController(owner: FeatureReadOwner) {
   });
 
   const createRubric = useLabMutation(owner, {
+    observation: "save",
     mutate: (values: RubricOutput) =>
       apiClient.request(lab.rubrics.create, {
         body: {
@@ -144,6 +147,7 @@ export function usePromptLabController(owner: FeatureReadOwner) {
   });
 
   const createTestCase = useLabMutation(owner, {
+    observation: "save",
     prepare: () => review(detail.data?.experiment),
     mutate: (values: TestCaseOutput) =>
       apiClient.request(lab.testCases.create, {
@@ -170,6 +174,7 @@ export function usePromptLabController(owner: FeatureReadOwner) {
   });
 
   const deleteTestCase = useLabMutation(owner, {
+    observation: "delete",
     validate: (result) => assertLabStatus(result, "deleted"),
     prepare: (target: PromptTestCase) => review(detail.data?.experiment, target),
     mutate: (target: PromptTestCase) =>
@@ -183,6 +188,7 @@ export function usePromptLabController(owner: FeatureReadOwner) {
   });
 
   const runTestCase = useLabMutation<PromptTestCase, PromptTestCaseRun>(owner, {
+    observation: "run_request",
     prepare: async (target) => {
       if (!labExecutionModels(target.models_json))
         throw labError("저장된 실행 모델을 확인해 주세요.", "prompt_lab_models");
@@ -213,6 +219,7 @@ export function usePromptLabController(owner: FeatureReadOwner) {
     { original: PromptExperiment; status: "active" | "archived" },
     unknown
   >(owner, {
+    observation: "save",
     validate: (result, { status }) => assertLabStatus(result, status),
     prepare: ({ original }) => review(original),
     mutate: ({ original, status }) =>
@@ -231,6 +238,7 @@ export function usePromptLabController(owner: FeatureReadOwner) {
   });
 
   const deleteExperiment = useLabMutation<PromptExperiment, unknown>(owner, {
+    observation: "delete",
     validate: (result) => assertLabStatus(result, "deleted"),
     prepare: (target) => review(target),
     mutate: (target) =>

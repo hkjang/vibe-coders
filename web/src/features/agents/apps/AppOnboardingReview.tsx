@@ -1,4 +1,5 @@
-import { useMutation } from "@tanstack/react-query";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
+
 import { useEffect, useRef, useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { z } from "zod";
@@ -48,6 +49,7 @@ export function AppOnboardingReview({
   const requested = useRef(false);
   const [stale, setStale] = useState(false);
   const onboarding = useMutation({
+    observation: "test",
     gcTime: 0,
     retry: false,
     mutationFn: async ({ values, generation }: { values: AppFormOutput; generation: number }) => {

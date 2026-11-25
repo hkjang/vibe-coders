@@ -16,6 +16,7 @@ export function useExternalKeyPromotion(owner: FeatureReadOwner, canWrite: boole
     true,
   );
   const promoteKey = useMutationFeedback({
+    observation: "save",
     ...safety,
     mutate: (row: UserSummary) =>
       run(() =>

@@ -89,6 +89,7 @@ import { systemEndpoints } from "@/shared/api/domains/system";
 import { text2sqlEndpoints } from "@/shared/api/domains/text2sql";
 import { uiTelemetryEndpoints } from "@/shared/api/domains/ui-telemetry";
 import { uiDiagnosticsEndpoints } from "@/shared/api/domains/ui-diagnostics";
+import { uiActionsEndpoints } from "@/shared/api/domains/ui-actions";
 import {
   adminModelsQuerySchema,
   adminModelsResponseSchema,
@@ -146,6 +147,7 @@ export const endpoints = {
   workflowGraph: workflowGraphEndpoints,
   uiTelemetry: uiTelemetryEndpoints,
   uiDiagnostics: uiDiagnosticsEndpoints,
+  uiActions: uiActionsEndpoints,
   health: operation<GetHealthData, GetHealthResponse>()("GET", "/health", gatewayHealthSchema),
   ready: operation<GetReadyData, GetReadyResponse>()("GET", "/ready", readinessSchema, undefined, {
     503: readinessFailureSchema,

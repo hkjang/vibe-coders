@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { apiClient } from "@/shared/api/client";
@@ -90,6 +91,7 @@ export function useProviderConnection(
         setError(undefined);
         setResult(undefined);
         setPhase("validation");
+        let observation: ReturnType<typeof captureAction>;
         try {
           const valid = await form.trigger([...connectionFields], { shouldFocus: true });
           if (!current() || expectedRevision !== revisionRef.current) return undefined;
@@ -108,18 +110,25 @@ export function useProviderConnection(
           setPhase("request");
           const mode = input.body.credential_mode;
           // Direct API call: no TanStack mutation variables/cache containing draft secrets.
+          observation = captureAction(
+            "test",
+            undefined,
+            () => current() && expectedRevision === revisionRef.current,
+          );
           const value = await apiClient.request(endpoints.domains.gateway.providers.connectionTest, {
             body: input.body,
             signal: controller.signal,
             routeId: "gateway.providers",
           });
           access.assertCurrent();
+          observation?.success();
           // Never publish a late result across current authorization, ownership,
           // session or input boundaries. Recovery requires a new manual test.
           return current() && expectedRevision === revisionRef.current
             ? { value, revision: expectedRevision, mode }
             : undefined;
         } catch (cause) {
+          observation?.failure(cause);
           if (current() && (!isAppError(cause) || cause.kind !== "aborted")) {
             const code = isAppError(cause) ? cause.code : undefined;
             setError({

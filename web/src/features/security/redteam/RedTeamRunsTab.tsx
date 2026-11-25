@@ -64,6 +64,7 @@ export function RedTeamRunsTab({
   );
 
   const updateRemediation = useRedTeamMutation(canWrite, {
+    observation: "save",
     mutate: ({ id, status }: { id: string; status: string }) =>
       apiClient.request(withPathParams(redteam.remediations.update, { id }), {
         body: { status },
@@ -75,6 +76,7 @@ export function RedTeamRunsTab({
   });
 
   const applyRemediation = useRedTeamMutation(canWrite, {
+    observation: "save",
     mutate: (remediation: RedTeamRemediation) =>
       apiClient.request(withPathParams(redteam.remediations.apply, { id: remediation.id }), {
         routeId,
@@ -85,6 +87,7 @@ export function RedTeamRunsTab({
   });
 
   const createRemediation = useRedTeamMutation(canWrite, {
+    observation: "save",
     mutate: (resultId: string) =>
       apiClient.request(withPathParams(redteam.results.remediation, { id: resultId }), {
         body: { action_type: "owner_action", action_payload: { source: "app_console" } },

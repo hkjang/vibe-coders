@@ -28,6 +28,7 @@ function setup(mutate: (value: string) => Promise<string>, onSuccess = vi.fn(), 
   const hook = renderHook(
     () =>
       useMutationFeedback({
+        observation: "save",
         mutate,
         onSuccess,
         ownsResult,

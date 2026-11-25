@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useLayoutEffect, useRef, useState } from "react";
 import { toast } from "@/shared/notifications/toast";
 import { apiClient } from "@/shared/api/client";
@@ -117,6 +118,7 @@ export function useDomainReviewOperation({
     const controller = new AbortController();
     flight.current = controller;
     setError(undefined);
+    let observation: ReturnType<typeof captureAction>;
     void guard
       .run(
         async () => {
@@ -128,6 +130,11 @@ export function useDomainReviewOperation({
           sent.current = true;
           setUnconfirmed(true);
           setPhase("recording");
+          observation = captureAction(
+            review.source.action === "approve" ? "approve" : "reject",
+            undefined,
+            () => current(controller),
+          );
           const ack = await apiClient.request(endpoint, {
             signal: controller.signal,
             routeId: "routing.rules",
@@ -136,6 +143,7 @@ export function useDomainReviewOperation({
           current(controller);
           if (!domainReviewAckMatches(ack, review.source.item.id, review.source.action))
             throw new AppError("기록 응답의 검토 ID와 상태를 확인할 수 없습니다.", { kind: "contract" });
+          observation?.success();
           completed.current = true;
           setUnconfirmed(false);
           setAcknowledged(true);
@@ -152,6 +160,7 @@ export function useDomainReviewOperation({
         (cause) => {
           try {
             current(controller);
+            observation?.failure(cause);
             setError(domainReviewSafeError(cause, access.prefixes));
           } catch {
             /* Retired owner. */

@@ -84,6 +84,7 @@ export function useTeamAdmin(
     [write.allowed, protectedId, teamAdmin, auth.user?.team_id],
   );
   const save = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: () => {
       try {

@@ -41,6 +41,7 @@ async function openToolbox() {
 }
 function MutationFailure() {
   const mutation = useMutationFeedback<undefined, undefined>({
+    observation: "save",
     mutate: async () => {
       throw new Error("private synthetic mutation failure");
     },

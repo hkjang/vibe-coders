@@ -34,6 +34,7 @@ export function useRequestSavedFilters(owner: FeatureReadOwner, expanded: boolea
     retry: false,
   });
   const change = useMutationFeedback<FilterChange, unknown>({
+    observation: (value) => (value.kind === "create" || value.kind === "rename" ? "save" : "delete"),
     gcTime: 0,
     ownsResult: () => owner.isCurrent(),
     mutate: (value) => {

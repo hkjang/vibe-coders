@@ -5,8 +5,15 @@ import { toast } from "@/shared/notifications/toast";
 import { AppError, isAppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import {
+  captureAction,
+  type ActionCompletion,
+  type ActionSelection,
+} from "@/shared/telemetry/action-channel";
 
 interface MutationFeedbackOptions<Variables, Result> {
+  /** Explicit operation category; false for preflight/preview reads. */
+  observation: ActionSelection<Variables>;
   /** Sensitive forms may discard detached mutation snapshots immediately. */
   gcTime?: number;
   /** Server call. */
@@ -28,6 +35,7 @@ interface MutationFeedbackOptions<Variables, Result> {
  * Callers that show errors inline (dialogs) can still read `error`.
  */
 export function useMutationFeedback<Variables, Result>({
+  observation,
   gcTime,
   errorMessage = "작업을 완료하지 못했습니다.",
   errorFormatter = safeAppErrorMessage,
@@ -39,7 +47,7 @@ export function useMutationFeedback<Variables, Result>({
 }: MutationFeedbackOptions<Variables, Result>): UseMutationResult<Result, Error, Variables> {
   const queryClient = useQueryClient();
   const sessionEpoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
-  type Submission = { variables: Variables; epoch: number };
+  type Submission = { variables: Variables; epoch: number; completion?: ActionCompletion };
   type PublicMutation = UseMutationResult<Result, Error, Variables>;
   const isCurrent = (submission: Submission): boolean =>
     submission.epoch === tokenStore.getSessionEpoch() && (ownsResult?.(submission.variables) ?? true);
@@ -58,9 +66,11 @@ export function useMutationFeedback<Variables, Result>({
       try {
         const result = await mutate(submission.variables);
         assertCurrent(submission);
+        submission.completion?.success();
         return result;
       } catch (error) {
         assertCurrent(submission);
+        submission.completion?.failure(error);
         throw error;
       }
     },
@@ -96,7 +106,11 @@ export function useMutationFeedback<Variables, Result>({
   const mutateAsync: PublicMutation["mutateAsync"] = async (...[variables, options]) => {
     // Capture at the public call, not an async onMutate/mutationFn. Each submission
     // owns its generation even when concurrent calls share the same variables.
-    const submission: Submission = { variables: variables as Variables, epoch: tokenStore.getSessionEpoch() };
+    const submission: Submission = {
+      variables: variables as Variables,
+      epoch: tokenStore.getSessionEpoch(),
+      completion: captureAction(observation, variables as Variables),
+    };
     try {
       const result = await mutation.mutateAsync(submission, {
         onSuccess: (data, value, context, mutationContext) => {

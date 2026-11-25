@@ -66,6 +66,7 @@ export function ToolRiskDialog({
   const changes = riskChanges(baseline, draft);
   const valid = riskFormSchema.safeParse(draft).success;
   const save = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: () => {
       try {

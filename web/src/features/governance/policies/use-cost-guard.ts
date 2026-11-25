@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/shared/notifications/toast";
@@ -111,14 +112,19 @@ export function useCostGuard(canWrite: boolean, epoch: number) {
     flight.current = draft.instance;
     setCommitted(false);
     setPending(true);
+    const observation = captureAction("save", undefined, () => current(draft));
     try {
       await apiClient.request(endpoints.domains.governance.costGuard.save, { body, routeId });
       if (!current(draft)) return;
+      observation?.success();
       setCommitted(true);
       toast.success("비용 보호 설정을 저장했습니다.");
       // POST is committed. Refresh is a separate read, not a reason to replay.
       for (const key of Object.values(costGuardQueryKeys))
         void client.invalidateQueries({ queryKey: key, exact: true }).catch(() => undefined);
+    } catch (cause) {
+      observation?.failure(cause);
+      throw cause;
     } finally {
       if (flight.current === draft.instance) flight.current = undefined;
       if (current(draft)) setPending(false);

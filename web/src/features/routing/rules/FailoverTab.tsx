@@ -1,3 +1,5 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useFeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -75,6 +77,7 @@ function coverageColumns(): ReadonlyArray<DataTableColumn<CoverageRow>> {
 }
 
 export function FailoverTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
+  const observationOwner = useFeatureReadOwner("routing.rules", "operation-observation", [], "routing:read");
   const [searchParams, updateSearch] = useSearchState();
   const model = searchParams.get("model") ?? "";
   const [modelInput, setModelInput] = useState(model);
@@ -107,12 +110,15 @@ export function FailoverTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
     if (drillModel.trim() === "") return;
     setDrillPending(true);
     setDrillError(undefined);
+    const observation = captureAction("test", undefined, observationOwner.isCurrent);
     try {
       const result = await apiClient.request(endpoints.domains.routing.failoverDrill, {
         body: { model: drillModel.trim(), fail: failed },
       });
+      observation?.success();
       setDrill(result);
     } catch (cause) {
+      observation?.failure(cause);
       setDrill(undefined);
       setDrillError({
         message: safeAppErrorMessage(cause, "폴백 리허설을 실행하지 못했습니다."),

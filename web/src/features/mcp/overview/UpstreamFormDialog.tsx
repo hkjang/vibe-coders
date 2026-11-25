@@ -195,6 +195,7 @@ export function UpstreamFormDialog({
   const [checklist, setChecklist] = useState<ReadonlyArray<OnboardingCheck>>([]);
 
   const save = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: (variables: { body: McpUpstreamBody; force?: "1" }) => {
       access.assertCurrent();
@@ -211,6 +212,7 @@ export function UpstreamFormDialog({
   });
 
   const update = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: (variables: { body: McpUpstreamPatchBody; id: string }) => {
       access.assertCurrent();
@@ -226,6 +228,7 @@ export function UpstreamFormDialog({
   });
 
   const check = useMutationFeedback({
+    observation: "test",
     ownsResult,
     mutate: (body: McpUpstreamBody) => {
       access.assertCurrent();

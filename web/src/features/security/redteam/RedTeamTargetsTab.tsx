@@ -135,6 +135,7 @@ export function RedTeamTargetsTab({
   });
 
   const saveCase = useRedTeamMutation(canWrite, {
+    observation: "save",
     mutate: (values: ProbeCaseFormValues) =>
       apiClient.request(redteam.probeCases.upsert, {
         body: {
@@ -161,6 +162,7 @@ export function RedTeamTargetsTab({
   });
 
   const deleteCase = useRedTeamMutation(canWrite, {
+    observation: "delete",
     mutate: (probeCase: RedTeamProbeCase) =>
       apiClient.request(withPathParams(redteam.probeCases.remove, { id: probeCase.id }), { routeId }),
     invalidates: [redteamKeys.probePacks],

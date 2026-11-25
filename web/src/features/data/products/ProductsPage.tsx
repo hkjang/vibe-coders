@@ -116,6 +116,7 @@ export function ProductsPage(): React.JSX.Element {
   });
 
   const upsert = useMutationFeedback({
+    observation: "save",
     mutate: (values: ProductFormValues) =>
       apiClient.request(products.upsert, {
         body: {
@@ -137,6 +138,7 @@ export function ProductsPage(): React.JSX.Element {
   });
 
   const changeStatus = useMutationFeedback({
+    observation: "save",
     mutate: (input: { product: DataProduct; status: string }) =>
       apiClient.request(products.upsert, {
         body: {
@@ -159,6 +161,7 @@ export function ProductsPage(): React.JSX.Element {
   });
 
   const remove = useMutationFeedback({
+    observation: "delete",
     mutate: (product: DataProduct) => apiClient.request(products.remove, { query: { id: product.id } }),
     invalidates: [productQueryKey],
     successMessage: (_result, product) => `데이터 상품 삭제 완료: ${product.product_key}`,
@@ -166,6 +169,7 @@ export function ProductsPage(): React.JSX.Element {
   });
 
   const decide = useMutationFeedback({
+    observation: (input) => (input.action === "approve" ? "approve" : "reject"),
     mutate: (input: { id: string; action: "approve" | "deny" }) =>
       apiClient.request(products.decide, { body: { id: input.id, action: input.action } }),
     invalidates: [productQueryKey],

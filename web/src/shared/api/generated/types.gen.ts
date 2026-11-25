@@ -4646,6 +4646,46 @@ export type TrackingViolation = {
     page: string;
 };
 
+export type UiActionCounts = {
+    rejected: number;
+    success: number;
+    unknown: number;
+};
+
+export type UiActionEventRequest = {
+    action: 'save' | 'delete' | 'approve' | 'reject' | 'revoke' | 'rotate' | 'rollback' | 'activate' | 'deactivate' | 'import' | 'export' | 'run_request' | 'test' | 'feedback';
+    /**
+     * Fresh random nonce, hashed by the server; never identity-derived or persisted by the browser.
+     */
+    event_id: string;
+    feature_id: string;
+    outcome: 'success' | 'rejected' | 'unknown';
+};
+
+export type UiActionGroup = {
+    action: 'save' | 'delete' | 'approve' | 'reject' | 'revoke' | 'rotate' | 'rollback' | 'activate' | 'deactivate' | 'import' | 'export' | 'run_request' | 'test' | 'feedback';
+    feature_id: string;
+    rejected: number;
+    success: number;
+    ui_version: string;
+    unknown: number;
+};
+
+export type UiActionSummaryResponse = {
+    days: 7 | 30;
+    enabled: boolean;
+    event_limit: 10000;
+    from: string;
+    group_limit: 100;
+    groups: Array<UiActionGroup>;
+    other: UiActionCounts;
+    rejected: number;
+    retention_days: 30;
+    success: number;
+    to: string;
+    unknown: number;
+};
+
 export type UiAuthentication = {
     allow_local_login: boolean;
     authenticated: boolean;
@@ -17060,6 +17100,66 @@ export type PostAdminTrackingViolationsAllowResponses = {
 };
 
 export type PostAdminTrackingViolationsAllowResponse = PostAdminTrackingViolationsAllowResponses[keyof PostAdminTrackingViolationsAllowResponses];
+
+export type PostAdminUiActionsEventsData = {
+    body: UiActionEventRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/ui-actions/events';
+};
+
+export type PostAdminUiActionsEventsErrors = {
+    /**
+     * Feature access denied
+     */
+    403: AppError;
+    /**
+     * Observation unavailable; never retry
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminUiActionsEventsError = PostAdminUiActionsEventsErrors[keyof PostAdminUiActionsEventsErrors];
+
+export type PostAdminUiActionsEventsResponses = {
+    /**
+     * Recorded idempotently or intentionally dropped; never retry
+     */
+    204: void;
+};
+
+export type PostAdminUiActionsEventsResponse = PostAdminUiActionsEventsResponses[keyof PostAdminUiActionsEventsResponses];
+
+export type GetAdminUiActionsSummaryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        days?: 7 | 30;
+    };
+    url: '/admin/ui-actions/summary';
+};
+
+export type GetAdminUiActionsSummaryErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminUiActionsSummaryError = GetAdminUiActionsSummaryErrors[keyof GetAdminUiActionsSummaryErrors];
+
+export type GetAdminUiActionsSummaryResponses = {
+    /**
+     * OK
+     */
+    200: UiActionSummaryResponse;
+};
+
+export type GetAdminUiActionsSummaryResponse = GetAdminUiActionsSummaryResponses[keyof GetAdminUiActionsSummaryResponses];
 
 export type GetAdminUiBootstrapData = {
     body?: never;

@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/shared/notifications/toast";
@@ -225,6 +226,7 @@ export function useProbeCsvImport(canWrite: boolean, reason: string, contextKey:
       return;
     selection.pending = true;
     update(selection, { pending: true, stage: "applying", error: undefined });
+    const observation = captureAction("import", undefined, () => owns(selection));
     try {
       const guard = context(selection);
       guard.assertCurrent();
@@ -239,6 +241,7 @@ export function useProbeCsvImport(canWrite: boolean, reason: string, contextKey:
         result.packs_touched !== review.packs_touched
       )
         throw new AppError("적용 응답을 확인할 수 없습니다.", { kind: "contract" });
+      observation?.success();
       let refreshed = true;
       try {
         await client.invalidateQueries({ queryKey: redteamKeys.probePacks }, { throwOnError: true });
@@ -260,6 +263,7 @@ export function useProbeCsvImport(canWrite: boolean, reason: string, contextKey:
       if (!refreshed) toast.warning("가져오기는 반영되었습니다. 목록을 다시 불러오세요.");
       close();
     } catch (cause) {
+      observation?.failure(cause);
       fail(selection, cause, true);
     } finally {
       finish(selection);

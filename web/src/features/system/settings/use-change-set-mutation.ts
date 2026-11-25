@@ -1,13 +1,16 @@
-import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
+import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
 import { toast } from "@/shared/notifications/toast";
 
 import { AppError, isAppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import type { ActionSelection } from "@/shared/telemetry/action-channel";
 
 /** Scoped to the mounted ChangeSet owner, including role/team and token session. */
 export function useChangeSetMutation<Variables, Result>({
+  observation,
   mutate,
   invalidates = [],
   successMessage,
@@ -15,6 +18,7 @@ export function useChangeSetMutation<Variables, Result>({
   onSuccess,
   invalidateOnError = false,
 }: {
+  observation: ActionSelection<Variables>;
   mutate: (variables: Variables) => Promise<Result>;
   invalidates?: readonly QueryKey[];
   successMessage?: string | ((result: Result, variables: Variables) => string);
@@ -36,6 +40,7 @@ export function useChangeSetMutation<Variables, Result>({
     if (!current()) throw new AppError("현재 계정과 화면을 다시 확인하세요.", { kind: "aborted" });
   };
   return useMutation({
+    observation: observation,
     retry: false,
     gcTime: 0,
     mutationFn: async (variables: Variables) => {

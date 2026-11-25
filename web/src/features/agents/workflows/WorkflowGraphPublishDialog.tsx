@@ -104,6 +104,7 @@ function PublishReview({ baseline, ...props }: Props & { baseline: WorkflowGraph
   const wf = original.workflow;
   return (
     <ConfirmDialog
+      observation="activate"
       open
       scrollBody
       title="분기 워크플로 게시"

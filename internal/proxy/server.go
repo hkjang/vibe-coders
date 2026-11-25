@@ -33,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.180"
+var AppVersion = "v0.86.181"
 
 type Server struct {
 	cfg      config.Config
@@ -305,6 +305,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/ui-telemetry/summary", s.handleAppUITelemetrySummary)
 	mux.HandleFunc("/admin/ui-diagnostics/events", s.handleAppUIDiagnosticEvent)
 	mux.HandleFunc("/admin/ui-diagnostics/summary", s.handleAppUIDiagnosticSummary)
+	mux.HandleFunc("/admin/ui-actions/events", s.handleAppUIActionEvent)
+	mux.HandleFunc("/admin/ui-actions/summary", s.handleAppUIActionSummary)
 	mux.HandleFunc("/admin", s.handleAdminUI)
 	mux.HandleFunc("/admin/", s.handleAdminUI)
 	mux.HandleFunc("/admin/stats", s.handleStats)

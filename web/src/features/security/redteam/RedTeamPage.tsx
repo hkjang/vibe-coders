@@ -105,6 +105,7 @@ function RedTeamWorkspace(): React.JSX.Element {
   const firstError = queries.find((query) => query.isError)?.error;
 
   const runQuickStart = useRedTeamMutation(canWrite, {
+    observation: "test",
     mutate: async () => {
       const packs = (data.probePacks.data?.probe_packs ?? []).filter((pack) => !pack.requires_approval);
       if (packs.length === 0) {

@@ -1,4 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -85,6 +86,7 @@ function EmergencyPanel({ owner, canWrite }: { owner: string; canWrite: boolean 
     if (active.current?.review !== candidate) throw emergencyReviewError();
   };
   const mutation = useMutation({
+    observation: (value) => (value.review.action === "stop" ? "deactivate" : "activate"),
     retry: false,
     gcTime: 0,
     mutationFn: async (input: { review: Review; reason: string }) => {

@@ -57,6 +57,7 @@ var publicRoutes = map[string]string{
 	"/admin/ui-bootstrap":          "public login/bootstrap metadata only; authenticated identity and permissions are included only after a valid credential",
 	"/admin/ui-telemetry/events":   "disabled or overloaded intake returns an empty 204 and records nothing; enabled intake requires appUIBootstrapIdentity plus effective feature RBAC, including for read-only roles, verified by TestAppUITelemetryRejectsInvalidExpiredRevokedAndMissingTokens and TestAppUITelemetryRBACRolloutAndFallbackUseFreshSettings; the aggregate summary remains guarded",
 	"/admin/ui-diagnostics/events": "disabled or overloaded diagnostics share the telemetry admission gate and return an empty 204; enabled intake requires appUIBootstrapIdentity and fresh effective feature access; summary requires admin read authorization",
+	"/admin/ui-actions/events":     "disabled or overloaded action intake returns an empty 204 and stores nothing; enabled intake requires appUIBootstrapIdentity and fresh effective feature access, verified by TestAppUIActionsHTTPContractAndOptOut and TestAppUIActionsFreshFeaturePermissionAndIdentity; summary requires admin read authorization",
 
 	"/":             "landing page, static HTML",
 	"/favicon.ico":  "static icon",

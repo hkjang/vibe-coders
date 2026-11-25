@@ -1,4 +1,5 @@
-import { useMutation } from "@tanstack/react-query";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
+
 import { useSkillScope, useSkillReadAction, useSkillOperationAccess } from "./skill-scope";
 import { useId, useRef, useState } from "react";
 import { toast } from "@/shared/notifications/toast";
@@ -48,6 +49,7 @@ export function SkillToolbox({
   const statusQuery = statusFilter === "all" ? {} : { status: statusFilter };
 
   const scan = useMutation({
+    observation: "test",
     gcTime: 0,
     retry: false,
     mutationFn: () =>
@@ -61,6 +63,7 @@ export function SkillToolbox({
   });
 
   const exportBundle = useMutation({
+    observation: "export",
     gcTime: 0,
     retry: false,
     mutationFn: () =>
@@ -83,6 +86,7 @@ export function SkillToolbox({
   });
 
   const recommend = useMutation({
+    observation: false,
     gcTime: 0,
     retry: false,
     mutationFn: (apply: boolean) => {
@@ -101,6 +105,7 @@ export function SkillToolbox({
   });
 
   const seed = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: mutationAccess.ownsResult,
     mutate: () => {
@@ -118,6 +123,7 @@ export function SkillToolbox({
   });
 
   const importBundle = useMutationFeedback({
+    observation: "import",
     gcTime: 0,
     ownsResult: mutationAccess.ownsResult,
     mutate: (body: { version?: string; skills: ReadonlyArray<Record<string, unknown>> }) => {

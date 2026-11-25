@@ -13,6 +13,7 @@ export function useText2SqlRegistryTransfer({
   onMessage: (message: { tone: "success" | "danger"; text: string }) => void;
 }) {
   const importBundle = useText2SqlMutation({
+    observation: "import",
     authorized: canWrite,
     mutate: async (file: File, assertCurrent) => {
       const bundle = await readRegistryFile(file);
@@ -32,6 +33,7 @@ export function useText2SqlRegistryTransfer({
       }),
   });
   const exportBundle = useText2SqlMutation({
+    observation: "export",
     readOnly: true,
     mutate: (schema: string) =>
       apiClient.request(endpoints.domains.text2sql.registry.export, {

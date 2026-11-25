@@ -1,4 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AppInspectionResults } from "./AppInspectionResults";
@@ -77,6 +78,7 @@ function Inspection({ app, disabled, owner }: Props & { owner: FeatureReadOwner 
     access.assertCurrent();
   };
   const validate = useMutation({
+    observation: "test",
     retry: false,
     mutationFn: async () => {
       assertAction("validate");
@@ -100,6 +102,7 @@ function Inspection({ app, disabled, owner }: Props & { owner: FeatureReadOwner 
     onError,
   });
   const plan = useMutation({
+    observation: false,
     retry: false,
     mutationFn: async () => {
       assertAction("plan");

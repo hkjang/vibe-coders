@@ -122,6 +122,7 @@ function CampaignsTab({
   }, [pollingCampaignId, refetchRuns]);
 
   const saveCampaign = useRedTeamMutation(canWrite, {
+    observation: "save",
     mutate: ({ values, campaignId }: { values: CampaignFormValues; campaignId: string }) => {
       const targetFilter: Record<string, unknown> = {};
       if (values.provider !== "") targetFilter.provider = values.provider;
@@ -150,6 +151,7 @@ function CampaignsTab({
   });
 
   const deleteCampaign = useRedTeamMutation(canWrite, {
+    observation: "delete",
     mutate: (campaign: RedTeamCampaign) =>
       apiClient.request(withPathParams(redteam.campaigns.remove, { id: campaign.id }), { routeId }),
     invalidates: [redteamKeys.campaigns, redteamKeys.runs, redteamKeys.dashboard],
@@ -158,12 +160,14 @@ function CampaignsTab({
   });
 
   const runDryRun = useMutationFeedback({
+    observation: "test",
     mutate: (campaign: RedTeamCampaign) => readPreflight(campaign.id),
     errorMessage: "사전 점검 결과를 확인하지 못했습니다.",
     onSuccess: (result) => setDryRun(result),
   });
 
   const approveCampaign = useRedTeamMutation(canWrite, {
+    observation: "approve",
     mutate: (campaign: RedTeamCampaign) =>
       apiClient.request(withPathParams(redteam.campaigns.approve, { id: campaign.id }), { routeId }),
     invalidates: [redteamKeys.campaigns],

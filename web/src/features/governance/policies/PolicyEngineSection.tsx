@@ -200,6 +200,7 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   });
 
   const savePolicy = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: (values: PolicyFormValues) =>
       writeGuard.run("policy-create", () =>
@@ -230,6 +231,7 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   });
 
   const togglePolicy = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: (variables: { policy: Policy; enabled: boolean }) => {
       editorAccess.assertRead();
@@ -264,6 +266,7 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   });
 
   const saveCase = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: (values: RegressionFormValues) =>
       writeGuard.run("case-create", () =>
@@ -286,6 +289,7 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   });
 
   const removeCase = useMutationFeedback({
+    observation: "delete",
     ownsResult,
     mutate: (row: PolicyRegressionCase) =>
       writeGuard.run("case-delete", () => {
@@ -303,6 +307,7 @@ function PolicyEngineContent({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   });
 
   const runRegression = useMutationFeedback({
+    observation: "test",
     ownsResult,
     mutate: () =>
       writeGuard.run("regression-run", () =>

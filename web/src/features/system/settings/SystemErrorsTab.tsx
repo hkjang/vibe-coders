@@ -48,6 +48,7 @@ function SystemErrorsWorkspace({
 
   const key = featureOwnedKey(systemSettingsKeys.errors, owner);
   const clearErrors = useRecordActionReview<NonNullable<typeof errors.data>, "clear">({
+    observation: "delete",
     owner,
     query: errors,
     queryKey: key,
