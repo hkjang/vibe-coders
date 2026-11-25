@@ -23,7 +23,7 @@ import (
 // Returning true passes control (and the shared requestPipeline state) to the
 // next step. This makes the previously-inline handleOpenAI flow explicit:
 //
-//	Auth → Quota → MCP Discovery → Routing → Skill → Deprecation → Limits → Governance → Cache → Cost → Upstream
+//	Auth → Quota → Controls → Dynamic Route → Agent Route → MCP Discovery → Routing → Skill → Deprecation → Limits → Governance → Cache → Cost → Upstream
 type PipelineStep interface {
 	// Name is a short stable identifier used in logs/metrics/tests.
 	Name() string
@@ -95,6 +95,14 @@ type requestPipeline struct {
 	// affinity identifies the conversation for provider stickiness (see
 	// resolveSessionAffinity). Empty when balancing does not apply.
 	affinity sessionAffinity
+
+	// controls are the caller's per-request control headers (metadata, timeout,
+	// retries, cache). See request_controls.go.
+	controls requestControls
+
+	// dynamic is set while a "dynamic/<name>" request is served by a dynamic route.
+	// See dynamic_route_runtime.go.
+	dynamic *dynamicRouteRequest
 }
 
 // pipelineSteps returns the ordered request pipeline. The order is the contract:
@@ -105,6 +113,8 @@ func (rc *requestPipeline) steps() []PipelineStep {
 	return []PipelineStep{
 		stepFunc{"auth", (*requestPipeline).stepAuth},
 		stepFunc{"quota", (*requestPipeline).stepQuota},
+		stepFunc{"controls", (*requestPipeline).stepRequestControls},
+		stepFunc{"dynamic_route", (*requestPipeline).stepDynamicRoute},
 		stepFunc{"agent_route", (*requestPipeline).stepAgentRoute},
 		stepFunc{"mcp_discovery", (*requestPipeline).stepMCPDiscovery},
 		stepFunc{"routing", (*requestPipeline).stepRouting},
@@ -226,6 +236,9 @@ func (rc *requestPipeline) stepRouting() bool {
 	var routeDecision routingDecision
 	pinned := strings.TrimSpace(r.Header.Get("X-Proxy-Provider")) != "" || strings.TrimSpace(r.URL.Query().Get("provider")) != ""
 	noRoute := strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Proxy-No-Route")), "1")
+	// A dynamic route has already chosen the model; rules and the auto router must
+	// not choose again.
+	noRoute = noRoute || rc.dynamic != nil
 	var routingPlan *intelligentRoutingPlan
 	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {
 		plan := s.planIntelligentRouting(r.Context(), body, r.URL.Path, pinned, noRoute, rc.authCtx)
@@ -260,6 +273,21 @@ func (rc *requestPipeline) stepRouting() bool {
 		} else if !pinned && !noRoute && plan.ForceProvider && plan.SelectedProvider != "" {
 			routeDecision.TargetProvider = plan.SelectedProvider
 		}
+		if rc.dynamic != nil {
+			plan.RouteReason = "dynamic_route"
+			plan.DecisionReason = "dynamic route " + rc.dynamic.label() + ": " + rc.dynamic.run.pathHeader()
+		}
+	}
+	if rc.dynamic != nil {
+		routeDecision = routingDecision{
+			Applied:        true,
+			OriginalModel:  rc.dynamic.virtual,
+			TargetModel:    rc.dynamic.current.Properties.Model,
+			TargetProvider: rc.dynamic.current.Properties.Provider,
+			Desc:           "dynamic route " + rc.dynamic.label() + ": " + rc.dynamic.run.pathHeader(),
+			Reason:         "dynamic_route",
+		}
+		w.Header().Set("X-Routed-Model", rc.dynamic.current.Properties.Model)
 	}
 	rc.body = body
 
@@ -291,6 +319,9 @@ func (rc *requestPipeline) stepRouting() bool {
 		// actually requested while leaving ResolvedModel/UpstreamModel aligned with
 		// the replacement (or any later intelligent-routing decision).
 		meta.Request.RequestedModel = rc.agentRouteDeprecatedFrom
+	}
+	if len(rc.controls.Set) > 0 {
+		setRoutingSummaryExtra(&meta.Request, "request_controls", rc.controls.Set)
 	}
 	refreshRoutingSummary(&meta.Request, routingPlan)
 
@@ -363,29 +394,49 @@ func (rc *requestPipeline) stepGovernance() bool {
 func (rc *requestPipeline) stepCache() bool {
 	s, r, w := rc.s, rc.r, rc.w
 
+	embeddingCacheable := r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost && s.cacheConf().EmbeddingEnabled
+	rc.chatCacheScope = chatCacheScopeValue(s.cacheConf().ChatScope, rc.authCtx, rc.apiKeyID)
+	rc.chatCacheKey, rc.chatCacheable = s.chatCacheEligible(r, rc.body, rc.authCtx, rc.apiKeyID)
+	if rc.controls.SkipCache {
+		// The caller asked for a fresh answer: neither serve nor store one. Say so,
+		// so "why was this not cached" has an answer on the response itself.
+		if embeddingCacheable || rc.chatCacheable {
+			w.Header().Set("X-Cache", "BYPASS")
+		}
+		rc.chatCacheable = false
+		rc.chatCacheKey = ""
+		return true
+	}
+
+	// A cache hit through a dynamic route is still the route's answer: record it as
+	// one, and tell the caller which path it would have taken.
+	cacheMeta := rc.dynamicCacheHitMeta()
+
 	// Embedding cache (idempotent) — only applies to /v1/embeddings + POST.
-	if r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost && s.cacheConf().EmbeddingEnabled {
+	if embeddingCacheable {
 		if served := s.serveEmbeddingFromCache(r.Context(), w, r, rc.body,
-			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), rc.meta, rc.traceID); served {
+			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), cacheMeta, rc.traceID); served {
 			return false
 		}
+		w.Header().Set("X-Cache", "MISS")
 	}
 
 	// Chat response cache — opt-in, only for deterministic (temp 0 / seed) requests.
-	rc.chatCacheScope = chatCacheScopeValue(s.cacheConf().ChatScope, rc.authCtx, rc.apiKeyID)
-	rc.chatCacheKey, rc.chatCacheable = s.chatCacheEligible(r, rc.body, rc.authCtx, rc.apiKeyID)
 	if rc.chatCacheable {
-		if served := s.serveChatFromCache(r.Context(), w, rc.chatCacheKey, rc.meta, rc.traceID); served {
+		w.Header().Set("X-Cache", "MISS")
+		if served := s.serveChatFromCache(r.Context(), w, rc.chatCacheKey, cacheMeta, rc.traceID); served {
 			return false
 		}
 		// Exact miss → try the embedding-based semantic cache (opt-in). The query vector
 		// is kept on rc so a fresh upstream response is stored under it.
-		if vec, served := s.serveChatSemantic(r.Context(), w, r, rc.body, rc.chatCacheScope, rc.meta, rc.traceID); served {
+		if vec, served := s.serveChatSemantic(r.Context(), w, r, rc.body, rc.chatCacheScope, cacheMeta, rc.traceID); served {
 			return false
 		} else {
 			rc.chatSemanticVec = vec
 		}
 	}
+	// No cache answered: the path header goes back to what the live run says.
+	rc.setDynamicRoutePathHeader()
 	return true
 }
 
@@ -529,6 +580,16 @@ func (rc *requestPipeline) stepUpstream() bool {
 	var err error
 	if rc.modelsAggregateFallback {
 		provider, err = s.modelsFallbackProvider(r.Context())
+	} else if rc.dynamic != nil {
+		// A dynamic route whose element cannot be served here (provider missing,
+		// disabled or denied to this key) moves on to the element's fallback.
+		var switched bool
+		provider, body, switched, err = rc.resolveDynamicProvider(r.Context(), body, forcedProvider)
+		if switched {
+			meta.Request.Model = rc.dynamic.current.Properties.Model
+			meta.Request.UpstreamModel = meta.Request.Model
+			balanced = balancerDecision{}
+		}
 	} else {
 		provider, err = s.selectProviderForced(r.Context(), r, meta.Request.Model, forcedProvider)
 	}
@@ -541,6 +602,11 @@ func (rc *requestPipeline) stepUpstream() bool {
 				code = "models_fallback_deadline_exceeded"
 			}
 			rc.writeModelsFallbackError(&meta, status, code, time.Now())
+			return false
+		}
+		if rc.dynamic != nil {
+			rc.setDynamicRoutePathHeader()
+			writeOpenAIError(w, http.StatusBadGateway, "no model element of this dynamic route has a usable provider", "server_error", "provider_unavailable")
 			return false
 		}
 		writeOpenAIError(w, http.StatusBadGateway, "provider is unavailable", "server_error", "provider_unavailable")
@@ -595,6 +661,15 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// Identify failover candidates: only when the client did NOT explicitly pin a provider.
 	failoverCandidates := []string{}
 	fallbackAllowed := routingPlan == nil || !riskDisablesFallback(routingPlan.Risk)
+	if rc.dynamic != nil {
+		// A pinned element gets no pool: its fallback output, not the provider pool,
+		// says what happens when that provider fails. An unpinned one fails over
+		// among the providers of its own model.
+		fallbackAllowed = false
+		if rc.dynamic.current.Properties.Provider == "" && (routingPlan == nil || !riskDisablesFallback(routingPlan.Risk)) {
+			failoverCandidates = rc.dynamicFailoverCandidates(r.Context(), rc.dynamic.current.Properties.Model, provider.Name)
+		}
+	}
 	if !rc.modelsAggregateFallback && fallbackAllowed && strings.TrimSpace(r.Header.Get("X-Proxy-Provider")) == "" && strings.TrimSpace(r.URL.Query().Get("provider")) == "" {
 		if cands, _ := s.providersForModel(r.Context(), meta.Request.Model); len(cands) > 1 {
 			for _, name := range cands {
@@ -636,7 +711,20 @@ func (rc *requestPipeline) stepUpstream() bool {
 		releaseModelsSlot()
 		return false
 	}
-	resp, resolvedName, failoverFrom, failoverReason, failoverPath, finalBody, finalModel, upstreamHeaders, err := s.dialUpstream(r.Context(), r, body, provider, traceID, failoverCandidates)
+	var dialed upstreamDialResult
+	if rc.dynamic != nil {
+		dialed = rc.dialDynamicRoute(r.Context(), body, provider, traceID, failoverCandidates)
+	} else {
+		dialed = s.dialUpstreamWith(r.Context(), r, body, provider, traceID, failoverCandidates, rc.controls.dialOptions())
+	}
+	resp, resolvedName, failoverFrom, failoverReason, failoverPath, finalBody, finalModel, upstreamHeaders, err := dialed.resp, dialed.provider, dialed.failoverFrom, dialed.failoverReason, dialed.path, dialed.body, dialed.model, dialed.headers, dialed.err
+	if dialed.retries > 0 {
+		w.Header().Set("X-Upstream-Retries", strconv.Itoa(dialed.retries))
+	}
+	rc.setDynamicRoutePathHeader()
+	if rc.dynamic != nil && finalModel != "" {
+		w.Header().Set("X-Routed-Model", finalModel)
+	}
 	if finalBody != nil {
 		body = finalBody
 	}
@@ -673,6 +761,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, nil, w.Header())
 		s.setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
 		refreshRoutingSummary(&meta.Request, routingPlan)
+		rc.attachDynamicRoute(&meta)
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		rc.recordSkillRun(rc.skillName, rc.skillVersion, "error", meta.Request.Model, 0, meta.Request.LatencyMS)
@@ -780,7 +869,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	w.Header().Set("X-Request-ID", traceID)
 	w.WriteHeader(resp.StatusCode)
 
-	captureForCache := !stream && r.URL.Path == "/v1/embeddings" && s.cacheConf().EmbeddingEnabled
+	captureForCache := !stream && r.URL.Path == "/v1/embeddings" && s.cacheConf().EmbeddingEnabled && !rc.controls.SkipCache
 	captureForChatCache := !stream && rc.chatCacheable && resp.StatusCode == http.StatusOK
 	lc := s.loggingConf()
 	captureLimit := lc.ResponseMaxBytes
@@ -814,10 +903,10 @@ func (rc *requestPipeline) stepUpstream() bool {
 	replayable := copyErr == nil && !analysis.Truncated
 	if captureForCache && replayable && analysis.Text != "" {
 		s.maybeStoreEmbeddingCache(r.Context(), body,
-			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
+			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text), rc.controls.CacheTTL)
 	}
 	if captureForChatCache && replayable && analysis.Text != "" {
-		s.maybeStoreChatCache(r.Context(), rc.chatCacheKey, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
+		s.maybeStoreChatCache(r.Context(), rc.chatCacheKey, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text), rc.controls.CacheTTL)
 		s.maybeStoreChatSemantic(r.Context(), rc.body, rc.chatCacheScope, rc.chatSemanticVec, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
 	if captureForCache || captureForChatCache {
@@ -911,6 +1000,10 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 	applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, resp.Header, w.Header())
 	refreshRoutingSummary(&meta.Request, routingPlan)
+	rc.attachDynamicRoute(&meta)
+	if meta.Usage != nil {
+		rc.chargeDynamicRouteCost(r.Context(), meta.Usage.EstimatedCost)
+	}
 	s.enqueue(meta)
 	return true
 }

@@ -469,6 +469,74 @@ ollama   base_url = http://ollama:11434    model_patterns = nomic-embed-*,mxbai-
 임계값을 조정하는 것과 목적지를 바꾸는 것은 다른 종류의 변경이라, 접속 정보는 기동 설정으로 남겨 두었습니다.
 provider를 추가·수정하려면 **설정 → 업스트림 프로바이더** 화면을 쓰세요(이쪽은 원래부터 런타임 반영입니다).
 
+## 6-2. 동적 라우팅 (Dynamic Routing)
+
+조건·비율·한도·폴백을 **흐름(그래프)** 으로 엮어 이름을 붙이고, 클라이언트는 모델 이름만 `dynamic/<이름>` 으로 바꿔 호출합니다.
+경로 정의는 Cloudflare AI Gateway의 동적 라우팅 JSON(`{"elements": [...]}`)과 같은 형식이라, 거기서 내보낸 경로를 붙여 넣어 시작할 수 있습니다.
+콘솔: **라우팅 → 동적 라우팅** (`/app/routing/dynamic`).
+
+```bash
+curl $GATEWAY/v1/chat/completions \
+  -H "Authorization: Bearer $VIBE_API_KEY" \
+  -H 'X-Vibe-Metadata: {"plan":"free","user_id":"u-123"}' \
+  -d '{"model":"dynamic/support","messages":[{"role":"user","content":"안녕하세요"}]}'
+```
+
+### 요소
+
+| 유형 | 하는 일 | 출력 |
+|---|---|---|
+| `start` | 진입점. 경로마다 하나 | `next` |
+| `conditional` | 조건이 맞는지에 따라 두 갈래 | `true` · `false` |
+| `percentage` | 트래픽을 비율대로 나눔(최대 5갈래, 합 100%). `stickyKey`를 주면 같은 값은 늘 같은 갈래 | `"90%"`, `"10%"` … |
+| `rate` | 기간(`window`, 10초~31일)당 요청 수(`count`) 또는 비용(`cost`, 원) 한도. `key`별로 따로 셈 | `success` · `fallback`(없으면 429) |
+| `model` | 모델 하나를 호출. `provider`(비우면 자동·같은 모델 장애 전환), `timeout`(ms, 첫 응답 헤더까지), `retries`(0~5), `retryDelay`, `backoff` | `success`(→ end) · `fallback` |
+| `end` | 마지막으로 성공한 모델의 응답을 돌려줌 | — |
+
+**조건이 읽는 값**: `metadata.<키>`(요청의 `X-Vibe-Metadata` 또는 `cf-aig-metadata` 헤더), `identity.team` · `identity.team_id` · `identity.user_id` · `identity.api_key_id` · `identity.role`(인증된 호출 키 — 헤더로 꾸밀 수 없음), `request.stream` · `request.endpoint`.
+연산자는 `$eq $ne $in $nin $gt $gte $lt $lte $exists`, 묶음은 `$and` · `$or`. 메타데이터에 없는 키는 `$eq`·`$in`에서 거짓, `$ne`·`$nin`에서 참입니다. 숫자와 문자열은 따로 비교합니다(`"3"` ≠ `3`).
+
+**폴백이 일어나는 경우**: 연결 오류, 시간 초과, 429, 5xx, 그리고 401·403·404·408(다른 공급자·모델이면 될 수 있는 실패). 400·422처럼 요청 자체가 잘못된 응답은 그대로 돌려줍니다. 모델 요소의 `retries`는 같은 공급자에 다시 보낸 뒤에 `fallback`으로 넘어갑니다.
+
+### 버전 · 배포 · 롤백
+
+저장할 때마다 버전이 하나 생기고, **배포한 버전만** 트래픽을 받습니다. 이전 버전을 배포하는 것이 롤백입니다.
+저장·배포 모두 화면을 연 시점의 버전을 함께 보내, 다른 운영자가 그 사이에 바꿨으면 덮어쓰지 않고 409로 거절합니다.
+배포는 처리한 인스턴스에서 즉시, 다른 인스턴스에서는 5초 안에 반영됩니다. 사용 중지 스위치를 끄면 호출이 `dynamic_route_disabled`로 거절됩니다.
+
+### 정책과 함께 동작하는 방식
+
+- 호출 키의 모델 허용/거부는 `dynamic/<이름>` 자체와 **실제로 고른 모델 모두**에 적용됩니다. 키가 쓸 수 없는 모델 요소는 건너뛰고 그 `fallback`으로 갑니다.
+- 거버넌스·캐시·비용 가드·쿼터는 선택된 실제 모델을 기준으로 평소대로 적용됩니다. 복잡도 규칙·auto 라우터는 동적 경로 요청에서는 모델을 다시 고르지 않습니다.
+- `rate` 한도는 DB에서 세므로 여러 인스턴스가 한도 하나를 공유합니다. 키 값(사용자 ID 등)은 해시로만 저장됩니다. 비용 한도는 응답 후 비용이 확정될 때 더해지므로, 동시에 진행 중인 요청만큼은 잠깐 넘을 수 있습니다.
+- 응답 캐시에 맞으면 경로 기록의 결과가 `cache_hit` 으로 남습니다.
+
+### 확인하는 방법
+
+- 응답 헤더: `X-Dynamic-Route`, `X-Dynamic-Route-Version`, `X-Dynamic-Route-Path`(예: `start>plan:false>premium:failed>light:success>end`), `X-Dynamic-Route-Element`, `X-Routed-Model`, 한도 거절 시 `X-Dynamic-Route-Limit` · `Retry-After`.
+- 콘솔 **시뮬레이션** 탭: 메타데이터·호출자 정보를 넣고, 특정 모델을 실패로·특정 한도를 소진으로 가정해 경로를 미리 봅니다. 모델은 호출하지 않고 한도도 쓰지 않습니다.
+- 콘솔 **트래픽** 탭: 버전·마지막 요소별 요청 수, 열려 있는 한도 구간, 최근 요청의 경로(메타데이터는 마스킹)를 15초마다 갱신합니다.
+- `/v1/models` 에 배포·사용 중인 경로가 `dynamic/<이름>` 으로 나옵니다.
+
+## 6-3. 요청 제어 헤더 (Cloudflare `cf-aig-*` 호환)
+
+요청 하나의 처리 방식을 호출자가 정합니다. `X-Vibe-*` 이름과 Cloudflare AI Gateway의 `cf-aig-*` 이름을 모두 받고(둘 다 오면 `X-Vibe-*` 우선), 게이트웨이가 소비하므로 공급자에게는 보내지 않습니다. 값이 잘못되면 `400 invalid_request_control` 로 알려 줍니다.
+
+| 헤더 | 별칭 | 의미 |
+|---|---|---|
+| `X-Vibe-Metadata` | `cf-aig-metadata` | 평평한 JSON 객체(최대 16개, 값은 문자열 ≤256자·숫자·불리언). 동적 라우팅 조건·한도 키가 읽고, 경로 기록에는 마스킹해 저장 |
+| `X-Vibe-Request-Timeout` | `cf-aig-request-timeout` | 시도마다 첫 응답 헤더를 기다리는 시간(ms, 1~600000). 시작된 스트림은 끊지 않음 |
+| `X-Vibe-Max-Attempts` | `cf-aig-max-attempts` | 공급자 한 곳에 보내는 최대 횟수(1~5). 429·5xx·연결 오류·시간 초과 때 재시도한 뒤 다음 후보로 폴백 |
+| `X-Vibe-Retry-Delay` | `cf-aig-retry-delay` | 재시도 전 대기(ms, 0~60000) |
+| `X-Vibe-Backoff` | `cf-aig-backoff` | `constant` · `linear` · `exponential` |
+| `X-Vibe-Skip-Cache` | `cf-aig-skip-cache` | `true`면 응답 캐시를 읽지도 쓰지도 않음 → `X-Cache: BYPASS` |
+| `X-Vibe-Cache-TTL` | `cf-aig-cache-ttl` | 이 응답의 캐시 보관 시간(초). 운영자가 정한 TTL보다 **짧게만** 줄일 수 있음 |
+
+재시도는 `X-Failover-Path`에 `retry_5xx:<provider>#2` 처럼 남고, 응답의 `X-Upstream-Retries`가 횟수를 알려 줍니다. 폴백 예산(`X-Failover-Budget-MS`)이 소진되면 재시도도 멈춥니다.
+캐시 대상 요청에는 이제 `X-Cache: MISS` 도 붙습니다(적중 시 `HIT`).
+
+**넣지 않은 Cloudflare 기능과 이유**: 요청별 비용 지정(`cf-aig-custom-cost`)은 호출자가 비용을 0으로 보내 키 예산·쿼터를 피할 수 있어 받지 않습니다. 요청별 로그 끄기(`cf-aig-collect-log`)는 감사 기록이 필수인 이 게이트웨이의 원칙과 맞지 않습니다(본문 저장은 설정의 응답 로그 옵션으로 운영자가 정합니다). 사용자 지정 캐시 키(`cf-aig-cache-key`)는 공유 캐시에서 다른 팀의 응답을 덮어쓰는 통로가 될 수 있어 받지 않습니다.
+
 ## 7. 관련 화면 · API
 
 | 대상 | 위치 |
@@ -484,3 +552,7 @@ provider를 추가·수정하려면 **설정 → 업스트림 프로바이더** 
 | `POST /admin/routing/failover-drill` | 폴백 리허설 — 지정한 provider 장애 시 누가 처리하는지 시뮬레이션 |
 | `GET/POST /admin/routing/balancer` | 라운드로빈 분산 검증(균형도·풀·intent vs actual) · 세션 고정 해제 |
 | `GET /admin/requests/{id}/explain` | 개별 요청이 왜 그렇게 처리됐는지 |
+| `GET/POST /admin/routing/dynamic-routes` | 동적 경로 목록 · 생성 (콘솔: 라우팅 → 동적 라우팅) |
+| `POST /admin/routing/dynamic-routes/{id}/versions` · `/deploy` | 새 버전 저장 · 배포/롤백 (`base_version`·`expected_deployed_version`으로 동시 수정 보호) |
+| `POST /admin/routing/dynamic-routes/validate` · `/simulate` | 그래프 검증 · 모델 호출 없는 경로 시뮬레이션 |
+| `GET /admin/routing/dynamic-routes/{id}/activity` | 경로 트래픽 · 열린 한도 구간 · 최근 요청 경로 |

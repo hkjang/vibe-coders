@@ -119,6 +119,15 @@ func refreshRoutingSummary(req *store.RequestLog, plan *intelligentRoutingPlan) 
 		"mcp_used":                req.ToolCount > 0,
 		"text2sql_used":           strings.HasPrefix(strings.ToLower(firstNonEmpty(req.RequestedModel, req.Model)), "vibe/text2sql"),
 	}
+	// Sections other steps added (a dynamic route's path, the caller's request
+	// controls) survive the rebuild.
+	if previous := mapFromJSON(req.RoutingSummaryJSON); previous != nil {
+		for _, key := range routingSummaryExtraKeys {
+			if value, ok := previous[key]; ok {
+				summary[key] = value
+			}
+		}
+	}
 	if plan != nil {
 		summary["complexity"] = plan.Complexity
 		summary["risk"] = plan.Risk

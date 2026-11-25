@@ -160,7 +160,7 @@ func (s *Server) serveChatFromCache(ctx context.Context, w http.ResponseWriter, 
 	return true
 }
 
-func (s *Server) maybeStoreChatCache(ctx context.Context, key string, statusCode int, contentType string, responseBody []byte) {
+func (s *Server) maybeStoreChatCache(ctx context.Context, key string, statusCode int, contentType string, responseBody []byte, requestedTTL time.Duration) {
 	if key == "" || statusCode != http.StatusOK {
 		return
 	}
@@ -168,9 +168,22 @@ func (s *Server) maybeStoreChatCache(ctx context.Context, key string, statusCode
 	if len(responseBody) == 0 || (maxBytes > 0 && len(responseBody) > maxBytes) {
 		return
 	}
-	if err := s.db.PutEmbeddingCache(ctx, key, "chat", contentType, responseBody, s.cacheConf().ChatTTL); err != nil {
+	if err := s.db.PutEmbeddingCache(ctx, key, "chat", contentType, responseBody, cacheTTLFor(s.cacheConf().ChatTTL, requestedTTL)); err != nil {
 		slog.Warn("chat cache store failed", "error", err)
 	}
+}
+
+// cacheTTLFor applies a caller's X-Vibe-Cache-TTL. A caller may keep its response
+// for less time than the operator configured, never for more: the configured TTL
+// is how stale an answer the gateway is willing to hand anyone.
+func cacheTTLFor(configured, requested time.Duration) time.Duration {
+	if requested <= 0 {
+		return configured
+	}
+	if configured > 0 && requested > configured {
+		return configured
+	}
+	return requested
 }
 
 // chatCacheScopeValue returns what to mix into the cache key, or "" to leave entries

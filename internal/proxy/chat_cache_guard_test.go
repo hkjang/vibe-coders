@@ -80,7 +80,7 @@ func TestOnlySuccessfulResponsesAreCached(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s, db := cacheGuardServer(t, nil)
-			s.maybeStoreChatCache(context.Background(), tc.key, tc.status, "application/json", tc.body)
+			s.maybeStoreChatCache(context.Background(), tc.key, tc.status, "application/json", tc.body, 0)
 			if got := cached(t, db, tc.key); got != tc.wantCached {
 				t.Fatalf("cached=%v want %v", got, tc.wantCached)
 			}
@@ -89,7 +89,7 @@ func TestOnlySuccessfulResponsesAreCached(t *testing.T) {
 
 	// An empty key stores nothing, whatever the response looks like.
 	s, db := cacheGuardServer(t, nil)
-	s.maybeStoreChatCache(context.Background(), "", http.StatusOK, "application/json", body)
+	s.maybeStoreChatCache(context.Background(), "", http.StatusOK, "application/json", body, 0)
 	if cached(t, db, "") {
 		t.Error("a response with no cache key was stored under the empty key")
 	}

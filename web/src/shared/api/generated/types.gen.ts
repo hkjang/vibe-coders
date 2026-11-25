@@ -617,6 +617,303 @@ export type DwRetryRun = {
 
 export type DwRetryWriteResponse = DwRetryLegacyResult | DwRetryRun;
 
+export type DynamicRoute = {
+    call_model: string;
+    created_at: string;
+    created_by: string;
+    deployed_at?: string;
+    deployed_by?: string;
+    deployed_version: number;
+    description: string;
+    enabled: boolean;
+    id: string;
+    latest_version: number;
+    name: string;
+    state: 'live' | 'live_with_draft' | 'not_deployed' | 'disabled';
+    traffic_24h: DynamicRouteTotals;
+    updated_at: string;
+    updated_by: string;
+};
+
+export type DynamicRouteActivityResponse = {
+    hours: number;
+    limits: Array<DynamicRouteLimitWindow>;
+    requests: Array<DynamicRouteRequestRecord>;
+    route: DynamicRoute;
+    traffic: Array<DynamicRouteTrafficRow>;
+};
+
+export type DynamicRouteCreateRequest = {
+    deploy?: boolean;
+    description?: string;
+    enabled?: boolean;
+    graph: DynamicRouteGraph;
+    name: string;
+    note?: string;
+};
+
+export type DynamicRouteDeleteResponse = {
+    id: string;
+    status: 'deleted';
+};
+
+export type DynamicRouteDeployRequest = {
+    expected_deployed_version: number;
+    reason?: string;
+    version: number;
+};
+
+export type DynamicRouteDetailResponse = {
+    deployed?: DynamicRouteVersion;
+    fields: Array<DynamicRouteField>;
+    latest?: DynamicRouteVersion;
+    route: DynamicRoute;
+    versions: Array<DynamicRouteVersion>;
+};
+
+export type DynamicRouteDistributionRow = {
+    count: number;
+    final_element_id: string;
+    final_model: string;
+    outcome: 'success' | 'cache_hit' | 'failed' | 'rate_limited' | 'no_model';
+    share: number;
+};
+
+export type DynamicRouteElement = {
+    id: string;
+    label?: string;
+    /**
+     * start: next; conditional: true/false; percentage: "<n>%"; rate and model: success/fallback.
+     */
+    outputs?: {
+        [key: string]: DynamicRouteOutput;
+    };
+    properties?: DynamicRouteProperties;
+    type: 'start' | 'conditional' | 'percentage' | 'rate' | 'model' | 'end';
+    [key: string]: unknown;
+};
+
+export type DynamicRouteField = {
+    description: string;
+    field: string;
+};
+
+/**
+ * Cloudflare AI Gateway dynamic routing JSON. A whole exported route object is accepted; unused fields are dropped.
+ */
+export type DynamicRouteGraph = {
+    elements: Array<DynamicRouteElement>;
+    [key: string]: unknown;
+};
+
+export type DynamicRouteGraphRejection = {
+    error: {
+        [key: string]: unknown;
+    };
+    validation: DynamicRouteValidation;
+};
+
+export type DynamicRouteIssue = {
+    code: string;
+    element_id?: string;
+    message: string;
+};
+
+export type DynamicRouteLimitWindow = {
+    cost_krw: number;
+    element_id: string;
+    request_count: number;
+    scoped: boolean;
+    window_end: string;
+    window_start: string;
+};
+
+export type DynamicRouteListResponse = {
+    count: number;
+    fields: Array<DynamicRouteField>;
+    routes: Array<DynamicRoute>;
+};
+
+export type DynamicRouteOutput = {
+    elementId: string;
+};
+
+export type DynamicRoutePatchRequest = {
+    description?: string;
+    enabled?: boolean;
+};
+
+export type DynamicRouteProperties = {
+    backoff?: 'constant' | 'linear' | 'exponential';
+    /**
+     * conditional: field paths (metadata.<key>, identity.*, request.*) mapped to a value or to operators $eq $ne $in $nin $gt $gte $lt $lte $exists; $and / $or combine objects.
+     */
+    conditions?: {
+        [key: string]: unknown;
+    };
+    /**
+     * rate: field each value of which gets its own limit; requests without it share one.
+     */
+    key?: string;
+    /**
+     * rate: requests (count) or KRW (cost) per window.
+     */
+    limit?: number;
+    limitType?: 'count' | 'cost';
+    model?: string;
+    /**
+     * model: provider to pin; empty uses normal provider selection and same-model failover.
+     */
+    provider?: string;
+    retries?: number;
+    retryDelay?: number;
+    /**
+     * percentage: field whose value keeps a caller in one branch.
+     */
+    stickyKey?: string;
+    /**
+     * model: ms to wait for response headers per try; 0 keeps the provider timeout.
+     */
+    timeout?: number;
+    /**
+     * rate: seconds.
+     */
+    window?: number;
+};
+
+export type DynamicRouteRequestRecord = {
+    attempts: number;
+    cost_krw: number;
+    created_at: string;
+    fallbacks: number;
+    final_element_id: string;
+    final_model: string;
+    final_provider: string;
+    latency_ms: number;
+    /**
+     * Masked metadata the request carried.
+     */
+    metadata: {
+        [key: string]: unknown;
+    };
+    outcome: 'success' | 'cache_hit' | 'failed' | 'rate_limited' | 'no_model';
+    provider_ref?: string;
+    request_id: string;
+    route_id: string;
+    route_name: string;
+    status_code: number;
+    steps: Array<DynamicRouteStep>;
+    version: number;
+};
+
+export type DynamicRouteRouteResponse = {
+    route: DynamicRoute;
+};
+
+export type DynamicRouteSaveVersionRequest = {
+    base_version: number;
+    deploy?: boolean;
+    graph: DynamicRouteGraph;
+    note?: string;
+};
+
+export type DynamicRouteSimulateRequest = {
+    endpoint?: string;
+    exceeded?: Array<string>;
+    failing?: Array<string>;
+    graph?: DynamicRouteGraph;
+    identity?: {
+        [key: string]: string;
+    };
+    metadata?: {
+        [key: string]: unknown;
+    };
+    route_id?: string;
+    samples?: number;
+    stream?: boolean;
+    version?: number;
+};
+
+export type DynamicRouteSimulateResponse = {
+    distribution: Array<DynamicRouteDistributionRow>;
+    result: DynamicRouteSimulation;
+    samples: number;
+    validation: DynamicRouteValidation;
+};
+
+export type DynamicRouteSimulation = {
+    attempts: number;
+    blocked_by?: string;
+    fallbacks: number;
+    final_element_id?: string;
+    final_model?: string;
+    outcome: 'success' | 'cache_hit' | 'failed' | 'rate_limited' | 'no_model';
+    path: string;
+    provider?: string;
+    retry_after_seconds?: number;
+    steps: Array<DynamicRouteStep>;
+};
+
+export type DynamicRouteStep = {
+    detail?: string;
+    id: string;
+    outcome: string;
+    type: 'start' | 'conditional' | 'percentage' | 'rate' | 'model' | 'end';
+};
+
+export type DynamicRouteTotals = {
+    failures: number;
+    fallbacks: number;
+    requests: number;
+};
+
+export type DynamicRouteTrafficRow = {
+    avg_latency_ms: number;
+    cost_krw: number;
+    fallbacks: number;
+    final_element_id: string;
+    final_model: string;
+    outcome: string;
+    requests: number;
+    version: number;
+};
+
+export type DynamicRouteValidateRequest = {
+    graph: DynamicRouteGraph;
+};
+
+export type DynamicRouteValidateResponse = {
+    graph: DynamicRouteGraph;
+    valid: boolean;
+    validation: DynamicRouteValidation;
+};
+
+export type DynamicRouteValidation = {
+    errors: Array<DynamicRouteIssue>;
+    warnings: Array<DynamicRouteIssue>;
+};
+
+export type DynamicRouteVersion = {
+    created_at: string;
+    created_by: string;
+    graph?: DynamicRouteGraph;
+    note: string;
+    route_id: string;
+    validation?: DynamicRouteValidation;
+    version: number;
+};
+
+export type DynamicRouteVersionResponse = {
+    version: DynamicRouteVersion;
+};
+
+export type DynamicRouteWriteResponse = {
+    graph?: DynamicRouteGraph;
+    route: DynamicRoute;
+    validation: DynamicRouteValidation;
+    version?: DynamicRouteVersion;
+};
+
 export type EmbeddingCacheStats = {
     bytes: number;
     entries: number;
@@ -4669,7 +4966,7 @@ export type UiSystemStatus = {
 
 export type UiTelemetryEventRequest = {
     event: 'visit' | 'legacy_fallback';
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     /**
      * 128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.
      */
@@ -4677,7 +4974,7 @@ export type UiTelemetryEventRequest = {
 };
 
 export type UiTelemetryFeatureCount = {
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     legacy_opens: number;
     visits: number;
 };
@@ -13688,6 +13985,406 @@ export type PostAdminRoutingDomainReviewIdResponses = {
 };
 
 export type PostAdminRoutingDomainReviewIdResponse = PostAdminRoutingDomainReviewIdResponses[keyof PostAdminRoutingDomainReviewIdResponses];
+
+export type GetAdminRoutingDynamicRoutesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/routing/dynamic-routes';
+};
+
+export type GetAdminRoutingDynamicRoutesErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRoutingDynamicRoutesError = GetAdminRoutingDynamicRoutesErrors[keyof GetAdminRoutingDynamicRoutesErrors];
+
+export type GetAdminRoutingDynamicRoutesResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteListResponse;
+};
+
+export type GetAdminRoutingDynamicRoutesResponse = GetAdminRoutingDynamicRoutesResponses[keyof GetAdminRoutingDynamicRoutesResponses];
+
+export type PostAdminRoutingDynamicRoutesData = {
+    body: DynamicRouteCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/routing/dynamic-routes';
+};
+
+export type PostAdminRoutingDynamicRoutesErrors = {
+    /**
+     * invalid_body, dynamic_route_name_invalid or dynamic_route_graph_invalid (unreadable JSON).
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_name_taken.
+     */
+    409: AppError;
+    /**
+     * dynamic_route_graph_invalid: the graph has errors; validation lists them per element.
+     */
+    422: DynamicRouteGraphRejection;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRoutingDynamicRoutesError = PostAdminRoutingDynamicRoutesErrors[keyof PostAdminRoutingDynamicRoutesErrors];
+
+export type PostAdminRoutingDynamicRoutesResponses = {
+    /**
+     * OK
+     */
+    201: DynamicRouteWriteResponse;
+};
+
+export type PostAdminRoutingDynamicRoutesResponse = PostAdminRoutingDynamicRoutesResponses[keyof PostAdminRoutingDynamicRoutesResponses];
+
+export type PostAdminRoutingDynamicRoutesSimulateData = {
+    body: DynamicRouteSimulateRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/routing/dynamic-routes/simulate';
+};
+
+export type PostAdminRoutingDynamicRoutesSimulateErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_not_found or dynamic_route_version_not_found.
+     */
+    404: AppError;
+    /**
+     * dynamic_route_graph_invalid: the graph has errors; validation lists them per element.
+     */
+    422: DynamicRouteGraphRejection;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRoutingDynamicRoutesSimulateError = PostAdminRoutingDynamicRoutesSimulateErrors[keyof PostAdminRoutingDynamicRoutesSimulateErrors];
+
+export type PostAdminRoutingDynamicRoutesSimulateResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteSimulateResponse;
+};
+
+export type PostAdminRoutingDynamicRoutesSimulateResponse = PostAdminRoutingDynamicRoutesSimulateResponses[keyof PostAdminRoutingDynamicRoutesSimulateResponses];
+
+export type PostAdminRoutingDynamicRoutesValidateData = {
+    body: DynamicRouteValidateRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/routing/dynamic-routes/validate';
+};
+
+export type PostAdminRoutingDynamicRoutesValidateErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRoutingDynamicRoutesValidateError = PostAdminRoutingDynamicRoutesValidateErrors[keyof PostAdminRoutingDynamicRoutesValidateErrors];
+
+export type PostAdminRoutingDynamicRoutesValidateResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteValidateResponse;
+};
+
+export type PostAdminRoutingDynamicRoutesValidateResponse = PostAdminRoutingDynamicRoutesValidateResponses[keyof PostAdminRoutingDynamicRoutesValidateResponses];
+
+export type DeleteAdminRoutingDynamicRoutesIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/routing/dynamic-routes/{id}';
+};
+
+export type DeleteAdminRoutingDynamicRoutesIdErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_not_found.
+     */
+    404: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminRoutingDynamicRoutesIdError = DeleteAdminRoutingDynamicRoutesIdErrors[keyof DeleteAdminRoutingDynamicRoutesIdErrors];
+
+export type DeleteAdminRoutingDynamicRoutesIdResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteDeleteResponse;
+};
+
+export type DeleteAdminRoutingDynamicRoutesIdResponse = DeleteAdminRoutingDynamicRoutesIdResponses[keyof DeleteAdminRoutingDynamicRoutesIdResponses];
+
+export type GetAdminRoutingDynamicRoutesIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/routing/dynamic-routes/{id}';
+};
+
+export type GetAdminRoutingDynamicRoutesIdErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_not_found.
+     */
+    404: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRoutingDynamicRoutesIdError = GetAdminRoutingDynamicRoutesIdErrors[keyof GetAdminRoutingDynamicRoutesIdErrors];
+
+export type GetAdminRoutingDynamicRoutesIdResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteDetailResponse;
+};
+
+export type GetAdminRoutingDynamicRoutesIdResponse = GetAdminRoutingDynamicRoutesIdResponses[keyof GetAdminRoutingDynamicRoutesIdResponses];
+
+export type PatchAdminRoutingDynamicRoutesIdData = {
+    body: DynamicRoutePatchRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/routing/dynamic-routes/{id}';
+};
+
+export type PatchAdminRoutingDynamicRoutesIdErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_not_found.
+     */
+    404: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PatchAdminRoutingDynamicRoutesIdError = PatchAdminRoutingDynamicRoutesIdErrors[keyof PatchAdminRoutingDynamicRoutesIdErrors];
+
+export type PatchAdminRoutingDynamicRoutesIdResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteRouteResponse;
+};
+
+export type PatchAdminRoutingDynamicRoutesIdResponse = PatchAdminRoutingDynamicRoutesIdResponses[keyof PatchAdminRoutingDynamicRoutesIdResponses];
+
+export type GetAdminRoutingDynamicRoutesIdActivityData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: {
+        hours?: number;
+    };
+    url: '/admin/routing/dynamic-routes/{id}/activity';
+};
+
+export type GetAdminRoutingDynamicRoutesIdActivityErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_not_found.
+     */
+    404: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRoutingDynamicRoutesIdActivityError = GetAdminRoutingDynamicRoutesIdActivityErrors[keyof GetAdminRoutingDynamicRoutesIdActivityErrors];
+
+export type GetAdminRoutingDynamicRoutesIdActivityResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteActivityResponse;
+};
+
+export type GetAdminRoutingDynamicRoutesIdActivityResponse = GetAdminRoutingDynamicRoutesIdActivityResponses[keyof GetAdminRoutingDynamicRoutesIdActivityResponses];
+
+export type PostAdminRoutingDynamicRoutesIdDeployData = {
+    body: DynamicRouteDeployRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/routing/dynamic-routes/{id}/deploy';
+};
+
+export type PostAdminRoutingDynamicRoutesIdDeployErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_not_found or dynamic_route_version_not_found.
+     */
+    404: AppError;
+    /**
+     * dynamic_route_conflict: a different version was deployed meanwhile.
+     */
+    409: AppError;
+    /**
+     * dynamic_route_graph_invalid: the graph has errors; validation lists them per element.
+     */
+    422: DynamicRouteGraphRejection;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRoutingDynamicRoutesIdDeployError = PostAdminRoutingDynamicRoutesIdDeployErrors[keyof PostAdminRoutingDynamicRoutesIdDeployErrors];
+
+export type PostAdminRoutingDynamicRoutesIdDeployResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteRouteResponse;
+};
+
+export type PostAdminRoutingDynamicRoutesIdDeployResponse = PostAdminRoutingDynamicRoutesIdDeployResponses[keyof PostAdminRoutingDynamicRoutesIdDeployResponses];
+
+export type PostAdminRoutingDynamicRoutesIdVersionsData = {
+    body: DynamicRouteSaveVersionRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/routing/dynamic-routes/{id}/versions';
+};
+
+export type PostAdminRoutingDynamicRoutesIdVersionsErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_not_found.
+     */
+    404: AppError;
+    /**
+     * dynamic_route_conflict: the route changed since it was loaded.
+     */
+    409: AppError;
+    /**
+     * dynamic_route_graph_invalid: the graph has errors; validation lists them per element.
+     */
+    422: DynamicRouteGraphRejection;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminRoutingDynamicRoutesIdVersionsError = PostAdminRoutingDynamicRoutesIdVersionsErrors[keyof PostAdminRoutingDynamicRoutesIdVersionsErrors];
+
+export type PostAdminRoutingDynamicRoutesIdVersionsResponses = {
+    /**
+     * OK
+     */
+    201: DynamicRouteWriteResponse;
+};
+
+export type PostAdminRoutingDynamicRoutesIdVersionsResponse = PostAdminRoutingDynamicRoutesIdVersionsResponses[keyof PostAdminRoutingDynamicRoutesIdVersionsResponses];
+
+export type GetAdminRoutingDynamicRoutesIdVersionsVersionData = {
+    body?: never;
+    path: {
+        version: number;
+        id: string;
+    };
+    query?: never;
+    url: '/admin/routing/dynamic-routes/{id}/versions/{version}';
+};
+
+export type GetAdminRoutingDynamicRoutesIdVersionsVersionErrors = {
+    /**
+     * invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads.
+     */
+    401: AppError;
+    /**
+     * dynamic_route_version_not_found.
+     */
+    404: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRoutingDynamicRoutesIdVersionsVersionError = GetAdminRoutingDynamicRoutesIdVersionsVersionErrors[keyof GetAdminRoutingDynamicRoutesIdVersionsVersionErrors];
+
+export type GetAdminRoutingDynamicRoutesIdVersionsVersionResponses = {
+    /**
+     * OK
+     */
+    200: DynamicRouteVersionResponse;
+};
+
+export type GetAdminRoutingDynamicRoutesIdVersionsVersionResponse = GetAdminRoutingDynamicRoutesIdVersionsVersionResponses[keyof GetAdminRoutingDynamicRoutesIdVersionsVersionResponses];
 
 export type PostAdminRoutingFailoverDrillData = {
     body?: never;

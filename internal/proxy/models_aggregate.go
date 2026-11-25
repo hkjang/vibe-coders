@@ -569,6 +569,7 @@ func (rc *requestPipeline) serveAggregatedModels() bool {
 		}
 		mergeAgentRouteModels(&result, routes, routesTruncated || routesOverflow)
 	}
+	s.appendDynamicRouteModels(r.Context(), &result)
 	boundAggregatedModelsMetadata(&result)
 	buf, err := json.Marshal(map[string]any{"object": "list", "data": result.data})
 	if err != nil {

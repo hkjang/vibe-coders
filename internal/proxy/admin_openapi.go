@@ -252,6 +252,14 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/routing/domain-examples", []string{"get"}, "routing", "Auto-promoted domain routing examples", false},
 	{"/admin/routing/domain-review", []string{"get"}, "routing", "Domain routing review queue", false},
 	{"/admin/routing/domain-review/{id}", []string{"post"}, "routing", "Approve/reject domain routing review item", false},
+	{"/admin/routing/dynamic-routes", []string{"get", "post"}, "routing", "List / create dynamic routes (model \"dynamic/<name>\")", false},
+	{"/admin/routing/dynamic-routes/validate", []string{"post"}, "routing", "Validate a dynamic route graph without saving it", false},
+	{"/admin/routing/dynamic-routes/simulate", []string{"post"}, "routing", "Walk a dynamic route graph for a sample request without calling a model", false},
+	{"/admin/routing/dynamic-routes/{id}", []string{"get", "patch", "delete"}, "routing", "Dynamic route detail, settings and deletion", false},
+	{"/admin/routing/dynamic-routes/{id}/versions", []string{"post"}, "routing", "Save a new dynamic route version", false},
+	{"/admin/routing/dynamic-routes/{id}/versions/{version}", []string{"get"}, "routing", "Read one dynamic route version", false},
+	{"/admin/routing/dynamic-routes/{id}/deploy", []string{"post"}, "routing", "Deploy or roll back a dynamic route version", false},
+	{"/admin/routing/dynamic-routes/{id}/activity", []string{"get"}, "routing", "Dynamic route traffic, open limit windows and recent requests", false},
 	{"/admin/models/quality", []string{"get"}, "routing", "Per-model coding quality", false},
 	{"/admin/models/contracts", []string{"get", "post", "delete"}, "routing", "Per-task-type model quality contracts", false},
 	{"/admin/models/contracts/run", []string{"post"}, "routing", "Run a model against its quality contract(s)", false},
@@ -648,6 +656,10 @@ func successResponse(schema string) map[string]any {
 func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
+	if enrichDynamicRoutesOpenAPI(key, op, responses) {
+		op["responses"] = responses
+		return
+	}
 	switch key {
 	case "post /admin/redteam/probe-packs/import-review", "put /admin/redteam/probe-packs/import":
 		enrichRedTeamProbeCSVReviewOpenAPI(strings.ToLower(method) == "put", op, responses)
@@ -1325,6 +1337,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range routingDraftOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range dynamicRoutesOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range routingLearningOpenAPISchemas() {

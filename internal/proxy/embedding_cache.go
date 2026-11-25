@@ -142,7 +142,7 @@ func (s *Server) serveEmbeddingFromCache(ctx context.Context, w http.ResponseWri
 	return true
 }
 
-func (s *Server) maybeStoreEmbeddingCache(ctx context.Context, requestBody []byte, scope string, statusCode int, contentType string, responseBody []byte) {
+func (s *Server) maybeStoreEmbeddingCache(ctx context.Context, requestBody []byte, scope string, statusCode int, contentType string, responseBody []byte, requestedTTL time.Duration) {
 	if !s.cacheConf().EmbeddingEnabled {
 		return
 	}
@@ -156,7 +156,7 @@ func (s *Server) maybeStoreEmbeddingCache(ctx context.Context, requestBody []byt
 	if !ok {
 		return
 	}
-	if err := s.db.PutEmbeddingCache(ctx, key, model, contentType, responseBody, s.cacheConf().EmbeddingTTL); err != nil {
+	if err := s.db.PutEmbeddingCache(ctx, key, model, contentType, responseBody, cacheTTLFor(s.cacheConf().EmbeddingTTL, requestedTTL)); err != nil {
 		slog.Warn("embedding cache store failed", "error", err)
 	}
 }
