@@ -1,12 +1,30 @@
-import { Component, createRef, type ErrorInfo, type PropsWithChildren, type ReactNode } from "react";
+import { Component, createRef, useEffect, useRef, type PropsWithChildren, type ReactNode } from "react";
 
 import { RootLegacyRecovery } from "./RootLegacyRecovery";
+
+function ErrorObservation({ error, onError }: { error: unknown; onError?: (error: unknown) => void }): null {
+  const observed = useRef<{ error: unknown } | undefined>(undefined);
+  useEffect(() => {
+    if (!onError || observed.current?.error === error) return;
+    observed.current = { error };
+    // Parent layout effects establish session ownership before observation.
+    try {
+      onError?.(error);
+    } catch {
+      /* Recovery must survive observer failures. */
+    }
+  }, [error, onError]);
+  return null;
+}
 
 interface State {
   error?: Error;
 }
 
-export class AppErrorBoundary extends Component<PropsWithChildren, State> {
+export class AppErrorBoundary extends Component<
+  PropsWithChildren<{ onError?: (error: unknown) => void }>,
+  State
+> {
   override state: State = {};
   private readonly headingRef = createRef<HTMLHeadingElement>();
 
@@ -14,9 +32,7 @@ export class AppErrorBoundary extends Component<PropsWithChildren, State> {
     return { error };
   }
 
-  override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Do not include props, API payloads, prompts, or user content in browser telemetry.
-    console.error("app_error_boundary", { name: error.name, componentStack: info.componentStack });
+  override componentDidCatch(): void {
     this.headingRef.current?.focus();
   }
 
@@ -24,6 +40,7 @@ export class AppErrorBoundary extends Component<PropsWithChildren, State> {
     if (!this.state.error) return this.props.children;
     return (
       <main className="fatal-error" id="main-content">
+        <ErrorObservation error={this.state.error} onError={this.props.onError} />
         <section className="page-state page-state-error" role="alert">
           <h1 ref={this.headingRef} tabIndex={-1}>
             신규 콘솔에서 오류가 발생했습니다.

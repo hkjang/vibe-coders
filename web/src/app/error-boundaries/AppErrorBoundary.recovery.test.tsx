@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppErrorBoundary } from "@/app/error-boundaries/AppErrorBoundary";
+import { logCaughtReactError } from "@/shared/telemetry/react-error-log";
 
 const privateDetail = "SYNTHETIC_PRIVATE_PROVIDER_FAILURE";
 
@@ -17,6 +18,7 @@ function renderFailure(): ReturnType<typeof render> {
     <AppErrorBoundary>
       <ThrowingChild />
     </AppErrorBoundary>,
+    { onCaughtError: logCaughtReactError },
   );
 }
 
@@ -45,10 +47,7 @@ describe("AppErrorBoundary recovery without a trusted authentication provider", 
     expect(screen.getByRole("button", { name: "다시 불러오기" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "기존 관리자 화면 열기" })).toBeEnabled();
     expect(document.body).not.toHaveTextContent(privateDetail);
-    expect(console.error).toHaveBeenCalledWith("app_error_boundary", {
-      name: "Error",
-      componentStack: expect.any(String),
-    });
+    expect(console.error).toHaveBeenCalledExactlyOnceWith("app_caught_error");
   });
 
   it("does not offer Legacy navigation when permission and fallback settings are unavailable", () => {

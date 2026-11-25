@@ -11,6 +11,7 @@ import { SettingDetailSheet } from "@/features/system/settings/SettingDetailShee
 import type { SettingRecovery } from "./SettingsRecoveryDialog";
 import { LazySettingsRecovery } from "./LazySettingsRecovery";
 import { ConsoleUsagePanel } from "@/features/system/settings/ConsoleUsagePanel";
+import { ConsoleDiagnosticsLauncher } from "@/features/system/settings/ConsoleDiagnosticsLauncher";
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import {
   useSettingSaveOutcome,
@@ -231,6 +232,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
       ) : null}
 
       <ConsoleUsagePanel />
+      <ConsoleDiagnosticsLauncher />
 
       <SectionCard
         title="콘솔 전체 설정"

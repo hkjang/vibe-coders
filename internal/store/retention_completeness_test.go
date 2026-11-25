@@ -77,6 +77,9 @@ var retentionDecisions = map[string]retentionDecision{
 		"degrade routing on a cycle; it is bounded by RETENTION_DOMAIN_EXAMPLE_DAYS instead, which " +
 		"is longer than the prompt window and not unlimited — see " +
 		"TestDomainExamplesOutlivePromptsButNotTheirOwnWindow"},
+	"app_ui_diagnostics": {purgedByOwnAge, "bounded console-error metadata, not a request payload; " +
+		"purged after 30 days by purgeAppUITelemetryTx, including while collection is disabled; " +
+		"see TestAppUIDiagnosticsCapacityAcrossPeersAndExpiry"},
 
 	// Kept on purpose.
 	"request_notes":           {retained, "operator-authored annotations, not telemetry"},

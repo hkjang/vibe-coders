@@ -262,10 +262,15 @@ func (s *SQLStore) purgeAppUITelemetryTx(ctx context.Context, tx *sql.Tx, now ti
 		return err
 	}
 	n, err := result.RowsAffected()
-	if err != nil || n == 0 {
+	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, s.bind(`UPDATE app_ui_telemetry_capacity
+	if n > 0 {
+		_, err = tx.ExecContext(ctx, s.bind(`UPDATE app_ui_telemetry_capacity
 		SET live_visits = live_visits - ? WHERE singleton = 1`), n)
-	return err
+		if err != nil {
+			return err
+		}
+	}
+	return s.purgeAppUIDiagnosticsTx(ctx, tx, cutoff)
 }
