@@ -279,7 +279,10 @@ func TestClickHouseRetryReviewReportsPartialDelivery(t *testing.T) {
 }
 func TestClickHouseRetryReviewBlockedFactRetainsQueue(t *testing.T) {
 	f := newDwRetryFixture(t, 1, false)
-	if err := f.db.RecordClickHouseSinkFailure(t.Context(), "text2sql_fact", f.day, "missing fact configuration"); err != nil {
+	// Fact dimensions are recorded with the attempt's start time, as the sink does;
+	// a Seoul calendar day would start after the review time between 00:00 and 09:00 KST.
+	since := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	if err := f.db.RecordClickHouseSinkFailure(t.Context(), "text2sql_fact", since, "missing fact configuration"); err != nil {
 		t.Fatal(err)
 	}
 	review := f.review(t)
