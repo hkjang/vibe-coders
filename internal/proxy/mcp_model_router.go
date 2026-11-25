@@ -125,7 +125,9 @@ func (rc *requestPipeline) stepMCPDiscovery() bool {
 		writeOpenAIError(w, http.StatusBadRequest, "MCP discovery requires at least one user prompt", "invalid_request_error", "empty_query")
 		return false
 	}
-	s.handleMCPDiscoveryChat(w, r, rc.body, query, policy, rc.apiKeyID, rc.authCtx)
+	rc.serveUnderDLP(func(w http.ResponseWriter, r *http.Request) {
+		s.handleMCPDiscoveryChat(w, r, rc.body, query, policy, rc.apiKeyID, rc.authCtx)
+	})
 	return false
 }
 
@@ -382,7 +384,7 @@ func (s *Server) finishMCPDiscovery(r *http.Request, meta store.LogRecord, start
 	s.metrics.IncRequest(false)
 	s.metrics.ObserveLatency(meta.Request.LatencyMS)
 	s.metrics.ObserveToolInvocations(meta.Tools)
-	s.enqueue(meta)
+	s.enqueueFor(r, meta)
 }
 
 func (s *Server) recordDomainRoutingLearning(r *http.Request, meta store.LogRecord, query string, policy MCPDiscoveryPolicy, candidates []MCPCandidate, evidences, filtered []MCPEvidence, authCtx *store.AuthContext) {

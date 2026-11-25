@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"vibe-coders/internal/audit"
+	"vibe-coders/internal/dlp"
 	"vibe-coders/internal/store"
 	"vibe-coders/internal/text2sql"
 )
@@ -23,7 +24,7 @@ import (
 // Returning true passes control (and the shared requestPipeline state) to the
 // next step. This makes the previously-inline handleOpenAI flow explicit:
 //
-//	Auth → Quota → Controls → Dynamic Route → Agent Route → MCP Discovery → Routing → Skill → Deprecation → Limits → Governance → Cache → Cost → Upstream
+//	Auth → Quota → Controls → DLP → Dynamic Route → Agent Route → MCP Discovery → Routing → Skill → Deprecation → Limits → Governance → Cache → Cost → Upstream
 type PipelineStep interface {
 	// Name is a short stable identifier used in logs/metrics/tests.
 	Name() string
@@ -103,6 +104,9 @@ type requestPipeline struct {
 	// dynamic is set while a "dynamic/<name>" request is served by a dynamic route.
 	// See dynamic_route_runtime.go.
 	dynamic *dynamicRouteRequest
+
+	// dlpState is the request's data loss prevention context. See dlp_runtime.go.
+	dlpState *dlpState
 }
 
 // pipelineSteps returns the ordered request pipeline. The order is the contract:
@@ -114,6 +118,7 @@ func (rc *requestPipeline) steps() []PipelineStep {
 		stepFunc{"auth", (*requestPipeline).stepAuth},
 		stepFunc{"quota", (*requestPipeline).stepQuota},
 		stepFunc{"controls", (*requestPipeline).stepRequestControls},
+		stepFunc{"dlp", (*requestPipeline).stepDLP},
 		stepFunc{"dynamic_route", (*requestPipeline).stepDynamicRoute},
 		stepFunc{"agent_route", (*requestPipeline).stepAgentRoute},
 		stepFunc{"mcp_discovery", (*requestPipeline).stepMCPDiscovery},
@@ -424,12 +429,13 @@ func (rc *requestPipeline) stepCache() bool {
 	// Chat response cache — opt-in, only for deterministic (temp 0 / seed) requests.
 	if rc.chatCacheable {
 		w.Header().Set("X-Cache", "MISS")
-		if served := s.serveChatFromCache(r.Context(), w, rc.chatCacheKey, cacheMeta, rc.traceID); served {
+		cacheCtx := rc.dlpCacheContext(r.Context())
+		if served := s.serveChatFromCache(cacheCtx, w, rc.chatCacheKey, cacheMeta, rc.traceID); served {
 			return false
 		}
 		// Exact miss → try the embedding-based semantic cache (opt-in). The query vector
 		// is kept on rc so a fresh upstream response is stored under it.
-		if vec, served := s.serveChatSemantic(r.Context(), w, r, rc.body, rc.chatCacheScope, cacheMeta, rc.traceID); served {
+		if vec, served := s.serveChatSemantic(cacheCtx, w, r, rc.body, rc.chatCacheScope, cacheMeta, rc.traceID); served {
 			return false
 		} else {
 			rc.chatSemanticVec = vec
@@ -539,7 +545,9 @@ func (rc *requestPipeline) stepUpstream() bool {
 			s.writeChatCompletion(w, meta.Request.Model, "Text2SQL 기능이 현재 운영자에 의해 일시 중지되었습니다. 잠시 후 다시 시도해 주세요.")
 			return false
 		}
-		s.handleText2SQL(w, r, meta, body, rc.authCtx)
+		rc.serveUnderDLP(func(w http.ResponseWriter, r *http.Request) {
+			s.handleText2SQL(w, r, meta, body, rc.authCtx)
+		})
 		return false
 	}
 
@@ -762,6 +770,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		s.setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
 		refreshRoutingSummary(&meta.Request, routingPlan)
 		rc.attachDynamicRoute(&meta)
+		rc.attachDLP(&meta)
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		rc.recordSkillRun(rc.skillName, rc.skillVersion, "error", meta.Request.Model, 0, meta.Request.LatencyMS)
@@ -775,6 +784,49 @@ func (rc *requestPipeline) stepUpstream() bool {
 		return false
 	}
 	defer resp.Body.Close()
+	if rc.dlpState != nil {
+		var outcome dlpOutcome
+		resp, outcome = rc.inspectDLPResponse(resp)
+		if outcome == dlpReadFailed {
+			// The answer could not be read whole: a transport failure, reported as one,
+			// with no DLP event.
+			releaseModelsSlot()
+			if resolvedName != "" {
+				meta.Request.Provider = resolvedName
+			}
+			meta.Request.StatusCode = http.StatusBadGateway
+			meta.Request.LatencyMS = time.Since(start).Milliseconds()
+			meta.Request.Error = "upstream_read_failed"
+			refreshRoutingSummary(&meta.Request, routingPlan)
+			rc.attachDynamicRoute(&meta)
+			rc.attachDLP(&meta)
+			s.enqueue(meta)
+			writeOpenAIError(w, http.StatusBadGateway, "upstream response could not be read", "server_error", "upstream_read_failed")
+			return false
+		}
+		if rc.dlpState.response.Matched() {
+			s.metrics.IncDLP(string(dlp.CheckResponse), string(rc.dlpState.response.Action))
+		}
+		rc.setDLPHeaders()
+		if outcome == dlpWithheld {
+			releaseModelsSlot()
+			// The provider answered and its answer is withheld. The request is logged
+			// as refused; the provider's cost is still recorded by the usage it reported
+			// in the headers, if any — the body that carried the rest is discarded.
+			if resolvedName != "" {
+				meta.Request.Provider = resolvedName
+			}
+			meta.Request.StatusCode = http.StatusBadRequest
+			meta.Request.LatencyMS = time.Since(start).Milliseconds()
+			meta.Request.Error = "dlp_response_blocked"
+			refreshRoutingSummary(&meta.Request, routingPlan)
+			rc.attachDynamicRoute(&meta)
+			rc.attachDLP(&meta)
+			s.enqueue(meta)
+			writeOpenAIError(w, http.StatusBadRequest, "Response content blocked due to DLP policy violations", "invalid_request_error", "dlp_response_blocked")
+			return false
+		}
+	}
 	if failoverFrom != "" {
 		s.metrics.IncFailover()
 		meta.Request.Failover = true
@@ -1001,6 +1053,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, resp.Header, w.Header())
 	refreshRoutingSummary(&meta.Request, routingPlan)
 	rc.attachDynamicRoute(&meta)
+	rc.attachDLP(&meta)
 	if meta.Usage != nil {
 		rc.chargeDynamicRouteCost(r.Context(), meta.Usage.EstimatedCost)
 	}

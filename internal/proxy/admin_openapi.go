@@ -283,6 +283,9 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/approvals/{id}/approve", []string{"post"}, "governance", "Approve a queued request", false},
 	{"/admin/approvals/{id}/reject", []string{"post"}, "governance", "Reject a queued request", false},
 	{"/admin/security/secrets", []string{"get"}, "governance", "Secret-leak events", false},
+	{"/admin/security/dlp", []string{"get", "put"}, "governance", "Data loss prevention settings, profiles and policies", false},
+	{"/admin/security/dlp/test", []string{"post"}, "governance", "Scan sample text with DLP profiles and policies", false},
+	{"/admin/security/dlp/events", []string{"get"}, "governance", "Data loss prevention matches and summary", false},
 	{"/admin/replay", []string{"get"}, "governance", "Request replay", false},
 	{"/admin/golden-prompts", []string{"get", "post"}, "governance", "List / create golden prompts", false},
 	{"/admin/golden-prompts/run", []string{"post"}, "governance", "Run golden prompt regression", false},
@@ -660,7 +663,7 @@ func successResponse(schema string) map[string]any {
 func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
-	if enrichDynamicRoutesOpenAPI(key, op, responses) {
+	if enrichDynamicRoutesOpenAPI(key, op, responses) || enrichDLPOpenAPI(key, op, responses) {
 		op["responses"] = responses
 		return
 	}
@@ -1373,6 +1376,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range dynamicRoutesOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range dlpOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range routingLearningOpenAPISchemas() {

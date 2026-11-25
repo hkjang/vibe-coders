@@ -86,6 +86,7 @@ import { routingDomainReviewEndpoints } from "@/shared/api/domains/routing-domai
 import { routingDomainDecisionEndpoints } from "@/shared/api/domains/routing-domain-decisions";
 import { routingDynamicEndpoints } from "@/shared/api/domains/routing-dynamic";
 import { securityEndpoints } from "@/shared/api/domains/security";
+import { securityDlpEndpoints } from "@/shared/api/domains/security-dlp";
 import { systemEndpoints } from "@/shared/api/domains/system";
 import { text2sqlEndpoints } from "@/shared/api/domains/text2sql";
 import { uiTelemetryEndpoints } from "@/shared/api/domains/ui-telemetry";
@@ -295,6 +296,7 @@ export const endpoints = {
     routingDomainReview: routingDomainReviewEndpoints,
     routingDomainDecisions: routingDomainDecisionEndpoints,
     routingDynamic: routingDynamicEndpoints,
+    securityDlp: securityDlpEndpoints,
     security: securityEndpoints,
     system: systemEndpoints,
     text2sql: text2sqlEndpoints,

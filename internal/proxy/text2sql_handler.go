@@ -254,7 +254,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		applyUpstreamHeaderSummary(&meta.Request, nil, nil, w.Header())
 		refreshRoutingSummary(&meta.Request, nil)
-		s.enqueue(meta)
+		s.enqueueFor(r, meta)
 		// Auto-candidate: a valid (and, in execute mode, successful) query is worth
 		// proposing as a golden example for later admin promotion. Best-effort, async.
 		if validation.OK && question != "" && (profile.Mode != text2sql.ModeExecute || executed) {

@@ -171,6 +171,14 @@ func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r
 	if contentType == "" {
 		contentType = "application/json"
 	}
+	attachGate := func(*store.LogRecord) {}
+	if gate := dlpCacheGateFrom(ctx); gate != nil {
+		allowed, after := gate(hit.Body, contentType)
+		if !allowed {
+			return vec, false
+		}
+		attachGate = after
+	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("X-Cache", "HIT")
 	w.Header().Set("X-Cache-Type", "chat-semantic")
@@ -190,6 +198,7 @@ func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r
 	}
 	meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{Hash: meta.Response.ResponseHash, FinishReason: "cache"})
 	s.metrics.ObserveLLMEvaluations(meta.Evaluations)
+	attachGate(&meta)
 	s.enqueue(meta)
 	return vec, true
 }

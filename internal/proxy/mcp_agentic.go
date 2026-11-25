@@ -580,6 +580,9 @@ func (s *Server) postUpstreamChat(ctx context.Context, r *http.Request, model st
 	if err != nil {
 		return nil, "", newMCPAgentUpstreamError(governanceRunErrRequestEncoding, false)
 	}
+	if encoded, err = inspectOutbound(r, encoded); err != nil {
+		return nil, "", newMCPAgentUpstreamError(governanceRunErrDLPBlocked, false)
+	}
 	provider, err := s.selectProvider(ctx, r, model)
 	if err != nil {
 		return nil, "", newMCPAgentUpstreamError(governanceRunErrProvider, false)
@@ -638,6 +641,12 @@ func (s *Server) postUpstreamChatStream(ctx context.Context, r *http.Request, mo
 	bodyMap["stream"] = true
 	bodyMap["stream_options"] = map[string]any{"include_usage": true}
 	encoded, merr := json.Marshal(bodyMap)
+	if merr == nil {
+		var derr error
+		if encoded, derr = inspectOutbound(r, encoded); derr != nil {
+			return "", nil, "", usage, "", newMCPAgentUpstreamError(governanceRunErrDLPBlocked, false)
+		}
+	}
 	if merr != nil {
 		return "", nil, "", usage, "", newMCPAgentUpstreamError(governanceRunErrRequestEncoding, false)
 	}

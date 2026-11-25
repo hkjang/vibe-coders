@@ -35,6 +35,9 @@ const (
 	governanceRunErrTimeout         = "upstream_request_timeout"
 	governanceRunErrResponseRead    = "upstream_response_read_failed"
 	governanceRunErrStatus          = "upstream_non_success_status"
+	// governanceRunErrDLPBlocked: a request policy blocked what the run would have
+	// sent to the provider (for example a tool result holding a registration number).
+	governanceRunErrDLPBlocked = "dlp_request_blocked"
 )
 
 func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, prompt string) governanceRunResult {

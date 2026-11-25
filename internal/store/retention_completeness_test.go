@@ -61,6 +61,7 @@ var retentionDecisions = map[string]retentionDecision{
 	"domain_routing_decisions": {purgedWithRequest, "per-request domain routing"},
 	"code_verify_results":      {purgedWithRequest, "per-request code verification"},
 	"dynamic_route_requests":   {purgedWithRequest, "per-request dynamic route path and outcome"},
+	"dlp_events":               {purgedWithRequest, "per-request DLP matches with partial previews"},
 
 	// Self-expiring rows: dead the moment their expiry passes.
 	"refresh_tokens":      {sweptByExpiry, "expired or long-revoked credentials"},

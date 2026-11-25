@@ -29,6 +29,12 @@ type Metrics struct {
 	knowledgeExpand    atomic.Uint64 // requests that expanded ≥1 knowledge snippet
 	knowledgeTokens    atomic.Uint64 // estimated tokens injected via knowledge expansion
 	costGuardBlock     atomic.Uint64 // requests blocked by the pre-call cost guard
+	dlpRequestFlag     atomic.Uint64 // requests whose prompt matched a DLP flag policy
+	dlpRequestMask     atomic.Uint64 // requests whose prompt was masked by DLP
+	dlpRequestBlock    atomic.Uint64 // requests refused by DLP
+	dlpResponseFlag    atomic.Uint64 // responses that matched a DLP flag policy
+	dlpResponseMask    atomic.Uint64 // responses masked by DLP
+	dlpResponseBlock   atomic.Uint64 // responses withheld by DLP
 	promptInjection    atomic.Uint64 // requests where prompt-injection patterns were detected
 	t2sRequests        atomic.Uint64 // Text2SQL virtual-model requests handled
 	t2sCacheHit        atomic.Uint64 // Text2SQL preview cache hits
@@ -128,7 +134,21 @@ func (m *Metrics) AddKnowledgeExpansion(tokens int) {
 		m.knowledgeTokens.Add(uint64(tokens))
 	}
 }
-func (m *Metrics) IncCostGuardBlock()        { m.costGuardBlock.Add(1) }
+func (m *Metrics) IncCostGuardBlock() { m.costGuardBlock.Add(1) }
+
+// IncDLP counts one DLP decision by side (REQUEST/RESPONSE) and action.
+func (m *Metrics) IncDLP(check, action string) {
+	if m == nil {
+		return
+	}
+	counters := map[string]*atomic.Uint64{
+		"REQUEST/FLAG": &m.dlpRequestFlag, "REQUEST/MASK": &m.dlpRequestMask, "REQUEST/BLOCK": &m.dlpRequestBlock,
+		"RESPONSE/FLAG": &m.dlpResponseFlag, "RESPONSE/MASK": &m.dlpResponseMask, "RESPONSE/BLOCK": &m.dlpResponseBlock,
+	}
+	if counter := counters[check+"/"+action]; counter != nil {
+		counter.Add(1)
+	}
+}
 func (m *Metrics) IncPromptInjection()       { m.promptInjection.Add(1) }
 func (m *Metrics) IncText2SQLRequest()       { m.t2sRequests.Add(1) }
 func (m *Metrics) IncText2SQLCacheHit()      { m.t2sCacheHit.Add(1) }
@@ -214,6 +234,14 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_cost_guard_blocked_total Requests blocked by the pre-call cost guard.",
 		"# TYPE proxy_cost_guard_blocked_total counter",
 		fmt.Sprintf("proxy_cost_guard_blocked_total %d", m.costGuardBlock.Load()),
+		"# HELP proxy_dlp_decisions_total Data loss prevention decisions by side and action.",
+		"# TYPE proxy_dlp_decisions_total counter",
+		fmt.Sprintf("proxy_dlp_decisions_total{check=\"request\",action=\"flag\"} %d", m.dlpRequestFlag.Load()),
+		fmt.Sprintf("proxy_dlp_decisions_total{check=\"request\",action=\"mask\"} %d", m.dlpRequestMask.Load()),
+		fmt.Sprintf("proxy_dlp_decisions_total{check=\"request\",action=\"block\"} %d", m.dlpRequestBlock.Load()),
+		fmt.Sprintf("proxy_dlp_decisions_total{check=\"response\",action=\"flag\"} %d", m.dlpResponseFlag.Load()),
+		fmt.Sprintf("proxy_dlp_decisions_total{check=\"response\",action=\"mask\"} %d", m.dlpResponseMask.Load()),
+		fmt.Sprintf("proxy_dlp_decisions_total{check=\"response\",action=\"block\"} %d", m.dlpResponseBlock.Load()),
 		"# HELP proxy_prompt_injection_total Requests where prompt-injection patterns were detected.",
 		"# TYPE proxy_prompt_injection_total counter",
 		fmt.Sprintf("proxy_prompt_injection_total %d", m.promptInjection.Load()),

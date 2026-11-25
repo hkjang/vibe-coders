@@ -55,6 +55,7 @@ type Server struct {
 	mcpPolicy       atomic.Pointer[mcpPolicySnapshot]
 	routingRules    atomic.Pointer[routingRulesSnapshot]
 	dynamicRoutes   dynamicRouteCache
+	dlp             dlpCache
 	knowledge       atomic.Pointer[knowledgeSnapshot]
 	deprecations    atomic.Pointer[deprecationSnapshot]
 	costCache       atomic.Pointer[costSnapshot]
@@ -587,6 +588,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/approvals", s.handleApprovals)
 	mux.HandleFunc("/admin/approvals/", s.handleApprovalDecision)
 	mux.HandleFunc("/admin/security/secrets", s.handleSecretEvents)
+	mux.HandleFunc("/admin/security/dlp", s.handleDLP)
+	mux.HandleFunc("/admin/security/dlp/test", s.handleDLPTestAuthorized)
+	mux.HandleFunc("/admin/security/dlp/events", s.handleDLPEventsAuthorized)
 	mux.HandleFunc("/admin/replay", s.handleReplay)
 	mux.HandleFunc("/admin/golden-prompts", s.handleGoldenPrompts)
 	mux.HandleFunc("/admin/golden-prompts/run", s.handleGoldenRun)
@@ -1547,6 +1551,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 					meta.Request.Error = "pipeline_blocked"
 				}
 				rc.attachDynamicRoute(&meta)
+				rc.attachDLP(&meta)
 				s.enqueue(meta)
 			}
 		} else {
@@ -1564,6 +1569,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 				meta.Request.Error = "early_blocked"
 			}
 			rc.attachDynamicRoute(&meta)
+			rc.attachDLP(&meta)
 			s.enqueue(meta)
 			s.loggedRequests.Delete(meta.Request.ID)
 		}
@@ -2516,7 +2522,8 @@ func adminRequiredScope(r *http.Request) string {
 		return "routing:write"
 	}
 	if strings.HasPrefix(r.URL.Path, "/admin/security") || strings.HasPrefix(r.URL.Path, "/admin/policies") || strings.HasPrefix(r.URL.Path, "/admin/approvals") {
-		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		// The DLP test scan computes on text the caller supplies and changes nothing.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.URL.Path == "/admin/security/dlp/test" {
 			return "security:read"
 		}
 		return "admin:write"
@@ -3058,6 +3065,7 @@ func addVaryHeader(w http.ResponseWriter, header string) {
 func gatewayOwnedRoutingHeader(key string) bool {
 	switch http.CanonicalHeaderKey(key) {
 	case "X-Provider", "X-Route-Reason", "X-Route-Detail", "X-Failover-From", "X-Failover-Reason", "X-Failover-Path", "X-Health-Demoted", "X-Agent-Provider", "X-Request-Id",
+		"X-Vibe-Dlp", "Cf-Aig-Dlp", "X-Vibe-Dlp-Response",
 		"X-Dynamic-Route", "X-Dynamic-Route-Version", "X-Dynamic-Route-Path", "X-Dynamic-Route-Element", "X-Dynamic-Route-Limit", "X-Upstream-Retries", "X-Routed-Model", "X-Cache", "X-Cache-Type":
 		return true
 	default:

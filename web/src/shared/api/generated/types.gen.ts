@@ -557,6 +557,200 @@ export type CostGuardConfigResponse = {
     threshold_krw: number;
 };
 
+export type DlpCatalogEntry = {
+    base_confidence: 'none' | 'low' | 'medium' | 'high';
+    context: Array<string>;
+    description?: string;
+    example: string;
+    id: string;
+    mask: string;
+    name: string;
+    requires_context: boolean;
+};
+
+export type DlpCatalogProfile = {
+    default_min_confidence: 'low' | 'medium' | 'high';
+    default_min_matches: number;
+    description: string;
+    entries: Array<DlpCatalogEntry>;
+    id: string;
+    name: string;
+    record_distinct?: number;
+    record_window?: number;
+};
+
+export type DlpConfig = {
+    custom_profiles: Array<DlpCustomProfile>;
+    enabled: boolean;
+    evidence: 'partial' | 'hash_only';
+    max_scan_bytes: number;
+    oversize: 'allow' | 'block';
+    policies: Array<DlpPolicy>;
+    profiles: {
+        [key: string]: DlpProfileSettings;
+    };
+};
+
+export type DlpConfigRejection = {
+    error: {
+        [key: string]: unknown;
+    };
+    issues: Array<DlpIssue>;
+};
+
+export type DlpCustomEntry = {
+    case_sensitive?: boolean;
+    confidence?: 'low' | 'medium' | 'high';
+    context?: Array<string>;
+    id: string;
+    keywords?: Array<string>;
+    mask?: string;
+    name: string;
+    pattern?: string;
+    type: 'regex' | 'keywords';
+};
+
+export type DlpCustomProfile = {
+    description?: string;
+    entries: Array<DlpCustomEntry>;
+    id: string;
+    min_confidence?: 'low' | 'medium' | 'high';
+    min_matches?: number;
+    name: string;
+};
+
+export type DlpEvent = {
+    action: 'FLAG' | 'MASK' | 'BLOCK';
+    api_key_id: string;
+    check: 'REQUEST' | 'RESPONSE';
+    confidence: string;
+    created_at: string;
+    endpoint: string;
+    entry_ids: Array<string>;
+    evidence: Array<string>;
+    hashes: Array<string>;
+    id: string;
+    match_count: number;
+    model: string;
+    policy_ids: Array<string>;
+    profile_id: string;
+    request_id: string;
+    team_id: string;
+    user_id: string;
+};
+
+export type DlpEventCount = {
+    events: number;
+    key: string;
+    matches: number;
+    requests: number;
+};
+
+export type DlpEventsResponse = {
+    count: number;
+    events: Array<DlpEvent>;
+    hours: number;
+    summary: {
+        by_action: Array<DlpEventCount>;
+        by_check: Array<DlpEventCount>;
+        by_day: Array<DlpEventCount>;
+        by_profile: Array<DlpEventCount>;
+    };
+};
+
+export type DlpIssue = {
+    message: string;
+    path: string;
+};
+
+export type DlpPolicy = {
+    action: 'FLAG' | 'MASK' | 'BLOCK';
+    api_keys?: Array<string>;
+    check: Array<'REQUEST' | 'RESPONSE'>;
+    enabled: boolean;
+    id: string;
+    name?: string;
+    note?: string;
+    profiles: Array<string>;
+    teams?: Array<string>;
+};
+
+export type DlpPolicyHit = {
+    action: 'FLAG' | 'MASK' | 'BLOCK';
+    policy_id: string;
+    profiles: Array<string>;
+};
+
+export type DlpProfileSettings = {
+    disabled_entries?: Array<string>;
+    min_confidence?: 'low' | 'medium' | 'high';
+    min_matches?: number;
+};
+
+export type DlpSettingsResponse = {
+    catalog: Array<DlpCatalogProfile>;
+    compat_header: string;
+    config: DlpConfig;
+    recommended_policies: Array<DlpPolicy>;
+    response_header: string;
+    revision: number;
+    updated_at: string;
+    updated_by: string;
+};
+
+export type DlpSettingsWriteRequest = {
+    config: DlpConfig;
+    expected_revision: number;
+    reason?: string;
+};
+
+export type DlpSettingsWriteResponse = {
+    config: DlpConfig;
+    revision: number;
+    updated_at: string;
+    updated_by: string;
+};
+
+export type DlpTestDecision = {
+    action: '' | 'FLAG' | 'MASK' | 'BLOCK';
+    policies: Array<DlpPolicyHit>;
+};
+
+export type DlpTestMatch = {
+    confidence: 'low' | 'medium' | 'high';
+    end: number;
+    entry_id: string;
+    entry_name: string;
+    profile_id: string;
+    start: number;
+};
+
+export type DlpTestProfile = {
+    entry_ids: Array<string>;
+    match_count: number;
+    name: string;
+    profile_id: string;
+    triggered: boolean;
+};
+
+export type DlpTestRequest = {
+    api_key_id?: string;
+    config?: DlpConfig;
+    team_id?: string;
+    text: string;
+};
+
+export type DlpTestResponse = {
+    header: string;
+    masked_request: string;
+    matches: Array<DlpTestMatch>;
+    profiles: Array<DlpTestProfile>;
+    request: DlpTestDecision;
+    response: DlpTestDecision;
+    scanned_bytes: number;
+    truncated: boolean;
+};
+
 export type DwDashboardDimensions = {
     configured: boolean;
     dimension?: string;
@@ -5174,7 +5368,7 @@ export type UiTelemetryEventRequest = ({
     event?: 'page_load';
 }) & {
     event: 'visit' | 'legacy_fallback' | 'page_load';
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.dlp' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     load_ms?: number;
     /**
      * 128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.
@@ -5183,7 +5377,7 @@ export type UiTelemetryEventRequest = ({
 };
 
 export type UiTelemetryFeatureCount = {
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.dlp' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     legacy_opens: number;
     load_max_ms?: number;
     load_samples?: number;
@@ -15096,6 +15290,158 @@ export type PostAdminSecretsRotateResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminSecurityDlpData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/security/dlp';
+};
+
+export type GetAdminSecurityDlpErrors = {
+    /**
+     * invalid_api_key: reading and the test scan need security:read; saving needs admin:write.
+     */
+    401: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSecurityDlpError = GetAdminSecurityDlpErrors[keyof GetAdminSecurityDlpErrors];
+
+export type GetAdminSecurityDlpResponses = {
+    /**
+     * OK
+     */
+    200: DlpSettingsResponse;
+};
+
+export type GetAdminSecurityDlpResponse = GetAdminSecurityDlpResponses[keyof GetAdminSecurityDlpResponses];
+
+export type PutAdminSecurityDlpData = {
+    body: DlpSettingsWriteRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/security/dlp';
+};
+
+export type PutAdminSecurityDlpErrors = {
+    /**
+     * invalid_body or dlp_revision_missing.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: reading and the test scan need security:read; saving needs admin:write.
+     */
+    401: AppError;
+    /**
+     * dlp_conflict: the settings changed since they were loaded.
+     */
+    409: AppError;
+    /**
+     * dlp_config_invalid: the configuration has errors; issues lists them by path.
+     */
+    422: DlpConfigRejection;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PutAdminSecurityDlpError = PutAdminSecurityDlpErrors[keyof PutAdminSecurityDlpErrors];
+
+export type PutAdminSecurityDlpResponses = {
+    /**
+     * OK
+     */
+    200: DlpSettingsWriteResponse;
+};
+
+export type PutAdminSecurityDlpResponse = PutAdminSecurityDlpResponses[keyof PutAdminSecurityDlpResponses];
+
+export type GetAdminSecurityDlpEventsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        hours?: number;
+        limit?: number;
+        action?: 'FLAG' | 'MASK' | 'BLOCK';
+        check?: 'REQUEST' | 'RESPONSE';
+        profile?: string;
+        request_id?: string;
+        team_id?: string;
+    };
+    url: '/admin/security/dlp/events';
+};
+
+export type GetAdminSecurityDlpEventsErrors = {
+    /**
+     * dlp_events_query_invalid.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: reading and the test scan need security:read; saving needs admin:write.
+     */
+    401: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSecurityDlpEventsError = GetAdminSecurityDlpEventsErrors[keyof GetAdminSecurityDlpEventsErrors];
+
+export type GetAdminSecurityDlpEventsResponses = {
+    /**
+     * OK
+     */
+    200: DlpEventsResponse;
+};
+
+export type GetAdminSecurityDlpEventsResponse = GetAdminSecurityDlpEventsResponses[keyof GetAdminSecurityDlpEventsResponses];
+
+export type PostAdminSecurityDlpTestData = {
+    body: DlpTestRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/security/dlp/test';
+};
+
+export type PostAdminSecurityDlpTestErrors = {
+    /**
+     * invalid_body or dlp_test_text_invalid.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: reading and the test scan need security:read; saving needs admin:write.
+     */
+    401: AppError;
+    /**
+     * dlp_draft_forbidden: testing an unsaved configuration requires admin:write.
+     */
+    403: AppError;
+    /**
+     * dlp_config_invalid: the configuration has errors; issues lists them by path.
+     */
+    422: DlpConfigRejection;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminSecurityDlpTestError = PostAdminSecurityDlpTestErrors[keyof PostAdminSecurityDlpTestErrors];
+
+export type PostAdminSecurityDlpTestResponses = {
+    /**
+     * OK
+     */
+    200: DlpTestResponse;
+};
+
+export type PostAdminSecurityDlpTestResponse = PostAdminSecurityDlpTestResponses[keyof PostAdminSecurityDlpTestResponses];
 
 export type GetAdminSecuritySecretsData = {
     body?: never;

@@ -173,6 +173,7 @@ describe("migration registry", () => {
     ["data.products", "/app/data/products"],
     ["finops.overview", "/app/finops"],
     ["security.overview", "/app/security"],
+    ["security.dlp", "/app/dlp"],
     ["security.redteam", "/app/redteam"],
     ["security.sandbox", "/app/sandbox"],
     ["system.health", "/app/system/health"],

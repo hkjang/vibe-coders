@@ -13,6 +13,11 @@ export const securityFeatureModules = defineFeatureModules([
     queryKeys: securityOverviewQueryKeys,
   },
   {
+    featureId: "security.dlp",
+    load: () => import("@/features/security/dlp/DLPPage").then((module) => module.DLPPage),
+    queryKeys: ["tab", "hours", "action", "check", "profile"],
+  },
+  {
     featureId: "security.redteam",
     load: () => import("@/features/security/redteam/RedTeamPage").then((module) => module.RedTeamPage),
     queryKeys: ["tab", "q", "execution_job", "job_campaign", ...runQueryKeys],

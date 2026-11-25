@@ -111,7 +111,9 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		w.Header().Set("X-Agent-Mode", "passthrough")
 		return true
 	}
-	rc.meta = s.handleAgentRouteChatWithRequestedModel(w, r, rc.body, route, rc.apiKeyID, rc.authCtx, requestedModel)
+	rc.serveUnderDLP(func(w http.ResponseWriter, r *http.Request) {
+		rc.meta = s.handleAgentRouteChatWithRequestedModel(w, r, rc.body, route, rc.apiKeyID, rc.authCtx, requestedModel)
+	})
 	rc.traceID = rc.meta.Request.TraceID
 	return false
 }
@@ -265,7 +267,7 @@ func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r
 	outcome := s.runMCPAgenticChat(w, callReq, backingModel, messages, ts, policy, apiKeyID, authCtx, stream)
 	if stream || (outcome.Content != "" && outcome.Err == nil) {
 		usage := agenticUsageRecord(outcome, meta, len(outcome.Content))
-		s.finishAgentRoute(meta, start, route, candidates, outcome, usage, apiKeyID)
+		s.finishAgentRoute(r, meta, start, route, candidates, outcome, usage, apiKeyID)
 		if !stream {
 			w.Header().Set("X-Agent-Steps", strconv.Itoa(outcome.Steps))
 			w.Header().Set("X-Agent-Tool-Calls", strconv.Itoa(outcome.ToolCalls))
@@ -286,7 +288,7 @@ func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r
 
 // finishAgentRoute enqueues the audit record for an agent-route run (response, usage, and per-tool
 // invocations) — the agentic analogue of finishMCPDiscovery, minus domain-routing learning.
-func (s *Server) finishAgentRoute(meta store.LogRecord, start time.Time, route store.AgentRoute, candidates []MCPCandidate, outcome mcpAgentOutcome, usage *store.TokenUsage, apiKeyID string) {
+func (s *Server) finishAgentRoute(r *http.Request, meta store.LogRecord, start time.Time, route store.AgentRoute, candidates []MCPCandidate, outcome mcpAgentOutcome, usage *store.TokenUsage, apiKeyID string) {
 	meta.Request.StatusCode = http.StatusOK
 	meta.Request.LatencyMS = time.Since(start).Milliseconds()
 	meta.Request.ToolCount = outcome.ToolCalls
@@ -322,5 +324,5 @@ func (s *Server) finishAgentRoute(meta store.LogRecord, start time.Time, route s
 	s.metrics.IncRequest(false)
 	s.metrics.ObserveLatency(meta.Request.LatencyMS)
 	s.metrics.ObserveToolInvocations(meta.Tools)
-	s.enqueue(meta)
+	s.enqueueFor(r, meta)
 }

@@ -2192,6 +2192,830 @@
         ],
         "type": "object"
       },
+      "DLPCatalogEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "base_confidence": {
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "context": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "example": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "mask": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "requires_context": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "base_confidence",
+          "requires_context",
+          "context",
+          "mask",
+          "example"
+        ],
+        "type": "object"
+      },
+      "DLPCatalogProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "default_min_confidence": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "default_min_matches": {
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/DLPCatalogEntry"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "record_distinct": {
+            "type": "integer"
+          },
+          "record_window": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "default_min_confidence",
+          "default_min_matches",
+          "entries"
+        ],
+        "type": "object"
+      },
+      "DLPConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "custom_profiles": {
+            "items": {
+              "$ref": "#/components/schemas/DLPCustomProfile"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "enum": [
+              "partial",
+              "hash_only"
+            ],
+            "type": "string"
+          },
+          "max_scan_bytes": {
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "oversize": {
+            "enum": [
+              "allow",
+              "block"
+            ],
+            "type": "string"
+          },
+          "policies": {
+            "items": {
+              "$ref": "#/components/schemas/DLPPolicy"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DLPProfileSettings"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "enabled",
+          "evidence",
+          "max_scan_bytes",
+          "oversize",
+          "profiles",
+          "custom_profiles",
+          "policies"
+        ],
+        "type": "object"
+      },
+      "DLPConfigRejection": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/DLPIssue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "error",
+          "issues"
+        ],
+        "type": "object"
+      },
+      "DLPCustomEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "confidence": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "context": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mask": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pattern": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "regex",
+              "keywords"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "DLPCustomProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/DLPCustomEntry"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "min_confidence": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "min_matches": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "entries"
+        ],
+        "type": "object"
+      },
+      "DLPEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "FLAG",
+              "MASK",
+              "BLOCK"
+            ],
+            "type": "string"
+          },
+          "api_key_id": {
+            "type": "string"
+          },
+          "check": {
+            "enum": [
+              "REQUEST",
+              "RESPONSE"
+            ],
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "entry_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "hashes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "match_count": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "policy_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "request_id",
+          "api_key_id",
+          "user_id",
+          "team_id",
+          "check",
+          "action",
+          "policy_ids",
+          "profile_id",
+          "entry_ids",
+          "match_count",
+          "confidence",
+          "evidence",
+          "hashes",
+          "endpoint",
+          "model",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "DLPEventCount": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "matches": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "events",
+          "requests",
+          "matches"
+        ],
+        "type": "object"
+      },
+      "DLPEventsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DLPEvent"
+            },
+            "type": "array"
+          },
+          "hours": {
+            "type": "integer"
+          },
+          "summary": {
+            "additionalProperties": false,
+            "properties": {
+              "by_action": {
+                "items": {
+                  "$ref": "#/components/schemas/DLPEventCount"
+                },
+                "type": "array"
+              },
+              "by_check": {
+                "items": {
+                  "$ref": "#/components/schemas/DLPEventCount"
+                },
+                "type": "array"
+              },
+              "by_day": {
+                "items": {
+                  "$ref": "#/components/schemas/DLPEventCount"
+                },
+                "type": "array"
+              },
+              "by_profile": {
+                "items": {
+                  "$ref": "#/components/schemas/DLPEventCount"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "by_action",
+              "by_check",
+              "by_profile",
+              "by_day"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "events",
+          "summary",
+          "hours",
+          "count"
+        ],
+        "type": "object"
+      },
+      "DLPIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "type": "object"
+      },
+      "DLPPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "FLAG",
+              "MASK",
+              "BLOCK"
+            ],
+            "type": "string"
+          },
+          "api_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "check": {
+            "items": {
+              "enum": [
+                "REQUEST",
+                "RESPONSE"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "teams": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "enabled",
+          "action",
+          "profiles",
+          "check"
+        ],
+        "type": "object"
+      },
+      "DLPPolicyHit": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "FLAG",
+              "MASK",
+              "BLOCK"
+            ],
+            "type": "string"
+          },
+          "policy_id": {
+            "type": "string"
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "policy_id",
+          "action",
+          "profiles"
+        ],
+        "type": "object"
+      },
+      "DLPProfileSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "disabled_entries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "min_confidence": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "min_matches": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DLPSettingsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog": {
+            "items": {
+              "$ref": "#/components/schemas/DLPCatalogProfile"
+            },
+            "type": "array"
+          },
+          "compat_header": {
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/DLPConfig"
+          },
+          "recommended_policies": {
+            "items": {
+              "$ref": "#/components/schemas/DLPPolicy"
+            },
+            "type": "array"
+          },
+          "response_header": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "config",
+          "revision",
+          "updated_by",
+          "updated_at",
+          "catalog",
+          "recommended_policies",
+          "response_header",
+          "compat_header"
+        ],
+        "type": "object"
+      },
+      "DLPSettingsWriteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/DLPConfig"
+          },
+          "expected_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "config",
+          "expected_revision"
+        ],
+        "type": "object"
+      },
+      "DLPSettingsWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/DLPConfig"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "config",
+          "revision",
+          "updated_by",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "DLPTestDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "",
+              "FLAG",
+              "MASK",
+              "BLOCK"
+            ],
+            "type": "string"
+          },
+          "policies": {
+            "items": {
+              "$ref": "#/components/schemas/DLPPolicyHit"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "policies"
+        ],
+        "type": "object"
+      },
+      "DLPTestMatch": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "end": {
+            "type": "integer"
+          },
+          "entry_id": {
+            "type": "string"
+          },
+          "entry_name": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile_id",
+          "entry_id",
+          "entry_name",
+          "start",
+          "end",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "DLPTestProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "entry_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "match_count": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "triggered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "profile_id",
+          "name",
+          "triggered",
+          "match_count",
+          "entry_ids"
+        ],
+        "type": "object"
+      },
+      "DLPTestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/DLPConfig"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "DLPTestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "header": {
+            "type": "string"
+          },
+          "masked_request": {
+            "type": "string"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/DLPTestMatch"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/DLPTestProfile"
+            },
+            "type": "array"
+          },
+          "request": {
+            "$ref": "#/components/schemas/DLPTestDecision"
+          },
+          "response": {
+            "$ref": "#/components/schemas/DLPTestDecision"
+          },
+          "scanned_bytes": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "matches",
+          "profiles",
+          "truncated",
+          "scanned_bytes",
+          "request",
+          "response",
+          "masked_request",
+          "header"
+        ],
+        "type": "object"
+      },
       "DwDashboardDimensions": {
         "additionalProperties": false,
         "properties": {
@@ -17899,6 +18723,7 @@
               "data.products",
               "finops.overview",
               "security.overview",
+              "security.dlp",
               "security.redteam",
               "security.sandbox",
               "system.health",
@@ -17967,6 +18792,7 @@
               "data.products",
               "finops.overview",
               "security.overview",
+              "security.dlp",
               "security.redteam",
               "security.sandbox",
               "system.health",
@@ -18025,7 +18851,7 @@
             "items": {
               "$ref": "#/components/schemas/UITelemetryFeatureCount"
             },
-            "maxItems": 40,
+            "maxItems": 41,
             "type": "array"
           },
           "from": {
@@ -36902,6 +37728,348 @@
         "summary": "Rotate the gateway secret",
         "tags": [
           "security"
+        ]
+      }
+    },
+    "/admin/security/dlp": {
+      "get": {
+        "description": "The DLP configuration with its revision, the predefined profile and entry catalog (with synthetic examples), and a recommended starting set of policies. DLP inspects request text after authentication and before routing or caching, and response text before it reaches the client; matched values are never stored.",
+        "operationId": "get__admin_security_dlp",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLPSettingsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading and the test scan need security:read; saving needs admin:write."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Data loss prevention settings, profiles and policies",
+        "tags": [
+          "governance"
+        ]
+      },
+      "put": {
+        "description": "Replace the configuration. expected_revision is the revision the edit started from (0 before the first save); another administrator's save in between returns 409 and nothing is written. The replica that saved applies it at once, others within five seconds.",
+        "operationId": "put__admin_security_dlp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DLPSettingsWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLPSettingsWriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body or dlp_revision_missing."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading and the test scan need security:read; saving needs admin:write."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dlp_conflict: the settings changed since they were loaded."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLPConfigRejection"
+                }
+              }
+            },
+            "description": "dlp_config_invalid: the configuration has errors; issues lists them by path."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Data loss prevention settings, profiles and policies",
+        "tags": [
+          "governance"
+        ]
+      }
+    },
+    "/admin/security/dlp/events": {
+      "get": {
+        "description": "Profiles that matched one side of one request, newest first, with partial previews (or only fingerprints, per settings) and a summary by action, side, profile and day. A team administrator sees only their team.",
+        "operationId": "get__admin_security_dlp_events",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "schema": {
+              "default": 24,
+              "maximum": 2160,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "enum": [
+                "FLAG",
+                "MASK",
+                "BLOCK"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "check",
+            "schema": {
+              "enum": [
+                "REQUEST",
+                "RESPONSE"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "team_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLPEventsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dlp_events_query_invalid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading and the test scan need security:read; saving needs admin:write."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Data loss prevention matches and summary",
+        "tags": [
+          "governance"
+        ]
+      }
+    },
+    "/admin/security/dlp/test": {
+      "post": {
+        "description": "Scan sample text with the saved configuration, or with config when given (an unsaved draft, which requires admin:write). Reports every profile that finds something with byte offsets into the text, what the request and response policies would decide for team_id/api_key_id, the masked request, and the response header value. DLP need not be enabled. Nothing is stored.",
+        "operationId": "post__admin_security_dlp_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DLPTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLPTestResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body or dlp_test_text_invalid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading and the test scan need security:read; saving needs admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dlp_draft_forbidden: testing an unsaved configuration requires admin:write."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLPConfigRejection"
+                }
+              }
+            },
+            "description": "dlp_config_invalid: the configuration has errors; issues lists them by path."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Scan sample text with DLP profiles and policies",
+        "tags": [
+          "governance"
         ]
       }
     },

@@ -2569,6 +2569,43 @@ func migrationStatements() []string {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_dynamic_route_requests_route ON dynamic_route_requests(route_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_dynamic_route_requests_created ON dynamic_route_requests(created_at)`,
+
+		// Data loss prevention. dlp_settings holds the one configuration document with a
+		// revision that guards concurrent edits; dlp_events records each profile that
+		// matched one side of one request, purged with request_logs. Matched values are
+		// never stored, only partial previews and fingerprints. See internal/dlp.
+		`CREATE TABLE IF NOT EXISTS dlp_settings (
+			id TEXT PRIMARY KEY,
+			config_json TEXT NOT NULL,
+			revision INTEGER NOT NULL DEFAULT 1,
+			updated_by TEXT,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS dlp_events (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			api_key_id TEXT,
+			user_id TEXT,
+			team_id TEXT,
+			check_side TEXT NOT NULL,
+			action TEXT NOT NULL,
+			policy_ids TEXT NOT NULL DEFAULT '[]',
+			profile_id TEXT NOT NULL,
+			entry_ids TEXT NOT NULL DEFAULT '[]',
+			match_count INTEGER NOT NULL DEFAULT 0,
+			confidence TEXT,
+			evidence TEXT NOT NULL DEFAULT '[]',
+			hashes TEXT NOT NULL DEFAULT '[]',
+			endpoint TEXT,
+			model TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_dlp_events_created ON dlp_events(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_dlp_events_request ON dlp_events(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_dlp_events_team ON dlp_events(team_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_dlp_events_action ON dlp_events(action, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_dlp_events_check ON dlp_events(check_side, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_dlp_events_profile ON dlp_events(profile_id, created_at)`,
 	}
 }
 
@@ -3425,6 +3462,11 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 
 	if record.DynamicRoute != nil {
 		if err := s.insertDynamicRouteRequest(ctx, tx, req, *record.DynamicRoute); err != nil {
+			return err
+		}
+	}
+	if len(record.DLPEvents) > 0 {
+		if err := s.insertDLPEvents(ctx, tx, req, record.DLPEvents); err != nil {
 			return err
 		}
 	}

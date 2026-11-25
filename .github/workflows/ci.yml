@@ -353,6 +353,8 @@ jobs:
         run: go test -race ./internal/store -run '^TestAppUI(Telemetry|Diagnostics|Actions)' -count=1 -timeout=5m
       - name: Verify PostgreSQL startup lock waiters and concurrent migrations
         run: go test -race ./internal/store -run '^TestPostgresMigration' -count=1 -timeout=2m
+      - name: Verify PostgreSQL DLP settings revisions, event filters, summaries and retention
+        run: go test -race ./internal/store -run '^TestDLP' -count=1 -timeout=3m
       - name: Verify PostgreSQL settings history and concurrent package startup
         # Keep package startup concurrent: waiting migration locks must not pin
         # the snapshots that another session's concurrent indexes need to finish.

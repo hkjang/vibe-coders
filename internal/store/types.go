@@ -410,6 +410,8 @@ type LogRecord struct {
 	CodeVerify  *CodeVerifyLog
 	// DynamicRoute is set when the request was served through a dynamic route.
 	DynamicRoute *DynamicRouteRequest
+	// DLPEvents are the data loss prevention matches of the request and its response.
+	DLPEvents []DLPEvent
 }
 
 // ToolInvocation captures a single tool/MCP interaction observed in a request or

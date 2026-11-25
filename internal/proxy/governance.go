@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vibe-coders/internal/audit"
+	"vibe-coders/internal/dlp"
 	"vibe-coders/internal/store"
 )
 
@@ -469,23 +470,43 @@ func governanceRuleMatches(conditions map[string]any, g governanceContext) bool 
 	return true
 }
 
+// legacySecretTypes are the firewall's own rules. The DLP credentials profile
+// covers them too; the firewall keeps its patterns and names for them and takes only
+// the formats it did not know from DLP, so existing policies and reports read the
+// same while coverage grows.
+var legacySecretTypes = func() map[string]bool {
+	out := map[string]bool{}
+	for _, p := range secretFirewallPatterns {
+		out[p.typ] = true
+	}
+	return out
+}()
+
 func detectSecretsInText(text string) []secretFinding {
 	seen := map[string]bool{}
 	findings := []secretFinding{}
+	add := func(typ, match string) bool {
+		if strings.TrimSpace(match) == "" {
+			return false
+		}
+		key := typ + ":" + audit.HashText(match)
+		if seen[key] {
+			return false
+		}
+		seen[key] = true
+		findings = append(findings, secretFinding{Type: typ, Value: match})
+		return len(findings) >= 50
+	}
 	for _, p := range secretFirewallPatterns {
 		for _, match := range p.re.FindAllString(text, 20) {
-			if strings.TrimSpace(match) == "" {
-				continue
-			}
-			key := p.typ + ":" + audit.HashText(match)
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			findings = append(findings, secretFinding{Type: p.typ, Value: match})
-			if len(findings) >= 50 {
+			if add(p.typ, match) {
 				return findings
 			}
+		}
+	}
+	for _, f := range dlp.FindCredentials(text, legacySecretTypes) {
+		if add(f.ID, f.Value) {
+			return findings
 		}
 	}
 	return findings
@@ -498,7 +519,7 @@ func maskSecretText(text string) string {
 			masked = p.re.ReplaceAllString(masked, p.replacement)
 		}
 	}
-	return masked
+	return dlp.MaskCredentials(masked, legacySecretTypes)
 }
 
 func findingTypes(findings []secretFinding) []string {

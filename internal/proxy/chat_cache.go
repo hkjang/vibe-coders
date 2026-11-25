@@ -112,6 +112,14 @@ func (s *Server) serveChatFromCache(ctx context.Context, w http.ResponseWriter, 
 	if contentType == "" {
 		contentType = "application/json"
 	}
+	attachGate := func(*store.LogRecord) {}
+	if gate := dlpCacheGateFrom(ctx); gate != nil {
+		allowed, after := gate(hit.Body, contentType)
+		if !allowed {
+			return false
+		}
+		attachGate = after
+	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("X-Cache", "HIT")
 	w.Header().Set("X-Cache-Type", "chat")
@@ -156,6 +164,7 @@ func (s *Server) serveChatFromCache(ctx context.Context, w http.ResponseWriter, 
 	s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 	applyUpstreamHeaderSummary(&meta.Request, nil, nil, w.Header())
 	refreshRoutingSummary(&meta.Request, nil)
+	attachGate(&meta)
 	s.enqueue(meta)
 	return true
 }
