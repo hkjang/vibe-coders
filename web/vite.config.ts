@@ -43,6 +43,13 @@ export default defineConfig({
               name: "routing-editing-shared",
               test: /[\\/]features[\\/]routing[\\/]rules[\\/](routing-toggle-state|routing-rule-create-state|routing-rule-create-operation|RoutingRuleCreateFields)\.(ts|tsx)$/u,
             },
+            {
+              // Campaign and single-case reviews share these primitives. Keep
+              // opening a campaign review independent of the entire route.
+              name: "redteam-review-shared",
+              test: /[\\/]features[\\/]security[\\/]redteam[\\/](RedTeamExecutionReviewDetails|reviewed-execution-form)\.(ts|tsx)$/u,
+              includeDependenciesRecursively: false,
+            },
           ],
         },
       },

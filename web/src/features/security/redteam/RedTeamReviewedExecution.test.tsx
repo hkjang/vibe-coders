@@ -5,20 +5,33 @@ import { describe, expect, it, vi } from "vitest";
 import axe from "axe-core";
 import { RedTeamReviewedExecution } from "./RedTeamReviewedExecution";
 import { executionReviewFixture, executionOutcomeFixture } from "./reviewed-execution-fixture";
+import { executionJobFixture, executionJobId } from "./job-fixture";
 import { redTeamCampaignSchema } from "@/shared/api/domains/redteam";
 import { redTeamReviewSchema, reviewedOutcomeSchema } from "@/shared/api/domains/redteam-reviewed";
 import { FeatureAccessContext } from "@/shared/feature-access/context";
 import { apiFailure, mockApi } from "@/test/api";
 const prepare = "POST /admin/redteam/campaigns/public-campaign/run-review",
   execute = "POST /admin/redteam/campaigns/public-campaign/run-reviewed";
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return { useAuth: () => testAuth() };
+});
 const campaign = redTeamCampaignSchema.parse({
   id: "public-campaign",
   name: "공개 실행",
   execution_mode: "active-controlled",
 });
-function mount(onResult = vi.fn(), proxyKey = "public-synthetic-key", canWrite = true, history = false) {
+function mount(
+  onResult = vi.fn(),
+  proxyKey = "public-synthetic-key",
+  canWrite = true,
+  history = false,
+  jobs = false,
+) {
   const onClose = vi.fn();
   const onOpenHistory = vi.fn();
+  const onJobTracked = vi.fn();
+  const onJobAccepted = vi.fn();
   const props = {
     campaign,
     proxyKey,
@@ -27,6 +40,8 @@ function mount(onResult = vi.fn(), proxyKey = "public-synthetic-key", canWrite =
     onClose,
     onPending: vi.fn(),
     onOpenHistory,
+    onJobTracked: jobs ? onJobTracked : undefined,
+    onJobAccepted: jobs ? onJobAccepted : undefined,
     historyAvailable: () => history,
     returnFocusRef: createRef<HTMLElement>(),
   };
@@ -37,7 +52,7 @@ function mount(onResult = vi.fn(), proxyKey = "public-synthetic-key", canWrite =
       <RedTeamReviewedExecution {...props} proxyKey={key} canWrite={write} />
     </FeatureAccessContext.Provider>
   );
-  return { ...render(ui()), onResult, onClose, onOpenHistory, ui };
+  return { ...render(ui()), onResult, onClose, onOpenHistory, onJobTracked, onJobAccepted, ui };
 }
 async function review() {
   const user = userEvent.setup();
@@ -50,6 +65,57 @@ async function confirm() {
   await userEvent.click(screen.getByRole("button", { name: "검토한 조건으로 한 번 실행" }));
 }
 describe("검토한 레드팀 실행", () => {
+  it("작업 지원 서버에는 접수 요청을 한 번 보내고 결과 대기 없이 상태 주소를 전달한다", async () => {
+    const record = executionReviewFixture({ job_id: executionJobId });
+    let trackedBeforePost = false;
+    const api = mockApi({
+      [prepare]: () => record,
+      [execute]: () => {
+        trackedBeforePost = view.onJobTracked.mock.calls.length === 1;
+        return executionJobFixture();
+      },
+    });
+    const view = mount(vi.fn(), "public-synthetic-key", true, false, true);
+    await review();
+    await confirm();
+    await waitFor(() =>
+      expect(view.onJobAccepted).toHaveBeenCalledWith({ id: executionJobId, campaign: "public-campaign" }),
+    );
+    expect(trackedBeforePost).toBe(true);
+    expect(view.onResult).not.toHaveBeenCalled();
+    expect(api.calls.filter((call) => call.key === execute)).toEqual([
+      {
+        key: execute,
+        options: {
+          query: { job: "1" },
+          body: { review_token: record.review_token, proxy_key: "public-synthetic-key" },
+        },
+      },
+    ]);
+  });
+  it("작업 접수 응답 유실은 주소를 유지하며 동기 실행이나 같은 요청으로 재시도하지 않는다", async () => {
+    const api = mockApi({
+      [prepare]: () => executionReviewFixture({ job_id: executionJobId }),
+      [execute]: () => {
+        throw apiFailure("lost", 503);
+      },
+    });
+    const view = mount(vi.fn(), "public-synthetic-key", true, false, true);
+    await review();
+    await confirm();
+    await screen.findByText(/실행 결과를 확정할 수 없습니다/u);
+    expect(view.onJobTracked).toHaveBeenCalledWith({ id: executionJobId, campaign: "public-campaign" });
+    expect(view.onJobAccepted).not.toHaveBeenCalled();
+    expect(api.bodies(execute)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "검토한 조건으로 한 번 실행" })).toBeDisabled();
+  });
+  it("작업 상태를 추적할 화면이 없으면 실행을 보내지 않는다", async () => {
+    const api = mockApi({ [prepare]: () => executionReviewFixture({ job_id: executionJobId }) });
+    mount();
+    await review();
+    await confirm();
+    expect(api.bodies(execute)).toHaveLength(0);
+  });
   it("실행 중 이력 이동은 다시 실행하지 않고 늦은 결과로 화면을 바꾸지 않는다", async () => {
     let finish: ((value: unknown) => void) | undefined;
     const record = executionReviewFixture();

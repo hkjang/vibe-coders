@@ -62,12 +62,26 @@ func redTeamRunReviewOpenAPISchemas() map[string]any {
 	execution := map[string]any{"campaign_id": text, "status": map[string]any{"type": "string", "enum": []string{"completed", "stopped"}}, "stopped": text, "runs": array(runSchema), "summary": object(summary), "note": text, "review_id": text, "execution_kind": kind, "limits": schemaRef("RedTeamRunLimits"), "planned_live_calls": count, "planned_case_executions": count, "complete": boolean, "recording": schemaRef("RedTeamRecording")}
 	body := object(map[string]any{"review_token": token, "proxy_key": map[string]any{"type": "string", "maxLength": 8192}})
 	body["required"] = []string{"review_token"}
+	reviewSchema := object(response)
+	// Optional for compatibility with older supported servers; replay reviews
+	// do not advertise this campaign-only transport capability.
+	response["job_id"] = map[string]any{"type": "string", "pattern": "^rtj_[a-f0-9]{64}$", "description": "Safe recovery reference for optional job=1 admission; not a bearer capability."}
+	job := object(map[string]any{
+		"id": response["job_id"], "campaign_id": text, "review_id": text, "kind": kind, "reason": text,
+		"planned_live_calls": count, "planned_case_executions": count,
+		"status":     map[string]any{"type": "string", "enum": []string{"running", "completed", "stopped", "unknown", "interrupted"}},
+		"created_at": text, "updated_at": text, "finished_at": text,
+		"progress": object(map[string]any{"run_ids": array(text), "live_calls": count, "completed_cases": count, "cost_krw": amount}),
+		"outcome":  map[string]any{"allOf": []any{schemaRef("RedTeamReviewedExecutionResponse")}, "nullable": true},
+	})
 	return map[string]any{
+		"RedTeamExecutionJob":              job,
+		"RedTeamReviewedWriteResponse":     map[string]any{"oneOf": []any{schemaRef("RedTeamReviewedExecutionResponse"), schemaRef("RedTeamExecutionJob")}},
 		"RedTeamRecording":                 object(map[string]any{"confirmed": boolean, "stage": map[string]any{"type": "string", "enum": []string{"", "run_start", "case_result", "finalize"}}, "results": count}),
 		"RedTeamRunLimits":                 limits,
 		"RedTeamRunReviewRequest":          object(map[string]any{"kind": kind, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 1000}, "models": models, "limits": schemaRef("RedTeamRunLimits")}),
 		"RedTeamReviewedTarget":            object(map[string]any{"id": text, "target_ref": text, "provider": text, "models": models, "live_calls": count, "case_executions": count}),
-		"RedTeamRunReviewResponse":         object(response),
+		"RedTeamRunReviewResponse":         reviewSchema,
 		"RedTeamReviewedExecutionRequest":  body,
 		"RedTeamReviewedExecutionResponse": object(execution),
 	}

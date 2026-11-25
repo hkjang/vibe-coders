@@ -2696,6 +2696,30 @@ export type RedTeamEvidenceReadRecord = {
     }> | null;
 };
 
+export type RedTeamExecutionJob = {
+    campaign_id: string;
+    created_at: string;
+    finished_at: string;
+    /**
+     * Safe recovery reference for optional job=1 admission; not a bearer capability.
+     */
+    id: string;
+    kind: 'live' | 'simulation';
+    outcome: RedTeamReviewedExecutionResponse | null;
+    planned_case_executions: number;
+    planned_live_calls: number;
+    progress: {
+        completed_cases: number;
+        cost_krw: number;
+        live_calls: number;
+        run_ids: Array<string>;
+    };
+    reason: string;
+    review_id: string;
+    status: 'running' | 'completed' | 'stopped' | 'unknown' | 'interrupted';
+    updated_at: string;
+};
+
 export type RedTeamPreflightResponse = {
     active_eligible_targets: number;
     approved: boolean;
@@ -2985,6 +3009,8 @@ export type RedTeamReviewedTarget = {
     target_ref: string;
 };
 
+export type RedTeamReviewedWriteResponse = RedTeamReviewedExecutionResponse | RedTeamExecutionJob;
+
 export type RedTeamRunLegacyList = {
     count: number;
     runs: Array<RedTeamRunMetadata>;
@@ -3034,6 +3060,10 @@ export type RedTeamRunReviewResponse = {
     case_executions: number;
     estimated_cost_krw: number;
     expires_at: string;
+    /**
+     * Safe recovery reference for optional job=1 admission; not a bearer capability.
+     */
+    job_id?: string;
     kind: 'live' | 'simulation';
     limits: RedTeamRunLimits;
     planned_live_calls: number;
@@ -11516,42 +11546,107 @@ export type PostAdminRedteamCampaignsIdRunReviewResponses = {
 
 export type PostAdminRedteamCampaignsIdRunReviewResponse = PostAdminRedteamCampaignsIdRunReviewResponses[keyof PostAdminRedteamCampaignsIdRunReviewResponses];
 
+export type GetAdminRedteamCampaignsIdRunReviewedData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query: {
+        /**
+         * Sole query parameter; use the job_id supplied in the review before submission.
+         */
+        job_id: string;
+    };
+    url: '/admin/redteam/campaigns/{id}/run-reviewed';
+};
+
+export type GetAdminRedteamCampaignsIdRunReviewedErrors = {
+    /**
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
+     */
+    400: AppError;
+    /**
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
+     */
+    401: AppError;
+    /**
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
+     */
+    403: AppError;
+    /**
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
+     */
+    404: AppError;
+    /**
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
+     */
+    409: AppError;
+    /**
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
+     */
+    500: AppError;
+    /**
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRedteamCampaignsIdRunReviewedError = GetAdminRedteamCampaignsIdRunReviewedErrors[keyof GetAdminRedteamCampaignsIdRunReviewedErrors];
+
+export type GetAdminRedteamCampaignsIdRunReviewedResponses = {
+    /**
+     * OK
+     */
+    200: RedTeamExecutionJob;
+};
+
+export type GetAdminRedteamCampaignsIdRunReviewedResponse = GetAdminRedteamCampaignsIdRunReviewedResponses[keyof GetAdminRedteamCampaignsIdRunReviewedResponses];
+
 export type PostAdminRedteamCampaignsIdRunReviewedData = {
     body: RedTeamReviewedExecutionRequest;
     path: {
         id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Sole optional query parameter. Without it, the existing synchronous response is unchanged.
+         */
+        job?: '1';
+    };
     url: '/admin/redteam/campaigns/{id}/run-reviewed';
 };
 
 export type PostAdminRedteamCampaignsIdRunReviewedErrors = {
     /**
-     * Review rejected or outcome unknown; read current history before a new review
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
      */
     400: AppError;
     /**
-     * Review rejected or outcome unknown; read current history before a new review
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
      */
     401: AppError;
     /**
-     * Review rejected or outcome unknown; read current history before a new review
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
      */
     403: AppError;
     /**
-     * Review rejected or outcome unknown; read current history before a new review
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
      */
     404: AppError;
     /**
-     * Review rejected or outcome unknown; read current history before a new review
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
      */
     409: AppError;
     /**
-     * Review rejected or outcome unknown; read current history before a new review
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
      */
     500: AppError;
     /**
-     * Review rejected or outcome unknown; read current history before a new review
+     * Invalid job request, current authorization denied, foreign owner, missing job, stale review, active campaign job or unconfirmed admission. Never automatically repeat paid work.
      */
     503: AppError;
     /**
@@ -11566,7 +11661,11 @@ export type PostAdminRedteamCampaignsIdRunReviewedResponses = {
     /**
      * OK
      */
-    200: RedTeamReviewedExecutionResponse;
+    200: RedTeamReviewedWriteResponse;
+    /**
+     * OK
+     */
+    202: RedTeamExecutionJob;
 };
 
 export type PostAdminRedteamCampaignsIdRunReviewedResponse = PostAdminRedteamCampaignsIdRunReviewedResponses[keyof PostAdminRedteamCampaignsIdRunReviewedResponses];

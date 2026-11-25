@@ -15,7 +15,7 @@ export const securityFeatureModules = defineFeatureModules([
   {
     featureId: "security.redteam",
     load: () => import("@/features/security/redteam/RedTeamPage").then((module) => module.RedTeamPage),
-    queryKeys: ["tab", "q", ...runQueryKeys],
+    queryKeys: ["tab", "q", "execution_job", "job_campaign", ...runQueryKeys],
   },
   {
     featureId: "security.sandbox",

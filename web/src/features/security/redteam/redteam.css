@@ -1,5 +1,35 @@
 /* Red Team screen: layout only. Colours come from the shared design tokens. */
 
+.rt-job-panel .section-card-body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.rt-job-progress.kv-list {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  gap: var(--space-4);
+}
+
+.rt-job-progress .kv-item {
+  min-width: 0;
+}
+
+.rt-job-progress dt {
+  font-size: inherit;
+}
+
+.rt-job-progress dd {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .rt-job-progress.kv-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .rt-execution-actions {
   display: flex;
   flex-wrap: wrap;

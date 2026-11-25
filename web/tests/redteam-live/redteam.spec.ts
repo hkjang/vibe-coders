@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Locator } from "@playwright/test";
 import { login, reader, required } from "../auth-live/live-fixture";
+import type { RedTeamReviewedExecutionRequest } from "../../src/shared/api/generated";
 
 const names = {
   simulation: "시뮬레이션 확인",
@@ -13,6 +14,7 @@ let reviews = 0;
 let executions = 0;
 let replayReviews = 0;
 let replays = 0;
+let liveJobId = "";
 
 test("REDTEAM-LIVE-009 오래된 실행의 페이지·상세·새로고침", async ({ page }) => {
   await login(
@@ -84,11 +86,17 @@ async function open(page: Page, scenario: Scenario): Promise<Locator> {
   return prepare(page, scenario);
 }
 
-async function execute(page: Page, panel: Locator, scenario: Scenario): Promise<Locator> {
+async function execute(page: Page, panel: Locator, scenario: Scenario, lostReply = false): Promise<Locator> {
   const action = panel.getByRole("button", { name: "검토한 조건으로 한 번 실행", exact: true });
   await expect(action).toBeDisabled();
   await panel.getByLabel("캠페인 이름 확인", { exact: false }).fill(names[scenario]);
   await action.click();
+  if (lostReply) {
+    await expect(panel.getByText(/실행 결과를 확정할 수 없습니다/u)).toBeVisible();
+    await panel.getByRole("button", { name: "닫기", exact: true }).click();
+    await page.reload();
+  } else await expect(panel).toBeHidden();
+  await page.getByRole("button", { name: "저장된 실행 결과" }).click();
   const outcome = page.getByRole("dialog", { name: "캠페인 실행 결과", exact: true });
   await expect(outcome).toBeVisible();
   expect(executions).toBe(1);
@@ -109,9 +117,39 @@ test("REDTEAM-LIVE-001 시뮬레이션 검토 취소와 저장 확인", async ({
 
 test("REDTEAM-LIVE-002 실제 호출의 결과와 이력", async ({ page }) => {
   const panel = await open(page, "live");
-  const outcome = await execute(page, panel, "live");
+  let submitted: RedTeamReviewedExecutionRequest | undefined;
+  await page.route("**/admin/redteam/campaigns/browser-redteam-live/run-reviewed?job=1", async (route) => {
+    executions++;
+    submitted = route.request().postDataJSON() as RedTeamReviewedExecutionRequest;
+    const response = await route.fetch();
+    expect(response.status()).toBe(202);
+    // Real Go admission and provider; only the browser response is lost.
+    await route.abort("failed");
+  });
+  const outcome = await execute(page, panel, "live", true);
+  liveJobId = new URL(page.url()).searchParams.get("execution_job") ?? "";
+  expect(/^rtj_[a-f0-9]{64}$/u.test(liveJobId)).toBe(true);
   await expect(outcome.getByText("확인됨", { exact: true })).toBeVisible();
   await expect(outcome.getByText("완료", { exact: true })).toBeVisible();
+  await page.unroute("**/admin/redteam/campaigns/browser-redteam-live/run-reviewed?job=1");
+  if (!submitted) throw Error("admission was not observed");
+  const duplicate = await page.evaluate(
+    async ({ body, id }) => {
+      const response = await fetch("/admin/redteam/campaigns/browser-redteam-live/run-reviewed?job=1", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Vibe-UI": "app",
+          Authorization: `Bearer ${sessionStorage.getItem("vibe.app.auth.access") ?? ""}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const result = (await response.json()) as { id?: string; status?: string };
+      return { status: response.status, same: result.id === id, complete: result.status === "completed" };
+    },
+    { body: submitted, id: liveJobId },
+  );
+  expect(duplicate).toEqual({ status: 200, same: true, complete: true });
   await outcome.getByRole("button", { name: /결과 1건 보기/u }).click();
   await expect(outcome).toBeHidden();
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -144,7 +182,13 @@ test("REDTEAM-LIVE-004 제공자 리다이렉트는 호출 오류", async ({ pag
 });
 
 test("REDTEAM-LIVE-005 조회 전용 사용자의 실행 거부", async ({ page }) => {
-  await login(page, reader, "/app/redteam?tab=campaigns");
+  expect(liveJobId).not.toBe("");
+  await login(
+    page,
+    reader,
+    `/app/redteam?tab=campaigns&execution_job=${liveJobId}&job_campaign=browser-redteam-live`,
+  );
+  await expect(page.getByText("레드팀 작업 조회 권한을 확인하세요.")).toBeVisible();
   await expect(page.getByRole("button", { name: `${names.live} 실제 실행`, exact: true })).toBeDisabled();
   const status = await page.evaluate(async () => {
     const response = await fetch("/admin/redteam/campaigns/browser-redteam-live/run-review", {

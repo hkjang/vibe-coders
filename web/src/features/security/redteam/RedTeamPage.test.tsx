@@ -643,7 +643,7 @@ describe("RedTeamPage", () => {
     const view = renderPage("/redteam?tab=campaigns");
 
     await user.click(await screen.findByRole("button", { name: "주간 레드팀 시뮬레이션 실행" }));
-    await user.type(screen.getByLabelText("실행 사유", { exact: false }), "공개 실행 점검");
+    await user.type(await screen.findByLabelText("실행 사유", { exact: false }), "공개 실행 점검");
     await user.click(screen.getByRole("button", { name: "실행 조건 검토" }));
     await screen.findByRole("dialog", { name: "실행 조건 최종 확인" });
     await user.type(screen.getByLabelText("캠페인 이름 확인", { exact: false }), "주간 레드팀");

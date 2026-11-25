@@ -33,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.173"
+var AppVersion = "v0.86.174"
 
 type Server struct {
 	cfg      config.Config
@@ -2217,6 +2217,9 @@ func (s *Server) runAdminPostChange(r *http.Request, action, before, after, prov
 }
 
 func adminID(r *http.Request) string {
+	if actor, ok := r.Context().Value(redTeamJobActorKey{}).(string); ok && actor != "" {
+		return actor
+	}
 	token := bearerToken(r.Header.Get("Authorization"))
 	if token == "" {
 		return "anonymous"
