@@ -14,7 +14,7 @@ const feature = (feature_id: string, app_path: string, title: string) => ({
   enabled_roles: [] as string[],
   rollout_percent: 100,
   fallback_enabled: false,
-  minimum_api_version: "v0.84.0",
+  minimum_api_version: "v0.86.182",
   available: true,
 });
 
@@ -92,7 +92,7 @@ async function install(page: Page): Promise<Gateway> {
     scopes: ["routing:read", "routing:write", "admin:read"],
   };
   const bootstrap: UiBootstrapResponse = {
-    backend_version: "v0.86.174",
+    backend_version: "v0.86.182",
     ui_version: "dynamic-routing-fixture",
     api_version: "v1",
     ui: {
