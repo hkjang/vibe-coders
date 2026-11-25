@@ -1,3 +1,4 @@
+import type { DwDateBounds } from "@/shared/utils/dw-date-bounds";
 import type { DwDimension, DwOrder, DwWindow } from "@/features/data/warehouse/warehouse-filters";
 import { apiClient } from "@/shared/api/client";
 import { downloadApiFile } from "@/shared/api/download-file";
@@ -9,10 +10,11 @@ export async function downloadDwDashboardCsv(
   dimension: DwDimension,
   order: DwOrder,
   ownership: FileDownloadContext,
+  bounds?: DwDateBounds,
 ): Promise<void> {
   const file = await apiClient.file(fileEndpoints.warehouse, {
     ...ownership,
-    query: { window, dimension, order_by: order, limit: 100 },
+    query: { window, dimension, order_by: order, limit: 100, ...bounds },
     routeId: "data.warehouse",
   });
   const stamp = new Date().toISOString().slice(0, 10);

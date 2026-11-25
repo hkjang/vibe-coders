@@ -53,8 +53,10 @@ function bootstrap() {
   const scopes = ["admin:read", "admin:write"];
   return {
     ...value,
+    // Keep the real API capability version, but avoid unrelated UI upgrade
+    // notices in screenshots. Embedded version matching is verified separately.
     backend_version: "v0.86.173",
-    ui_version: "v0.86.173",
+    ui_version: "public-dw-retry-fixture",
     ui: { ...value.ui, default_entry: "/app/data/warehouse" },
     user: { ...value.user, scopes, features: { "data.warehouse": true } },
     permissions: scopes,

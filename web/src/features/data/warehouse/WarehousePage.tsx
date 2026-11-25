@@ -1,3 +1,4 @@
+import { readDwDateSelection } from "@/shared/utils/dw-date-bounds";
 import { validDwRetryJobId } from "@/shared/utils/dw-retry-query";
 import { legacyRoutes } from "@/config/legacy-route-map";
 import { useQueryClient } from "@tanstack/react-query";
@@ -55,7 +56,11 @@ export function WarehousePage(): React.JSX.Element {
   const retryJobId = validDwRetryJobId(rawRetryJob) ? rawRetryJob : undefined;
 
   const onFilterChange = useCallback(
-    (updates: Record<string, string | undefined>): void => update(updates),
+    (updates: Record<string, string | undefined>): void =>
+      update({
+        ...("window" in updates || "bucket" in updates ? { since_day: undefined, until_day: undefined } : {}),
+        ...updates,
+      }),
     [update],
   );
 
@@ -104,6 +109,7 @@ export function WarehousePage(): React.JSX.Element {
       {tab === "insights" ? (
         <TabPanel id="insights" panelIdPrefix="warehouse">
           <InsightsTab
+            selection={readDwDateSelection(params)}
             bucket={bucket}
             dimension={dimension}
             onFilterChange={onFilterChange}

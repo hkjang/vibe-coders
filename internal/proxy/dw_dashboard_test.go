@@ -396,8 +396,8 @@ func TestDWDashboardTimeseriesBucket(t *testing.T) {
 	if out.Bucket != "week" {
 		t.Fatalf("bucket = %q, want week", out.Bucket)
 	}
-	if !strings.Contains(sawQuery, "toMonday(day)") {
-		t.Fatalf("week bucket should group by toMonday(day): %s", sawQuery)
+	if !strings.Contains(sawQuery, "toMonday(rollup.day)") {
+		t.Fatalf("week bucket should group by toMonday(rollup.day): %s", sawQuery)
 	}
 
 	// Unknown/absent bucket falls back to day.

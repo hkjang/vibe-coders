@@ -834,6 +834,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["400"] = map[string]any{"description": "Webhook missing or malformed", "content": jsonContent(schemaRef("AppError"))}
 		responses["502"] = map[string]any{"description": "webhook_failed: transport failed or the receiver rejected the test message; response body and URL are not echoed", "content": jsonContent(schemaRef("AppError"))}
 		responses["503"] = map[string]any{"description": "mattermost_config_unavailable: saved configuration could not be loaded", "content": jsonContent(schemaRef("AppError"))}
+	case "get /admin/dw/dashboard/timeseries", "get /admin/dw/dashboard/dimensions", "get /admin/dw/dashboard/export.csv":
+		enrichDWDashboardOpenAPI(route, op, responses)
 	case "get /admin/dw/sink-retry", "post /admin/dw/sink-retry":
 		enrichDwRetryOpenAPI(method, op, responses)
 	case "get /admin/cost", "post /admin/cost":
@@ -1252,6 +1254,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range settingsEditorOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range dwDashboardOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range dwRetryOpenAPISchemas() {
