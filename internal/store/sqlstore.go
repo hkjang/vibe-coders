@@ -2505,6 +2505,70 @@ func migrationStatements() []string {
 		// paths that revoke in bulk: every token of a user, and every token of a session.
 		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_session ON refresh_tokens(session_id)`,
+
+		// Dynamic routes: named, versioned routing graphs called as model "dynamic/<name>".
+		// Every save appends a version; deployed_version is the one serving traffic, so a
+		// rollback is deploying an earlier number. See internal/store/dynamic_routes.go.
+		`CREATE TABLE IF NOT EXISTS dynamic_routes (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			description TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			deployed_version INTEGER NOT NULL DEFAULT 0,
+			latest_version INTEGER NOT NULL DEFAULT 0,
+			deployed_at TEXT,
+			deployed_by TEXT,
+			created_by TEXT,
+			updated_by TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS dynamic_route_versions (
+			route_id TEXT NOT NULL,
+			version INTEGER NOT NULL,
+			graph_json TEXT NOT NULL,
+			note TEXT NOT NULL DEFAULT '',
+			created_by TEXT,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (route_id, version)
+		)`,
+		// Rate elements count per window. The key is the route, the element, a hash of
+		// the metadata value the element is keyed on, and the window's start in unix
+		// seconds. Counting in the database keeps every gateway replica on one limit.
+		`CREATE TABLE IF NOT EXISTS dynamic_route_counters (
+			route_id TEXT NOT NULL,
+			element_id TEXT NOT NULL,
+			scope_key TEXT NOT NULL,
+			window_start BIGINT NOT NULL,
+			window_end BIGINT NOT NULL DEFAULT 0,
+			request_count BIGINT NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (route_id, element_id, scope_key, window_start)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_dynamic_route_counters_window_end ON dynamic_route_counters(window_end)`,
+		// One row per request served through a route: the version, the elements it passed
+		// and the model that answered. Purged with request_logs.
+		`CREATE TABLE IF NOT EXISTS dynamic_route_requests (
+			request_id TEXT PRIMARY KEY,
+			route_id TEXT NOT NULL,
+			route_name TEXT NOT NULL,
+			version INTEGER NOT NULL DEFAULT 0,
+			path_json TEXT NOT NULL DEFAULT '[]',
+			metadata_json TEXT NOT NULL DEFAULT '{}',
+			final_element_id TEXT,
+			final_model TEXT,
+			final_provider TEXT,
+			fallbacks INTEGER NOT NULL DEFAULT 0,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			outcome TEXT NOT NULL DEFAULT '',
+			status_code INTEGER NOT NULL DEFAULT 0,
+			latency_ms BIGINT NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_dynamic_route_requests_route ON dynamic_route_requests(route_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_dynamic_route_requests_created ON dynamic_route_requests(created_at)`,
 	}
 }
 
@@ -3355,6 +3419,12 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 			routing.Complexity.RefactoringKeywords, routing.Complexity.DebuggingKeywords, routing.Risk.Score, routing.Risk.Tier, string(riskCategories),
 			routing.HealthScore, string(fallbackPath), routing.DecisionReason, formatTime(routing.CreatedAt))
 		if err != nil {
+			return err
+		}
+	}
+
+	if record.DynamicRoute != nil {
+		if err := s.insertDynamicRouteRequest(ctx, tx, req, *record.DynamicRoute); err != nil {
 			return err
 		}
 	}

@@ -60,6 +60,7 @@ var retentionDecisions = map[string]retentionDecision{
 	"mcp_route_decisions":      {purgedWithRequest, "per-request MCP routing"},
 	"domain_routing_decisions": {purgedWithRequest, "per-request domain routing"},
 	"code_verify_results":      {purgedWithRequest, "per-request code verification"},
+	"dynamic_route_requests":   {purgedWithRequest, "per-request dynamic route path and outcome"},
 
 	// Self-expiring rows: dead the moment their expiry passes.
 	"refresh_tokens":      {sweptByExpiry, "expired or long-revoked credentials"},

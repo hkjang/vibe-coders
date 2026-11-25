@@ -9,4 +9,8 @@ export const routingFeatureModules = defineFeatureModules([
     // each tab keeps in the URL so a screen can be shared as a link.
     queryKeys: ["rule_id", "limit", "model", "page", "request_id", "route", "status", "threshold", "window"],
   },
+  {
+    featureId: "routing.dynamic",
+    load: () => import("./dynamic/DynamicRoutesPage").then((module) => module.DynamicRoutesPage),
+  },
 ]);

@@ -146,6 +146,7 @@ describe("migration registry", () => {
     ["gateway.models", "/app/gateway/models"],
     ["gateway.chat", "/app/gateway/chat"],
     ["routing.rules", "/app/routing/rules"],
+    ["routing.dynamic", "/app/routing/dynamic"],
     ["observability.requests", "/app/observability/requests"],
     ["observability.traces", "/app/observability/traces"],
     ["observability.sessions", "/app/observability/sessions"],
@@ -205,6 +206,7 @@ describe("migration registry", () => {
 
   it("maps nested client-side routes back to a registry feature", () => {
     expect(featureByPath("/routing/rules/decision-1")?.featureId).toBe("routing.rules");
+    expect(featureByPath("/routing/dynamic/drt_0123")?.featureId).toBe("routing.dynamic");
   });
 
   it("exposes the Provider and Models catalog previews to the gateway roles", () => {

@@ -169,7 +169,8 @@ func (s *Server) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Don't shadow built-in virtual models or the Text2SQL namespace.
-		if isMCPDiscoveryModel(canonicalMCPDiscoveryModel(a.VirtualModel)) || text2sql.IsModel(a.VirtualModel) {
+		_, dynamicName := dynamicRouteNameFromModel(a.VirtualModel)
+		if isMCPDiscoveryModel(canonicalMCPDiscoveryModel(a.VirtualModel)) || text2sql.IsModel(a.VirtualModel) || dynamicName {
 			writeOpenAIError(w, http.StatusBadRequest, "virtual_model collides with a built-in model name — choose another (e.g. vibe/agent-<name>)", "invalid_request_error", "reserved_model")
 			return
 		}

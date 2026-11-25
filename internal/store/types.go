@@ -408,6 +408,8 @@ type LogRecord struct {
 	Tools       []ToolInvocation
 	Routing     *RoutingDecisionLog
 	CodeVerify  *CodeVerifyLog
+	// DynamicRoute is set when the request was served through a dynamic route.
+	DynamicRoute *DynamicRouteRequest
 }
 
 // ToolInvocation captures a single tool/MCP interaction observed in a request or

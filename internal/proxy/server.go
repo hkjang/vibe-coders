@@ -54,6 +54,7 @@ type Server struct {
 	loggedRequests  sync.Map
 	mcpPolicy       atomic.Pointer[mcpPolicySnapshot]
 	routingRules    atomic.Pointer[routingRulesSnapshot]
+	dynamicRoutes   dynamicRouteCache
 	knowledge       atomic.Pointer[knowledgeSnapshot]
 	deprecations    atomic.Pointer[deprecationSnapshot]
 	costCache       atomic.Pointer[costSnapshot]
@@ -622,6 +623,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing/breaker-reset", s.handleRoutingBreakerReset)
 	mux.HandleFunc("/admin/routing/balancer", s.handleRoutingBalancer)
 	mux.HandleFunc("/admin/routing/failover-drill", s.handleRoutingFailoverDrill)
+	mux.HandleFunc("/admin/routing/dynamic-routes", s.handleDynamicRoutes)
+	mux.HandleFunc("/admin/routing/dynamic-routes/", s.handleDynamicRouteByID)
 	mux.HandleFunc("/admin/providers/slo", s.handleProviderSLOs)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/models/quality", s.handleModelQuality)
@@ -1543,6 +1546,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 				if meta.Request.Error == "" {
 					meta.Request.Error = "pipeline_blocked"
 				}
+				rc.attachDynamicRoute(&meta)
 				s.enqueue(meta)
 			}
 		} else {
@@ -1559,6 +1563,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 			if meta.Request.Error == "" {
 				meta.Request.Error = "early_blocked"
 			}
+			rc.attachDynamicRoute(&meta)
 			s.enqueue(meta)
 			s.loggedRequests.Delete(meta.Request.ID)
 		}
@@ -1787,12 +1792,103 @@ type resolvedProvider struct {
 	Detail  string // e.g. matched glob pattern, or header name
 }
 
+// upstreamDialOptions tunes how one dial loop treats a provider that fails. The
+// zero value is the gateway's classic behaviour: one try per provider, the
+// provider's own timeout, and the context-overflow model swap.
+type upstreamDialOptions struct {
+	// attemptTimeout bounds the wait for response headers on each try. A stream that
+	// has started is never cut by it; the provider's own timeout still bounds the
+	// whole exchange.
+	attemptTimeout time.Duration
+	// maxAttempts is how many times one provider is tried before failing over to the
+	// next candidate. Values below 1 mean 1.
+	maxAttempts int
+	retryDelay  time.Duration
+	backoff     string
+	// fixedModel disables the context-overflow swap to a long-context model. A dynamic
+	// route names its models explicitly; the gateway must not substitute one.
+	fixedModel bool
+}
+
+// upstreamDialResult is what a dial loop produced: the live response (or the error
+// of the last try), who served it and how it got there.
+type upstreamDialResult struct {
+	resp           *http.Response
+	provider       string
+	failoverFrom   string
+	failoverReason string
+	path           []string
+	body           []byte
+	model          string
+	headers        http.Header
+	retries        int
+	err            error
+}
+
+// retryBackoff is the pause before retry number n (1 for the first retry).
+func retryBackoff(base time.Duration, mode string, n int) time.Duration {
+	if base <= 0 || n < 1 {
+		return 0
+	}
+	delay := base
+	switch mode {
+	case "linear":
+		delay = base * time.Duration(n)
+	case "exponential":
+		shift := n - 1
+		if shift > 16 {
+			shift = 16
+		}
+		delay = base << shift
+	}
+	if limit := time.Duration(dynamicRouteMaxRetryDelay) * time.Millisecond; delay > limit || delay < 0 {
+		delay = limit
+	}
+	return delay
+}
+
+// sleepContext waits d unless ctx ends first, reporting whether the wait completed.
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+// errAttemptTimeout marks a try that produced no response headers within the
+// per-attempt timeout. It wraps context.DeadlineExceeded so callers map it to 504
+// and record the reason as "timeout", the same as a provider timeout.
+type errAttemptTimeout struct{ after time.Duration }
+
+func (e errAttemptTimeout) Error() string {
+	return "upstream request timeout: no response within " + e.after.String()
+}
+
+func (e errAttemptTimeout) Unwrap() error { return context.DeadlineExceeded }
+
 // dialUpstream sends the request to `primary`. On transport-level failure (timeout,
 // connection refused, EOF before any response) it falls back to the next candidate
 // in `failoverCandidates`, in order. Returns the live response, the name of the
 // provider that actually answered, and (if a failover occurred) the original primary's
 // name in `failoverFrom`.
 func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, http.Header, error) {
+	res := s.dialUpstreamWith(reqCtx, r, body, primary, traceID, failoverCandidates, upstreamDialOptions{})
+	return res.resp, res.provider, res.failoverFrom, res.failoverReason, res.path, res.body, res.model, res.headers, res.err
+}
+
+// dialUpstreamWith is dialUpstream with per-request retry handling. A try that
+// fails with a transport error, a timeout, 429 or 5xx is repeated on the same
+// provider up to opts.maxAttempts times, pausing per opts.backoff, before the loop
+// fails over to the next candidate. Retries are recorded in the path as
+// "retry_<reason>:<provider>#<try>" so a caller can see them in X-Failover-Path.
+func (s *Server) dialUpstreamWith(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string, opts upstreamDialOptions) upstreamDialResult {
 	boundModelsMetadata := r.Method == http.MethodGet && r.URL.Path == "/v1/models" && !clientPinnedProvider(r)
 	providerLabel := func(name string) string {
 		return boundedModelsProviderLabel(name)
@@ -1835,6 +1931,10 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	budgetSpent := func() bool {
 		return !failoverDeadline.IsZero() && !time.Now().Before(failoverDeadline)
 	}
+	maxTries := opts.maxAttempts
+	if maxTries < 1 {
+		maxTries = 1
+	}
 
 	var lastErr error
 	failoverPath := []string{}
@@ -1846,6 +1946,20 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	currentModel := extractModel(currentBody)
 	usedLongContext := false
 	var lastUpstreamHeaders http.Header
+	retries := 0
+	tries := 0
+	result := func(resp *http.Response, provider, from, reason string, err error) upstreamDialResult {
+		return upstreamDialResult{resp: resp, provider: provider, failoverFrom: from, failoverReason: reason, path: failoverPath,
+			body: currentBody, model: currentModel, headers: lastUpstreamHeaders, retries: retries, err: err}
+	}
+	// retry pauses before trying the same provider again. It reports false when the
+	// request ended during the pause.
+	retry := func(reason, provider string) bool {
+		retries++
+		failoverPath = append(failoverPath, "retry_"+reason+":"+providerLabel(provider)+"#"+strconv.Itoa(tries+1))
+		slog.Info("upstream retry", "provider", providerLabel(provider), "reason", reason, "try", tries+1, "trace_id", traceID)
+		return sleepContext(reqCtx, retryBackoff(opts.retryDelay, opts.backoff, retries))
+	}
 	for i := 0; i < len(attempts); {
 		att := attempts[i]
 		upstreamRequestURL := r.URL
@@ -1853,30 +1967,47 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			var modelsURLErr error
 			upstreamRequestURL, modelsURLErr = modelsCatalogRequestURL(att.provider.BaseURL, r.URL.Path)
 			if modelsURLErr != nil {
-				return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, modelsURLErr
+				return result(nil, "", "", "", modelsURLErr)
 			}
 		} else if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && clientPinnedProvider(r) {
 			var modelsURLErr error
 			upstreamRequestURL, modelsURLErr = pinnedModelsRequestURL(att.provider.BaseURL, r.URL)
 			if modelsURLErr != nil {
-				return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, modelsURLErr
+				return result(nil, "", "", "", modelsURLErr)
 			}
 		}
 		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, upstreamRequestURL)
 		if err != nil {
-			return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, err
+			return result(nil, "", "", "", err)
 		}
+		tries++
 		ctx := reqCtx
 		var cancel context.CancelFunc
 		if att.provider.Timeout > 0 {
 			ctx, cancel = context.WithTimeout(reqCtx, att.provider.Timeout)
 		}
+		var firstByteTimer *time.Timer
+		if opts.attemptTimeout > 0 {
+			var cancelFirstByte context.CancelFunc
+			ctx, cancelFirstByte = context.WithCancel(ctx)
+			outer := cancel
+			cancel = func() {
+				cancelFirstByte()
+				if outer != nil {
+					outer()
+				}
+			}
+			firstByteTimer = time.AfterFunc(opts.attemptTimeout, cancelFirstByte)
+		}
 		upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(currentBody))
 		if err != nil {
+			if firstByteTimer != nil {
+				firstByteTimer.Stop()
+			}
 			if cancel != nil {
 				cancel()
 			}
-			return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, err
+			return result(nil, "", "", "", err)
 		}
 		if boundModelsMetadata {
 			upstreamReq.Header.Set("Accept", "application/json")
@@ -1905,6 +2036,16 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			client = &bounded
 		}
 		resp, doErr := client.Do(upstreamReq)
+		if firstByteTimer != nil && !firstByteTimer.Stop() {
+			// The timer is stopped exactly once, so a false Stop means it fired: the
+			// headers lost the race against the per-attempt timeout, and whatever arrived
+			// belongs to a cancelled context that cannot be relayed.
+			if doErr == nil {
+				_ = resp.Body.Close()
+				resp = nil
+			}
+			doErr = errAttemptTimeout{after: opts.attemptTimeout}
+		}
 		if doErr == nil {
 			if breakerEnabled {
 				if breakerCountsAsFailure(resp.StatusCode) {
@@ -1912,6 +2053,19 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				} else {
 					s.noteBreakerSuccess(att.provider.Name)
 				}
+			}
+			if statusFallbackAllowed(resp.StatusCode) && tries < maxTries && !budgetSpent() {
+				reason := fallbackReasonForStatus(resp.StatusCode)
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				if cancel != nil {
+					cancel()
+				}
+				if !retry(reason, att.provider.Name) {
+					lastErr = reqCtx.Err()
+					break
+				}
+				continue
 			}
 			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && !budgetSpent() {
 				reason := fallbackReasonForStatus(resp.StatusCode)
@@ -1923,13 +2077,14 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				failoverPath = append(failoverPath, reason+":"+providerLabel(att.provider.Name)+"->"+providerLabel(attempts[i+1].provider.Name))
 				slog.Warn("upstream status fallback", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "next", providerLabel(attempts[i+1].provider.Name))
 				i++
+				tries = 0
 				continue
 			}
 			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && budgetSpent() {
 				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
 				slog.Warn("failover budget exhausted", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "trace_id", traceID)
 			}
-			if resp.StatusCode == http.StatusBadRequest && !usedLongContext && redTeamReviewedOutput(reqCtx) == 0 {
+			if resp.StatusCode == http.StatusBadRequest && !usedLongContext && !opts.fixedModel && redTeamReviewedOutput(reqCtx) == 0 {
 				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 				_ = resp.Body.Close()
 				if cancel != nil {
@@ -1942,6 +2097,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 						currentBody = rewriteModelField(currentBody, longModel)
 						currentModel = longModel
 						usedLongContext = true
+						tries = 0
 						continue
 					}
 				}
@@ -1957,7 +2113,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 					reason = failoverPath[len(failoverPath)-1]
 				}
 			}
-			return resp, att.provider.Name, from, reason, failoverPath, currentBody, currentModel, lastUpstreamHeaders, nil
+			return result(resp, att.provider.Name, from, reason, nil)
 		}
 		if cancel != nil {
 			cancel()
@@ -1972,6 +2128,13 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			code = "models_fallback_transport_failed"
 		}
 		slog.Warn("upstream call failed", "provider", providerLabel(att.provider.Name), "attempt", i, "code", code, "reason", reason)
+		if tries < maxTries && reqCtx.Err() == nil && !budgetSpent() {
+			if !retry(reason, att.provider.Name) {
+				lastErr = reqCtx.Err()
+				break
+			}
+			continue
+		}
 		if i+1 < len(attempts) {
 			if budgetSpent() {
 				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
@@ -1981,11 +2144,12 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			failoverPath = append(failoverPath, reason+":"+providerLabel(att.provider.Name)+"->"+providerLabel(attempts[i+1].provider.Name))
 		}
 		i++
+		tries = 0
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no provider attempts made")
 	}
-	return nil, "", "", fallbackReasonForError(lastErr), failoverPath, currentBody, currentModel, lastUpstreamHeaders, lastErr
+	return result(nil, "", "", fallbackReasonForError(lastErr), lastErr)
 }
 
 // selectProviderForced resolves a provider, optionally pinned to forceProvider
@@ -2344,7 +2508,9 @@ func adminRequiredScope(r *http.Request) string {
 	if strings.HasPrefix(r.URL.Path, "/admin/routing") {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead ||
 			r.URL.Path == "/admin/routing/preview" ||
-			r.URL.Path == "/admin/routing/pattern-conflicts" {
+			r.URL.Path == "/admin/routing/pattern-conflicts" ||
+			r.URL.Path == dynamicRoutesAdminPath+"/validate" ||
+			r.URL.Path == dynamicRoutesAdminPath+"/simulate" {
 			return "routing:read"
 		}
 		return "routing:write"
@@ -2849,7 +3015,7 @@ func copyUpstreamHeaders(dst http.Header, src http.Header) {
 	for key, values := range src {
 		canonical := http.CanonicalHeaderKey(key)
 		if hopByHopHeader(canonical) || canonical == "Authorization" || canonical == "Host" || canonical == "Content-Length" ||
-			canonical == "X-Proxy-Provider" || canonical == "X-Proxy-No-Route" {
+			canonical == "X-Proxy-Provider" || canonical == "X-Proxy-No-Route" || requestControlHeader(canonical) {
 			continue
 		}
 		for _, value := range values {
@@ -2891,7 +3057,8 @@ func addVaryHeader(w http.ResponseWriter, header string) {
 
 func gatewayOwnedRoutingHeader(key string) bool {
 	switch http.CanonicalHeaderKey(key) {
-	case "X-Provider", "X-Route-Reason", "X-Route-Detail", "X-Failover-From", "X-Failover-Reason", "X-Failover-Path", "X-Health-Demoted", "X-Agent-Provider", "X-Request-Id":
+	case "X-Provider", "X-Route-Reason", "X-Route-Detail", "X-Failover-From", "X-Failover-Reason", "X-Failover-Path", "X-Health-Demoted", "X-Agent-Provider", "X-Request-Id",
+		"X-Dynamic-Route", "X-Dynamic-Route-Version", "X-Dynamic-Route-Path", "X-Dynamic-Route-Element", "X-Dynamic-Route-Limit", "X-Upstream-Retries", "X-Routed-Model", "X-Cache", "X-Cache-Type":
 		return true
 	default:
 		return false

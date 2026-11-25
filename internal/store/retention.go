@@ -180,6 +180,14 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) (int64, error) {
 	} else {
 		totalDeleted += n
 	}
+	// Closed dynamic route rate windows. An hour of grace keeps the window that just
+	// closed visible in the console a little longer; nothing reads it for enforcement.
+	if n, err := w.store.PurgeDynamicRouteCounters(ctx, now.Add(-time.Hour).Unix()); err != nil {
+		failures = append(failures, err)
+		slog.Warn("retention purge dynamic_route_counters failed", "error", err)
+	} else {
+		totalDeleted += n
+	}
 	if n, err := w.store.PurgeExpiredText2SQLCache(ctx); err != nil {
 		failures = append(failures, err)
 		slog.Warn("retention purge text2sql_cache failed", "error", err)

@@ -2565,6 +2565,971 @@
           }
         ]
       },
+      "DynamicRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "call_model": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "deployed_at": {
+            "type": "string"
+          },
+          "deployed_by": {
+            "type": "string"
+          },
+          "deployed_version": {
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "latest_version": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "live",
+              "live_with_draft",
+              "not_deployed",
+              "disabled"
+            ],
+            "type": "string"
+          },
+          "traffic_24h": {
+            "$ref": "#/components/schemas/DynamicRouteTotals"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "enabled",
+          "deployed_version",
+          "latest_version",
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at",
+          "call_model",
+          "state",
+          "traffic_24h"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteActivityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "hours": {
+            "type": "integer"
+          },
+          "limits": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteLimitWindow"
+            },
+            "type": "array"
+          },
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteRequestRecord"
+            },
+            "type": "array"
+          },
+          "route": {
+            "$ref": "#/components/schemas/DynamicRoute"
+          },
+          "traffic": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteTrafficRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "route",
+          "hours",
+          "traffic",
+          "limits",
+          "requests"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "deploy": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/DynamicRouteGraph"
+          },
+          "name": {
+            "maxLength": 63,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "graph"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "deleted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteDeployRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_deployed_version": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "expected_deployed_version"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deployed": {
+            "$ref": "#/components/schemas/DynamicRouteVersion"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteField"
+            },
+            "type": "array"
+          },
+          "latest": {
+            "$ref": "#/components/schemas/DynamicRouteVersion"
+          },
+          "route": {
+            "$ref": "#/components/schemas/DynamicRoute"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "route",
+          "versions",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteDistributionRow": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "final_element_id": {
+            "type": "string"
+          },
+          "final_model": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "success",
+              "cache_hit",
+              "failed",
+              "rate_limited",
+              "no_model"
+            ],
+            "type": "string"
+          },
+          "share": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "final_element_id",
+          "final_model",
+          "outcome",
+          "count",
+          "share"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteElement": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "outputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DynamicRouteOutput"
+            },
+            "description": "start: next; conditional: true/false; percentage: \"<n>%\"; rate and model: success/fallback.",
+            "type": "object"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/DynamicRouteProperties"
+          },
+          "type": {
+            "enum": [
+              "start",
+              "conditional",
+              "percentage",
+              "rate",
+              "model",
+              "end"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteField": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "description"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteGraph": {
+        "additionalProperties": true,
+        "description": "Cloudflare AI Gateway dynamic routing JSON. A whole exported route object is accepted; unused fields are dropped.",
+        "properties": {
+          "elements": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteElement"
+            },
+            "maxItems": 64,
+            "type": "array"
+          }
+        },
+        "required": [
+          "elements"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteGraphRejection": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/DynamicRouteValidation"
+          }
+        },
+        "required": [
+          "error",
+          "validation"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "element_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteLimitWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_krw": {
+            "type": "number"
+          },
+          "element_id": {
+            "type": "string"
+          },
+          "request_count": {
+            "type": "integer"
+          },
+          "scoped": {
+            "type": "boolean"
+          },
+          "window_end": {
+            "type": "string"
+          },
+          "window_start": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "element_id",
+          "scoped",
+          "window_start",
+          "window_end",
+          "request_count",
+          "cost_krw"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteField"
+            },
+            "type": "array"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRoute"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "routes",
+          "count",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "elementId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "elementId"
+        ],
+        "type": "object"
+      },
+      "DynamicRoutePatchRequest": {
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "DynamicRouteProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "backoff": {
+            "enum": [
+              "constant",
+              "linear",
+              "exponential"
+            ],
+            "type": "string"
+          },
+          "conditions": {
+            "additionalProperties": true,
+            "description": "conditional: field paths (metadata.<key>, identity.*, request.*) mapped to a value or to operators $eq $ne $in $nin $gt $gte $lt $lte $exists; $and / $or combine objects.",
+            "type": "object"
+          },
+          "key": {
+            "description": "rate: field each value of which gets its own limit; requests without it share one.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "rate: requests (count) or KRW (cost) per window.",
+            "type": "number"
+          },
+          "limitType": {
+            "enum": [
+              "count",
+              "cost"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "model: provider to pin; empty uses normal provider selection and same-model failover.",
+            "type": "string"
+          },
+          "retries": {
+            "maximum": 5,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retryDelay": {
+            "maximum": 60000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stickyKey": {
+            "description": "percentage: field whose value keeps a caller in one branch.",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "model: ms to wait for response headers per try; 0 keeps the provider timeout.",
+            "maximum": 600000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "window": {
+            "description": "rate: seconds.",
+            "maximum": 2678400,
+            "minimum": 10,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DynamicRouteRequestRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "type": "integer"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "fallbacks": {
+            "type": "integer"
+          },
+          "final_element_id": {
+            "type": "string"
+          },
+          "final_model": {
+            "type": "string"
+          },
+          "final_provider": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Masked metadata the request carried.",
+            "type": "object"
+          },
+          "outcome": {
+            "enum": [
+              "success",
+              "cache_hit",
+              "failed",
+              "rate_limited",
+              "no_model"
+            ],
+            "type": "string"
+          },
+          "provider_ref": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "route_id": {
+            "type": "string"
+          },
+          "route_name": {
+            "type": "string"
+          },
+          "status_code": {
+            "type": "integer"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteStep"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_id",
+          "route_id",
+          "route_name",
+          "version",
+          "final_element_id",
+          "final_model",
+          "final_provider",
+          "fallbacks",
+          "attempts",
+          "outcome",
+          "status_code",
+          "latency_ms",
+          "cost_krw",
+          "created_at",
+          "steps",
+          "metadata"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteRouteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "route": {
+            "$ref": "#/components/schemas/DynamicRoute"
+          }
+        },
+        "required": [
+          "route"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteSaveVersionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_version": {
+            "type": "integer"
+          },
+          "deploy": {
+            "type": "boolean"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/DynamicRouteGraph"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_version",
+          "graph"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteSimulateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "type": "string"
+          },
+          "exceeded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "failing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/DynamicRouteGraph"
+          },
+          "identity": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "route_id": {
+            "type": "string"
+          },
+          "samples": {
+            "maximum": 5000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": null,
+        "type": "object"
+      },
+      "DynamicRouteSimulateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "distribution": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteDistributionRow"
+            },
+            "type": "array"
+          },
+          "result": {
+            "$ref": "#/components/schemas/DynamicRouteSimulation"
+          },
+          "samples": {
+            "type": "integer"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/DynamicRouteValidation"
+          }
+        },
+        "required": [
+          "result",
+          "distribution",
+          "samples",
+          "validation"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteSimulation": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "type": "integer"
+          },
+          "blocked_by": {
+            "type": "string"
+          },
+          "fallbacks": {
+            "type": "integer"
+          },
+          "final_element_id": {
+            "type": "string"
+          },
+          "final_model": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "success",
+              "cache_hit",
+              "failed",
+              "rate_limited",
+              "no_model"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "retry_after_seconds": {
+            "type": "integer"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps",
+          "path",
+          "outcome",
+          "attempts",
+          "fallbacks"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteStep": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "start",
+              "conditional",
+              "percentage",
+              "rate",
+              "model",
+              "end"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteTotals": {
+        "additionalProperties": false,
+        "properties": {
+          "failures": {
+            "type": "integer"
+          },
+          "fallbacks": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "failures",
+          "fallbacks"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteTrafficRow": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_latency_ms": {
+            "type": "number"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "fallbacks": {
+            "type": "integer"
+          },
+          "final_element_id": {
+            "type": "string"
+          },
+          "final_model": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "final_element_id",
+          "final_model",
+          "outcome",
+          "requests",
+          "fallbacks",
+          "avg_latency_ms",
+          "cost_krw"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteValidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "graph": {
+            "$ref": "#/components/schemas/DynamicRouteGraph"
+          }
+        },
+        "required": [
+          "graph"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteValidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "graph": {
+            "$ref": "#/components/schemas/DynamicRouteGraph"
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/DynamicRouteValidation"
+          }
+        },
+        "required": [
+          "valid",
+          "graph",
+          "validation"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteValidation": {
+        "additionalProperties": false,
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteIssue"
+            },
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/DynamicRouteIssue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "errors",
+          "warnings"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/DynamicRouteGraph"
+          },
+          "note": {
+            "type": "string"
+          },
+          "route_id": {
+            "type": "string"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/DynamicRouteValidation"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "route_id",
+          "version",
+          "note",
+          "created_by",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteVersionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/DynamicRouteVersion"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "DynamicRouteWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "graph": {
+            "$ref": "#/components/schemas/DynamicRouteGraph"
+          },
+          "route": {
+            "$ref": "#/components/schemas/DynamicRoute"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/DynamicRouteValidation"
+          },
+          "version": {
+            "$ref": "#/components/schemas/DynamicRouteVersion"
+          }
+        },
+        "required": [
+          "route",
+          "validation"
+        ],
+        "type": "object"
+      },
       "EffectiveSettingLayer": {
         "additionalProperties": false,
         "properties": {
@@ -16907,6 +17872,7 @@
               "gateway.models",
               "gateway.chat",
               "routing.rules",
+              "routing.dynamic",
               "observability.requests",
               "observability.traces",
               "observability.sessions",
@@ -16974,6 +17940,7 @@
               "gateway.models",
               "gateway.chat",
               "routing.rules",
+              "routing.dynamic",
               "observability.requests",
               "observability.traces",
               "observability.sessions",
@@ -17058,7 +18025,7 @@
             "items": {
               "$ref": "#/components/schemas/UITelemetryFeatureCount"
             },
-            "maxItems": 39,
+            "maxItems": 40,
             "type": "array"
           },
           "from": {
@@ -34476,6 +35443,826 @@
           }
         ],
         "summary": "Approve/reject domain routing review item",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/admin/routing/dynamic-routes": {
+      "get": {
+        "description": "Every dynamic route with its state and the last 24 hours of traffic. A client calls a route as the model \"dynamic/<name>\".",
+        "operationId": "get__admin_routing_dynamic_routes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List / create dynamic routes (model \"dynamic/<name>\")",
+        "tags": [
+          "routing"
+        ]
+      },
+      "post": {
+        "description": "Create a route and its version 1. The route serves nothing until a version is deployed; deploy:true deploys version 1 at once. Names are lowercase letters, digits and . _ -.",
+        "operationId": "post__admin_routing_dynamic_routes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DynamicRouteCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteWriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_body, dynamic_route_name_invalid or dynamic_route_graph_invalid (unreadable JSON)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_name_taken."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteGraphRejection"
+                }
+              }
+            },
+            "description": "dynamic_route_graph_invalid: the graph has errors; validation lists them per element."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List / create dynamic routes (model \"dynamic/<name>\")",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/admin/routing/dynamic-routes/simulate": {
+      "post": {
+        "description": "Walk a graph (inline, or a stored route version) for sample metadata and caller identity. failing marks model elements as failing so fallback chains can be checked; exceeded marks rate elements as spent. distribution repeats the walk with fresh randomness (sticky keys ignored) to show how percentage splits divide traffic. No model is called and no limit is consumed.",
+        "operationId": "post__admin_routing_dynamic_routes_simulate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DynamicRouteSimulateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteSimulateResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_not_found or dynamic_route_version_not_found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteGraphRejection"
+                }
+              }
+            },
+            "description": "dynamic_route_graph_invalid: the graph has errors; validation lists them per element."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Walk a dynamic route graph for a sample request without calling a model",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/admin/routing/dynamic-routes/validate": {
+      "post": {
+        "description": "Normalize and validate a graph. Errors block a save; warnings point at likely mistakes such as an unknown provider or a limit without a fallback. Nothing is stored.",
+        "operationId": "post__admin_routing_dynamic_routes_validate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DynamicRouteValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteValidateResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Validate a dynamic route graph without saving it",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/admin/routing/dynamic-routes/{id}": {
+      "delete": {
+        "description": "Delete the route, its versions and its limit counters. Per-request history stays until retention purges the request logs.",
+        "operationId": "delete__admin_routing_dynamic_routes_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteDeleteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_not_found."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Dynamic route detail, settings and deletion",
+        "tags": [
+          "routing"
+        ]
+      },
+      "get": {
+        "description": "The route, its newest 100 versions (without graphs), the latest version's graph and, when a different version is deployed, the deployed graph.",
+        "operationId": "get__admin_routing_dynamic_routes_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_not_found."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Dynamic route detail, settings and deletion",
+        "tags": [
+          "routing"
+        ]
+      },
+      "patch": {
+        "description": "Change the description or turn the route off and on. Neither creates a version. A disabled route refuses calls with dynamic_route_disabled.",
+        "operationId": "patch__admin_routing_dynamic_routes_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DynamicRoutePatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteRouteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_not_found."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Dynamic route detail, settings and deletion",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/admin/routing/dynamic-routes/{id}/activity": {
+      "get": {
+        "description": "Requests the route served, grouped by version, final element and outcome; the limit windows still open; and the newest 50 requests with their path. Stored metadata values are masked.",
+        "operationId": "get__admin_routing_dynamic_routes_id_activity",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "schema": {
+              "default": 24,
+              "maximum": 744,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteActivityResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_not_found."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Dynamic route traffic, open limit windows and recent requests",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/admin/routing/dynamic-routes/{id}/deploy": {
+      "post": {
+        "description": "Make version the one serving traffic. Deploying an older version is the rollback. expected_deployed_version must match the currently deployed version (0 when none), so two operators cannot deploy over each other. The replica handling the call switches at once; other replicas within five seconds.",
+        "operationId": "post__admin_routing_dynamic_routes_id_deploy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DynamicRouteDeployRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteRouteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_not_found or dynamic_route_version_not_found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_conflict: a different version was deployed meanwhile."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteGraphRejection"
+                }
+              }
+            },
+            "description": "dynamic_route_graph_invalid: the graph has errors; validation lists them per element."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Deploy or roll back a dynamic route version",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/admin/routing/dynamic-routes/{id}/versions": {
+      "post": {
+        "description": "Append a version on top of base_version, the latest version the edit started from. When another operator saved in between nothing is written (409). deploy:true also deploys the new version.",
+        "operationId": "post__admin_routing_dynamic_routes_id_versions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DynamicRouteSaveVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteWriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_not_found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_conflict: the route changed since it was loaded."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteGraphRejection"
+                }
+              }
+            },
+            "description": "dynamic_route_graph_invalid: the graph has errors; validation lists them per element."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Save a new dynamic route version",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/admin/routing/dynamic-routes/{id}/versions/{version}": {
+      "get": {
+        "description": "One stored version with its graph and current validation.",
+        "operationId": "get__admin_routing_dynamic_routes_id_versions_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DynamicRouteVersionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: reading needs routing:read, writing routing:write. validate and simulate are reads."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "dynamic_route_version_not_found."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read one dynamic route version",
         "tags": [
           "routing"
         ]
