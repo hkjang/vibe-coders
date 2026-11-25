@@ -245,6 +245,14 @@ func buildSettingRegistry() []settingDef {
 		{Key: appUIFeedbackEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_FEEDBACK_ENABLED", "false") }},
 		{Key: appUITelemetryEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_TELEMETRY_ENABLED", "false") }},
 
+		// Authentication is fixed at startup. Expose only non-secret state; writes
+		// still use the deployment environment and require a process restart.
+		{Key: "env.auth_enabled", Category: "env.auth", Type: stBool, ReadOnly: true, Restart: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Auth.Enabled) }},
+		{Key: "env.auth_access_token_ttl", Category: "env.auth", Type: stDuration, ReadOnly: true, Restart: true, envValue: func(c config.Config) string { return c.Auth.AccessTokenTTL.String() }},
+		{Key: "env.auth_refresh_token_ttl", Category: "env.auth", Type: stDuration, ReadOnly: true, Restart: true, envValue: func(c config.Config) string { return c.Auth.RefreshTokenTTL.String() }},
+		{Key: "env.auth_jwt_configured", Category: "env.auth", Type: stBool, ReadOnly: true, Restart: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Auth.JWTSecret != "") }},
+		{Key: "env.self_service_keys_enabled", Category: "env.auth", Type: stBool, ReadOnly: true, Restart: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Auth.SelfServiceKeys) }},
+
 		// ---- Env (read-only view of startup environment variables) ----
 		{Key: "env.upstream_base_url", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.BaseURL }},
 		{Key: "env.upstream_provider", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.Provider }},
@@ -286,6 +294,11 @@ func skillEnforceMode(v string) error {
 // settingDescriptions maps each setting key to a short Korean help string shown under the key
 // in the admin UI. Kept separate from the registry so the registry stays terse.
 var settingDescriptions = map[string]string{
+	"env.auth_enabled":              "계정 인증 사용 여부(AUTH_ENABLED). 이 파드가 시작할 때 읽은 값이며 변경 후 재시작해야 합니다. SSO 사용과 로컬 로그인 허용은 SSO 설정도 함께 확인하세요.",
+	"env.auth_access_token_ttl":     "새 접근 토큰의 유효기간(AUTH_ACCESS_TOKEN_TTL). 예: 15m0s는 15분입니다. 변경 후 재시작해야 하며 이미 발급한 토큰의 만료시각을 바꾸지 않습니다.",
+	"env.auth_refresh_token_ttl":    "갱신 토큰과 로그인 세션의 유효기간(AUTH_REFRESH_TOKEN_TTL). 예: 168h0m0s는 7일입니다. 변경 후 재시작해야 하며 기존 세션의 만료시각을 바꾸지 않습니다.",
+	"env.auth_jwt_configured":       "JWT 서명 키의 설정 여부(AUTH_JWT_SECRET)만 표시합니다. 키 값은 반환하지 않습니다. 키 변경은 기존 로그인에 영향을 주므로 배포 환경에서 관리하세요.",
+	"env.self_service_keys_enabled": "개인이 자신의 API 키를 관리할 수 있는지(SELF_SERVICE_KEYS_ENABLED). 키 권한은 사용자의 역할 범위로 제한됩니다. 변경 후 재시작해야 합니다.",
 	// Next Admin UI
 	appUIEnabledKey:          "React 기반 Next Admin Console(/app) 활성화. 비활성 시 Legacy Admin 안내 화면만 제공합니다.",
 	appUIDefaultEntryKey:     "Next Admin Console의 기본 진입 경로. 외부 URL이 아닌 /app/ 내부 경로만 허용합니다.",
@@ -980,7 +993,7 @@ func (s *Server) callerSettingsRole(r *http.Request) string {
 
 // canWriteSetting reports whether the caller may modify a specific setting.
 func (s *Server) canWriteSetting(r *http.Request, d settingDef) bool {
-	return roleCanWriteGroup(s.callerSettingsRole(r), settingPermissionGroup(d))
+	return !d.ReadOnly && roleCanWriteGroup(s.callerSettingsRole(r), settingPermissionGroup(d))
 }
 
 func settingDefByKey(key string) (settingDef, bool) {
@@ -1022,6 +1035,11 @@ func validateSettingValue(d settingDef, value string) error {
 // admin override (decrypted for secrets) if present, else the env/default. The second
 // return reports the source ("admin" or "env").
 func (s *Server) effectiveSettingValue(stored map[string]store.AdminSetting, d settingDef) (string, string, error) {
+	// Startup-only values never consume DB overrides, including historical rows.
+	if d.ReadOnly {
+		stored = nil
+	}
+
 	if a, ok := stored[d.Key]; ok {
 		raw := a.ValueJSON
 		var decoded string
@@ -1042,6 +1060,11 @@ func (s *Server) effectiveSettingValue(stored map[string]store.AdminSetting, d s
 
 // settingView is the API representation of one setting (secret-masked).
 func (s *Server) settingView(stored map[string]store.AdminSetting, d settingDef) map[string]any {
+	// Startup-only values never consume DB overrides, including historical rows.
+	if d.ReadOnly {
+		stored = nil
+	}
+
 	eff, source, valueErr := s.effectiveSettingValue(stored, d)
 	view := map[string]any{
 		"key": d.Key, "category": d.Category, "type": string(d.Type),
@@ -1079,6 +1102,11 @@ func settingMaskedValue(value string, secret bool) (string, bool) {
 }
 
 func (s *Server) effectiveSettingView(stored map[string]store.AdminSetting, d settingDef, r *http.Request) map[string]any {
+	// Startup-only values never consume DB overrides, including historical rows.
+	if d.ReadOnly {
+		stored = nil
+	}
+
 	eff, source, valueErr := s.effectiveSettingValue(stored, d)
 	effectiveSource := "bootstrap_env"
 	if source == "admin" {
