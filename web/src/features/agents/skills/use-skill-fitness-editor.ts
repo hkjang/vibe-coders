@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSkillRead, useSkillScope, useSkillOperationAccess } from "./skill-scope";
 import { featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
@@ -200,6 +201,7 @@ export function useSkillFitnessEditor() {
     flight.current = draft;
     setPending(true);
     setCommitted(undefined);
+    const observation = captureAction("save", undefined, () => current(draft) && mutationAccess.ownsResult());
     try {
       const saved = await apiClient.request(endpoints.domains.agents.skills.recordFitness, {
         body,
@@ -214,9 +216,13 @@ export function useSkillFitnessEditor() {
         throw new AppError("기록 응답의 스킬을 확인할 수 없습니다. 다시 전송하기 전에 목록을 조회하세요.", {
           kind: "contract",
         });
+      observation?.success();
       setCommitted({ name: draft.skill.name, epoch: draft.epoch, skill_ref: draft.skill.skill_ref });
       toast.success("적합성 근거를 기록했습니다.");
       void mutationAccess.refreshReads(saved).catch(() => undefined);
+    } catch (cause) {
+      observation?.failure(cause);
+      throw cause;
     } finally {
       if (flight.current?.instance === draft.instance) flight.current = undefined;
       if (current(draft)) setPending(false);

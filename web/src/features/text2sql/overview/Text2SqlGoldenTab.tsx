@@ -62,6 +62,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
   });
 
   const save = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (values: GoldenFormValues) => {
       access.assertCurrent();
@@ -84,6 +85,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
     successMessage: "기준 SQL를 저장했습니다.",
   });
   const remove = useText2SqlMutation({
+    observation: "delete",
     authorized: canWrite,
     mutate: (id: string) => {
       access.assertCurrent();
@@ -96,6 +98,7 @@ export function Text2SqlGoldenTab({ canWrite, golden, loading }: Text2SqlGoldenT
     successMessage: "기준 SQL를 삭제했습니다.",
   });
   const run = useText2SqlMutation({
+    observation: "test",
     authorized: canWrite,
     mutate: () => {
       access.assertCurrent();

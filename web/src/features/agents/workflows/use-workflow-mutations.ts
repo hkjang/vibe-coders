@@ -17,6 +17,7 @@ export function useWorkflowMutations({
   onRemoved: (id: string) => void;
 }) {
   const upsert = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: (variables: { values: WorkflowFormOutput; id?: string }) => {
       assertCurrent();
@@ -31,6 +32,7 @@ export function useWorkflowMutations({
     errorMessage: "워크플로를 저장하지 못했습니다.",
   });
   const remove = useMutationFeedback({
+    observation: "delete",
     ownsResult,
     mutate: (id: string) => {
       assertCurrent();
@@ -46,6 +48,7 @@ export function useWorkflowMutations({
     onSuccess: (_result, id) => onRemoved(id),
   });
   const publish = useMutationFeedback({
+    observation: "activate",
     ownsResult,
     mutate: (variables: { id: string; note: string }) => {
       assertCurrent();

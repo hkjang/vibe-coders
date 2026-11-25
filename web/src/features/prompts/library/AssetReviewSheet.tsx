@@ -72,6 +72,7 @@ export function AssetReviewSheet({
   ];
 
   const submitForReview = useLibraryMutation({
+    observation: "save",
     prepare: review.current,
     validate: (result, expected: PromptAsset) => assertAssetStatus(result, expected.id, "pending"),
     mutate: (expected: PromptAsset) =>
@@ -85,6 +86,7 @@ export function AssetReviewSheet({
   });
 
   const decideReview = useLibraryMutation({
+    observation: (value) => (value.status === "approved" || value.status === "standard" ? "approve" : "save"),
     prepare: async (value: { asset: PromptAsset; status: string; note: string }) => {
       await review.current(value.asset);
     },
@@ -101,6 +103,7 @@ export function AssetReviewSheet({
   });
 
   const rollback = useLibraryMutation({
+    observation: "rollback",
     prepare: async (value: { asset: PromptAsset; snapshot: PromptAssetHistoryEntry }) => {
       await review.rollback(value.asset, value.snapshot);
     },
@@ -132,6 +135,7 @@ export function AssetReviewSheet({
   });
 
   const useAsset = useLibraryMutation({
+    observation: "save",
     prepare: review.current,
     validate: (result, expected: PromptAsset) => {
       if (

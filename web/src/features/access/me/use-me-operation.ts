@@ -1,5 +1,7 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
 import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { isAppError } from "@/shared/api/error";
@@ -8,6 +10,7 @@ import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-r
 import { useMeOwner } from "./me-console-context";
 import { meError, meRouteId, safeMeError, safeMeMessage } from "./me-console-model";
 import type { MeRead } from "./me-console-api";
+import type { ActionSelection } from "@/shared/telemetry/action-channel";
 
 type Flight = "idle" | "pending" | "unknown";
 const flights = new WeakMap<QueryClient, Map<string, Flight>>();
@@ -27,6 +30,7 @@ function setFlight(client: QueryClient, key: string, state: Flight) {
   listeners.forEach((callback) => callback());
 }
 export function useMeOperation<Input, Result>({
+  observation,
   operation,
   validate,
   run,
@@ -34,6 +38,7 @@ export function useMeOperation<Input, Result>({
   invalidates,
   message,
 }: {
+  observation: ActionSelection<Input>;
   operation: string;
   validate: (input: Input, prefixes: readonly string[]) => void;
   run: (input: Input, scope: MeRead) => Promise<Result>;
@@ -59,6 +64,7 @@ export function useMeOperation<Input, Result>({
     };
   }, []);
   const mutation = useMutation({
+    observation: false,
     retry: false,
     gcTime: 0,
     mutationFn: async (input: Input) => {
@@ -73,12 +79,14 @@ export function useMeOperation<Input, Result>({
       const existing = flights.get(client)?.get(key);
       if (existing) throw meError(existing === "pending" ? "busy" : "unknown");
       setFlight(client, key, "pending");
+      let completion: ReturnType<typeof captureAction>;
       let sent = false,
         responded = false,
         confirmed = false,
         uncertain = false;
       try {
         assertCurrent();
+        completion = captureAction(observation, input, assertCurrent);
         sent = true;
         const result = await run(input, {
           user: auth.user?.id ?? "",
@@ -88,6 +96,7 @@ export function useMeOperation<Input, Result>({
         responded = true;
         if (!accept(result, input)) throw meError("unknown");
         confirmed = true;
+        completion?.success();
         // A known successful write can refresh the current account after a tab
         // remount, but must never touch another account's query lifetime.
         assertFeatureRead(owner);
@@ -102,6 +111,7 @@ export function useMeOperation<Input, Result>({
         toast.success(message);
         return result;
       } catch (error) {
+        completion?.failure(error);
         const rejected =
           isAppError(error) && error.status !== undefined && error.status >= 400 && error.status < 500;
         uncertain = sent && !confirmed && (!rejected || responded);

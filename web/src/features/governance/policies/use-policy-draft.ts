@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { apiClient } from "@/shared/api/client";
@@ -246,6 +247,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
     const active = new AbortController();
     flight.current = active;
     setOutcome({ kind: "pending" });
+    let observation: ReturnType<typeof captureAction>;
     const owns = () => {
       current();
       if (flight.current !== active || selected.current !== target || active.signal.aborted)
@@ -263,6 +265,7 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
         latestSource.updated !== approved.updated
       )
         throw draftStopped();
+      observation = captureAction("save", undefined, owns);
       const result = await apiClient.request(endpoints.domains.governance.advisor.apply, {
         body,
         signal: active.signal,
@@ -270,17 +273,20 @@ export function usePolicyDraft(access: PolicyDraftAccess, window: SimulationWind
       });
       owns();
       if (!policyDraftAcknowledged(result)) {
+        observation?.failure(new Error("Unconfirmed policy draft"));
         setOutcome({ kind: "error", message: "생성 여부를 확인할 수 없습니다.", uncertain: true });
         return;
       }
       // Acknowledged commit remains a success even after readonly/write withdrawal.
       // Invalidation never launches an unrelated route's query automatically.
+      observation?.success();
       committed.current = target;
       flight.current = undefined;
       setOutcome({ kind: "success", refreshFailed: false });
       void client.invalidateQueries({ queryKey: access.catalogKey, refetchType: "none" });
       void refreshCommitted(target);
     } catch (cause) {
+      observation?.failure(cause);
       try {
         owns();
       } catch {

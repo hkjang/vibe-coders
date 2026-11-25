@@ -33,6 +33,7 @@ export function useHealthActions() {
   const { credentialPrefixes } = useAuth();
   const access = useHealthWriteAccess();
   const resetBreaker = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: (target: RecoveryTarget) => target.owner.isCurrent(),
     mutate: (target: RecoveryTarget) => {
@@ -52,6 +53,7 @@ export function useHealthActions() {
   });
 
   const releaseSessions = useMutationFeedback({
+    observation: "revoke",
     gcTime: 0,
     ownsResult: (target: RecoveryTarget) => target.owner.isCurrent(),
     mutate: (target: RecoveryTarget) => {

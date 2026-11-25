@@ -199,6 +199,7 @@ function GraphFields({
   };
   return (
     <FormDialog
+      observation="save"
       open
       wide
       scrollBody

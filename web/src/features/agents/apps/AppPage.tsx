@@ -132,6 +132,7 @@ function AppPageContent(): React.JSX.Element {
   }, [updateSearch]);
 
   const save = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: operations.ownsResult,
     mutate: (variables: { values: AppFormOutput; id?: string }) =>
@@ -155,6 +156,7 @@ function AppPageContent(): React.JSX.Element {
   });
 
   const remove = useMutationFeedback({
+    observation: "delete",
     gcTime: 0,
     ownsResult: operations.ownsResult,
     mutate: (id: string) =>
@@ -172,6 +174,7 @@ function AppPageContent(): React.JSX.Element {
   });
 
   const deprecate = useMutationFeedback({
+    observation: "deactivate",
     gcTime: 0,
     ownsResult: operations.ownsResult,
     mutate: (id: string) =>
@@ -186,6 +189,7 @@ function AppPageContent(): React.JSX.Element {
   });
 
   const publish = useMutationFeedback({
+    observation: "activate",
     gcTime: 0,
     ownsResult: operations.ownsResult,
     mutate: async (variables: { id: string; note: string; force?: boolean }) => {
@@ -210,6 +214,7 @@ function AppPageContent(): React.JSX.Element {
   });
 
   const instantiate = useMutationFeedback({
+    observation: "save",
     gcTime: 0,
     ownsResult: operations.ownsResult,
     mutate: (variables: { key: string }) =>

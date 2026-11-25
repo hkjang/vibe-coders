@@ -37,6 +37,7 @@ export function RedTeamSchedulesTab({
   const writeTitle = canWrite ? undefined : writeReason;
 
   const upsert = useRedTeamMutation(canWrite, {
+    observation: "save",
     mutate: (schedule: {
       id?: string;
       campaign_template_id: string;

@@ -110,6 +110,7 @@ function JourneyProbePanel(): React.JSX.Element {
   const [result, setResult] = useState<JourneyProbeResponse>();
 
   const probe = useMutationFeedback<{ proxyKey: string; clients: readonly string[] }, JourneyProbeResponse>({
+    observation: "test",
     mutate: ({ proxyKey: key, clients }) =>
       apiClient.request(endpoints.domains.observability.probes.journey, {
         body: { proxy_key: key, clients: [...clients] },

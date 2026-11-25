@@ -78,6 +78,7 @@ export function useModelGovernanceMutations() {
   const contracts = useModelListPrerequisite("contracts");
   const deprecations = useModelListPrerequisite("deprecations");
   const saveContract = useMutationFeedback({
+    observation: "save",
     ownsResult: access.ownsResult,
     mutate: (body: ModelContractWriteBody) => {
       access.write.assertCurrent();
@@ -94,6 +95,7 @@ export function useModelGovernanceMutations() {
   });
 
   const removeContract = useMutationFeedback({
+    observation: "delete",
     ownsResult: access.ownsResult,
     mutate: (id: string) => {
       access.write.assertCurrent();
@@ -113,6 +115,7 @@ export function useModelGovernanceMutations() {
   });
 
   const runContract = useMutationFeedback({
+    observation: "test",
     ownsResult: access.ownsResult,
     mutate: (input: { model: string; contract_id?: string }) => {
       access.run.assertCurrent();
@@ -127,6 +130,7 @@ export function useModelGovernanceMutations() {
   });
 
   const saveDeprecation = useMutationFeedback({
+    observation: "save",
     ownsResult: access.ownsResult,
     mutate: (body: ModelDeprecationWriteBody) => {
       access.write.assertCurrent();
@@ -141,6 +145,7 @@ export function useModelGovernanceMutations() {
   });
 
   const removeDeprecation = useMutationFeedback({
+    observation: "delete",
     ownsResult: access.ownsResult,
     mutate: (id: string) => {
       access.write.assertCurrent();

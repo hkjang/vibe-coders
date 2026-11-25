@@ -61,6 +61,7 @@ function ProfileEditor({
   const formId = useId();
   const guard = useDraftGuard({ dirty: form.formState.isDirty, onDiscard: props.onClose });
   const snapshot = useText2SqlMutation({
+    observation: false,
     readOnly: true,
     mutate: (model: string) =>
       apiClient.request(endpoints.domains.text2sql.profiles.review, {
@@ -69,6 +70,7 @@ function ProfileEditor({
       }),
   });
   const save = useText2SqlMutation({
+    observation: "save",
     authorized: props.canWrite,
     mutate: (body: ProfileReviewInput) =>
       apiClient.request(endpoints.domains.text2sql.profiles.saveReviewed, { body, routeId: text2sqlRouteId }),

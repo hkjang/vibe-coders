@@ -112,6 +112,7 @@ function OwnedChangeSetsTab({
   });
 
   const createChangeSet = useChangeSetMutation({
+    observation: "save",
     mutate: async (values: CreateValues) => {
       access.assertCurrent();
       const items =
@@ -151,6 +152,7 @@ function OwnedChangeSetsTab({
   });
 
   const changeSetDryRun = useChangeSetMutation({
+    observation: "test",
     mutate: async ({ id }: { id: string; revision: unknown }) =>
       apiClient.request(withPathParams(system.changeSets.dryRun, { id }), { routeId }),
     errorMessage: "미리보기를 실행하지 못했습니다.",
@@ -160,6 +162,14 @@ function OwnedChangeSetsTab({
   // One mutation per lifecycle step: the server exposes each as its own POST and
   // rejects a transition that does not match the current status.
   const lifecycle = useChangeSetMutation({
+    observation: (value) =>
+      value.action === "approve"
+        ? "approve"
+        : value.action === "delete"
+          ? "delete"
+          : value.action === "rollback"
+            ? "rollback"
+            : "save",
     mutate: async (variables: { action: LifecycleAction; id: string; reason: string; target?: string }) => {
       access.assertCurrent();
       const { action, id, reason } = variables;
@@ -197,6 +207,7 @@ function OwnedChangeSetsTab({
   });
 
   const simulate = useChangeSetMutation({
+    observation: false,
     mutate: async (values: SimulateValues) =>
       apiClient.request(system.changeSets.simulateImpact, {
         body: {

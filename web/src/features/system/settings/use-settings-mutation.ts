@@ -5,6 +5,11 @@ import { useFeatureMutationAccess } from "@/shared/feature-access/use-feature-mu
 import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-read-owner";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSettingsWorkspace } from "./settings-workspace-context";
+import {
+  captureAction,
+  type ActionCompletion,
+  type ActionSelection,
+} from "@/shared/telemetry/action-channel";
 
 export function useSettingsWriteAccess(authorized = true) {
   return useFeatureMutationAccess(
@@ -14,6 +19,9 @@ export function useSettingsWriteAccess(authorized = true) {
   );
 }
 interface Options<V, R> {
+  observation: ActionSelection<V>;
+  /** An acknowledged domain result may encode a refusal without throwing. */
+  observationError?: (result: R) => unknown;
   mutate: (value: V) => Promise<R>;
   invalidates?: readonly QueryKey[];
   errorMessage: string;
@@ -39,10 +47,11 @@ export function useSettingsMutation<V, R>(options: Options<V, R>) {
       mounted.current = false;
     };
   }, []);
-  type Submission = { value: V; generation: number };
+  type Submission = { value: V; generation: number; completion?: ActionCompletion };
   const current = (input: Submission) =>
     owner.isCurrent() && mounted.current && permitted && generation.current === input.generation;
   const mutation = useMutationFeedback<Submission, R>({
+    observation: false, // The domain acknowledgment below precedes independent refreshes.
     gcTime: 0,
     ownsResult: current,
     mutate: async (input) => {
@@ -50,7 +59,22 @@ export function useSettingsMutation<V, R>(options: Options<V, R>) {
       if (!options.readOnly) access.assertCurrent();
       if (!current(input))
         throw new AppError("화면 또는 설정 변경 권한이 바뀌었습니다.", { kind: "aborted" });
-      const result = await options.mutate(input.value);
+      let result: R;
+      try {
+        result = await options.mutate(input.value);
+      } catch (cause) {
+        if (current(input)) input.completion?.failure(cause);
+        throw cause;
+      }
+      if (current(input)) {
+        try {
+          const error = options.observationError?.(result);
+          if (error === undefined) input.completion?.success();
+          else input.completion?.failure(error);
+        } catch {
+          /* Observation cannot change a product result. */
+        }
+      }
       // A completed write may outlive a tab. Refresh only the original readable
       // workspace; callbacks and downloads still require the initiating view.
       if (owner.isCurrent())
@@ -65,10 +89,15 @@ export function useSettingsMutation<V, R>(options: Options<V, R>) {
     successMessage: options.successMessage,
     onSuccess: (result, input) => options.onSuccess?.(result, input.value),
   });
+  const submit = (value: V): Submission => ({
+    value,
+    generation: generation.current,
+    completion: captureAction(options.observation, value),
+  });
   return {
     ...mutation,
     variables: mutation.variables?.value,
-    mutate: (value: V) => mutation.mutate({ value, generation: generation.current }),
-    mutateAsync: (value: V) => mutation.mutateAsync({ value, generation: generation.current }),
+    mutate: (value: V) => mutation.mutate(submit(value)),
+    mutateAsync: (value: V) => mutation.mutateAsync(submit(value)),
   };
 }

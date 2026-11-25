@@ -65,6 +65,7 @@ export function WarehousePage(): React.JSX.Element {
   );
 
   const refreshCache = useMutationFeedback({
+    observation: "run_request",
     mutate: () => apiClient.request(endpoints.domains.data.warehouse.refreshCache),
     invalidates: [dataQueryKeys.warehouse],
     successMessage: "분석 캐시를 비웠습니다. 최신 값으로 다시 조회합니다.",

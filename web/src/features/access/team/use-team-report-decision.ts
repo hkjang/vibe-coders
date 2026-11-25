@@ -1,5 +1,7 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
 import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { apiClient } from "@/shared/api/client";
@@ -48,6 +50,7 @@ export function useTeamReportDecision() {
     };
   }, []);
   const mutation = useMutation({
+    observation: false,
     retry: false,
     gcTime: 0,
     mutationFn: async ({
@@ -76,6 +79,7 @@ export function useTeamReportDecision() {
       const existing = flights.get(client)?.get(principal);
       if (existing) throw teamError(existing === "pending" ? "busy" : "unknown");
       setFlight(client, principal, "pending");
+      let completion: ReturnType<typeof captureAction>;
       let sent = false,
         acknowledged = false,
         confirmed = false,
@@ -110,6 +114,7 @@ export function useTeamReportDecision() {
           client.removeQueries({ queryKey, exact: true });
         }
         assertCurrent();
+        completion = captureAction(action, undefined, assertCurrent);
         sent = true;
         const result = await apiClient.request(endpoints.domains.access.team.decideReport, {
           body: { report_id: report.id, action, reason },
@@ -126,6 +131,7 @@ export function useTeamReportDecision() {
         )
           throw teamError("unknown");
         confirmed = true;
+        completion?.success();
         // Refresh the current read lifetime even if its report tab remounted.
         assertFeatureRead(scope.owner);
         await client.invalidateQueries({
@@ -138,6 +144,7 @@ export function useTeamReportDecision() {
         assertCurrent();
         toast.success(action === "approve" ? "리포트를 승인했습니다." : "리포트를 반려했습니다.");
       } catch (error) {
+        completion?.failure(error);
         const rejected =
           isAppError(error) && error.status !== undefined && error.status >= 400 && error.status < 500;
         uncertain = sent && !confirmed && (!rejected || acknowledged);

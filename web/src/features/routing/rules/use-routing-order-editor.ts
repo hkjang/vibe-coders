@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/shared/notifications/toast";
@@ -218,6 +219,7 @@ export function useRoutingOrderEditor(
     const controller = new AbortController();
     flight.current = controller;
     setError(undefined);
+    let observation: ReturnType<typeof captureAction>;
     void guard
       .run(
         async () => {
@@ -232,6 +234,7 @@ export function useRoutingOrderEditor(
           sentRef.current = true;
           setSent(true);
           setPhase("save");
+          observation = captureAction("save", undefined, () => assertCurrent(controller));
           const after = await apiClient.request(routingOrderEndpoints.save, {
             body: { order: [...captured.ids], expected_revision: snapshot.revision, reason },
             signal: controller.signal,
@@ -240,6 +243,7 @@ export function useRoutingOrderEditor(
           assertCurrent(controller);
           if (!orderAcknowledged(snapshot, captured.ids, after) || after.revision === snapshot.revision)
             throw new AppError(orderText.unknown, { kind: "contract" });
+          observation?.success();
           setSaved(true);
           toast.success(orderText.saved);
           await client.cancelQueries({ queryKey: routingRulesQueryKey });
@@ -250,6 +254,7 @@ export function useRoutingOrderEditor(
         (cause) => {
           try {
             assertCurrent(controller);
+            observation?.failure(cause);
             setError(cause);
           } catch {
             /* Retired owner. */

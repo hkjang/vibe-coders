@@ -24,6 +24,8 @@ export const INTERACTIVE_FEATURES = {
   "src/features/system/settings/SettingsRecoveryDialog.tsx": { rawBytes: 20_000, wireBytes: 8_000 },
   "src/features/system/settings/ConsoleFeatureDialog.tsx": { rawBytes: 20_000, wireBytes: 8_000 },
   "src/features/system/settings/ConsoleDiagnosticsDialog.tsx": { rawBytes: 25_000, wireBytes: 10_000 },
+  "src/features/system/settings/ConsoleActionsDialog.tsx": { rawBytes: 25_000, wireBytes: 10_000 },
+  "src/features/system/settings/SettingDetailSheet.tsx": { rawBytes: 25_000, wireBytes: 10_000 },
   "src/shared/code-editor/MonacoEditor.tsx": { rawBytes: 6_000_000, wireBytes: 1_500_000 },
   "src/shared/data-table/ColumnTooltip.tsx": { rawBytes: 8_000, wireBytes: 4_000 },
   "src/shared/data-table/TableRowMenu.tsx": { rawBytes: 8_000, wireBytes: 4_000 },

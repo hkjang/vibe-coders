@@ -1440,6 +1440,16 @@ func migrationStatements() []string {
 			boundary TEXT NOT NULL DEFAULT '' CHECK (boundary IN ('', 'root', 'route'))
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_ui_diagnostics_received ON app_ui_diagnostics(received_epoch)`,
+		`ALTER TABLE app_ui_telemetry_capacity ADD COLUMN live_actions INTEGER NOT NULL DEFAULT 0 CHECK (live_actions BETWEEN 0 AND 10000)`,
+		`CREATE TABLE IF NOT EXISTS app_ui_actions (
+			event_hash TEXT PRIMARY KEY CHECK (length(event_hash) = 64),
+			feature_id TEXT NOT NULL CHECK (length(feature_id) BETWEEN 1 AND 64),
+			action TEXT NOT NULL CHECK (action IN ('save','delete','approve','reject','revoke','rotate','rollback','activate','deactivate','import','export','run_request','test','feedback')),
+			outcome TEXT NOT NULL CHECK (outcome IN ('success','rejected','unknown')),
+			ui_version TEXT NOT NULL DEFAULT '' CHECK (length(ui_version) <= 32),
+			received_epoch BIGINT NOT NULL CHECK (received_epoch > 0)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_ui_actions_received ON app_ui_actions(received_epoch)`,
 		// Skills — reusable AI task manuals with metadata, lifecycle status, and policy hints.
 		`CREATE TABLE IF NOT EXISTS skills (
 			name TEXT PRIMARY KEY,

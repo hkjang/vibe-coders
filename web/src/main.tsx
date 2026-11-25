@@ -7,6 +7,7 @@ import { AppProviders } from "@/app/providers/AppProviders";
 import { initializeAppearance } from "@/app/providers/theme";
 import { createAppRouter } from "@/app/router/router";
 import { ConsoleDiagnostics } from "@/shared/telemetry/ConsoleDiagnostics";
+import { ConsoleActions } from "@/shared/telemetry/ConsoleActions";
 import { logCaughtReactError } from "@/shared/telemetry/react-error-log";
 import { sanitizeWindowAppLocationBeforeBootstrap } from "@/shared/security/app-route-query";
 import "@/shared/styles/globals.css";
@@ -23,7 +24,9 @@ createRoot(root, { onCaughtError: logCaughtReactError }).render(
     <AppErrorBoundary>
       <AppProviders>
         <ConsoleDiagnostics router={router}>
-          <AppRouterProvider router={router} onError={logCaughtReactError} />
+          <ConsoleActions router={router}>
+            <AppRouterProvider router={router} onError={logCaughtReactError} />
+          </ConsoleActions>
         </ConsoleDiagnostics>
       </AppProviders>
     </AppErrorBoundary>

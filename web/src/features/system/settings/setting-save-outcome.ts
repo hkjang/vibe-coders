@@ -10,6 +10,11 @@ export type SettingSaveResult =
   | { outcome: "conflict"; error: AppError }
   | ({ outcome: "reload_pending" } & SettingReloadPendingNotice);
 
+/** A conflict is refused; a reload-pending response has already committed. */
+export function settingObservationError(result: SettingSaveResult): AppError | undefined {
+  return result.outcome === "conflict" ? result.error : undefined;
+}
+
 /** Both special outcomes require a fresh read, never an automatic write retry. */
 async function settingSaveOutcome(
   write: () => Promise<unknown>,

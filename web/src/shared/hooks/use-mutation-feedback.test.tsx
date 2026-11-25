@@ -1,3 +1,4 @@
+import { installActionSink } from "@/shared/telemetry/action-channel";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
@@ -28,6 +29,7 @@ function setup(mutate: (value: string) => Promise<string>, onSuccess = vi.fn(), 
   const hook = renderHook(
     () =>
       useMutationFeedback({
+        observation: "save",
         mutate,
         onSuccess,
         ownsResult,
@@ -231,4 +233,31 @@ describe("mutation authentication boundary", () => {
     expect(hook.onSuccess).toHaveBeenCalledWith("saved", "draft");
     expect(hook.success).toHaveBeenCalledTimes(1);
   });
+});
+
+it.each(["success", "failure"])("does not observe %s after its hook unmounts", async (outcome) => {
+  const send = vi.fn(),
+    pending = deferred();
+  const retire = installActionSink(
+    () => "overview",
+    () => true,
+    send,
+  );
+  try {
+    const hook = setup(() => pending.promise);
+    let result!: Promise<unknown>;
+    act(() => {
+      result = hook.result.current.mutateAsync("old draft").catch((error: unknown) => error);
+    });
+    await waitFor(() => expect(hook.result.current.isPending).toBe(true));
+    hook.unmount();
+    await act(async () => {
+      if (outcome === "success") pending.resolve("old reply");
+      else pending.reject(new Error("old failure"));
+      await result;
+    });
+    expect(send).not.toHaveBeenCalled();
+  } finally {
+    retire();
+  }
 });

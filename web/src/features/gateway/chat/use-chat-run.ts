@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { streamChatTest } from "./chat-stream";
 import type { ChatAccess } from "./use-chat-access";
@@ -75,6 +76,7 @@ export function useChatRun(access: ChatAccess, requestBody: (messages: Messages)
         { id: turnId(), role: "user", content: trimmed },
         { id: active.answerId, role: "assistant", content: "", pending: true },
       ]);
+      const observation = captureAction("run_request", undefined, owned);
       void (async () => {
         try {
           const outcome = await streamChatTest(
@@ -97,8 +99,11 @@ export function useChatRun(access: ChatAccess, requestBody: (messages: Messages)
             },
             active.controller.signal,
           );
+          if (outcome.finishReason) observation?.success();
+          else observation?.failure(new Error("Stream completion unconfirmed"));
           patch((turn) => ({ ...turn, content: outcome.content || turn.content, pending: false }));
         } catch (cause) {
+          observation?.failure(cause);
           if (!owned()) return;
           patch((turn) => ({ ...turn, pending: false, failed: true }));
           if (!(isAppError(cause) && cause.kind === "aborted"))

@@ -55,6 +55,7 @@ export function KnowledgeTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Rea
   });
 
   const create = useMutationFeedback({
+    observation: "save",
     mutate: async (values: CreateValues) =>
       apiClient.request(system.knowledge.create, {
         body: { name: values.name, content: values.content, ...(values.id ? { id: values.id } : {}) },
@@ -70,6 +71,7 @@ export function KnowledgeTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Rea
   });
 
   const toggle = useMutationFeedback({
+    observation: (value) => (value.enabled ? "deactivate" : "activate"),
     mutate: async (snippet: KnowledgeSnippet) =>
       apiClient.request(withPathParams(system.knowledge.update, { id: snippet.id }), {
         body: { enabled: !snippet.enabled },
@@ -82,6 +84,7 @@ export function KnowledgeTab({ hasAdminWrite }: { hasAdminWrite: boolean }): Rea
   });
 
   const remove = useMutationFeedback({
+    observation: "delete",
     mutate: async (snippet: KnowledgeSnippet) =>
       apiClient.request(withPathParams(system.knowledge.remove, { id: snippet.id }), { routeId }),
     invalidates: [knowledgeKey],

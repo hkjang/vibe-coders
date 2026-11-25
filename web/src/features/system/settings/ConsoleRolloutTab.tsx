@@ -1,3 +1,4 @@
+import { settingObservationError } from "./setting-save-outcome";
 import { ConsoleFeatureTable } from "./ConsoleFeatureTable";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "@/shared/notifications/toast";
@@ -7,11 +8,12 @@ import { RuntimeSettingUnavailable } from "./RuntimeSettingUnavailable";
 import { featureTitles } from "./console-rollout-display";
 import type { ConsoleFeatureEdit } from "@/features/system/settings/ConsoleFeatureDialog";
 import { LazyConsoleFeatureDialog } from "@/features/system/settings/LazyConsoleFeatureDialog";
-import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
+import { LazySettingDetailSheet as SettingDetailSheet } from "@/features/system/settings/LazySettingDetailSheet";
 import type { SettingRecovery } from "./SettingsRecoveryDialog";
 import { LazySettingsRecovery } from "./LazySettingsRecovery";
 import { ConsoleUsagePanel } from "@/features/system/settings/ConsoleUsagePanel";
 import { ConsoleDiagnosticsLauncher } from "@/features/system/settings/ConsoleDiagnosticsLauncher";
+import { ConsoleActionsLauncher } from "@/features/system/settings/ConsoleActionsLauncher";
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import {
   useSettingSaveOutcome,
@@ -137,6 +139,8 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   };
 
   const saveFeature = useSettingsMutation({
+    observationError: settingObservationError,
+    observation: "save",
     authorized: hasAdminWrite || scopedWriter,
     mutate: async (input: {
       row: ConsoleFeatureRow;
@@ -191,6 +195,8 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   });
 
   const saveGlobal = useSettingsMutation({
+    observationError: settingObservationError,
+    observation: "save",
     authorized: hasAdminWrite || scopedWriter,
     mutate: async (input: { setting: EffectiveSetting; value: string; reason: string }) =>
       writeSetting(input.setting, input.value, input.reason),
@@ -233,6 +239,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
 
       <ConsoleUsagePanel />
       <ConsoleDiagnosticsLauncher />
+      <ConsoleActionsLauncher />
 
       <SectionCard
         title="콘솔 전체 설정"

@@ -40,6 +40,7 @@ export function useContractOperation(owner: FeatureReadOwner) {
     access.assertCurrent();
   };
   const mutation = useMutationFeedback({
+    observation: (command) => (command.kind === "delete" ? "delete" : "save"),
     gcTime: 0,
     ownsResult: () => {
       try {

@@ -35,6 +35,8 @@ export function useText2SqlMutation<V = void, R = unknown>(options: Options<V, R
     (options.ownsResult?.(input.value) ?? true);
   const mutation = useMutationFeedback<Submission, R>({
     ...options,
+    observation: (input) =>
+      typeof options.observation === "function" ? options.observation(input.value) : options.observation,
     gcTime: 0,
     ownsResult: current,
     mutate: async (input) => {

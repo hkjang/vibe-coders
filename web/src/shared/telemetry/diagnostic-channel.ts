@@ -73,6 +73,7 @@ export function captureAPIError(endpoint: {
     !template ||
     template.startsWith("/auth/") ||
     template.startsWith("/admin/ui-telemetry/") ||
+    template.startsWith("/admin/ui-actions/") ||
     template.startsWith("/admin/ui-diagnostics/")
   )
     return;

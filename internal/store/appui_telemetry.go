@@ -272,5 +272,8 @@ func (s *SQLStore) purgeAppUITelemetryTx(ctx context.Context, tx *sql.Tx, now ti
 			return err
 		}
 	}
-	return s.purgeAppUIDiagnosticsTx(ctx, tx, cutoff)
+	if err := s.purgeAppUIDiagnosticsTx(ctx, tx, cutoff); err != nil {
+		return err
+	}
+	return s.purgeAppUIActionsTx(ctx, tx, cutoff)
 }

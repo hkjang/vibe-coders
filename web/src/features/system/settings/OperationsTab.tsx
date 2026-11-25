@@ -95,6 +95,7 @@ function OwnedOperationsTab({
   const notificationSending = useRef(false);
 
   const runRetention = useMutationFeedback({
+    observation: "run_request",
     ownsResult,
     mutate: async (reason: string) => {
       access.assertCurrent();
@@ -109,6 +110,7 @@ function OwnedOperationsTab({
   });
 
   const replayFallback = useMutationFeedback({
+    observation: "run_request",
     ownsResult,
     mutate: async (reason: string) => {
       access.assertCurrent();
@@ -127,6 +129,7 @@ function OwnedOperationsTab({
   });
 
   const testNotification = useMutationFeedback({
+    observation: "test",
     ownsResult,
     mutate: async () => {
       access.assertCurrent();

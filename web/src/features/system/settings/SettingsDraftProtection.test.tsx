@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ConsoleFeatureDialog } from "@/features/system/settings/ConsoleFeatureDialog";
 import { SettingDetailSheet, type SettingSaveInput } from "@/features/system/settings/SettingDetailSheet";
+import { LazySettingDetailSheet } from "./LazySettingDetailSheet";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
 import { publishLogout } from "@/shared/auth/token-store";
 import { UnsavedChangesContext } from "@/shared/unsaved/context";
@@ -46,20 +47,21 @@ function Harness({
   save = async () => undefined,
   recovery = () => undefined,
 }: {
-  mode?: "detail" | "feature";
+  mode?: "detail" | "feature" | "lazy";
   current?: EffectiveSetting;
   save?: (input: SettingSaveInput) => Promise<unknown>;
   recovery?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const Detail = mode === "lazy" ? LazySettingDetailSheet : SettingDetailSheet;
   return (
     <>
       <button ref={trigger} onClick={() => setOpen(true)}>
         편집 열기
       </button>
-      {mode === "detail" ? (
-        <SettingDetailSheet
+      {mode !== "feature" ? (
+        <Detail
           open={open}
           onOpenChange={setOpen}
           setting={current}
@@ -124,6 +126,18 @@ function setup(ui: React.ReactNode) {
   );
   return render(ui, { wrapper });
 }
+
+it("지연 로딩한 설정 편집기도 닫기와 포커스 복원을 유지한다", async () => {
+  const user = userEvent.setup();
+  setup(<Harness mode="lazy" />);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  const trigger = screen.getByRole("button", { name: "편집 열기" });
+  await user.click(trigger);
+  expect(await screen.findByRole("textbox", { name: "새 값" })).toHaveValue(setting.value);
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await waitFor(() => expect(trigger).toHaveFocus());
+});
 
 describe.each(["detail", "feature"] as const)("%s 설정 초안 보호", (mode) => {
   it("경로 폐기를 승인하면 이동 완료 전 재렌더에도 초안과 이동 차단을 되살리지 않는다", async () => {

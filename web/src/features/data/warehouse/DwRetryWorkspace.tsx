@@ -108,6 +108,7 @@ function RetrySession({ owner, ...props }: Props & { owner: FeatureReadOwner }):
     },
   });
   const mutation = useMutationFeedback({
+    observation: "run_request",
     gcTime: 0,
     ownsResult: owner.isCurrent,
     mutate: async (body: DwRetryInput) => {

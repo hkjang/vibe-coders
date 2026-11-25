@@ -1,3 +1,5 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useFeatureReadOwner } from "@/shared/hooks/use-feature-read-owner";
 import { useState, type RefObject } from "react";
 
 import { apiClient } from "@/shared/api/client";
@@ -29,6 +31,7 @@ export function ClickhouseTestDialog({
   open,
   returnFocusRef,
 }: ClickhouseTestDialogProps): React.JSX.Element {
+  const observationOwner = useFeatureReadOwner("data.warehouse", "operation-observation", [], "admin:read");
   const [overrides, setOverrides] = useState(emptyOverrides);
   const [result, setResult] = useState<ClickhouseTest | undefined>();
   const [error, setError] = useState<{ message: string; requestId?: string } | undefined>();
@@ -47,10 +50,14 @@ export function ClickhouseTestDialog({
     setPending(true);
     setError(undefined);
     setResult(undefined);
+    const observation = captureAction("test", undefined, observationOwner.isCurrent);
     try {
       const body = Object.fromEntries(Object.entries(overrides).filter(([, value]) => value.trim() !== ""));
-      setResult(await apiClient.request(endpoints.domains.data.pipeline.testConnection, { body }));
+      const response = await apiClient.request(endpoints.domains.data.pipeline.testConnection, { body });
+      observation?.success();
+      setResult(response);
     } catch (cause) {
+      observation?.failure(cause);
       setError({
         message: safeAppErrorMessage(cause, "연결을 확인하지 못했습니다."),
         requestId: isAppError(cause) ? cause.requestId : undefined,

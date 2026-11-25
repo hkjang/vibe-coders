@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/shared/notifications/toast";
@@ -291,6 +292,11 @@ export function useRequestNoteEditor(retention?: RequestNoteRetention) {
     setPending(true);
     setCommitted(undefined);
     setUnsupportedInstance(undefined);
+    const observation = captureAction(
+      draft.kind === "edit" ? "save" : "delete",
+      undefined,
+      () => current(draft) && !sent?.retired && !draft.retention?.isSuspended?.(),
+    );
     try {
       if (draft.kind === "edit")
         await apiClient.request(
@@ -314,6 +320,7 @@ export function useRequestNoteEditor(retention?: RequestNoteRetention) {
         }
         return;
       }
+      observation?.success();
       setCommitted({ id: draft.requestId, epoch: draft.epoch, kind: draft.kind });
       toast.success(
         draft.kind === "edit" ? "요청 메모·태그를 저장했습니다." : "요청 메모·태그를 삭제했습니다.",
@@ -325,6 +332,7 @@ export function useRequestNoteEditor(retention?: RequestNoteRetention) {
       ])
         void client.invalidateQueries({ queryKey: key }).catch(() => undefined);
     } catch (cause) {
+      observation?.failure(cause);
       if (sent && draft.retention?.isSuspended?.()) sent.retired = true;
       if (sent) sent.outcome = "uncertain";
       if (current(draft) && sent?.retired && retainedRef.current?.target === draft) {

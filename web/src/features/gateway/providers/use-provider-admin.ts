@@ -26,6 +26,7 @@ export function useProviderAdmin() {
     return providerWriteFlight(client, access.sessionKey, operation);
   };
   const save = useMutationFeedback({
+    observation: "save",
     mutate: (body: ProviderWriteBody) => {
       access.assertCurrent();
       return run(() =>
@@ -39,6 +40,7 @@ export function useProviderAdmin() {
   });
 
   const remove = useMutationFeedback({
+    observation: "delete",
     mutate: (name: string) => {
       access.assertCurrent();
       return run(() =>
@@ -55,6 +57,7 @@ export function useProviderAdmin() {
   });
 
   const saveSlo = useMutationFeedback({
+    observation: "save",
     mutate: (body: ProviderSLOWriteBody) => {
       access.assertCurrent();
       return run(() =>
@@ -68,6 +71,7 @@ export function useProviderAdmin() {
   });
 
   const removeSlo = useMutationFeedback({
+    observation: "delete",
     mutate: (provider: string) => {
       access.assertCurrent();
       return run(() =>

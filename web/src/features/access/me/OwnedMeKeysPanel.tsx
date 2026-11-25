@@ -91,6 +91,7 @@ export function OwnedMeKeysPanel({ owner }: { owner: string }): React.JSX.Elemen
   const rowTrigger = useRef<HTMLElement>(null);
 
   const createKey = useMutationFeedback({
+    observation: "save",
     ownsResult,
     mutate: (body: CreateMeKeyBody) => {
       assertCurrent();
@@ -108,6 +109,7 @@ export function OwnedMeKeysPanel({ owner }: { owner: string }): React.JSX.Elemen
     },
   });
   const updateScopes = useMutationFeedback({
+    observation: "save",
     errorFormatter: meKeyErrorMessage,
     ownsResult,
     mutate: ({ id, body }: { id: string; body: UpdateMeKeyScopesBody }) => {
@@ -122,6 +124,7 @@ export function OwnedMeKeysPanel({ owner }: { owner: string }): React.JSX.Elemen
     successMessage: "내 API 키 권한을 수정했습니다.",
   });
   const revokeKey = useMutationFeedback({
+    observation: "revoke",
     ownsResult,
     mutate: (id: string) => {
       assertCurrent();

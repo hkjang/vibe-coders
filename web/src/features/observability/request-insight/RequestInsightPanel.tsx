@@ -123,6 +123,7 @@ function RequestInsightPanelContent({
   });
 
   const runAnalysis = useMutationFeedback({
+    observation: "run_request",
     mutate: () => {
       executionAccess.assertCurrent();
       return apiClient.request(
@@ -139,6 +140,7 @@ function RequestInsightPanelContent({
   });
 
   const runReplay = useMutationFeedback({
+    observation: "run_request",
     mutate: () => {
       executionAccess.assertCurrent();
       return apiClient.request(

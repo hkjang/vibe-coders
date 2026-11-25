@@ -65,6 +65,7 @@ function DeleteEditor({
   const formId = useId();
   const guard = useDraftGuard({ dirty: form.formState.isDirty, onDiscard: props.onClose });
   const read = useText2SqlMutation({
+    observation: false,
     readOnly: true,
     mutate: () =>
       apiClient.request(endpoints.domains.text2sql.profiles.review, {
@@ -73,6 +74,7 @@ function DeleteEditor({
       }),
   });
   const remove = useText2SqlMutation({
+    observation: "delete",
     authorized: props.canWrite,
     mutate: async (body: ProfileDeleteReviewInput) => {
       const receipt = await apiClient.request(endpoints.domains.text2sql.profiles.deleteReviewed, {

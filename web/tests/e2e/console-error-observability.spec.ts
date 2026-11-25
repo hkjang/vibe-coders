@@ -61,7 +61,7 @@ test("실제 수집 API가 오류의 경로 형식과 상태만 보존하고 원
     status: 503,
     request_id: "trace_" + "b".repeat(32),
   });
-  expect(fault?.headers()["x-vibe-ui-version"]).toBe("v0.86.180");
+  expect(fault?.headers()["x-vibe-ui-version"]).toBe(process.env.APP_UI_DIAGNOSTICS_VERSION ?? "v0.86.180");
   expect(fault?.headers()["referer"]).toBeUndefined();
   expect(fault?.postData()).not.toMatch(/PRIVATE|private-code|runtime|\/app/);
   await expect

@@ -1,3 +1,4 @@
+import { settingObservationError } from "./setting-save-outcome";
 import { useState, type RefObject } from "react";
 import { toast } from "@/shared/notifications/toast";
 
@@ -66,6 +67,8 @@ function RecoveryEditor({
 
   const settingSaveOutcome = useSettingSaveOutcome(effectiveKey);
   const save = useSettingsMutation({
+    observationError: settingObservationError,
+    observation: "rollback",
     errorMessage: "설정을 복구하지 못했습니다.",
     authorized: hasAdminWrite || scopedWriter,
     mutate: async (note: string) => {

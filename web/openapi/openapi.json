@@ -15991,6 +15991,224 @@
         ],
         "type": "object"
       },
+      "UIActionCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "rejected": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "success": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unknown": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "success",
+          "rejected",
+          "unknown"
+        ],
+        "type": "object"
+      },
+      "UIActionEventRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "save",
+              "delete",
+              "approve",
+              "reject",
+              "revoke",
+              "rotate",
+              "rollback",
+              "activate",
+              "deactivate",
+              "import",
+              "export",
+              "run_request",
+              "test",
+              "feedback"
+            ],
+            "type": "string"
+          },
+          "event_id": {
+            "description": "Fresh random nonce, hashed by the server; never identity-derived or persisted by the browser.",
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "feature_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "success",
+              "rejected",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "feature_id",
+          "action",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "UIActionGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "save",
+              "delete",
+              "approve",
+              "reject",
+              "revoke",
+              "rotate",
+              "rollback",
+              "activate",
+              "deactivate",
+              "import",
+              "export",
+              "run_request",
+              "test",
+              "feedback"
+            ],
+            "type": "string"
+          },
+          "feature_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "rejected": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "success": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ui_version": {
+            "maxLength": 32,
+            "pattern": "^(v(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5}))?$",
+            "type": "string"
+          },
+          "unknown": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "action",
+          "ui_version",
+          "success",
+          "rejected",
+          "unknown"
+        ],
+        "type": "object"
+      },
+      "UIActionSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "enum": [
+              7,
+              30
+            ],
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "event_limit": {
+            "enum": [
+              10000
+            ],
+            "type": "integer"
+          },
+          "from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "group_limit": {
+            "enum": [
+              100
+            ],
+            "type": "integer"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/UIActionGroup"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "other": {
+            "$ref": "#/components/schemas/UIActionCounts"
+          },
+          "rejected": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retention_days": {
+            "enum": [
+              30
+            ],
+            "type": "integer"
+          },
+          "success": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "to": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "unknown": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "days",
+          "from",
+          "to",
+          "retention_days",
+          "event_limit",
+          "group_limit",
+          "success",
+          "rejected",
+          "unknown",
+          "other",
+          "groups"
+        ],
+        "type": "object"
+      },
       "UIAuthentication": {
         "additionalProperties": false,
         "properties": {
@@ -18066,7 +18284,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.180"
+    "version": "v0.86.181"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -39708,6 +39926,119 @@
         "summary": "Add one blocked origin to tracking.allowed_hosts",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/admin/ui-actions/events": {
+      "post": {
+        "description": "Optional, lossy browser-observed operation outcomes. Requires fresh shared-DB UI/telemetry opt-in, existing identity and feature permission. Shares process/caller intake quotas and a two-second cancellation/body-read budget. Strict 1024-byte JSON accepts only a random nonce, feature and fixed action/outcome categories. No payload, identity, path, request ID or message is retained. Numeric UI release comes from the standard header. Idempotent immutable nonce hash, 10000-event capacity, 30-day retention. Disabled, overloaded or full intake returns 204 without collecting; never retry. success means the operation handler acknowledged completion, run_request only means a job was accepted. rejected means explicit rejection; unknown is excluded from known-outcome success rates. This is not a whole-service success rate or business audit authority.",
+        "operationId": "post__admin_ui_actions_events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UIActionEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Recorded idempotently or intentionally dropped; never retry"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Feature access denied"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Observation unavailable; never retry"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record an opt-in anonymous console operation outcome",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/ui-actions/summary": {
+      "get": {
+        "description": "Requires admin read and current feature permissions. Returns a single snapshot, at most 100 groups and separate omitted-group outcome counts. Known-outcome rate is success/(success+rejected); unknown observations must be shown separately. Reports are anonymous, optional and incomplete, not population-wide action totals.",
+        "operationId": "get__admin_ui_actions_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "enum": [
+                7,
+                30
+              ],
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UIActionSummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read permission-scoped console operation outcome counts",
+        "tags": [
+          "admin"
         ]
       }
     },

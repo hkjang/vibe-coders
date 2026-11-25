@@ -75,6 +75,7 @@ function RegistryContent({ owner }: { owner: FeatureReadOwner }) {
     },
   });
   const validate = useMutationFeedback({
+    observation: "test",
     gcTime: 0,
     ownsResult: () => owner.isCurrent() && currentScope.current,
     errorMessage: "계약 검증을 완료하지 못했습니다.",

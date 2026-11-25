@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { apiClient } from "@/shared/api/client";
 import { AppError, isAppError } from "@/shared/api/error";
@@ -157,9 +158,11 @@ export function RedTeamReviewedReplay({
   const execute = async () => {
     const candidate = reviewRef.current;
     if (!candidate || sent.current || confirmation !== candidate.source_result.id) return;
+    let observation: ReturnType<typeof captureAction>;
     try {
       assertCurrent();
       if (Date.parse(candidate.expires_at) <= Date.now()) throw unavailable();
+      observation = captureAction("run_request", undefined, assertCurrent);
       sent.current = true;
       setConsumed(true);
       setPending(true);
@@ -179,11 +182,15 @@ export function RedTeamReviewedReplay({
         result.campaign_id !== candidate.campaign_id ||
         result.review_id !== candidate.review_id ||
         JSON.stringify(result.limits) !== JSON.stringify(candidate.limits)
-      )
+      ) {
+        observation?.failure(new AppError("실행 응답을 확인할 수 없습니다.", { kind: "contract" }));
         throw unavailable();
+      }
+      observation?.success();
       setOutcome(result);
       onResult(result);
     } catch (e) {
+      observation?.failure(e);
       if (active.current)
         setError({
           message: sent.current

@@ -144,6 +144,7 @@ function BulkForm({ review, onClose, returnFocusRef }: Props & { review: PromptS
     defaultValues: { reason: "", count: "", confirmed: false },
   });
   const mutation = useLibraryMutation({
+    observation: "save",
     prepare: async () => {
       if (Date.now() >= deadline)
         throw new AppError(text.expired, { kind: "contract", code: "prompt_library_bulk_expired" });

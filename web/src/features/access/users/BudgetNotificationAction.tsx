@@ -28,6 +28,7 @@ function Notification({ canWrite, writeDeniedReason, owner }: Props & { owner: F
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const send = useMutationFeedback({
+    observation: "run_request",
     ...safety,
     mutate: () =>
       run(() =>

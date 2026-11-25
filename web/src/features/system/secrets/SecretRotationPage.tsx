@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
@@ -97,6 +98,7 @@ export function SecretRotationPage(): React.JSX.Element {
 
   const rotate = async (): Promise<void> => {
     access.assertCurrent();
+    const observation = captureAction("rotate", undefined, access.assertCurrent);
     try {
       const result = await apiClient.request(endpoints.domains.system.secrets.rotate, {
         body: { new_secret: secret.trim() },
@@ -104,9 +106,11 @@ export function SecretRotationPage(): React.JSX.Element {
         timeoutMs: 120_000,
         routeId,
       });
+      observation?.success();
       setOutcome({ kind: "success", rotated: result.rotated });
       clearDraft();
     } catch (error) {
+      observation?.failure(error);
       if (rotationRefused(error)) throw error;
       const requestId = isAppError(error) ? error.requestId : undefined;
       setOutcome({ kind: "unknown", ...(requestId ? { requestId } : {}) });

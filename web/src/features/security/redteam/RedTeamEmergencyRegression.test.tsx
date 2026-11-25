@@ -1,3 +1,4 @@
+import { installActionSink } from "@/shared/telemetry/action-channel";
 import { fireEvent, act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -215,3 +216,48 @@ describe("레드팀 emergency control safety regression", () => {
     ]);
   });
 });
+
+it.each([
+  [409, "rejected"],
+  [503, "unknown"],
+] as const)(
+  "records the original emergency HTTP %i before showing the cautious recovery message",
+  async (status, outcome) => {
+    const send = vi.fn();
+    const retire = installActionSink(
+      () => "security.redteam",
+      () => true,
+      send,
+    );
+    try {
+      const api = mockApi({
+        ...baseHandlers,
+        "GET /admin/redteam/kill-switch": () => observed,
+        [post]: () => {
+          throw apiFailure("private response", status);
+        },
+      });
+      mount();
+      const user = userEvent.setup();
+      const button = await screen.findByRole("button", { name: "레드팀 처리 중지 검토" });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      const dialog = screen.getByRole("dialog");
+      await user.type(within(dialog).getByLabelText("변경 사유", { exact: false }), "공개 검증용 사유");
+      await user.type(within(dialog).getByLabelText("확인 문구", { exact: false }), "레드팀 처리 중지");
+      await user.click(within(dialog).getByRole("button", { name: "중지" }));
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledExactlyOnceWith({
+          feature_id: "security.redteam",
+          action: "deactivate",
+          outcome,
+        }),
+      );
+      expect(await screen.findByText("처리 결과 확인이 필요합니다.")).toBeVisible();
+      expect(within(dialog).getByRole("button", { name: "중지" })).toBeDisabled();
+      expect(api.bodies(post)).toHaveLength(1);
+    } finally {
+      retire();
+    }
+  },
+);

@@ -59,6 +59,7 @@ export function RoutingToggleDialog({
       : value || empty;
   return (
     <ConfirmDialog
+      observation={intendedEnabled ? "activate" : "deactivate"}
       open
       title={`라우팅 규칙 ${intendedEnabled ? "사용" : "중지"}`}
       description="선택한 원본 규칙의 사용 상태만 변경합니다. 대상과 변경 전후 상태를 확인하세요."

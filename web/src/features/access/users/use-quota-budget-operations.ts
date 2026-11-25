@@ -112,6 +112,7 @@ export function useQuotaBudgetOperations(owner: FeatureReadOwner, canWrite: bool
   });
 
   const createQuota = useMutationFeedback({
+    observation: "save",
     ...safety,
     mutate: (body: CreateQuotaBody) =>
       run(() => apiClient.request(access.quotas.create, { body, routeId, retryUnauthorized: false })),
@@ -119,6 +120,7 @@ export function useQuotaBudgetOperations(owner: FeatureReadOwner, canWrite: bool
     successMessage: "할당량을 만들었습니다.",
   });
   const updateQuota = useMutationFeedback({
+    observation: "save",
     ...safety,
     mutate: ({ id, body }: { id: string; body: UpdateQuotaBody }) =>
       run(() =>
@@ -132,6 +134,7 @@ export function useQuotaBudgetOperations(owner: FeatureReadOwner, canWrite: bool
     successMessage: "할당량을 수정했습니다.",
   });
   const removeQuota = useMutationFeedback({
+    observation: "delete",
     ...safety,
     mutate: (id: string) =>
       run(() =>
@@ -144,6 +147,7 @@ export function useQuotaBudgetOperations(owner: FeatureReadOwner, canWrite: bool
     successMessage: "할당량을 삭제했습니다.",
   });
   const createBudget = useMutationFeedback({
+    observation: "save",
     ...safety,
     mutate: (body: CreateBudgetBody) =>
       run(() => apiClient.request(access.budgets.create, { body, routeId, retryUnauthorized: false })),
@@ -151,6 +155,7 @@ export function useQuotaBudgetOperations(owner: FeatureReadOwner, canWrite: bool
     successMessage: "예산을 만들었습니다.",
   });
   const removeBudget = useMutationFeedback({
+    observation: "delete",
     ...safety,
     mutate: (id: string) =>
       run(() =>

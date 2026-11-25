@@ -82,6 +82,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/ui-telemetry/summary", []string{"get"}, "admin", "Read aggregate observed console visits and Legacy fallbacks", false},
 	{"/admin/ui-diagnostics/events", []string{"post"}, "admin", "Record an opt-in bounded console API or error-boundary diagnostic", true},
 	{"/admin/ui-diagnostics/summary", []string{"get"}, "admin", "Read permission-scoped console error groups and safe request correlations", false},
+	{"/admin/ui-actions/events", []string{"post"}, "admin", "Record an opt-in anonymous console operation outcome", true},
+	{"/admin/ui-actions/summary", []string{"get"}, "admin", "Read permission-scoped console operation outcome counts", false},
 
 	// ---- admin: core analytics ----
 	{"/admin/stats", []string{"get"}, "admin", "Summary stats", false},
@@ -917,6 +919,10 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		enrichAppUIDiagnosticOpenAPI("post", op, responses)
 	case "get /admin/ui-diagnostics/summary":
 		enrichAppUIDiagnosticOpenAPI("get", op, responses)
+	case "post /admin/ui-actions/events":
+		enrichAppUIActionOpenAPI("post", op, responses)
+	case "get /admin/ui-actions/summary":
+		enrichAppUIActionOpenAPI("get", op, responses)
 	case "post /admin/ui-telemetry/events":
 		op["security"] = []any{map[string]any{}, map[string]any{"bearerAuth": []any{}}}
 		op["description"] = "Requires current UI and telemetry opt-in plus the feature's existing read permission and rollout eligibility. Read-only users can report accessible features. Shared DB opt-in is read at admission: requests admitted before opt-out may complete, while subsequent requests observe opt-out without waiting for pod reload. Pending work has a two-second cancellation budget, not a hard database-cleanup or response-time guarantee. Request-body reads have a matching deadline. Authenticated callers share a per-process UTC-day limit of 600 events across features, sessions and event kinds. The limiter stores only daily randomly-keyed HMACs in a bounded memory map, not raw identities or persistent analytics identifiers. It resets on process restart and does not enforce a cluster-wide quota or guarantee analytics integrity. Maximum body 1024 bytes; only exact schema fields are accepted. The server stores a hash of a random per-visit identifier, never user identity, IP, user-agent, URL, prompt, or result. No client timestamps are accepted. Disabled, overloaded, and capacity-limited events are silently dropped without retry (204). Retention is 30 days, capped at 100000 visits. This is sampled observational evidence, not total adoption or a unique-user count."
@@ -1316,6 +1322,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range appUIDiagnosticOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range appUIActionOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range providerImpactOpenAPISchemas() {

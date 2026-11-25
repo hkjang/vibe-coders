@@ -1,3 +1,4 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { toast } from "@/shared/notifications/toast";
 
@@ -39,6 +40,11 @@ export function useRunActionSubmit(snapshot: RunActionSnapshot, access: CompareA
         if (!owned()) throw abandoned();
         access.write.assertCurrent();
       };
+      const observation = captureAction(
+        target.kind === "feedback" ? "feedback" : target.kind === "promote" ? "activate" : "save",
+        undefined,
+        owned,
+      );
       try {
         // Build the immutable body before the final, synchronous admission check.
         if (target.kind === "feedback") {
@@ -82,8 +88,10 @@ export function useRunActionSubmit(snapshot: RunActionSnapshot, access: CompareA
         }
         // Readonly/scope changes do not turn an admitted write into a failed save.
         if (!owned()) throw abandoned();
+        observation?.success();
         toast.success(runActionLabels[target.kind].success);
       } catch (cause) {
+        observation?.failure(cause);
         if (!owned()) throw abandoned();
         throw cause; // FormDialog owns the current inline error and request ID.
       } finally {

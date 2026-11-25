@@ -1,4 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OctagonAlert, Play } from "lucide-react";
 import { useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/shared/notifications/toast";
@@ -110,6 +112,7 @@ function KillSwitchPanel({ canWrite, owner }: { canWrite: boolean; owner: string
   });
 
   const setKillSwitch = useMutation({
+    observation: false, // Observe the original outcome before the safe presentation wrapper.
     retry: false,
     gcTime: 0,
     mutationFn: async (variables: { review: Review; disabled: boolean; reason: string }) => {
@@ -119,6 +122,10 @@ function KillSwitchPanel({ canWrite, owner }: { canWrite: boolean; owner: string
       if (!active.current || active.current.sent) throw killSwitchReviewError();
       active.current.sent = true;
       setSent(true);
+      const completion = captureAction(variables.disabled ? "deactivate" : "activate", undefined, () => {
+        assertSelected(variables.review);
+        access.assertCurrent();
+      });
       try {
         const result = await apiClient.request(endpoints.domains.governance.killSwitch.set, {
           body: { disabled: variables.disabled, reason: variables.reason },
@@ -128,9 +135,11 @@ function KillSwitchPanel({ canWrite, owner }: { canWrite: boolean; owner: string
         assertSelected(variables.review);
         if (result.disabled !== variables.disabled || result.reason !== variables.reason)
           throw new AppError("응답이 검토한 변경과 다릅니다.", { kind: "contract" });
+        completion?.success();
         return result;
       } catch (cause) {
         assertSelected(variables.review);
+        completion?.failure(cause);
         throw new AppError(killSwitchMessages.uncertain, {
           kind: "contract",
           requestId: isAppError(cause) ? cause.requestId : undefined,

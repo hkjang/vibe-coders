@@ -120,6 +120,7 @@ export function AgentRoutesTab({ canWrite }: { canWrite: boolean }): React.JSX.E
   });
 
   const saveRoute = useMutationFeedback({
+    observation: "save",
     mutate: (body: AgentRouteBody) =>
       apiClient.request(endpoints.domains.mcp.agents.saveRoute, { body, routeId }),
     invalidates: [["agents"]],
@@ -127,6 +128,7 @@ export function AgentRoutesTab({ canWrite }: { canWrite: boolean }): React.JSX.E
     errorMessage: "에이전트 라우트를 저장하지 못했습니다.",
   });
   const removeRoute = useMutationFeedback({
+    observation: "delete",
     mutate: (id: string) =>
       apiClient.request(withPathParams(endpoints.domains.mcp.agents.deleteRoute, { id }), { routeId }),
     invalidates: [["agents"]],
@@ -134,6 +136,7 @@ export function AgentRoutesTab({ canWrite }: { canWrite: boolean }): React.JSX.E
     errorMessage: "에이전트 라우트를 삭제하지 못했습니다.",
   });
   const testRoute = useMutationFeedback({
+    observation: "test",
     mutate: (variables: { id: string; prompt: string }) =>
       apiClient.request(withPathParams(endpoints.domains.mcp.agents.testRoute, { id: variables.id }), {
         body: variables.prompt ? { prompt: variables.prompt } : {},

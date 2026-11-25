@@ -101,6 +101,7 @@ export function Text2SqlRuntimeTab({
   const selectedDriver = connectionForm.watch("driver");
 
   const saveConnection = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (values: ConnectionFormValues) =>
       apiClient.request(endpoints.domains.text2sql.connections.save, {
@@ -111,6 +112,7 @@ export function Text2SqlRuntimeTab({
     successMessage: "실행 DB 연결을 저장했습니다.",
   });
   const removeConnection = useText2SqlMutation({
+    observation: "delete",
     authorized: canWrite,
     mutate: (connectionId: string) =>
       apiClient.request(endpoints.domains.text2sql.connections.remove, {
@@ -123,6 +125,7 @@ export function Text2SqlRuntimeTab({
   });
 
   const healthcheck = useText2SqlMutation({
+    observation: "test",
     readOnly: true,
     mutate: (connectionId: string) =>
       apiClient.request(endpoints.domains.text2sql.connections.healthcheck, {

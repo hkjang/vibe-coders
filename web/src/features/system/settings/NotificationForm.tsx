@@ -98,6 +98,7 @@ function NotificationEditor({
         setError(undefined);
         toast.success("알림 설정을 저장했습니다.");
       },
+      "save",
     );
   };
   return (

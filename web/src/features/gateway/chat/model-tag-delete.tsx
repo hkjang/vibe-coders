@@ -46,6 +46,7 @@ export function ModelTagDelete({
       : undefined);
   return (
     <ConfirmDialog
+      observation="delete"
       open
       title="모델 용도 태그 삭제"
       description="선택한 원본 모델 ID의 용도 태그만 삭제합니다. 모델 자체를 삭제하는 작업은 아닙니다."

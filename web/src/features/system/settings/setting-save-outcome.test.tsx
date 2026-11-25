@@ -44,6 +44,7 @@ function setup(write: () => Promise<unknown>, read: () => Promise<ReturnType<typ
     const outcome = useSettingSaveOutcome();
     const notice = useSettingsReloadNotice();
     const save = useMutationFeedback({
+      observation: "save",
       mutate: () => outcome(write),
       invalidates: [key],
       onSuccess: (result) => {

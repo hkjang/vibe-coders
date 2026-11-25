@@ -71,12 +71,14 @@ export function HealthTab({ canWrite }: { canWrite: boolean }): React.JSX.Elemen
   });
 
   const resetBreaker = useMutationFeedback<string, unknown>({
+    observation: "save",
     mutate: (provider) => apiClient.request(endpoints.domains.routing.breakerReset, { body: { provider } }),
     invalidates: [routingHealthQueryKey],
     successMessage: "회로 차단기를 해제했습니다.",
     errorMessage: "회로 차단기를 해제하지 못했습니다.",
   });
   const releaseSticky = useMutationFeedback<string, unknown>({
+    observation: "revoke",
     mutate: (provider) =>
       apiClient.request(endpoints.domains.routing.balancer.release, { body: { provider } }),
     invalidates: [routingBalancerQueryKey],

@@ -1,3 +1,4 @@
+import { observeAction } from "@/shared/telemetry/action-channel";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/shared/api/client";
@@ -226,14 +227,20 @@ export function usePolicyImportOperation(access: PolicyImportAccess, close: () =
       setPhase("saving");
       reconciliation.current = candidate.baseline;
       setUnconfirmed(true);
-      const response = await apiClient.request(endpoints.domains.governance.policyImport.apply, {
-        body: candidate.selected.body,
-        signal: task.controller.signal,
-        routeId: "governance.policies",
-      });
-      current(task);
-      // An already confirmed write is not converted to failure by write-scope withdrawal.
-      const result = confirmPolicyAck(response, candidate.selected.body, false);
+      const result = await observeAction(
+        "import",
+        async () => {
+          const response = await apiClient.request(endpoints.domains.governance.policyImport.apply, {
+            body: candidate.selected.body,
+            signal: task.controller.signal,
+            routeId: "governance.policies",
+          });
+          current(task);
+          // Observe the confirmed write before its independent follow-up reads.
+          return confirmPolicyAck(response, candidate.selected.body, false);
+        },
+        () => current(task),
+      );
       completed.current = true;
       reconciliation.current = undefined;
       setUnconfirmed(false);

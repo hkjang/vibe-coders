@@ -83,6 +83,7 @@ export function Text2SqlReportTab({
   const promoteForm = useZodForm<PromoteFormValues, PromoteFormValues>(promoteFormSchema, { name: "" });
 
   const saveSchedule = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (variables: ScheduleFormValues & { id: string }) =>
       apiClient.request(endpoints.domains.text2sql.reports.schedule, {
@@ -93,6 +94,7 @@ export function Text2SqlReportTab({
     successMessage: "리포트 스케줄을 저장했습니다.",
   });
   const removeReport = useText2SqlMutation({
+    observation: "delete",
     authorized: canWrite,
     mutate: (id: string) =>
       apiClient.request(endpoints.domains.text2sql.reports.remove, {
@@ -103,6 +105,7 @@ export function Text2SqlReportTab({
     successMessage: "저장 리포트를 삭제했습니다.",
   });
   const promote = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (variables: { name: string; question: string; sql: string }) =>
       apiClient.request(endpoints.domains.text2sql.promote, {

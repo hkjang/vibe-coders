@@ -13,6 +13,7 @@ function checkText(value: string, prefixes: readonly string[], max = 500) {
 }
 export function useMeSnooze() {
   return useMeOperation({
+    observation: "save",
     operation: "snooze",
     invalidates: ["actions"],
     message: "이 항목을 7일 동안 숨겼습니다.",
@@ -27,6 +28,7 @@ export function useMeSnooze() {
 }
 export function useMeGenerateRecommendations() {
   return useMeOperation({
+    observation: "run_request",
     operation: "recommendations",
     invalidates: ["recommendations", "actions", "notifications"],
     message: "추천을 다시 계산했습니다.",
@@ -39,6 +41,7 @@ export function useMeGenerateRecommendations() {
 }
 export function useMeRecommendationFeedback() {
   return useMeOperation({
+    observation: "feedback",
     operation: "recommendations",
     invalidates: ["actions", "notifications"],
     message: "추천에 대한 의견을 기록했습니다.",
@@ -62,6 +65,7 @@ export function useMeRecommendationFeedback() {
 }
 export function useMeSkillRequest() {
   return useMeOperation({
+    observation: "save",
     operation: "skill-request",
     invalidates: ["skills"],
     message: "스킬 접근 신청을 접수했습니다.",
@@ -81,6 +85,7 @@ export function useMeSkillRequest() {
 }
 export function useMeSkillFeedback() {
   return useMeOperation({
+    observation: "feedback",
     operation: "skill-feedback",
     invalidates: ["skills"],
     message: "스킬 평가를 기록했습니다.",

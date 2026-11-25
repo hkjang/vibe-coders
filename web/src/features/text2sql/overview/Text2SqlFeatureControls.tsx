@@ -19,6 +19,7 @@ interface Props {
 export function Text2SqlFeatureControls({ canWrite, features, error, loading, onRetry }: Props) {
   const writable = canWrite && !error && !loading;
   const toggle = useText2SqlMutation({
+    observation: (value) => (value.enabled ? "activate" : "deactivate"),
     authorized: writable,
     mutate: (variables: { name: string; enabled: boolean }) =>
       apiClient.request(endpoints.domains.text2sql.features.toggle, {

@@ -65,6 +65,7 @@ export function PipelineTab({
   const testTriggerRef = useRef<HTMLButtonElement>(null);
 
   const bootstrap = useMutationFeedback({
+    observation: "save",
     mutate: () => apiClient.request(pipeline.bootstrap),
     invalidates: [dataQueryKeys.pipeline],
     successMessage: (result) =>
@@ -72,6 +73,7 @@ export function PipelineTab({
     errorMessage: "스키마를 생성하지 못했습니다.",
   });
   const runSink = useMutationFeedback({
+    observation: "run_request",
     mutate: () => apiClient.request(pipeline.runSink, { query: { days: sinkDays } }),
     invalidates: [dataQueryKeys.pipeline, dataQueryKeys.warehouse],
     successMessage: (result) => `${formatNumber(result.sent_rows)}행을 적재했습니다.`,

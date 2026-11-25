@@ -7,6 +7,7 @@ import { useCostGuard } from "./use-cost-guard";
 import { costGuardQueryKeys } from "@/shared/api/domains/cost-guard";
 import { tokenStore } from "@/shared/auth/token-store";
 import { mockApi } from "@/test/api";
+import { installActionSink } from "@/shared/telemetry/action-channel";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/app/auth/AuthProvider", async () => {
@@ -32,6 +33,32 @@ function setup() {
 }
 
 describe("비용 보호 실제 제출 경계", () => {
+  it("저장 뒤 목록 갱신 실패를 저장 실패로 집계하지 않는다", async () => {
+    const send = vi.fn();
+    const dispose = installActionSink(
+      () => "governance.policies",
+      () => true,
+      send,
+    );
+    try {
+      const { result, client, api } = setup();
+      await waitFor(() => expect(result.current.confirmed).toEqual(config));
+      act(() => result.current.open(document.createElement("button")));
+      const target = result.current.target;
+      if (!target) throw new Error("missing cost draft");
+      vi.spyOn(client, "invalidateQueries").mockRejectedValue(new Error("private refresh failure"));
+      await act(async () => result.current.submit(target, values));
+      expect(api.bodies("POST /admin/cost")).toHaveLength(1);
+      expect(send).toHaveBeenCalledExactlyOnceWith({
+        feature_id: "governance.policies",
+        action: "save",
+        outcome: "success",
+      });
+      expect(result.current.committed).toBe(true);
+    } finally {
+      dispose();
+    }
+  });
   it("고정 baseline은 캐시와 분리되고 이전 close가 새 인스턴스를 닫지 않는다", async () => {
     const { result, client } = setup();
     await waitFor(() => expect(result.current.confirmed).toEqual(config));

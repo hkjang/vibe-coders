@@ -46,6 +46,7 @@ export function SsoTab({ hasAdminWrite }: { hasAdminWrite: boolean }): React.JSX
   });
 
   const test = useMutationFeedback({
+    observation: "test",
     mutate: async () => apiClient.request(system.sso.test, { routeId }),
     errorMessage: "Keycloak 연결을 확인하지 못했습니다.",
   });

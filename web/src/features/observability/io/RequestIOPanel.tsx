@@ -387,6 +387,7 @@ function RequestIOPanelContent({
   // A GET with an audited side effect, so it runs only from the confirmation below and the
   // result stays in component state: never in the query cache, the URL or browser storage.
   const reveal = useMutationFeedback({
+    observation: false,
     gcTime: 0,
     mutate: () => apiClient.request(path, { query: { reveal: "raw" }, routeId }),
     errorMessage: "원문을 불러오지 못했습니다.",

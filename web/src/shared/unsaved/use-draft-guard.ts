@@ -3,6 +3,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { tokenStore } from "@/shared/auth/token-store";
 import { useUnsavedChanges } from "@/shared/unsaved/context";
 import type { UnsavedDiscardReason } from "@/shared/unsaved/coordinator";
+import { captureAction, type ActionKind } from "@/shared/telemetry/action-channel";
 
 interface DraftGuardOptions {
   dirty: boolean;
@@ -73,6 +74,7 @@ export function useDraftGuard({
     operation: () => Promise<Result>,
     onError: (error: unknown) => void,
     onSaved?: (result: Result) => void,
+    observation: ActionKind | false = false,
   ): Promise<void> => {
     if (pending || flight.current || !coordinator.startSubmission(owner)) return;
     flight.current = true;
@@ -82,16 +84,21 @@ export function useDraftGuard({
     const sessionEpoch = tokenStore.getSessionEpoch();
     const isCurrent = (): boolean =>
       mounted.current && epoch.current === submissionEpoch && sessionEpoch === tokenStore.getSessionEpoch();
+    const completion = captureAction(observation, undefined);
     try {
       const result = await operation();
       if (isCurrent()) {
+        completion?.success();
         // Inline editors stay mounted after success. Their owner updates the
         // baseline and wipes secrets; dialogs retain the default close behavior.
         if (onSaved) onSaved(result);
         else discard("close");
       }
     } catch (error) {
-      if (isCurrent()) onError(error);
+      if (isCurrent()) {
+        completion?.failure(error);
+        onError(error);
+      }
     } finally {
       flight.current = false;
       if (mounted.current) setSubmitting(false);

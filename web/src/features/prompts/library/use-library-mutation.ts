@@ -1,11 +1,7 @@
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
 import { useLayoutEffect, useRef, useState } from "react";
-import {
-  useIsMutating,
-  useMutation,
-  useQueryClient,
-  type QueryClient,
-  type QueryKey,
-} from "@tanstack/react-query";
+import { useIsMutating, useQueryClient, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AppError, isAppError } from "@/shared/api/error";
@@ -14,6 +10,7 @@ import { assertFeatureRead, featureOwnedKey } from "@/shared/hooks/use-feature-r
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useLibraryOwner } from "./library-context";
 import { libraryError, libraryRouteId, safeLibraryError } from "./library-model";
+import type { ActionSelection } from "@/shared/telemetry/action-channel";
 
 const flights = new WeakMap<QueryClient, Set<string>>();
 export function useLibraryAccess() {
@@ -33,6 +30,7 @@ export function useLibraryBusy() {
   return useIsMutating({ mutationKey: ["prompt-library-write", principal] }) > 0;
 }
 interface Options<V, R> {
+  observation: ActionSelection<V>;
   prepare?: (value: V) => Promise<void>;
   mutate: (value: V) => Promise<R>;
   validate?: (result: R, value: V) => void;
@@ -60,6 +58,7 @@ export function useLibraryMutation<V = void, R = unknown>(options: Options<V, R>
     };
   }, []);
   const mutation = useMutation({
+    observation: false,
     mutationKey: ["prompt-library-write", principal],
     retry: false,
     gcTime: 0,
@@ -80,6 +79,7 @@ export function useLibraryMutation<V = void, R = unknown>(options: Options<V, R>
       }
       if (pending.has(principal)) throw libraryError("busy");
       pending.add(principal);
+      let completion: ReturnType<typeof captureAction>;
       let sent = false,
         acknowledged = false;
       try {
@@ -106,10 +106,12 @@ export function useLibraryMutation<V = void, R = unknown>(options: Options<V, R>
           }
         }
         assertCurrent();
+        completion = captureAction(options.observation, value, assertCurrent);
         sent = true;
         const result = await options.mutate(value);
         acknowledged = true;
         options.validate?.(result, value);
+        completion?.success();
         // A tab can remount while its write is pending. Refresh the still-current
         // read owner even if the initiating component no longer exists. Keep
         // component and write-access checks for callbacks and notifications.
@@ -138,6 +140,7 @@ export function useLibraryMutation<V = void, R = unknown>(options: Options<V, R>
         // A response may echo template content. Keep it out of Mutation data.
         return;
       } catch (error) {
+        completion?.failure(error);
         const rejected =
           isAppError(error) && error.status !== undefined && error.status >= 400 && error.status < 500;
         if (sent && (!rejected || acknowledged) && mounted.current && owner.isCurrent()) setUncertain(true);

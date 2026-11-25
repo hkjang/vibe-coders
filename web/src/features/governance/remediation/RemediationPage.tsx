@@ -71,6 +71,7 @@ export function RemediationPage(): React.JSX.Element {
   });
 
   const dryRun = useMutationFeedback({
+    observation: "test",
     mutate: (action: RemediationAction) =>
       apiClient.request(endpoints.domains.governance.remediation.apply, {
         body: {
@@ -86,6 +87,7 @@ export function RemediationPage(): React.JSX.Element {
   });
 
   const apply = useMutationFeedback({
+    observation: "save",
     mutate: (variables: { actionType: string; params: Record<string, unknown>; reason: string }) =>
       apiClient.request(endpoints.domains.governance.remediation.apply, {
         body: {

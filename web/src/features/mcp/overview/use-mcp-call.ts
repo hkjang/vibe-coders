@@ -50,6 +50,7 @@ export function useMcpCall(owner: FeatureReadOwner, canWrite: boolean) {
     if (!scope) throw new AppError("경로 확인에도 MCP 관리 권한이 필요합니다.", { kind: "permission" });
   };
   const explain = useMutationFeedback({
+    observation: false,
     gcTime: 0,
     ownsResult: ({ version }) => mounted.current && owner.isCurrent() && version === revision.current,
     errorMessage: "적용 경로를 확인하지 못했습니다.",
@@ -71,6 +72,7 @@ export function useMcpCall(owner: FeatureReadOwner, canWrite: boolean) {
     },
   });
   const run = useMutationFeedback({
+    observation: "run_request",
     gcTime: 0,
     ownsResult: () => {
       try {

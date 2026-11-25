@@ -1,3 +1,4 @@
+import { settingObservationError } from "./setting-save-outcome";
 import { connectionTests, testEndpoint, type ConnectionTestKind } from "./runtime-connection-tests";
 import { settingColumns } from "./runtime-setting-columns";
 import { RuntimeSettingUnavailable } from "./RuntimeSettingUnavailable";
@@ -6,7 +7,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "@/shared/notifications/toast";
 
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
-import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
+import { LazySettingDetailSheet as SettingDetailSheet } from "@/features/system/settings/LazySettingDetailSheet";
 import { useSettingSaveOutcome } from "@/features/system/settings/setting-save-outcome";
 import type { SettingRecovery } from "./SettingsRecoveryDialog";
 import { LazySettingsRecovery } from "./LazySettingsRecovery";
@@ -85,6 +86,8 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
   const pod = settingsQuery.data?.this_pod;
 
   const saveSetting = useSettingsMutation({
+    observationError: settingObservationError,
+    observation: "save",
     authorized: hasAdminWrite || scopedWriter,
     mutate: async (input: { setting: EffectiveSetting; value: string; reason: string }) => {
       if (!settingEditPermission(input.setting, hasAdminWrite, access.allowed, scopedWriter).editable)
@@ -116,6 +119,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
   });
 
   const runTest = useSettingsMutation({
+    observation: "test",
     authorized: hasAdminWrite,
     mutate: async (input: { kind: ConnectionTestKind; label: string }) =>
       apiClient.request(testEndpoint(input.kind), { routeId }),
@@ -135,6 +139,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
   });
 
   const exportSettings = useSettingsMutation({
+    observation: "export",
     readOnly: true,
     mutate: async () => apiClient.request(system.settings.export, { routeId }),
     successMessage: "설정 백업 파일을 내려받았습니다.",

@@ -1,4 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { captureAction } from "@/shared/telemetry/action-channel";
+import { useObservedMutation as useMutation } from "@/shared/hooks/use-observed-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/shared/notifications/toast";
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -82,6 +84,7 @@ function EmergencyPanel({ owner, canWrite }: { owner: string; canWrite: boolean 
     if (active.current?.review !== candidate) throw emergencyReviewError();
   };
   const mutation = useMutation({
+    observation: false, // Observe the original outcome before the safe presentation wrapper.
     retry: false,
     gcTime: 0,
     mutationFn: async (input: { review: Review; reason: string }) => {
@@ -92,6 +95,14 @@ function EmergencyPanel({ owner, canWrite }: { owner: string; canWrite: boolean 
       active.current.sent = true;
       setSent(true);
       const disabled = input.review.action === "stop";
+      const completion = captureAction(
+        input.review.action === "stop" ? "deactivate" : "activate",
+        undefined,
+        () => {
+          selected(input.review);
+          access.assertCurrent();
+        },
+      );
       try {
         const result = await apiClient.request(endpoints.domains.text2sql.killSwitch.set, {
           body: {
@@ -112,9 +123,11 @@ function EmergencyPanel({ owner, canWrite }: { owner: string; canWrite: boolean 
           result.review_token === input.review.snapshot.data.review_token
         )
           throw new AppError(uncertain, { kind: "contract" });
+        completion?.success();
         return result;
       } catch (cause) {
         selected(input.review);
+        completion?.failure(cause);
         throw new AppError(uncertain, {
           kind: "contract",
           requestId: isAppError(cause) ? cause.requestId : undefined,

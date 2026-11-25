@@ -7,8 +7,11 @@ import { Input } from "@/shared/components/ui/Input";
 import { FormField } from "@/shared/components/form/FormField";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { isAppError } from "@/shared/api/error";
+import { captureAction, type ActionKind } from "@/shared/telemetry/action-channel";
 
 interface ConfirmDialogProps {
+  /** Only imperative handlers; leave off when the handler already uses an observed mutation. */
+  observation?: ActionKind;
   cancelLabel?: string;
   children?: ReactNode;
   confirmLabel?: string;
@@ -54,6 +57,7 @@ function Confirmation({
   description,
   errorFormatter = safeAppErrorMessage,
   onConfirm,
+  observation,
   onOpenChange,
   open,
   requireReason = false,
@@ -109,12 +113,17 @@ function Confirmation({
     sending.current = true;
     setPending(true);
     setError(undefined);
+    const completion = captureAction(observation ?? false, undefined);
     try {
       if (requireTarget === undefined) await onConfirm(reason.trim());
       else await onConfirm(reason.trim(), target);
-      if (mounted.current) close(false);
+      if (mounted.current) {
+        completion?.success();
+        close(false);
+      }
     } catch (cause) {
       if (!mounted.current) return;
+      completion?.failure(cause);
       setError({
         message: errorFormatter(cause, "작업을 완료하지 못했습니다."),
         requestId: isAppError(cause) ? cause.requestId : undefined,

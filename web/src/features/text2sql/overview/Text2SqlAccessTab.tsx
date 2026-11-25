@@ -95,6 +95,7 @@ export function Text2SqlAccessTab({
   });
 
   const savePermission = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (values: PermissionFormValues) =>
       apiClient.request(endpoints.domains.text2sql.permissions.save, {
@@ -105,6 +106,7 @@ export function Text2SqlAccessTab({
     successMessage: "권한 규칙을 저장했습니다.",
   });
   const removePermission = useText2SqlMutation({
+    observation: "delete",
     authorized: canWrite,
     mutate: (id: string) =>
       apiClient.request(endpoints.domains.text2sql.permissions.remove, {
@@ -115,6 +117,7 @@ export function Text2SqlAccessTab({
     successMessage: "권한 규칙을 삭제했습니다.",
   });
   const saveTerm = useText2SqlMutation({
+    observation: "save",
     authorized: canWrite,
     mutate: (values: GlossaryFormValues) =>
       apiClient.request(endpoints.domains.text2sql.glossary.save, {
@@ -125,6 +128,7 @@ export function Text2SqlAccessTab({
     successMessage: "업무 용어를 저장했습니다.",
   });
   const removeTerm = useText2SqlMutation({
+    observation: "delete",
     authorized: canWrite,
     mutate: (id: string) =>
       apiClient.request(endpoints.domains.text2sql.glossary.remove, {

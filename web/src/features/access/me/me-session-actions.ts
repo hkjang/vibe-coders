@@ -8,6 +8,7 @@ const api = endpoints.domains.access.me;
 const options = { routeId: meRouteId, cache: "no-store" as const, retryUnauthorized: false };
 export function useMeRevokeSession() {
   return useMeOperation({
+    observation: "revoke",
     operation: "sessions",
     invalidates: ["sessions"],
     message: "선택한 세션을 종료했습니다.",
@@ -23,6 +24,7 @@ export function useMeRevokeSession() {
 }
 export function useMeRevokeOtherSessions() {
   return useMeOperation({
+    observation: "revoke",
     operation: "sessions",
     invalidates: ["sessions"],
     message: "다른 로그인 세션을 종료했습니다.",

@@ -179,6 +179,14 @@ jobs:
           VIBE_DW_RETRY_BROWSER_TEST: "1"
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: go test ./internal/proxy -run '^TestDwRetryBrowserIntegration$' -count=1 -timeout=3m
+      - name: Actual UI action intake and persisted success, rejection and unknown outcomes
+        env:
+          VIBE_APPUI_ACTIONS_BROWSER_TEST: "1"
+          APP_UI_ACTIONS_HEADER_VERSION: ci-${{ github.sha }}
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        # Four business-response fixtures reach the real embedded UI and Go
+        # observation APIs. No skipped or retry-only result may pass this gate.
+        run: go test ./internal/proxy -run '^TestAppUIActionsBrowserIntegration$' -count=1 -timeout=2m
       - name: Upload sanitized authentication summary only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -342,7 +350,7 @@ jobs:
       - name: Verify PostgreSQL work app pagination, independent detail and existing authorization
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^Test(WorkAppPage|AdminWorkAppPage)' -count=1 -timeout=5m
       - name: Verify PostgreSQL UI telemetry and diagnostics concurrency and retention
-        run: go test -race ./internal/store -run '^TestAppUI(Telemetry|Diagnostics)' -count=1 -timeout=5m
+        run: go test -race ./internal/store -run '^TestAppUI(Telemetry|Diagnostics|Actions)' -count=1 -timeout=5m
       - name: Verify PostgreSQL startup lock waiters and concurrent migrations
         run: go test -race ./internal/store -run '^TestPostgresMigration' -count=1 -timeout=2m
       - name: Verify PostgreSQL settings history and concurrent package startup
@@ -439,7 +447,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.180
+      SOURCE_SBOM_VERSION: v0.86.181
       GO_VERSION: 1.26.11
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

@@ -49,6 +49,7 @@ export function PromptStageDialog({
   });
   const stage = useWatch({ control: form.control, name: "stage" });
   const mutation = useLibraryMutation({
+    observation: "save",
     mutate: (value: PromptStageChange) =>
       apiClient.request(stageEndpoints.change, {
         query: { view: "workspace" },
