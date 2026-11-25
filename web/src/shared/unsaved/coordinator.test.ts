@@ -3,6 +3,23 @@ import { describe, expect, it, vi } from "vitest";
 import { UnsavedChangesCoordinator } from "@/shared/unsaved/coordinator";
 
 describe("UnsavedChangesCoordinator", () => {
+  it("lets an opted-in page editor change its own query string, and nothing else", () => {
+    const coordinator = new UnsavedChangesCoordinator();
+    const page = Symbol();
+    const tabs = { currentLocation: { pathname: "/dlp" }, nextLocation: { pathname: "/dlp" } };
+    const away = { currentLocation: { pathname: "/dlp" }, nextLocation: { pathname: "/routing" } };
+    coordinator.setForm(page, { dirty: true, pending: false, discard: vi.fn(), keepsDraftOnSamePage: true });
+    expect(coordinator.shouldBlock(tabs)).toBe(false);
+    expect(coordinator.shouldBlock(away)).toBe(true);
+    expect(coordinator.shouldBlock()).toBe(true);
+    // A dialog draft on the same page has not opted in: its query change still asks.
+    const dialog = Symbol();
+    coordinator.setForm(dialog, { dirty: true, pending: false, discard: vi.fn() });
+    expect(coordinator.shouldBlock(tabs)).toBe(true);
+    coordinator.removeForm(dialog);
+    expect(coordinator.shouldBlock(tabs)).toBe(false);
+  });
+
   it("closes clean forms immediately and confirms only the dirty owner", () => {
     const coordinator = new UnsavedChangesCoordinator();
     const first = Symbol();

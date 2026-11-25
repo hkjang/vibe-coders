@@ -10,6 +10,11 @@ interface DraftGuardOptions {
   externalPending?: boolean;
   /** Inline editors reset in place instead of unmounting on a local discard. */
   keepMounted?: boolean;
+  /**
+   * A page-level editor whose tabs and filters live in the query string keeps its
+   * draft across those changes, so they do not ask to discard it.
+   */
+  keepsDraftOnSamePage?: boolean;
   onDiscard: (reason: UnsavedDiscardReason) => void;
 }
 
@@ -18,6 +23,7 @@ export function useDraftGuard({
   dirty,
   externalPending = false,
   keepMounted = false,
+  keepsDraftOnSamePage = false,
   onDiscard,
 }: DraftGuardOptions) {
   const coordinator = useUnsavedChanges();
@@ -42,18 +48,19 @@ export function useDraftGuard({
           dirty: false,
           pending: flight.current || externalPending,
           discard: discardDraft,
+          keepsDraftOnSamePage,
         });
       }
       // A recovery confirmation belongs only to an explicitly approved local
       // transition, never route departure, authentication loss, or unmount.
       if (reason === "close") continuation?.();
     },
-    [coordinator, externalPending, keepMounted, onDiscard, owner],
+    [coordinator, externalPending, keepMounted, keepsDraftOnSamePage, onDiscard, owner],
   );
 
   useLayoutEffect(() => {
-    coordinator.setForm(owner, { dirty, pending: pending || flight.current, discard });
-  }, [coordinator, dirty, discard, owner, pending]);
+    coordinator.setForm(owner, { dirty, pending: pending || flight.current, discard, keepsDraftOnSamePage });
+  }, [coordinator, dirty, discard, keepsDraftOnSamePage, owner, pending]);
   useLayoutEffect(() => {
     mounted.current = true;
     return () => {

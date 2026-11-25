@@ -4,6 +4,17 @@ export interface UnsavedForm {
   dirty: boolean;
   pending: boolean;
   discard: (reason: UnsavedDiscardReason) => void;
+  /**
+   * The editor stays mounted while its own page changes only its query string
+   * (tabs, filters), so such a navigation keeps the draft and need not ask.
+   */
+  keepsDraftOnSamePage?: boolean;
+}
+
+/** The locations a router hands to a navigation blocker. */
+interface NavigationTarget {
+  currentLocation: { pathname: string };
+  nextLocation: { pathname: string };
 }
 
 interface NavigationAttempt {
@@ -33,7 +44,17 @@ export class UnsavedChangesCoordinator {
   };
 
   readonly getSnapshot = (): Snapshot => this.snapshot;
-  readonly shouldBlock = (): boolean => this.snapshot.protected;
+  readonly shouldBlock = (target?: NavigationTarget): boolean => {
+    if (!this.snapshot.protected) return false;
+    if (target && target.currentLocation.pathname === target.nextLocation.pathname) {
+      // Same page, other query string: block only for editors that would lose
+      // their draft, i.e. any protected form that has not opted in.
+      const protectedForms = [...this.forms.values()].filter((form) => form.dirty || form.pending);
+      if (protectedForms.length > 0 && protectedForms.every((form) => form.keepsDraftOnSamePage))
+        return false;
+    }
+    return true;
+  };
 
   private publish(): void {
     const forms = [...this.forms.values()];
