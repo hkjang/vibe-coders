@@ -5,11 +5,8 @@ import { toast } from "@/shared/notifications/toast";
 import { AppError, isAppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import {
-  captureAction,
-  type ActionCompletion,
-  type ActionSelection,
-} from "@/shared/telemetry/action-channel";
+import type { ActionCompletion, ActionSelection } from "@/shared/telemetry/action-channel";
+import { useActionCapture } from "@/shared/telemetry/use-action-capture";
 
 interface MutationFeedbackOptions<Variables, Result> {
   /** Explicit operation category; false for preflight/preview reads. */
@@ -46,6 +43,7 @@ export function useMutationFeedback<Variables, Result>({
   successMessage,
 }: MutationFeedbackOptions<Variables, Result>): UseMutationResult<Result, Error, Variables> {
   const queryClient = useQueryClient();
+  const capture = useActionCapture();
   const sessionEpoch = useSyncExternalStore(tokenStore.subscribeSession, tokenStore.getSessionEpoch);
   type Submission = { variables: Variables; epoch: number; completion?: ActionCompletion };
   type PublicMutation = UseMutationResult<Result, Error, Variables>;
@@ -109,7 +107,11 @@ export function useMutationFeedback<Variables, Result>({
     const submission: Submission = {
       variables: variables as Variables,
       epoch: tokenStore.getSessionEpoch(),
-      completion: captureAction(observation, variables as Variables),
+      completion: capture(
+        observation,
+        variables as Variables,
+        () => ownsResult?.(variables as Variables) ?? true,
+      ),
     };
     try {
       const result = await mutation.mutateAsync(submission, {

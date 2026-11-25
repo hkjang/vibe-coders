@@ -1,3 +1,4 @@
+import { installActionSink } from "@/shared/telemetry/action-channel";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -229,3 +230,38 @@ describe("실제 서버 응답의 필수 필드", () => {
     (value) => expect(appRunPlanSchema.safeParse(value).success).toBe(false),
   );
 });
+
+it.each(["success", "rejected", "unknown"] as const)(
+  "keeps the new app's observations separate from the old app's %s",
+  async (outcome) => {
+    const pending = deferred(),
+      send = vi.fn();
+    const retire = installActionSink(
+      () => "agents.apps",
+      () => true,
+      send,
+    );
+    try {
+      const { user } = setup(() => pending.promise);
+      await user.click(screen.getByRole("button", { name: "검증" }));
+      await user.click(screen.getByRole("button", { name: "앱 B" }));
+      await act(async () => {
+        if (outcome === "success") pending.resolve(validation);
+        else pending.reject(apiFailure("old app reply", outcome === "rejected" ? 409 : 503));
+      });
+      expect(send).not.toHaveBeenCalled();
+      expect(screen.queryByRole("heading", { name: "검증 결과" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "검증" }));
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledExactlyOnceWith({
+          feature_id: "agents.apps",
+          action: "test",
+          outcome: "success",
+        }),
+      );
+      expect(await screen.findByRole("heading", { name: "검증 결과" })).toBeVisible();
+    } finally {
+      retire();
+    }
+  },
+);

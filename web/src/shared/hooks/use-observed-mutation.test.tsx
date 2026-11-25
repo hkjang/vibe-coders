@@ -124,3 +124,76 @@ describe("observed mutation lifecycle", () => {
     });
   });
 });
+
+it.each(["success", "rejected", "unknown"] as const)(
+  "drops %s from an unmounted mutation owner",
+  async (outcome) => {
+    const send = vi.fn(),
+      pending = deferred();
+    dispose = installActionSink(
+      () => "agents.apps",
+      () => true,
+      send,
+    );
+    const hook = renderHook(
+      () => useObservedMutation({ observation: "test", mutationFn: () => pending.promise }),
+      { wrapper: wrapper() },
+    );
+    let result!: Promise<unknown>;
+    act(() => {
+      result = hook.result.current.mutateAsync().catch((error: unknown) => error);
+    });
+    hook.unmount();
+    const next = renderHook(
+      () => useObservedMutation({ observation: "test", mutationFn: async () => "new owner" }),
+      { wrapper: wrapper() },
+    );
+    await act(async () => {
+      if (outcome === "success") pending.resolve("old response");
+      else
+        pending.reject(
+          new AppError("old response", { kind: "http", status: outcome === "rejected" ? 409 : 503 }),
+        );
+      await result;
+    });
+    expect(send).not.toHaveBeenCalled();
+    await act(async () => {
+      await next.result.current.mutateAsync();
+    });
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      feature_id: "agents.apps",
+      action: "test",
+      outcome: "success",
+    });
+  },
+);
+
+it("drops failure after the selection lifetime ends without unmounting", async () => {
+  const send = vi.fn(),
+    pending = deferred();
+  let current = true;
+  dispose = installActionSink(
+    () => "agents.apps",
+    () => true,
+    send,
+  );
+  const hook = renderHook(
+    () =>
+      useObservedMutation({
+        observation: "test",
+        ownsObservation: () => current,
+        mutationFn: () => pending.promise,
+      }),
+    { wrapper: wrapper() },
+  );
+  let result!: Promise<unknown>;
+  act(() => {
+    result = hook.result.current.mutateAsync().catch((error: unknown) => error);
+  });
+  current = false;
+  await act(async () => {
+    pending.reject(new AppError("old selection", { kind: "http", status: 409 }));
+    await result;
+  });
+  expect(send).not.toHaveBeenCalled();
+});

@@ -4,11 +4,8 @@ import {
   type UseMutationOptions,
   type UseMutationResult,
 } from "@tanstack/react-query";
-import {
-  captureAction,
-  type ActionCompletion,
-  type ActionSelection,
-} from "@/shared/telemetry/action-channel";
+import type { ActionCompletion, ActionSelection } from "@/shared/telemetry/action-channel";
+import { useActionCapture } from "@/shared/telemetry/use-action-capture";
 
 /**
  * Observe an explicitly classified operation after its mutationFn validates the
@@ -19,12 +16,16 @@ import {
 export function useObservedMutation<Result = unknown, Failure = Error, Variables = void, Context = unknown>(
   {
     observation,
+    ownsObservation,
     ...options
   }: UseMutationOptions<Result, Failure, Variables, Context> & {
     observation: ActionSelection<Variables>;
+    /** Optional selection/permission lifetime in addition to the mounted hook. */
+    ownsObservation?: (variables: Variables) => boolean;
   },
   client?: QueryClient,
 ): UseMutationResult<Result, Failure, Variables, Context> {
+  const capture = useActionCapture();
   type Submission = { value: Variables; completion?: ActionCompletion };
   type Public = UseMutationResult<Result, Failure, Variables, Context>;
   const onMutate = options.onMutate;
@@ -53,11 +54,15 @@ export function useObservedMutation<Result = unknown, Failure = Error, Variables
     },
     client,
   );
-  const mutateAsync: Public["mutateAsync"] = (...[value, callbacks]) =>
-    mutation.mutateAsync(
+  const mutateAsync: Public["mutateAsync"] = (...[value, callbacks]) => {
+    return mutation.mutateAsync(
       {
         value: value as Variables,
-        completion: captureAction(observation, value as Variables),
+        completion: capture(
+          observation,
+          value as Variables,
+          () => ownsObservation?.(value as Variables) ?? true,
+        ),
       },
       {
         onSuccess: (result, submission, previous, context) =>
@@ -68,6 +73,7 @@ export function useObservedMutation<Result = unknown, Failure = Error, Variables
           callbacks?.onSettled?.(result, error, submission.value, previous, context),
       },
     );
+  };
   const mutate: Public["mutate"] = (...args) => {
     void mutateAsync(...args).catch(() => undefined);
   };

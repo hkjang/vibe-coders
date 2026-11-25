@@ -1,3 +1,4 @@
+import { installActionSink } from "@/shared/telemetry/action-channel";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -432,3 +433,41 @@ describe("게이트웨이 긴급 정지의 상태 확인과 대상 재입력", (
     expect(screen.getByRole("textbox", { name: "변경 사유" })).toHaveValue("");
   });
 });
+
+it.each([
+  [409, "rejected"],
+  [503, "unknown"],
+] as const)(
+  "keeps gateway HTTP %i classification before the safe recovery wrapper",
+  async (status, outcome) => {
+    const send = vi.fn();
+    const retire = installActionSink(
+      () => "governance.policies",
+      () => true,
+      send,
+    );
+    try {
+      const gateway = mount("running");
+      gateway.reply(() => Response.json({ error: { message: "private response" } }, { status }));
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByRole("button", { name: stopLabel })).toBeEnabled());
+      await user.click(screen.getByRole("button", { name: stopLabel }));
+      await user.type(screen.getByRole("textbox", { name: "변경 사유" }), reason);
+      await user.type(screen.getByRole("textbox", { name: "확인 문구" }), "게이트웨이 전체 정지");
+      await user.click(screen.getByRole("button", { name: "긴급 차단" }));
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledExactlyOnceWith({
+          feature_id: "governance.policies",
+          action: "deactivate",
+          outcome,
+        }),
+      );
+      expect(screen.getByRole("dialog")).toBeVisible();
+      expect(screen.getByRole("button", { name: "긴급 차단" })).toBeDisabled();
+      expect(gateway.posts()).toHaveLength(1);
+      expect(notifications.success).not.toHaveBeenCalled();
+    } finally {
+      retire();
+    }
+  },
+);

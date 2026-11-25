@@ -79,6 +79,7 @@ function Inspection({ app, disabled, owner }: Props & { owner: FeatureReadOwner 
   };
   const validate = useMutation({
     observation: "test",
+    ownsObservation: current,
     retry: false,
     mutationFn: async () => {
       assertAction("validate");
