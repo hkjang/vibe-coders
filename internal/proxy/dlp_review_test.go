@@ -3,12 +3,14 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/dlp"
@@ -30,15 +32,23 @@ type switchUpstream struct {
 	mu    sync.Mutex
 	reply func(w http.ResponseWriter, r *http.Request)
 	calls int
+	last  string
 }
 
 func (u *switchUpstream) handler(w http.ResponseWriter, r *http.Request) {
-	_, _ = io.ReadAll(r.Body)
+	body, _ := io.ReadAll(r.Body)
 	u.mu.Lock()
 	reply := u.reply
 	u.calls++
+	u.last = string(body)
 	u.mu.Unlock()
 	reply(w, r)
+}
+
+func (u *switchUpstream) lastBody() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.last
 }
 
 func (u *switchUpstream) set(reply func(w http.ResponseWriter, r *http.Request)) {
@@ -362,5 +372,254 @@ func TestDLPReviewErrorAnswersAreInspected(t *testing.T) {
 	resp, data := dlpRequest(t, env, http.MethodPost, "/v1/chat/completions", chatWith("보내 줘", false))
 	if resp.StatusCode != http.StatusUnprocessableEntity || strings.Contains(string(data), "kim.minsu") || !strings.Contains(string(data), "[REDACTED_EMAIL]") {
 		t.Fatalf("error answer: %d %s", resp.StatusCode, data)
+	}
+}
+
+// Knowledge and context expansion run after the DLP step; what they add is
+// inspected before the request leaves.
+func TestDLPKnowledgeExpansionIsInspected(t *testing.T) {
+	env, upstream := newReviewEnv(t, nil)
+	if err := env.db.UpsertKnowledge(context.Background(), store.KnowledgeSnippet{ID: "vip", Name: "VIP", Content: "담당 고객 주민번호 900101-1234561", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	env.server.invalidateKnowledgeCache()
+	saveDLP(t, env, 0, dlpPolicies(policy("block-ids", dlp.ActionBlock, []string{"government"}, dlp.CheckRequest)))
+	resp, data := dlpRequest(t, env, http.MethodPost, "/v1/chat/completions", chatWith("{{kb:vip}} 요약해 줘", false))
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(data), "dlp_request_blocked") {
+		t.Fatalf("expanded knowledge: %d %s", resp.StatusCode, data)
+	}
+	if upstream.calls != 0 {
+		t.Fatal("the expanded request reached the provider")
+	}
+}
+
+// A value split across two messages is found, and the log keeps neither half.
+func TestDLPValuesSplitAcrossMessages(t *testing.T) {
+	env, upstream := newReviewEnv(t, func(cfg *config.Config) { cfg.Logging.RawPrompts = true })
+	saveDLP(t, env, 0, dlpPolicies(
+		policy("block-ids", dlp.ActionBlock, []string{"government"}, dlp.CheckRequest),
+		policy("flag-pii", dlp.ActionFlag, []string{"pii"}, dlp.CheckRequest),
+	))
+	twoMessages := func(a, b string) map[string]any {
+		return map[string]any{"model": "test-model", "messages": []map[string]string{{"role": "user", "content": a}, {"role": "user", "content": b}}}
+	}
+	resp, data := dlpRequest(t, env, http.MethodPost, "/v1/chat/completions", twoMessages("주민번호 앞자리 900101-", "1234561 입니다"))
+	if resp.StatusCode != http.StatusBadRequest || upstream.calls != 0 {
+		t.Fatalf("split registration number: %d %s", resp.StatusCode, data)
+	}
+	resp, data = dlpRequest(t, env, http.MethodPost, "/v1/chat/completions", twoMessages("연락처 010-1234-", "5678 로 주세요"))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("split phone number: %d %s", resp.StatusCode, data)
+	}
+	if header := parseDLPHeader(t, resp); header.Action != dlp.ActionFlag {
+		t.Fatalf("split phone number is flagged: %+v", header)
+	}
+	for _, e := range dlpEventsFor(t, env.db, 2) {
+		if stored := storedRequest(t, env, e.RequestID); strings.Contains(stored, "1234561") || strings.Contains(stored, "5678") {
+			t.Fatalf("a half of a split value was stored: %s", stored)
+		}
+	}
+}
+
+// slowStream answers like a provider streaming a slow answer: headers at once,
+// then the events after delay.
+func slowStream(delay time.Duration, contents ...string) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		time.Sleep(delay)
+		for _, c := range contents {
+			encoded, _ := json.Marshal(c)
+			_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"content":`+string(encoded)+`}}]}`+"\n\n")
+			w.(http.Flusher).Flush()
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}
+}
+
+// A held stream that takes long starts early with comment lines, so idle timeouts
+// do not cut the client off; the inspected stream follows and the DLP result comes
+// as trailers.
+func TestDLPHeldStreamKeepalive(t *testing.T) {
+	env, upstream := newReviewEnv(t, nil)
+	env.server.dlpKeepalive = 30 * time.Millisecond
+	saveDLP(t, env, 0, dlpPolicies(policy("mask-pii", dlp.ActionMask, []string{"pii"}, dlp.CheckResponse)))
+	upstream.set(slowStream(200*time.Millisecond, "메일은 kim.mi", "nsu@example.com 입니다"))
+
+	resp, data := dlpRequest(t, env, http.MethodPost, "/v1/chat/completions", chatWith("연락처", true))
+	body := string(data)
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(body, ": vibe-dlp:") || strings.Contains(body, "kim.mi") || !strings.Contains(body, "[REDACTED_EMAIL]") || !strings.Contains(body, "[DONE]") {
+		t.Fatalf("held stream: %d %q", resp.StatusCode, body)
+	}
+	if resp.Header.Get("X-Vibe-DLP-Stream") != "held" {
+		t.Fatalf("started stream is marked: %v", resp.Header)
+	}
+	var trailer dlp.HeaderValue
+	if err := json.Unmarshal([]byte(resp.Trailer.Get("X-Vibe-Dlp")), &trailer); err != nil || trailer.Action != dlp.ActionMask || resp.Trailer.Get("Cf-Aig-Dlp") == "" {
+		t.Fatalf("DLP result as trailers: %v %v", resp.Trailer, err)
+	}
+
+	// A short answer is not started early: the normal status and headers apply.
+	upstream.set(slowStream(0, "메일 kim.minsu@example.com"))
+	resp, data = dlpRequest(t, env, http.MethodPost, "/v1/chat/completions", chatWith("연락처", true))
+	if strings.HasPrefix(string(data), ":") || resp.Header.Get("X-Vibe-DLP") == "" {
+		t.Fatalf("fast stream: %v %q", resp.Header, data)
+	}
+}
+
+// A block found after the stream started is an error event in the stream.
+func TestDLPHeldStreamBlockedAfterStart(t *testing.T) {
+	env, upstream := newReviewEnv(t, nil)
+	env.server.dlpKeepalive = 30 * time.Millisecond
+	saveDLP(t, env, 0, dlpPolicies(policy("block-cards", dlp.ActionBlock, []string{"financial"}, dlp.CheckResponse)))
+	upstream.set(slowStream(200*time.Millisecond, "카드 4111 1111 ", "1111 1111 결제"))
+	resp, data := dlpRequest(t, env, http.MethodPost, "/v1/chat/completions", chatWith("결제", true))
+	body := string(data)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"code":"dlp_response_blocked"`) || !strings.HasSuffix(body, "data: [DONE]\n\n") || strings.Contains(body, "4111") {
+		t.Fatalf("blocked after start: %d %q", resp.StatusCode, body)
+	}
+	events := dlpEventsFor(t, env.db, 1)
+	if len(events) != 1 || events[0].Action != "BLOCK" {
+		t.Fatalf("block recorded: %+v", events)
+	}
+	if stored := storedRequest(t, env, events[0].RequestID); !strings.Contains(stored, "dlp_response_blocked") {
+		t.Fatalf("log: %s", stored)
+	}
+}
+
+// Text a compatible provider puts in content_block_start continues in the deltas.
+func TestDLPBlockStartJoinsItsDeltas(t *testing.T) {
+	body := []byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"카드 4111 1111\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" 1111 1111\"}}\n\n")
+	texts := responseSegments(body, "text/event-stream")
+	if !strings.Contains(strings.Join(texts, "|"), "카드 4111 1111 1111 1111") {
+		t.Fatalf("block start and delta joined: %q", texts)
+	}
+}
+
+// Handlers that answer by themselves run while the client waits too: a streamed
+// agent run is kept alive, and a handler that panics does not take the server down.
+func TestDLPSelfAnsweringStreamKeepaliveAndPanic(t *testing.T) {
+	env, _ := newReviewEnv(t, nil)
+	env.server.dlpKeepalive = 30 * time.Millisecond
+	engine, issues := dlp.Compile(dlpPolicies(policy("mask-pii", dlp.ActionMask, []string{"pii"}, dlp.CheckResponse)))
+	if len(issues) > 0 {
+		t.Fatal(issues)
+	}
+	run := func(serve func(w http.ResponseWriter, r *http.Request)) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+		rec := httptest.NewRecorder()
+		rc := &requestPipeline{s: env.server, r: req, w: &dlpStreamWriter{ResponseWriter: rec, path: req.URL.Path}, body: []byte(`{"model":"agent/x","stream":true}`), dlpState: &dlpState{engine: engine, inspectResponse: true}}
+		rc.serveUnderDLP(serve)
+		return rec
+	}
+	rec := run(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(150 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"content":"담당자 kim.minsu@example.com"}}]}`+"\n\ndata: [DONE]\n\n")
+	})
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.HasPrefix(body, ": vibe-dlp:") || strings.Contains(body, "kim.minsu") || !strings.Contains(body, "[REDACTED_EMAIL]") {
+		t.Fatalf("agent stream: %d %q", rec.Code, body)
+	}
+	rec = run(func(http.ResponseWriter, *http.Request) { panic("boom") })
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "internal_error") {
+		t.Fatalf("handler panic: %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDLPRequestGroups(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[` +
+		`{"role":"system","content":"시스템"},` +
+		`{"role":"user","content":"하나"},{"role":"user","content":"둘"},` +
+		`{"role":"assistant","content":"셋"},` +
+		`{"role":"user","content":[{"type":"text","text":"넷"},{"type":"text","text":"다섯"}]}],` +
+		`"metadata":{"note":"여섯"}}`)
+	segments, _ := dlp.JSONSegments(body)
+	got := [][]string{}
+	for _, group := range requestGroups(body) {
+		texts := []string{}
+		for _, i := range group {
+			texts = append(texts, segments[i])
+		}
+		got = append(got, texts)
+	}
+	if fmt.Sprint(got) != "[[하나 둘] [넷 다섯]]" {
+		t.Fatalf("groups: %v", got)
+	}
+}
+
+// Review round 3: masking applies every time a value is sent, not only the first.
+func TestDLPMaskedValuesStayMaskedWhenResent(t *testing.T) {
+	env, upstream := newReviewEnv(t, nil)
+	engine, issues := dlp.Compile(dlpPolicies(policy("mask-pii", dlp.ActionMask, []string{"pii"}, dlp.CheckRequest)))
+	if len(issues) > 0 {
+		t.Fatal(issues)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+	state := &dlpState{engine: engine}
+	state.request = engine.EvaluateParts(dlp.CheckRequest, dlp.Scope{}, []string{"내 메일 kim.minsu@example.com"}, nil)
+	rc := &requestPipeline{s: env.server, r: req, w: httptest.NewRecorder(), dlpState: state}
+	turn := []byte(`{"messages":[{"role":"user","content":"내 메일 kim.minsu@example.com"},{"role":"tool","tool_call_id":"c1","content":"담당 kim.minsu@example.com"}]}`)
+	rc.serveUnderDLP(func(w http.ResponseWriter, r *http.Request) {
+		for range 2 {
+			out, err := inspectOutbound(r, turn)
+			if err != nil || strings.Contains(string(out), "kim.minsu") {
+				t.Fatalf("re-sent value: %s %v", out, err)
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Knowledge that repeats a value the prompt had masked is masked as well.
+	if err := env.db.UpsertKnowledge(context.Background(), store.KnowledgeSnippet{ID: "card", Name: "명함", Content: "담당자 kim.minsu@example.com", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	env.server.invalidateKnowledgeCache()
+	saveDLP(t, env, 0, dlpPolicies(policy("mask-pii", dlp.ActionMask, []string{"pii"}, dlp.CheckRequest)))
+	upstream.set(jsonReply("ok"))
+	resp, data := dlpRequest(t, env, http.MethodPost, "/v1/chat/completions", chatWith("내 메일 kim.minsu@example.com 과 {{kb:card}}", false))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("%d %s", resp.StatusCode, data)
+	}
+	sent := upstream.lastBody()
+	if strings.Contains(sent, "kim.minsu") || !strings.Contains(sent, "[REDACTED_EMAIL]") {
+		t.Fatalf("the provider received: %s", sent)
+	}
+}
+
+// A self-answering handler that answers in JSON, or fails, after its stream has
+// started is turned into stream events.
+func TestDLPStartedStreamConvertsJSONAndErrors(t *testing.T) {
+	env, _ := newReviewEnv(t, nil)
+	env.server.dlpKeepalive = 20 * time.Millisecond
+	engine, issues := dlp.Compile(dlpPolicies(policy("mask-pii", dlp.ActionMask, []string{"pii"}, dlp.CheckResponse)))
+	if len(issues) > 0 {
+		t.Fatal(issues)
+	}
+	run := func(serve func(w http.ResponseWriter, r *http.Request)) string {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+		rec := httptest.NewRecorder()
+		rc := &requestPipeline{s: env.server, r: req, w: &dlpStreamWriter{ResponseWriter: rec, path: req.URL.Path}, body: []byte(`{"model":"vibe/text2sql-x","stream":true}`), dlpState: &dlpState{engine: engine, inspectResponse: true}}
+		rc.serveUnderDLP(serve)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d", rec.Code)
+		}
+		return rec.Body.String()
+	}
+	body := run(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"c1","object":"chat.completion","model":"vibe/text2sql-x","choices":[{"index":0,"message":{"role":"assistant","content":"담당 kim.minsu@example.com"},"finish_reason":"stop"}],"usage":{"total_tokens":3}}`)
+	})
+	if !strings.Contains(body, `"object":"chat.completion.chunk"`) || !strings.Contains(body, "[REDACTED_EMAIL]") || strings.Contains(body, "kim.minsu") || !strings.HasSuffix(body, "data: [DONE]\n\n") {
+		t.Fatalf("JSON answer as a stream: %q", body)
+	}
+	body = run(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		writeOpenAIError(w, http.StatusBadGateway, "agent route failed", "server_error", "agent_route_failed")
+	})
+	if !strings.Contains(body, `"code":"agent_route_failed"`) || !strings.HasSuffix(body, "data: [DONE]\n\n") {
+		t.Fatalf("error after start: %q", body)
 	}
 }

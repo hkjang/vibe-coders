@@ -56,6 +56,7 @@ type Server struct {
 	routingRules    atomic.Pointer[routingRulesSnapshot]
 	dynamicRoutes   dynamicRouteCache
 	dlp             dlpCache
+	dlpKeepalive    time.Duration // held-stream keepalive interval (0: dlpKeepaliveEvery); tests shorten it
 	knowledge       atomic.Pointer[knowledgeSnapshot]
 	deprecations    atomic.Pointer[deprecationSnapshot]
 	costCache       atomic.Pointer[costSnapshot]

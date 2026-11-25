@@ -442,6 +442,10 @@ type Decision struct {
 	Truncated bool
 	// MaskMatches are the matches a MASK policy asked to replace.
 	MaskMatches []Match
+	// JoinedMasks are MASK matches found only by reading a group of segments joined
+	// (EvaluateParts): Segment is the group, offsets are in the group's joined text.
+	JoinedMasks []Match
+	groups      [][]int
 }
 
 // Matched reports whether any policy matched.
@@ -534,6 +538,16 @@ func (e *Engine) Redact(text string, profileIDs []string) string {
 	if e == nil || text == "" || len(profileIDs) == 0 {
 		return text
 	}
+	matches := e.recognise(text, profileIDs)
+	if len(matches) == 0 {
+		return text
+	}
+	return e.Mask([]string{text}, matches)[0]
+}
+
+// recognise returns what the given profiles recognise in text at their configured
+// confidence, as matches of segment 0.
+func (e *Engine) recognise(text string, profileIDs []string) []Match {
 	lower := asciiLower(text)
 	matches := []Match{}
 	for _, id := range profileIDs {
@@ -549,10 +563,240 @@ func (e *Engine) Redact(text string, profileIDs []string) string {
 			}
 		}
 	}
-	if len(matches) == 0 {
-		return text
+	return matches
+}
+
+// RedactParts is Redact over texts a model reads as one (the messages of a
+// request): each is redacted, and a value split between two of them is redacted
+// whole, its label in the part where it starts.
+func (e *Engine) RedactParts(parts []string, profileIDs []string) []string {
+	if e == nil || len(profileIDs) == 0 || len(parts) == 0 {
+		return parts
 	}
-	return e.Mask([]string{text}, matches)[0]
+	offsets := partOffsets(parts)
+	all := []Match{}
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		for _, m := range e.recognise(part, profileIDs) {
+			m.Start += offsets[i]
+			m.End += offsets[i]
+			all = append(all, m)
+		}
+	}
+	if len(parts) > 1 {
+		all = append(all, e.recognise(strings.Join(parts, ""), profileIDs)...)
+	}
+	if len(all) == 0 {
+		return parts
+	}
+	return e.MaskJoined(parts, all)
+}
+
+func partOffsets(parts []string) []int {
+	offsets := make([]int, len(parts))
+	total := 0
+	for i, part := range parts {
+		offsets[i] = total
+		total += len(part)
+	}
+	return offsets
+}
+
+// EvaluateParts is Evaluate for request text whose pieces a model reads as one:
+// the content parts of a message, and consecutive messages of one role (groups,
+// as segment indices in order). Each segment is read on its own, and each group is
+// also read joined; from the joined read only values that span a boundary between
+// two of its segments are added ("900101-" + "1234561"). A context word in one
+// piece does not raise a match in another, and nothing is joined across groups,
+// so text that is clean piece by piece is not blocked for what its neighbours say.
+// Mask what it decides with MaskParts.
+func (e *Engine) EvaluateParts(check Check, scope Scope, parts []string, groups [][]int) Decision {
+	decision := e.Evaluate(check, scope, parts)
+	decision.groups = groups
+	if len(groups) == 0 || len(e.Policies(check, scope)) == 0 {
+		return decision
+	}
+	for g, group := range groups {
+		texts := make([]string, 0, len(group))
+		for _, index := range group {
+			if index >= 0 && index < len(parts) {
+				texts = append(texts, parts[index])
+			}
+		}
+		if len(texts) < 2 || len(texts) != len(group) {
+			continue
+		}
+		offsets := partOffsets(texts)
+		spans := func(m Match) bool {
+			for _, at := range offsets[1:] {
+				if m.Start < at && m.End > at {
+					return true
+				}
+			}
+			return false
+		}
+		joined := e.Evaluate(check, scope, []string{strings.Join(texts, "")})
+		if !joined.Matched() {
+			continue
+		}
+		profiles := map[string]bool{}
+		for _, hit := range joined.Hits {
+			matches := []Match{}
+			for _, m := range hit.Matches {
+				if spans(m) {
+					m.Segment = g
+					matches = append(matches, m)
+				}
+			}
+			if len(matches) == 0 {
+				continue
+			}
+			profiles[hit.ProfileID] = true
+			merged := false
+			for i := range decision.Hits {
+				if decision.Hits[i].ProfileID == hit.ProfileID {
+					decision.Hits[i].Matches = append(decision.Hits[i].Matches, matches...)
+					merged = true
+				}
+			}
+			if !merged {
+				decision.Hits = append(decision.Hits, ProfileHit{ProfileID: hit.ProfileID, Matches: matches})
+			}
+		}
+		if len(profiles) == 0 {
+			continue
+		}
+		for _, m := range joined.MaskMatches {
+			if spans(m) {
+				m.Segment = g
+				decision.JoinedMasks = append(decision.JoinedMasks, m)
+			}
+		}
+		for _, p := range joined.Policies {
+			kept := []string{}
+			for _, id := range p.Profiles {
+				if profiles[id] {
+					kept = append(kept, id)
+				}
+			}
+			if len(kept) == 0 {
+				continue
+			}
+			decision.Action = Stronger(decision.Action, p.Action)
+			found := false
+			for i := range decision.Policies {
+				if decision.Policies[i].PolicyID == p.PolicyID {
+					found = true
+					for _, id := range kept {
+						if !containsString(decision.Policies[i].Profiles, id) {
+							decision.Policies[i].Profiles = append(decision.Policies[i].Profiles, id)
+						}
+					}
+				}
+			}
+			if !found {
+				decision.Policies = append(decision.Policies, PolicyHit{PolicyID: p.PolicyID, Action: p.Action, Profiles: kept})
+			}
+		}
+	}
+	return decision
+}
+
+// MaskParts applies a decision from EvaluateParts: values inside one part and
+// values split across the parts of a group are both replaced, each label where its
+// value starts.
+func (e *Engine) MaskParts(parts []string, decision Decision) []string {
+	out := e.Mask(parts, decision.MaskMatches)
+	if len(decision.JoinedMasks) == 0 {
+		return out
+	}
+	byGroup := map[int][]Match{}
+	for _, m := range decision.JoinedMasks {
+		byGroup[m.Segment] = append(byGroup[m.Segment], m)
+	}
+	for g, joined := range byGroup {
+		if g >= len(decision.groups) {
+			continue
+		}
+		group := decision.groups[g]
+		texts := make([]string, len(group))
+		position := map[int]int{}
+		for i, index := range group {
+			texts[i] = parts[index]
+			position[index] = i
+		}
+		offsets := partOffsets(texts)
+		all := append([]Match(nil), joined...)
+		for _, m := range decision.MaskMatches {
+			if i, ok := position[m.Segment]; ok {
+				m.Start += offsets[i]
+				m.End += offsets[i]
+				all = append(all, m)
+			}
+		}
+		for i, masked := range e.MaskJoined(texts, all) {
+			out[group[i]] = masked
+		}
+	}
+	return out
+}
+
+// Without drops from a decision what an earlier decision on the same side already
+// found (same entry, same value), and the policies left with nothing. A request
+// read again — after context was added, or on an agent's next turn — then records
+// and acts on what is new, not twice on what was already handled.
+func (d Decision) Without(earlier Decision) Decision {
+	known := map[[2]string]bool{}
+	for _, hit := range earlier.Hits {
+		for _, m := range hit.Matches {
+			known[[2]string{m.EntryID, m.value}] = true
+		}
+	}
+	isNew := func(m Match) bool { return !known[[2]string{m.EntryID, m.value}] }
+	out := Decision{Check: d.Check, Truncated: d.Truncated}
+	profiles := map[string]bool{}
+	for _, hit := range d.Hits {
+		matches := []Match{}
+		for _, m := range hit.Matches {
+			if isNew(m) {
+				matches = append(matches, m)
+			}
+		}
+		if len(matches) > 0 {
+			out.Hits = append(out.Hits, ProfileHit{ProfileID: hit.ProfileID, Matches: matches})
+			profiles[hit.ProfileID] = true
+		}
+	}
+	for _, m := range d.MaskMatches {
+		if isNew(m) {
+			out.MaskMatches = append(out.MaskMatches, m)
+		}
+	}
+	for _, m := range d.JoinedMasks {
+		if isNew(m) {
+			out.JoinedMasks = append(out.JoinedMasks, m)
+		}
+	}
+	for _, p := range d.Policies {
+		if p.PolicyID == "scan-limit" {
+			out.Policies = append(out.Policies, p)
+			out.Action = Stronger(out.Action, p.Action)
+			continue
+		}
+		kept := []string{}
+		for _, id := range p.Profiles {
+			if profiles[id] {
+				kept = append(kept, id)
+			}
+		}
+		if len(kept) > 0 {
+			out.Policies = append(out.Policies, PolicyHit{PolicyID: p.PolicyID, Action: p.Action, Profiles: kept})
+			out.Action = Stronger(out.Action, p.Action)
+		}
+	}
+	return out
 }
 
 // RedactJSON is Redact over the content strings of a JSON document, keeping it a
@@ -562,16 +806,17 @@ func (e *Engine) RedactJSON(body string, profileIDs []string) string {
 	if !ok {
 		return e.Redact(body, profileIDs)
 	}
+	redacted := e.RedactParts(segments, profileIDs)
 	changed := false
-	for i, segment := range segments {
-		if redacted := e.Redact(segment, profileIDs); redacted != segment {
-			segments[i], changed = redacted, true
+	for i := range segments {
+		if redacted[i] != segments[i] {
+			changed = true
 		}
 	}
 	if !changed {
 		return body
 	}
-	rewritten, err := RewriteJSONSegments([]byte(body), segments)
+	rewritten, err := RewriteJSONSegments([]byte(body), redacted)
 	if err != nil {
 		return e.Redact(body, profileIDs)
 	}

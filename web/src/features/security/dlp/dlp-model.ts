@@ -170,7 +170,7 @@ export function readinessNotes(config: DLPConfig): { tone: "info" | "warning"; t
   if (enabled.some((policy) => policy.check.includes("RESPONSE"))) {
     notes.push({
       tone: "info",
-      text: "응답 검사 정책이 있어 스트리밍 응답은 끝까지 받은 뒤 검사하고 전달합니다. 첫 토큰이 늦어질 수 있습니다.",
+      text: "응답 검사 정책이 있어 스트리밍 응답은 끝까지 받은 뒤 검사하고 전달합니다. 첫 토큰이 늦어지며, 10초가 넘으면 연결이 끊기지 않도록 유지 신호를 보냅니다.",
     });
   }
   if (config.oversize === "allow") {

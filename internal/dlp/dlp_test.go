@@ -494,3 +494,79 @@ func TestContextWordsIgnoreCaseBeyondASCII(t *testing.T) {
 		}
 	}
 }
+
+func TestPartsAreAlsoReadJoined(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Enabled = true
+	cfg.Policies = []Policy{
+		{ID: "block-ids", Enabled: true, Action: ActionBlock, Profiles: []string{"government"}, Check: []Check{CheckRequest}},
+		{ID: "mask-pii", Enabled: true, Action: ActionMask, Profiles: []string{"pii"}, Check: []Check{CheckRequest}},
+		{ID: "flag-money", Enabled: true, Action: ActionFlag, Profiles: []string{"financial"}, Check: []Check{CheckRequest}},
+	}
+	engine := mustEngine(t, cfg)
+
+	split := []string{"주민번호 900101-", "1234561 확인"}
+	if d := engine.Evaluate(CheckRequest, Scope{}, split); d.Action == ActionBlock {
+		t.Fatal("precondition: each part alone holds no registration number")
+	}
+	pair := [][]int{{0, 1}}
+	if d := engine.EvaluateParts(CheckRequest, Scope{}, split, pair); d.Action != ActionBlock {
+		t.Fatalf("a value split across parts is found: %+v", d)
+	}
+
+	mail := []string{"메일 kim.min", "su@exam", "ple.com 입니다"}
+	d := engine.EvaluateParts(CheckRequest, Scope{}, mail, [][]int{{0, 1, 2}})
+	if d.Action != ActionMask {
+		t.Fatalf("split email: %+v", d)
+	}
+	if got := engine.MaskParts(mail, d); strings.Join(got, "|") != "메일 [REDACTED_EMAIL]|| 입니다" {
+		t.Fatalf("masked whole, label where it starts: %q", got)
+	}
+
+	// Only values that span a boundary come from the joined read: a context word in
+	// one piece does not make a number in the next one sensitive, and text that is
+	// clean piece by piece stays clean (these once blocked ordinary requests).
+	for _, clean := range [][]string{
+		{"입금 계좌", "110-123-456789"},
+		{"당신은 여권 발급 안내 챗봇입니다.", "예약번호 S1234567 확인해 주세요"},
+		{"고객 송금 문의 응대 봇입니다.", "주문번호 123-456-789012 배송 언제?"},
+	} {
+		if d := engine.EvaluateParts(CheckRequest, Scope{}, clean, pair); d.Matched() {
+			t.Fatalf("clean pieces %q: %+v", clean, d)
+		}
+	}
+	// Nothing is joined outside the given groups.
+	if d := engine.EvaluateParts(CheckRequest, Scope{}, split, nil); d.Action == ActionBlock {
+		t.Fatalf("no groups, no joining: %+v", d)
+	}
+
+	// Values inside single parts are counted once, not again from the joined read.
+	once := engine.EvaluateParts(CheckRequest, Scope{}, []string{"메일 a@example.com", "다른 b@example.com"}, pair)
+	hit, _ := ScanResult{Hits: once.Hits}.Hit("pii")
+	if len(hit.Matches) != 2 || len(once.JoinedMasks) != 0 {
+		t.Fatalf("no double counting: %+v", once)
+	}
+	if got := engine.MaskParts([]string{"메일 a@example.com", "다른 b@example.com"}, once); got[0] != "메일 [REDACTED_EMAIL]" || got[1] != "다른 [REDACTED_EMAIL]" {
+		t.Fatalf("per-part masking unchanged: %q", got)
+	}
+
+	if got := engine.RedactParts([]string{"연락처 010-1234-", "5678 입니다"}, []string{"pii"}); strings.Contains(strings.Join(got, ""), "1234") || strings.Contains(got[1], "5678") {
+		t.Fatalf("stored halves of a split value: %q", got)
+	}
+}
+
+func TestWithoutKeepsOnlyNewFindings(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Enabled = true
+	cfg.Policies = []Policy{{ID: "flag-pii", Enabled: true, Action: ActionFlag, Profiles: []string{"pii"}, Check: []Check{CheckRequest}}}
+	engine := mustEngine(t, cfg)
+	first := engine.EvaluateParts(CheckRequest, Scope{}, []string{"메일 a@example.com"}, nil)
+	again := engine.EvaluateParts(CheckRequest, Scope{}, []string{"메일 a@example.com", "도구 결과 b@example.com"}, nil)
+	fresh := again.Without(first)
+	if fresh.Action != ActionFlag || len(fresh.Hits) != 1 || len(fresh.Hits[0].Matches) != 1 || fresh.Hits[0].Matches[0].Preview() != partialMask("b@example.com") {
+		t.Fatalf("only the tool result's address is new: %+v", fresh)
+	}
+	if same := engine.EvaluateParts(CheckRequest, Scope{}, []string{"메일 a@example.com"}, nil).Without(first); same.Matched() {
+		t.Fatalf("nothing new: %+v", same)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,6 +93,9 @@ type dlpState struct {
 	inspectResponse bool
 	request         dlp.Decision
 	response        dlp.Decision
+	// checkedBody is the request body as the request check left it; a later step
+	// that changes the body (knowledge or context expansion) is inspected again.
+	checkedBody []byte
 }
 
 func dlpInspectablePath(r *http.Request) bool {
@@ -124,6 +129,10 @@ func (rc *requestPipeline) stepDLP() bool {
 	// Embedding responses are vectors; there is no text to inspect.
 	state.inspectResponse = r.URL.Path != "/v1/embeddings" && len(engine.Policies(dlp.CheckResponse, scope)) > 0
 	rc.dlpState = state
+	if state.inspectResponse {
+		// A held stream may need to start early (see dlpStreamWriter).
+		rc.w = &dlpStreamWriter{ResponseWriter: rc.w, path: r.URL.Path}
+	}
 	if len(engine.Policies(dlp.CheckRequest, scope)) == 0 {
 		return true
 	}
@@ -140,7 +149,7 @@ func (rc *requestPipeline) stepDLP() bool {
 		return false
 	}
 	segments, isJSON := textSegments(rc.body)
-	decision := evaluateSafely(engine, dlp.CheckRequest, scope, segments)
+	decision := evaluatePartsSafely(engine, dlp.CheckRequest, scope, segments, requestGroups(rc.body))
 	state.request = decision
 	if decision.Matched() {
 		s.metrics.IncDLP(string(dlp.CheckRequest), string(decision.Action))
@@ -151,7 +160,7 @@ func (rc *requestPipeline) stepDLP() bool {
 		writeOpenAIError(w, http.StatusBadRequest, "Request content blocked due to DLP policy violations", "invalid_request_error", "dlp_request_blocked")
 		return false
 	case dlp.ActionMask:
-		masked := engine.Mask(segments, decision.MaskMatches)
+		masked := engine.MaskParts(segments, decision)
 		if isJSON {
 			rewritten, err := dlp.RewriteJSONSegments(rc.body, masked)
 			if err != nil {
@@ -165,6 +174,46 @@ func (rc *requestPipeline) stepDLP() bool {
 			rc.body = []byte(strings.Join(masked, ""))
 		}
 	}
+	state.checkedBody = rc.body
+	return true
+}
+
+// recheckDLP reads the request again when a step after the DLP step changed it —
+// knowledge expansion ({{kb:}}, X-Vibe-Knowledge) and X-Vibe-Context add text the
+// caller never sent — so what was added is under the same request policies. What
+// the first check already found is not counted again.
+func (rc *requestPipeline) recheckDLP() bool {
+	state := rc.dlpState
+	if state == nil || state.checkedBody == nil || rc.body == nil || bytes.Equal(rc.body, state.checkedBody) {
+		return true
+	}
+	segments, isJSON := textSegments(rc.body)
+	// Masking and blocking apply to everything found; only what the first check did
+	// not already record is counted again.
+	full := evaluatePartsSafely(state.engine, dlp.CheckRequest, state.scope, segments, requestGroups(rc.body))
+	state.checkedBody = rc.body
+	if fresh := full.Without(state.request); fresh.Matched() {
+		rc.s.metrics.IncDLP(string(dlp.CheckRequest), string(fresh.Action))
+		mergeDecision(&state.request, fresh)
+		rc.setDLPHeaders()
+	}
+	switch full.Action {
+	case dlp.ActionBlock:
+		rc.setDLPHeaders()
+		writeOpenAIError(rc.w, http.StatusBadRequest, "Request content blocked due to DLP policy violations in content the gateway added (knowledge or context)", "invalid_request_error", "dlp_request_blocked")
+		return false
+	case dlp.ActionMask:
+		masked := state.engine.MaskParts(segments, full)
+		if !isJSON {
+			rc.body = []byte(strings.Join(masked, ""))
+		} else if rewritten, err := dlp.RewriteJSONSegments(rc.body, masked); err == nil {
+			rc.body = rewritten
+		} else {
+			writeOpenAIError(rc.w, http.StatusBadRequest, "Request content blocked due to DLP policy violations", "invalid_request_error", "dlp_request_blocked")
+			return false
+		}
+		state.checkedBody = rc.body
+	}
 	return true
 }
 
@@ -176,6 +225,78 @@ func (rc *requestPipeline) setDLPHeaders() {
 		rc.w.Header().Set("X-Vibe-DLP", value)
 		rc.w.Header().Set("Cf-Aig-Dlp", value)
 	}
+}
+
+// evaluatePartsSafely is evaluateSafely for request text, whose parts and messages
+// the model reads as one (see dlp.Engine.EvaluateParts).
+func evaluatePartsSafely(engine *dlp.Engine, check dlp.Check, scope dlp.Scope, segments []string, groups [][]int) (decision dlp.Decision) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("dlp inspection failed; blocking", "check", check, "panic", p)
+			decision = dlp.Decision{Check: check, Action: dlp.ActionBlock, Policies: []dlp.PolicyHit{{PolicyID: "inspection-error", Action: dlp.ActionBlock, Profiles: []string{}}}}
+		}
+	}()
+	return engine.EvaluateParts(check, scope, segments, groups)
+}
+
+var messageContentPath = regexp.MustCompile(`^\.(messages|input)\[(\d+)\]\.content(?:\[\d+\]\.text)?$`)
+
+// requestGroups finds which content strings of a request body a model reads as
+// one text: the parts of one message, and consecutive messages of the same role
+// (a chat client that sends a long paste as several user messages). Groups are
+// segment indices in the order JSONSegments returns them.
+func requestGroups(body []byte) [][]int {
+	strs, ok := dlp.JSONPathStrings(body)
+	if !ok {
+		return nil
+	}
+	var roles struct {
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+		Input json.RawMessage `json:"input"`
+	}
+	_ = json.Unmarshal(body, &roles)
+	inputRoles := []struct {
+		Role string `json:"role"`
+	}{}
+	_ = json.Unmarshal(roles.Input, &inputRoles)
+	roleOf := func(list string, index int) string {
+		if list == "messages" && index < len(roles.Messages) {
+			return roles.Messages[index].Role
+		}
+		if list == "input" && index < len(inputRoles) {
+			return inputRoles[index].Role
+		}
+		return ""
+	}
+	groups := [][]int{}
+	current := []int{}
+	lastList, lastRole, lastIndex := "", "", -1
+	flush := func() {
+		if len(current) > 1 {
+			groups = append(groups, current)
+		}
+		current = []int{}
+	}
+	for i, ps := range strs {
+		m := messageContentPath.FindStringSubmatch(ps.Path)
+		if m == nil {
+			flush()
+			lastList, lastIndex = "", -1
+			continue
+		}
+		index, _ := strconv.Atoi(m[2])
+		role := roleOf(m[1], index)
+		continues := len(current) > 0 && m[1] == lastList && role != "" && role == lastRole && (index == lastIndex || index == lastIndex+1)
+		if !continues {
+			flush()
+		}
+		current = append(current, i)
+		lastList, lastRole, lastIndex = m[1], role, index
+	}
+	flush()
+	return groups
 }
 
 // evaluateSafely decides and fails closed: an inspection that panics blocks instead
@@ -233,11 +354,12 @@ func readSSE(body []byte) *sseStream {
 		}
 		ev := sseEvent{line: i, payload: payload}
 		for j, ps := range strs {
-			k, seen := keyIndex[ps.Path]
+			path := streamKey(ps.Path)
+			k, seen := keyIndex[path]
 			if !seen {
 				k = len(st.keys)
-				keyIndex[ps.Path] = k
-				st.keys = append(st.keys, ps.Path)
+				keyIndex[path] = k
+				st.keys = append(st.keys, path)
 				st.pieces = append(st.pieces, nil)
 			}
 			st.pieces[k] = append(st.pieces[k], sseRef{event: len(st.events), index: j})
@@ -246,6 +368,19 @@ func readSSE(body []byte) *sseStream {
 		st.events = append(st.events, ev)
 	}
 	return st
+}
+
+// streamKey joins pieces the client joins although they arrive under different
+// event types: an Anthropic-style content block may carry text in its
+// content_block_start and continue it in content_block_delta events.
+func streamKey(path string) string {
+	for _, kind := range []string{"type=content_block_start;", "type=content_block_delta;"} {
+		if strings.Contains(path, kind) {
+			path = strings.Replace(path, kind, "", 1)
+			return strings.Replace(path, ".content_block.", ".delta.", 1)
+		}
+	}
+	return path
 }
 
 // texts joins each key's pieces: the answer as the client assembles it, choice by
@@ -335,7 +470,7 @@ func (rc *requestPipeline) inspectDLPResponse(resp *http.Response) (*http.Respon
 	if state == nil || !state.inspectResponse || resp.StatusCode < 200 || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotModified {
 		return resp, dlpRelay
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, dlpResponseBufferLimit+1))
+	raw, err := rc.readHeld(io.LimitReader(resp.Body, dlpResponseBufferLimit+1), strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "event-stream"))
 	if err != nil {
 		_ = resp.Body.Close()
 		return resp, dlpReadFailed
@@ -590,9 +725,16 @@ func redactDLPLog(state *dlpState, meta *store.LogRecord) {
 		}
 	}()
 	engine := state.engine
+	// The messages are redacted together, so a value split between two of them is
+	// not stored in two harmless-looking halves.
+	redacted := make([]string, len(meta.Prompts))
+	content := make([]string, len(meta.Prompts))
+	for i, prompt := range meta.Prompts {
+		redacted[i], content[i] = prompt.RedactedText, prompt.ContentText
+	}
+	redacted, content = engine.RedactParts(redacted, profiles), engine.RedactParts(content, profiles)
 	for i := range meta.Prompts {
-		meta.Prompts[i].RedactedText = engine.Redact(meta.Prompts[i].RedactedText, profiles)
-		meta.Prompts[i].ContentText = engine.Redact(meta.Prompts[i].ContentText, profiles)
+		meta.Prompts[i].RedactedText, meta.Prompts[i].ContentText = redacted[i], content[i]
 	}
 	if meta.Request.BodyRaw != "" {
 		meta.Request.BodyRaw = engine.RedactJSON(meta.Request.BodyRaw, profiles)
@@ -638,6 +780,7 @@ type dlpBuffer struct {
 	status   int
 	body     bytes.Buffer
 	overflow bool
+	failed   bool
 }
 
 func (b *dlpBuffer) Header() http.Header { return b.header }
@@ -692,7 +835,7 @@ func (rc *requestPipeline) serveUnderDLP(serve func(w http.ResponseWriter, r *ht
 		mu.Unlock()
 		for _, record := range records {
 			if blocked {
-				record.Request.StatusCode = http.StatusBadRequest
+				record.Request.StatusCode = rc.dlpSentStatus(http.StatusBadRequest)
 				record.Request.Error = "dlp_response_blocked"
 			}
 			rc.attachDLP(&record)
@@ -705,14 +848,32 @@ func (rc *requestPipeline) serveUnderDLP(serve func(w http.ResponseWriter, r *ht
 		return
 	}
 	buf := &dlpBuffer{header: http.Header{}}
-	serve(buf, r)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			// The handler runs off the request goroutine; a panic must not take the
+			// server down. Nothing it wrote is sent.
+			if p := recover(); p != nil {
+				slog.Error("handler under DLP failed", "panic", p)
+				buf.failed = true
+			}
+		}()
+		serve(buf, r)
+	}()
+	rc.waitHeld(done, requestStreams(rc.body))
 	if buf.status == 0 {
 		buf.status = http.StatusOK
+	}
+	if buf.failed {
+		finish(false)
+		rc.writeDLPError(http.StatusInternalServerError, "the answer could not be produced", "server_error", "internal_error")
+		return
 	}
 	if buf.overflow {
 		// More than DLP can hold: nothing of it is sent unread.
 		finish(true)
-		writeOpenAIError(rc.w, http.StatusBadGateway, "the answer is too large to inspect", "server_error", "dlp_response_too_large")
+		rc.writeDLPError(http.StatusBadGateway, "the answer is too large to inspect", "server_error", "dlp_response_too_large")
 		return
 	}
 	resp := &http.Response{StatusCode: buf.status, Header: buf.header, Body: io.NopCloser(bytes.NewReader(buf.body.Bytes()))}
@@ -728,12 +889,98 @@ func (rc *requestPipeline) serveUnderDLP(serve func(w http.ResponseWriter, r *ht
 	rc.setDLPHeaders()
 	if outcome != dlpRelay {
 		finish(true)
-		writeOpenAIError(rc.w, http.StatusBadRequest, "Response content blocked due to DLP policy violations", "invalid_request_error", "dlp_response_blocked")
+		rc.writeDLPError(http.StatusBadRequest, "Response content blocked due to DLP policy violations", "invalid_request_error", "dlp_response_blocked")
 		return
 	}
 	finish(false)
+	if rc.dlpStreamStarted() {
+		// The client was promised a stream; a handler that answered in JSON (Text2SQL
+		// always does) or with an error is turned into stream events.
+		answer, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			message, kind, code := errorFields(answer)
+			rc.writeDLPError(resp.StatusCode, message, kind, code)
+			return
+		}
+		if !isEventStream(answer, resp.Header.Get("Content-Type")) {
+			if converted, ok := completionAsStream(answer); ok {
+				answer = converted
+			}
+		}
+		_, _ = rc.w.Write(answer)
+		return
+	}
 	rc.w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(rc.w, resp.Body)
+}
+
+// errorFields reads an OpenAI-shaped error body.
+func errorFields(body []byte) (message, kind, code string) {
+	var parsed struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    any    `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &parsed)
+	message, kind = parsed.Error.Message, parsed.Error.Type
+	if c, ok := parsed.Error.Code.(string); ok {
+		code = c
+	}
+	if message == "" {
+		message = "the answer could not be produced"
+	}
+	if kind == "" {
+		kind = "server_error"
+	}
+	if code == "" {
+		code = "upstream_error"
+	}
+	return message, kind, code
+}
+
+// completionAsStream turns a chat.completion JSON answer into the stream a client
+// that asked for one expects: one chunk per choice with the whole message, a usage
+// chunk when there is usage, then [DONE].
+func completionAsStream(body []byte) ([]byte, bool) {
+	var completion struct {
+		ID      string `json:"id"`
+		Created int64  `json:"created"`
+		Model   string `json:"model"`
+		Choices []struct {
+			Index        int             `json:"index"`
+			Message      json.RawMessage `json:"message"`
+			FinishReason any             `json:"finish_reason"`
+		} `json:"choices"`
+		Usage json.RawMessage `json:"usage"`
+	}
+	if json.Unmarshal(body, &completion) != nil || len(completion.Choices) == 0 {
+		return nil, false
+	}
+	var out bytes.Buffer
+	emit := func(chunk map[string]any) {
+		encoded, _ := json.Marshal(chunk)
+		out.WriteString("data: ")
+		out.Write(encoded)
+		out.WriteString("\n\n")
+	}
+	base := func() map[string]any {
+		return map[string]any{"id": completion.ID, "object": "chat.completion.chunk", "created": completion.Created, "model": completion.Model}
+	}
+	for _, choice := range completion.Choices {
+		chunk := base()
+		chunk["choices"] = []any{map[string]any{"index": choice.Index, "delta": choice.Message, "finish_reason": choice.FinishReason}}
+		emit(chunk)
+	}
+	if len(completion.Usage) > 0 && string(completion.Usage) != "null" {
+		chunk := base()
+		chunk["choices"] = []any{}
+		chunk["usage"] = completion.Usage
+		emit(chunk)
+	}
+	out.WriteString("data: [DONE]\n\n")
+	return out.Bytes(), true
 }
 
 type dlpOutboundKey struct{}
@@ -757,17 +1004,19 @@ func (rc *requestPipeline) dlpOutbound(body []byte) ([]byte, error) {
 		return body, nil
 	}
 	segments, isJSON := textSegments(body)
-	decision := evaluateSafely(state.engine, dlp.CheckRequest, state.scope, segments)
-	if !decision.Matched() {
-		return body, nil
+	// Each turn resends the conversation, tool results included, as the loop keeps
+	// it (unmasked). Masking and blocking apply to all of it every time; only what is
+	// new is recorded.
+	full := evaluatePartsSafely(state.engine, dlp.CheckRequest, state.scope, segments, requestGroups(body))
+	if fresh := full.Without(state.request); fresh.Matched() {
+		rc.s.metrics.IncDLP(string(dlp.CheckRequest), string(fresh.Action))
+		mergeDecision(&state.request, fresh)
 	}
-	rc.s.metrics.IncDLP(string(dlp.CheckRequest), string(decision.Action))
-	mergeDecision(&state.request, decision)
-	switch decision.Action {
+	switch full.Action {
 	case dlp.ActionBlock:
 		return nil, errDLPOutboundBlocked
 	case dlp.ActionMask:
-		masked := state.engine.Mask(segments, decision.MaskMatches)
+		masked := state.engine.MaskParts(segments, full)
 		if !isJSON {
 			return []byte(strings.Join(masked, "")), nil
 		}
@@ -797,4 +1046,151 @@ func mergeDecision(dst *dlp.Decision, src dlp.Decision) {
 		}
 	}
 	dst.Truncated = dst.Truncated || src.Truncated
+}
+
+// dlpKeepaliveEvery is how long a held stream goes without output before the
+// client is sent the stream's start and a comment line, and how often the comment
+// repeats while the answer is still being read.
+const dlpKeepaliveEvery = 10 * time.Second
+
+// dlpStreamWriter lets a held stream start early. Response inspection holds a
+// whole streamed answer before sending any of it; a long answer (a reasoning
+// model, an agent run with many tool calls) would otherwise send nothing for
+// minutes and be cut off by client or proxy idle timeouts. Once started, the status
+// (200) and stream headers are out, comment lines (": ...") keep the connection
+// busy and are ignored by SSE clients, later WriteHeader calls are ignored, the
+// DLP result follows as trailers, and a block becomes an error event in the stream.
+type dlpStreamWriter struct {
+	http.ResponseWriter
+	path    string
+	started bool
+}
+
+func (w *dlpStreamWriter) WriteHeader(code int) {
+	if w.started {
+		return
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *dlpStreamWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *dlpStreamWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *dlpStreamWriter) start(requestID string) {
+	h := w.Header()
+	if requestID != "" {
+		h.Set("X-Request-ID", requestID)
+	}
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Accel-Buffering", "no")
+	h.Del("Content-Length")
+	// The DLP result is known only at the end: it goes out as trailers.
+	h.Del("X-Vibe-DLP")
+	h.Del("Cf-Aig-Dlp")
+	h.Del("X-Vibe-DLP-Response")
+	h.Set("Trailer", "X-Vibe-DLP, Cf-Aig-Dlp, X-Vibe-DLP-Response")
+	h.Set("X-Vibe-DLP-Stream", "held")
+	w.ResponseWriter.WriteHeader(http.StatusOK)
+	w.started = true
+}
+
+func (w *dlpStreamWriter) heartbeat() {
+	_, _ = io.WriteString(w.ResponseWriter, ": vibe-dlp: inspecting the answer before it is sent\n\n")
+	w.Flush()
+}
+
+func (s *Server) dlpKeepaliveInterval() time.Duration {
+	if s.dlpKeepalive > 0 {
+		return s.dlpKeepalive
+	}
+	return dlpKeepaliveEvery
+}
+
+// waitHeld waits for a held answer, starting the stream early and sending comment
+// lines while it takes long, when the client asked for a stream.
+func (rc *requestPipeline) waitHeld(done <-chan struct{}, stream bool) {
+	sw, _ := rc.w.(*dlpStreamWriter)
+	if !stream || sw == nil {
+		<-done
+		return
+	}
+	ticker := time.NewTicker(rc.s.dlpKeepaliveInterval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			if !sw.started {
+				sw.start(rc.traceID)
+			}
+			sw.heartbeat()
+		}
+	}
+}
+
+// readHeld reads a held answer; see waitHeld.
+func (rc *requestPipeline) readHeld(r io.Reader, stream bool) ([]byte, error) {
+	var data []byte
+	var err error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		data, err = io.ReadAll(r)
+	}()
+	rc.waitHeld(done, stream)
+	return data, err
+}
+
+// dlpStreamStarted reports whether a held stream already sent its start.
+func (rc *requestPipeline) dlpStreamStarted() bool {
+	sw, ok := rc.w.(*dlpStreamWriter)
+	return ok && sw.started
+}
+
+// dlpSentStatus is the status the client actually received: once a held stream
+// has started, that was 200 whatever happens after.
+func (rc *requestPipeline) dlpSentStatus(status int) int {
+	if rc.dlpStreamStarted() {
+		return http.StatusOK
+	}
+	return status
+}
+
+// writeDLPError reports an error, as an error event when the stream has started:
+// OpenAI's {"error":{...}} data line followed by [DONE], or Anthropic's error event
+// on /v1/messages. SDKs raise both as API errors.
+func (rc *requestPipeline) writeDLPError(status int, message, kind, code string) {
+	sw, ok := rc.w.(*dlpStreamWriter)
+	if !ok || !sw.started {
+		writeOpenAIError(rc.w, status, message, kind, code)
+		return
+	}
+	var event string
+	if strings.HasPrefix(sw.path, "/v1/responses") {
+		payload, _ := json.Marshal(map[string]any{"type": "error", "code": code, "message": message, "param": nil})
+		event = "event: error\ndata: " + string(payload) + "\n\n"
+	} else if strings.HasPrefix(sw.path, "/v1/messages") {
+		payload, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]any{"type": kind, "message": message, "code": code}})
+		event = "event: error\ndata: " + string(payload) + "\n\n"
+	} else {
+		payload, _ := json.Marshal(map[string]any{"error": map[string]any{"message": message, "type": kind, "code": code, "param": nil}})
+		event = "data: " + string(payload) + "\n\ndata: [DONE]\n\n"
+	}
+	_, _ = io.WriteString(sw.ResponseWriter, event)
+	sw.Flush()
+}
+
+// requestStreams reports whether a request asked for a streamed answer.
+func requestStreams(body []byte) bool {
+	var request struct {
+		Stream bool `json:"stream"`
+	}
+	return json.Unmarshal(body, &request) == nil && request.Stream
 }

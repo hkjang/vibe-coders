@@ -525,6 +525,9 @@ func (rc *requestPipeline) stepCost() bool {
 // applies provider-phase governance, dials the upstream with failover, relays the
 // response (streaming or buffered), and enqueues the finalized audit record.
 func (rc *requestPipeline) stepUpstream() bool {
+	if !rc.recheckDLP() {
+		return false
+	}
 	s, r, w := rc.s, rc.r, rc.w
 	meta := rc.meta
 	body := rc.body
@@ -794,14 +797,14 @@ func (rc *requestPipeline) stepUpstream() bool {
 			if resolvedName != "" {
 				meta.Request.Provider = resolvedName
 			}
-			meta.Request.StatusCode = http.StatusBadGateway
+			meta.Request.StatusCode = rc.dlpSentStatus(http.StatusBadGateway)
 			meta.Request.LatencyMS = time.Since(start).Milliseconds()
 			meta.Request.Error = "upstream_read_failed"
 			refreshRoutingSummary(&meta.Request, routingPlan)
 			rc.attachDynamicRoute(&meta)
 			rc.attachDLP(&meta)
 			s.enqueue(meta)
-			writeOpenAIError(w, http.StatusBadGateway, "upstream response could not be read", "server_error", "upstream_read_failed")
+			rc.writeDLPError(http.StatusBadGateway, "upstream response could not be read", "server_error", "upstream_read_failed")
 			return false
 		}
 		if rc.dlpState.response.Matched() {
@@ -816,14 +819,14 @@ func (rc *requestPipeline) stepUpstream() bool {
 			if resolvedName != "" {
 				meta.Request.Provider = resolvedName
 			}
-			meta.Request.StatusCode = http.StatusBadRequest
+			meta.Request.StatusCode = rc.dlpSentStatus(http.StatusBadRequest)
 			meta.Request.LatencyMS = time.Since(start).Milliseconds()
 			meta.Request.Error = "dlp_response_blocked"
 			refreshRoutingSummary(&meta.Request, routingPlan)
 			rc.attachDynamicRoute(&meta)
 			rc.attachDLP(&meta)
 			s.enqueue(meta)
-			writeOpenAIError(w, http.StatusBadRequest, "Response content blocked due to DLP policy violations", "invalid_request_error", "dlp_response_blocked")
+			rc.writeDLPError(http.StatusBadRequest, "Response content blocked due to DLP policy violations", "invalid_request_error", "dlp_response_blocked")
 			return false
 		}
 	}
