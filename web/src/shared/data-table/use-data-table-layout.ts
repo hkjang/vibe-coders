@@ -77,7 +77,11 @@ const initialScrollState: DataTableScrollState = {
   overflowing: false,
 };
 
-export function dataTableColumnLabel(column: { columnDef: { header?: unknown }; id: string }): string {
+export function dataTableColumnLabel(column: {
+  columnDef: { header?: unknown; meta?: Record<string, unknown> };
+  id: string;
+}): string {
+  if (typeof column.columnDef.meta?.label === "string") return column.columnDef.meta.label;
   return typeof column.columnDef.header === "string" ? column.columnDef.header : column.id;
 }
 

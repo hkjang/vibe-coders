@@ -7,11 +7,13 @@ export function XViewLiveStatus({
   live,
   scatter,
   fixedEnd,
+  tableBrowsing = false,
 }: {
   state: ReturnType<typeof useXViewLive>;
   live: boolean;
   scatter: boolean;
   fixedEnd: boolean;
+  tableBrowsing?: boolean;
 }) {
   let message = "약 1.5초 간격으로 새 요청을 조회합니다.";
   if (!live) message = "실시간 꺼짐";
@@ -24,6 +26,7 @@ export function XViewLiveStatus({
   else if (state.snapshotFetching) message = "요청 목록의 새 응답을 기다리고 있습니다.";
   else if (state.snapshotInvalidated)
     message = "요청 목록 재조회가 필요해 자동 조회를 멈췄습니다. 지금 새로고침으로 다시 확인하세요.";
+  else if (tableBrowsing) message = "표를 탐색하는 동안 자동 갱신을 멈췄습니다. 표를 닫으면 다시 갱신합니다.";
   else if (state.paused) message = "탭이 가려져 실시간 갱신을 멈췄습니다.";
   else if (state.status === "retrying") message = "조회 실패로 재시도를 기다리고 있습니다.";
   else if (state.status === "catching-up") message = "남은 요청을 이어서 조회하고 있습니다.";

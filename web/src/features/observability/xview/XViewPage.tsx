@@ -207,7 +207,8 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
 
   const [draft, setDraft] = useState({ from, to, models, endpoint });
   const [filterError, setFilterError] = useState<string>();
-  const live_ = useXViewLive(filters, live && tab === "scatter", readOwner);
+  const [tableBrowsing, setTableBrowsing] = useState(false);
+  const live_ = useXViewLive(filters, live && tab === "scatter" && !tableBrowsing, readOwner);
   const displayOwner = useMemo(
     () => ({ readOwner, retirement: live_.denialBoundary }),
     [readOwner, live_.denialBoundary],
@@ -275,14 +276,15 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
         timeZone={timeZone}
         viewMode={viewMode}
         onToggleCategory={toggleCategory}
-        onSelect={(points) => {
+        onTableOpenChange={setTableBrowsing}
+        onSelect={(points, trigger) => {
           // One request goes straight to what it said; several are compared in a list.
           if (points.length === 1 && points[0]) {
-            ioFocusRef.current = refreshFocusRef.current;
+            ioFocusRef.current = trigger ?? refreshFocusRef.current;
             setIo({ owner: displayOwner, id: points[0].request_id });
             return;
           }
-          selectionFocusRef.current = refreshFocusRef.current;
+          selectionFocusRef.current = trigger ?? refreshFocusRef.current;
           setSelectionLimit(selectionPageSize);
           setSelected({ owner: displayOwner, points });
         }}
@@ -417,7 +419,13 @@ function XViewPageContent({ readOwner }: { readOwner: XViewReadOwner }): React.J
         }
       />
 
-      <XViewLiveStatus state={live_} live={live} scatter={tab === "scatter"} fixedEnd={Boolean(to)} />
+      <XViewLiveStatus
+        state={live_}
+        live={live}
+        scatter={tab === "scatter"}
+        fixedEnd={Boolean(to)}
+        tableBrowsing={tableBrowsing}
+      />
 
       <section className="xview-controls" aria-label="XView 조회 조건">
         <Toolbar label="XView 표시 설정">

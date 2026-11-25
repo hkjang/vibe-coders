@@ -1,7 +1,8 @@
-import { useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   formatTimeTick,
+  formatScatterMetric,
   metricValue,
   nearestPlottedPoint,
   percentile,
@@ -17,14 +18,18 @@ import {
   type ScatterViewMode,
 } from "@/features/observability/xview/scatter-model";
 import type { ScatterPoint } from "@/shared/api/domains/observability.schemas";
-import { Button } from "@/shared/components/ui/Button";
-import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
+import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
+
+const ScatterRequestTable = lazy(() =>
+  import("./ScatterRequestTable").then((module) => ({ default: module.ScatterRequestTable })),
+);
 
 interface ScatterPlotProps {
   /** Requests whose category is hidden stay in the data but off the plot and out of a drag. */
   hiddenCategories: ReadonlySet<ScatterCategory>;
   metric: ScatterMetric;
-  onSelect: (points: ReadonlyArray<ScatterPoint>) => void;
+  onSelect: (points: ReadonlyArray<ScatterPoint>, trigger?: HTMLElement) => void;
+  onTableOpenChange?: (open: boolean) => void;
   onToggleCategory: (category: ScatterCategory) => void;
   points: ReadonlyArray<ScatterPoint>;
   scale: ScatterScale;
@@ -59,15 +64,6 @@ const categoryMarkers: Record<ScatterCategory, Marker> = {
 const modelColorVars = ["--obs-series-1", "--obs-series-2", "--obs-series-3"] as const;
 const otherModelColor = "var(--obs-series-other)";
 
-/** Row cap for the accessible table alternative; the plot itself holds up to 6,000 points. */
-const tableRowCap = 200;
-
-function formatMetric(metric: ScatterMetric, value: number): string {
-  if (metric === "cost") return formatKRW(value);
-  if (metric === "latency" || metric === "first_chunk") return formatDuration(value);
-  return formatNumber(value, value > 0 && value < 1 ? 3 : 0);
-}
-
 function markerPath(shape: Marker["shape"], cx: number, cy: number, size: number): string {
   const half = size / 2;
   if (shape === "circle")
@@ -87,6 +83,7 @@ export function ScatterPlot({
   hiddenCategories,
   metric,
   onSelect,
+  onTableOpenChange,
   onToggleCategory,
   points,
   scale,
@@ -95,6 +92,8 @@ export function ScatterPlot({
   viewMode,
 }: ScatterPlotProps): React.JSX.Element {
   const titleId = useId();
+  const [tableOpen, setTableOpen] = useState(false);
+  useEffect(() => () => onTableOpenChange?.(false), [onTableOpenChange]);
   const svgRef = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<{ x1: number; y1: number; x2: number; y2: number }>();
   const [hover, setHover] = useState<PlottedPoint>();
@@ -272,7 +271,7 @@ export function ScatterPlot({
                   y2={y}
                 />
                 <text className="obs-scatter-axis" x={padding.left - 6} y={y + 3} textAnchor="end">
-                  {formatMetric(metric, tick)}
+                  {formatScatterMetric(metric, tick)}
                 </text>
               </g>
             );
@@ -303,7 +302,7 @@ export function ScatterPlot({
                 y={layout.toY(layout.p95) - 4}
                 textAnchor="end"
               >
-                P95 {formatMetric(metric, layout.p95)}
+                P95 {formatScatterMetric(metric, layout.p95)}
               </text>
             </g>
           ) : null}
@@ -360,7 +359,7 @@ export function ScatterPlot({
             <span>
               HTTP {formatNumber(hovered.point.status_code)} · {markerFor(hovered.point).label}
             </span>
-            <span>{formatMetric(metric, metricValue(hovered.point, metric))}</span>
+            <span>{formatScatterMetric(metric, metricValue(hovered.point, metric))}</span>
             <span>
               토큰 {formatNumber(hovered.point.total_tokens)} · {formatKRW(hovered.point.cost_krw)}
             </span>
@@ -409,48 +408,27 @@ export function ScatterPlot({
           </li>
         </ul>
       )}
-      <details>
-        <summary>표로 보기 (최근 {formatNumber(Math.min(shown.length, tableRowCap))}건)</summary>
-        <div className="data-table-scroll" tabIndex={0} aria-label="요청 분포 표 영역">
-          <table className="data-table">
-            <caption className="sr-only">
-              산점도에 표시된 요청 (최근 {formatNumber(tableRowCap)}건까지)
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">시각</th>
-                <th scope="col">요청 ID</th>
-                <th scope="col">모델</th>
-                <th scope="col">구분</th>
-                <th scope="col">지표</th>
-                <th scope="col">작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown
-                .slice(-tableRowCap)
-                .reverse()
-                .map((item, index) => (
-                  <tr key={`${item.request_id}-${index}`}>
-                    <th scope="row">{formatDateTime(item.created_at)}</th>
-                    <td className="mono truncate">{item.request_id}</td>
-                    <td>{item.model || "(미상)"}</td>
-                    <td>{markerFor(item).label}</td>
-                    <td className="cell-number">{formatMetric(metric, metricValue(item, metric))}</td>
-                    <td>
-                      <Button
-                        size="small"
-                        onClick={() => onSelect([item])}
-                        aria-label={`${item.request_id} 선택`}
-                      >
-                        선택
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
+      <details
+        open={tableOpen}
+        onToggle={(event) => {
+          const open = event.currentTarget.open;
+          if (open !== tableOpen) {
+            setTableOpen(open);
+            onTableOpenChange?.(open);
+          }
+        }}
+      >
+        <summary>표로 보기 ({formatNumber(shown.length)}건)</summary>
+        {tableOpen ? (
+          <Suspense fallback={<p role="status">요청 표를 불러오는 중입니다.</p>}>
+            <ScatterRequestTable
+              points={shown}
+              metric={metric}
+              categoryLabel={(point) => markerFor(point).label}
+              onSelect={onSelect}
+            />
+          </Suspense>
+        ) : null}
       </details>
     </div>
   );
