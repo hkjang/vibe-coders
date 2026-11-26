@@ -57,6 +57,7 @@ type Server struct {
 	dynamicRoutes   dynamicRouteCache
 	dlp             dlpCache
 	dlpKeepalive    time.Duration // held-stream keepalive interval (0: dlpKeepaliveEvery); tests shorten it
+	stopLimits      sync.Map      // provider+model -> stop sequences it accepts, learned from its 400 (stop_compat.go)
 	knowledge       atomic.Pointer[knowledgeSnapshot]
 	deprecations    atomic.Pointer[deprecationSnapshot]
 	costCache       atomic.Pointer[costSnapshot]
@@ -1830,6 +1831,9 @@ type upstreamDialResult struct {
 	headers        http.Header
 	retries        int
 	err            error
+	// droppedStops are stop sequences the provider could not take; the gateway
+	// applies them to the answer itself (stop_compat.go).
+	droppedStops []string
 }
 
 // retryBackoff is the pause before retry number n (1 for the first retry).
@@ -1952,12 +1956,16 @@ func (s *Server) dialUpstreamWith(reqCtx context.Context, r *http.Request, body 
 	// was never used at all.
 	currentModel := extractModel(currentBody)
 	usedLongContext := false
+	// stopRetried marks the providers already retried with fewer stop sequences, so a
+	// provider that keeps refusing is not retried forever.
+	stopRetried := map[string]bool{}
+	var droppedStops []string
 	var lastUpstreamHeaders http.Header
 	retries := 0
 	tries := 0
 	result := func(resp *http.Response, provider, from, reason string, err error) upstreamDialResult {
 		return upstreamDialResult{resp: resp, provider: provider, failoverFrom: from, failoverReason: reason, path: failoverPath,
-			body: currentBody, model: currentModel, headers: lastUpstreamHeaders, retries: retries, err: err}
+			body: currentBody, model: currentModel, headers: lastUpstreamHeaders, retries: retries, err: err, droppedStops: droppedStops}
 	}
 	// retry pauses before trying the same provider again. It reports false when the
 	// request ended during the pause.
@@ -2006,7 +2014,11 @@ func (s *Server) dialUpstreamWith(reqCtx context.Context, r *http.Request, body 
 			}
 			firstByteTimer = time.AfterFunc(opts.attemptTimeout, cancelFirstByte)
 		}
-		upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(currentBody))
+		// Fit the stop sequences to what this provider is known to accept; the rest
+		// are applied to its answer by the gateway.
+		var sendBody []byte
+		sendBody, droppedStops = s.applyStopLimit(att.provider.Name, currentModel, currentBody)
+		upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(sendBody))
 		if err != nil {
 			if firstByteTimer != nil {
 				firstByteTimer.Stop()
@@ -2091,13 +2103,22 @@ func (s *Server) dialUpstreamWith(reqCtx context.Context, r *http.Request, body 
 				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
 				slog.Warn("failover budget exhausted", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "trace_id", traceID)
 			}
-			if resp.StatusCode == http.StatusBadRequest && !usedLongContext && !opts.fixedModel && redTeamReviewedOutput(reqCtx) == 0 {
+			if resp.StatusCode == http.StatusBadRequest {
 				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 				_ = resp.Body.Close()
 				if cancel != nil {
 					cancel()
 				}
-				if contextOverflowBody(sniff) {
+				// A provider that refuses the request only for carrying more stop
+				// sequences than it accepts is asked again with as many as it takes.
+				if limit, limited := stopLimitFromError(sniff, sendBody); limited && !stopRetried[att.provider.Name] {
+					stopRetried[att.provider.Name] = true
+					s.learnStopLimit(att.provider.Name, currentModel, limit)
+					slog.Info("provider limits stop sequences; applying the rest at the gateway", "provider", providerLabel(att.provider.Name), "model", currentModel, "limit", limit, "trace_id", traceID)
+					tries = 0
+					continue
+				}
+				if !usedLongContext && !opts.fixedModel && redTeamReviewedOutput(reqCtx) == 0 && contextOverflowBody(sniff) {
 					longModel := defaultAutoModel("reasoning")
 					if longModel != "" && longModel != currentModel {
 						failoverPath = append(failoverPath, "context_overflow:"+currentModel+"->"+longModel)
@@ -3066,7 +3087,7 @@ func addVaryHeader(w http.ResponseWriter, header string) {
 func gatewayOwnedRoutingHeader(key string) bool {
 	switch http.CanonicalHeaderKey(key) {
 	case "X-Provider", "X-Route-Reason", "X-Route-Detail", "X-Failover-From", "X-Failover-Reason", "X-Failover-Path", "X-Health-Demoted", "X-Agent-Provider", "X-Request-Id",
-		"X-Vibe-Dlp", "Cf-Aig-Dlp", "X-Vibe-Dlp-Response",
+		"X-Vibe-Dlp", "Cf-Aig-Dlp", "X-Vibe-Dlp-Response", "X-Stop-Compat",
 		"X-Dynamic-Route", "X-Dynamic-Route-Version", "X-Dynamic-Route-Path", "X-Dynamic-Route-Element", "X-Dynamic-Route-Limit", "X-Upstream-Retries", "X-Routed-Model", "X-Cache", "X-Cache-Type":
 		return true
 	default:

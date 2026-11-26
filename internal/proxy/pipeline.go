@@ -904,6 +904,19 @@ func (rc *requestPipeline) stepUpstream() bool {
 		}
 	}
 
+	// Stop sequences the provider could not take are applied here, to the answer as
+	// the client will read it (after any gzip was removed above).
+	if len(dialed.droppedStops) > 0 && resp.StatusCode == http.StatusOK && w.Header().Get("Content-Encoding") == "" {
+		w.Header().Set("X-Stop-Compat", "gateway="+strconv.Itoa(len(dialed.droppedStops)))
+		if stream {
+			responseBody = newStopStream(responseBody, resp.Body, dialed.droppedStops)
+		} else if whole, readErr := io.ReadAll(io.LimitReader(responseBody, 64<<20)); readErr == nil {
+			responseBody = bytes.NewReader(enforceStopsJSON(whole, dialed.droppedStops))
+		} else {
+			responseBody = io.MultiReader(bytes.NewReader(whole), responseBody)
+		}
+	}
+
 	if stream {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")

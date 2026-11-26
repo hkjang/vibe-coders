@@ -414,9 +414,14 @@ func TestDLPValuesSplitAcrossMessages(t *testing.T) {
 	if header := parseDLPHeader(t, resp); header.Action != dlp.ActionFlag {
 		t.Fatalf("split phone number is flagged: %+v", header)
 	}
+	// Checked with their separators: bare digits such as "5678" also turn up in the
+	// random hexadecimal ids of a stored record.
 	for _, e := range dlpEventsFor(t, env.db, 2) {
-		if stored := storedRequest(t, env, e.RequestID); strings.Contains(stored, "1234561") || strings.Contains(stored, "5678") {
-			t.Fatalf("a half of a split value was stored: %s", stored)
+		stored := storedRequest(t, env, e.RequestID)
+		for _, half := range []string{"900101-", "1234561 입니다", "010-1234-", "5678 로"} {
+			if strings.Contains(stored, half) {
+				t.Fatalf("a half of a split value (%q) was stored: %s", half, stored)
+			}
 		}
 	}
 }
