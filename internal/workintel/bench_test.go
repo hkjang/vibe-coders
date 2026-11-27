@@ -88,6 +88,10 @@ func TestClassifyIsFast(t *testing.T) {
 	if testing.Short() {
 		t.Skip("timing test")
 	}
+	if raceEnabled {
+		// CI measured 852 µs per call under -race against 14 µs without it.
+		t.Skip("timing test: the race detector slows classification by an order of magnitude")
+	}
 	e := DefaultEngine()
 	f := Features{Text: benchText(1500), TaskType: "debug", Languages: []string{"Java"}, MCPServers: []string{"kubernetes"}, Client: "Claude Code"}
 	res := testing.Benchmark(func(b *testing.B) {

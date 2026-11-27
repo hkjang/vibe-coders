@@ -971,7 +971,8 @@ describe("ClassificationPage reclassify", () => {
 
     expect(await screen.findByText("재분류를 시작하지 않았습니다.")).toBeVisible();
     expect(await screen.findByText("job-9")).toBeVisible();
-    expect(currentLocation()).toContain("job=job-9");
+    // The notice can show the active job a render before the navigation to it lands.
+    await waitFor(() => expect(currentLocation()).toContain("job=job-9"));
   });
 
   it("rebuilds aggregates for a period as a separate repair", async () => {
