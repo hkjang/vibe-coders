@@ -171,6 +171,8 @@ describe("migration registry", () => {
     ["text2sql.overview", "/app/text2sql"],
     ["data.warehouse", "/app/data/warehouse"],
     ["data.products", "/app/data/products"],
+    ["insights.usage", "/app/insights/usage"],
+    ["insights.classification", "/app/insights/classification"],
     ["finops.overview", "/app/finops"],
     ["security.overview", "/app/security"],
     ["security.dlp", "/app/dlp"],

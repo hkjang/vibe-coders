@@ -11,7 +11,9 @@ import type {
   GetAdminSbomData,
   GetAdminPrivacyLedgerData,
   GetAdminDwDashboardExportCsvData,
+  GetAdminWorkIntelExportCsvData,
 } from "@/shared/api/generated";
+import { workExportQuerySchema, type WorkExportQuery } from "@/shared/api/domains/insights-usage";
 import { policyImportLimits } from "@/shared/api/domains/policy-import-json";
 
 const chargebackQuery = z
@@ -98,6 +100,12 @@ export const fileEndpoints = {
     "/admin/dw/dashboard/export.csv",
     { contentTypes: ["text/csv"] },
     warehouseQuery,
+  ),
+  workUsage: fileOperation<WithQuery<GetAdminWorkIntelExportCsvData, WorkExportQuery>>()(
+    "GET",
+    "/admin/work-intel/export.csv",
+    { contentTypes: ["text/csv"] },
+    workExportQuerySchema,
   ),
   chargeback: fileOperation<WithQuery<GetAdminCostChargebackPackData, z.infer<typeof chargebackQuery>>>()(
     "GET",

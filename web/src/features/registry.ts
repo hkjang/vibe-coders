@@ -6,6 +6,7 @@ import type { FeatureModule } from "@/features/feature-module";
 import { finopsFeatureModules } from "@/features/finops/routes";
 import { gatewayFeatureModules } from "@/features/gateway/routes";
 import { governanceFeatureModules } from "@/features/governance/routes";
+import { insightsFeatureModules } from "@/features/insights/routes";
 import { mcpFeatureModules } from "@/features/mcp/routes";
 import { observabilityFeatureModules } from "@/features/observability/routes";
 import { overviewFeatureModules } from "@/features/overview/routes";
@@ -23,6 +24,7 @@ const allFeatureModules: readonly FeatureModule[] = [
   ...finopsFeatureModules,
   ...gatewayFeatureModules,
   ...governanceFeatureModules,
+  ...insightsFeatureModules,
   ...mcpFeatureModules,
   ...observabilityFeatureModules,
   ...promptsFeatureModules,

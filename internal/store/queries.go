@@ -3108,7 +3108,17 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 			`DELETE FROM dynamic_route_requests WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM dlp_events WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM code_verify_results WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			// Work classification facts and the corrections made to them describe one
+			// request each. The aggregates built from them hold no request content and
+			// are kept on their own clock (PurgeWorkIntelOlderThan).
+			`DELETE FROM work_classifications WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM work_corrections WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM request_logs WHERE created_at < ?`,
+		}
+		// Recorded before the facts go, so a crash in between cannot leave a day that
+		// would be rebuilt from facts that are no longer all there.
+		if err := s.noteWorkIntelFactsPurged(ctx, cutoffAt); err != nil {
+			return total, err
 		}
 		for _, q := range queries {
 			res, err := s.db.ExecContext(ctx, s.bind(q), cutoff)

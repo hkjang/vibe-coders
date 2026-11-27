@@ -279,6 +279,7 @@ func buildSettingRegistry() []settingDef {
 	}
 	registry = append(registry, trackingSettingDefs()...)
 	registry = append(registry, mcpOAuthSettingDefs()...)
+	registry = append(registry, workIntelSettingDefs()...)
 	return append(registry, appUIFeatureSettingDefs()...)
 }
 
@@ -687,6 +688,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) error {
 	s.reloadAppUIRuntime(stored)
 	s.reloadTrackingRuntime(stored)
 	s.reloadMCPOAuthRuntime(stored)
+	s.reloadWorkIntelRuntime(stored)
 	audit.SetFallbackPriceModel(pricing.FallbackModel) // apply the runtime fallback model
 	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
 	if s.retention != nil && prevRet != ret {

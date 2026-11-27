@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -50,6 +51,15 @@ type Metrics struct {
 	dwCacheMiss        atomic.Uint64 // DW dashboard query cache misses (fetched from ClickHouse)
 	latency            *LatencyDigest
 	firstChunk         *LatencyDigest
+
+	// Work intelligence worker (work_intel_worker.go). Counted by the instance
+	// that holds the worker lease; the others report zero.
+	workIntelByMethod [len(workIntelMetricMethods)]atomic.Uint64 // requests classified, by method
+	workIntelFailures atomic.Uint64                              // failed model calls and failed cycles
+	workIntelLLMCalls atomic.Uint64                              // calls to the classification model
+	workIntelCacheHit atomic.Uint64                              // requests answered from the classification cache
+	workIntelBatchUS  atomic.Uint64                              // time spent in batches, microseconds
+	workIntelBatches  atomic.Uint64                              // batches applied
 }
 
 func newMetrics() *Metrics {
@@ -299,4 +309,81 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		out += m.firstChunk.PrometheusHistogramFor("proxy_first_chunk_duration_ms", "First upstream response chunk latency in milliseconds (last 4096 samples).")
 	}
 	return out
+}
+
+// workIntelMetricMethods are the classification methods the worker produces.
+// Manual corrections are made by administrators, not by the worker.
+var workIntelMetricMethods = [3]string{"rule", "llm", "cache"}
+
+// AddWorkIntelProcessed counts requests the work intelligence worker classified.
+func (m *Metrics) AddWorkIntelProcessed(method string, n int) {
+	if n <= 0 {
+		return
+	}
+	for i, known := range workIntelMetricMethods {
+		if method == known {
+			m.workIntelByMethod[i].Add(uint64(n))
+		}
+	}
+}
+
+// AddWorkIntelLLM counts classification model calls and cache hits.
+func (m *Metrics) AddWorkIntelLLM(calls, cacheHits int) {
+	if calls > 0 {
+		m.workIntelLLMCalls.Add(uint64(calls))
+	}
+	if cacheHits > 0 {
+		m.workIntelCacheHit.Add(uint64(cacheHits))
+	}
+}
+
+// AddWorkIntelFailures counts failed model calls and failed cycles.
+func (m *Metrics) AddWorkIntelFailures(n int) {
+	if n > 0 {
+		m.workIntelFailures.Add(uint64(n))
+	}
+}
+
+// ObserveWorkIntelBatch records the duration of one applied batch.
+func (m *Metrics) ObserveWorkIntelBatch(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	m.workIntelBatchUS.Add(uint64(d.Microseconds()))
+	m.workIntelBatches.Add(1)
+}
+
+// WorkIntelPrometheus renders the work intelligence series. The backlog and
+// the lag are gauges the caller supplies: they describe the queue, not this
+// process.
+func (m *Metrics) WorkIntelPrometheus(backlog int64, lagSeconds float64) string {
+	lines := []string{
+		"# HELP proxy_work_intel_processed_total Requests classified by the work intelligence worker, by method.",
+		"# TYPE proxy_work_intel_processed_total counter",
+	}
+	for i, method := range workIntelMetricMethods {
+		lines = append(lines, fmt.Sprintf("proxy_work_intel_processed_total{method=%q} %d", method, m.workIntelByMethod[i].Load()))
+	}
+	lines = append(lines,
+		"# HELP proxy_work_intel_failures_total Failed classification model calls and failed worker cycles.",
+		"# TYPE proxy_work_intel_failures_total counter",
+		fmt.Sprintf("proxy_work_intel_failures_total %d", m.workIntelFailures.Load()),
+		"# HELP proxy_work_intel_llm_calls_total Calls made to the classification model.",
+		"# TYPE proxy_work_intel_llm_calls_total counter",
+		fmt.Sprintf("proxy_work_intel_llm_calls_total %d", m.workIntelLLMCalls.Load()),
+		"# HELP proxy_work_intel_cache_hits_total Requests classified from the fingerprint cache.",
+		"# TYPE proxy_work_intel_cache_hits_total counter",
+		fmt.Sprintf("proxy_work_intel_cache_hits_total %d", m.workIntelCacheHit.Load()),
+		"# HELP proxy_work_intel_backlog Logged requests waiting to be classified, as last counted by this instance (capped).",
+		"# TYPE proxy_work_intel_backlog gauge",
+		fmt.Sprintf("proxy_work_intel_backlog %d", backlog),
+		"# HELP proxy_work_intel_lag_seconds Age of the oldest request waiting to be classified, as last counted by this instance.",
+		"# TYPE proxy_work_intel_lag_seconds gauge",
+		fmt.Sprintf("proxy_work_intel_lag_seconds %g", lagSeconds),
+		"# HELP proxy_work_intel_batch_seconds Time spent classifying and applying batches.",
+		"# TYPE proxy_work_intel_batch_seconds summary",
+		fmt.Sprintf("proxy_work_intel_batch_seconds_sum %g", float64(m.workIntelBatchUS.Load())/1e6),
+		fmt.Sprintf("proxy_work_intel_batch_seconds_count %d", m.workIntelBatches.Load()),
+	)
+	return strings.Join(lines, "\n") + "\n"
 }

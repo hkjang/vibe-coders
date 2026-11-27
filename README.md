@@ -411,6 +411,18 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `RETENTION_RESPONSE_DAYS` | `30` | 응답 로그 보존 일수 |
 | `RETENTION_DOMAIN_EXAMPLE_DAYS` | `365` | 라우팅 예시로 적립된 리닥션 프롬프트 텍스트 보존 일수 (0 이면 무기한) |
 | `RETENTION_INTERVAL` | `1h` | 보존 정책 cleanup 워커 주기 |
+| `WORK_INTEL_CLASSIFY_ENABLED` | `true` | 업무 분류 워커. 저장된 요청 로그를 뒤따라가며 업무 유형을 분류하고 집계합니다. 요청 처리 경로와 별개라 꺼도 프록시 응답에는 영향이 없습니다. 런타임 설정 `work_intel.classify_enabled` |
+| `WORK_INTEL_ANALYTICS_ENABLED` | `true` | 업무 활용 분석 API·화면(`/admin/work-intel/*`, `/app/insights/*`). 끄면 조회만 막고 분류와 집계는 계속합니다 |
+| `WORK_INTEL_INTERVAL` | `15s` | 분류 워커 주기 (1s~1h) |
+| `WORK_INTEL_BATCH_SIZE` | `200` | 주기당 최대 분류 건수. 한 묶음이 한 트랜잭션 |
+| `WORK_INTEL_BACKFILL_DAYS` | `7` | 처음 켤 때 과거 며칠 치 요청부터 분류할지 (0~365) |
+| `WORK_INTEL_LLM_ENABLED` | `false` | 규칙·캐시로 확정하지 못한 요청만 분류 모델에 묻기. 가린 프롬프트 일부가 전송되고 호출 비용이 발생 |
+| `WORK_INTEL_LLM_MODEL` / `WORK_INTEL_LLM_PROVIDER` | 없음 | 분류에 쓸 모델과 Provider. 모델이 비어 있으면 호출하지 않음 |
+| `WORK_INTEL_LLM_ALLOW_EXTERNAL` | `false` | 외부 Provider로 분류 텍스트 전송 허용. 꺼져 있으면 루프백·사설망·내부 도메인 Provider로만 보냄 |
+| `WORK_INTEL_LLM_CONCURRENCY` / `WORK_INTEL_LLM_MAX_PER_MINUTE` / `WORK_INTEL_LLM_TIMEOUT` | `2` / `60` / `20s` | 분류 모델 동시 호출 수, 분당 호출 상한, 호출 1회 제한 시간 |
+| `WORK_INTEL_INSIGHT_ENABLED` / `WORK_INTEL_INSIGHT_INTERVAL` | `true` / `6h` | 트렌드·자동화 후보·인사이트 주기 작업과 그 간격 |
+| `WORK_INTEL_INSIGHT_LLM_ENABLED` | `false` | 인사이트 문장을 모델로 다듬기. 집계 수치만 전달 |
+| `WORK_INTEL_RETENTION_DAYS` | `400` | 업무 집계·세션·인사이트 보존 일수 (0 이면 지우지 않음). 자세한 내용은 [업무 활용 분석 가이드](docs/WORK_INTELLIGENCE_GUIDE.md) |
 | `CARBON_WH_PER_1K_TOKENS` | `0.4` | Prompt Carbon Score 기본 에너지 계수(1K 토큰당 Wh) |
 | `CARBON_MODEL_WH_PER_1K` | 없음 | 모델별 에너지 계수 오버라이드(`gpt-4.1=0.8,gpt-4.1-mini=0.2`) |
 | `CARBON_PUE` | `1.2` | 데이터센터 PUE(전력 사용 효율) 배수 |

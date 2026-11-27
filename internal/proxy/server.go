@@ -111,6 +111,11 @@ type Server struct {
 
 	appUITelemetryGate        *appUITelemetryLimiter     // defaults to the process-wide bounded intake gate
 	appUITelemetryCallerQuota *appUITelemetryCallerQuota // defaults to the process-wide ephemeral caller quota
+
+	// Work intelligence (work_intel_*.go): the settings snapshot, and what every
+	// instance keeps whether or not it is the worker (compiled policy, backlog).
+	workIntelRuntime atomic.Pointer[workIntelConfig]
+	workIntel        workIntelRuntimeState
 }
 
 type atomicKillState struct {
@@ -486,6 +491,36 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/dw/table-info", s.handleClickHouseTableInfo)
 	mux.HandleFunc("/admin/dw/text2sql-fact", s.handleClickHouseText2SQLFact)
 	mux.HandleFunc("/admin/dw/redteam", s.handleClickHouseRedTeamFact)
+	mux.HandleFunc("/admin/work-intel/overview", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/categories", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/trend", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/matrix", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/flow", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/teams", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/models", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/trends", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/automation", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/automation/", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/insights", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/insights/run", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/sessions", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/sessions/", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/requests", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/productivity", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/export.csv", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/status", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/policy", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/policy/versions", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/policy/versions/", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/policy/publish", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/policy/rollback", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/policy/test", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/policy/evaluate", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/review", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/review/correct", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/reclassify", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/reclassify/jobs/", s.handleWorkIntel)
+	mux.HandleFunc("/admin/work-intel/rebuild", s.handleWorkIntel)
 	mux.HandleFunc("/admin/text2sql", s.handleText2SQLAdmin)
 	mux.HandleFunc("/admin/text2sql/summary", s.handleText2SQLSummary)
 	mux.HandleFunc("/admin/text2sql/spans", s.handleText2SQLSpans)
@@ -733,6 +768,12 @@ func (s *Server) Routes() http.Handler {
 			s.handleSkillByName(w, r)
 			return
 		}
+		// A work session id is chosen by the client and may contain slashes or
+		// dot segments; cleaning would redirect the read to another session.
+		if strings.HasPrefix(r.URL.EscapedPath(), workIntelSessionsPrefix) {
+			s.handleWorkIntel(w, r)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
 	return withTrace(withTrustedClientIP(router, s.trustedProxies))
@@ -791,6 +832,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = w.Write([]byte(s.metrics.Prometheus(s.logger.QueueDepth(), s.logger.Dropped(), s.logger.Written())))
+	_, _ = w.Write([]byte(s.workIntelMetrics()))
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

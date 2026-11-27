@@ -2606,6 +2606,295 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_dlp_events_action ON dlp_events(action, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_dlp_events_check ON dlp_events(check_side, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_dlp_events_profile ON dlp_events(profile_id, created_at)`,
+
+		// Work intelligence (docs/WORK_INTELLIGENCE_DESIGN.md section 4). A background
+		// worker reads request_logs behind a cursor and writes these tables; nothing on
+		// the request path touches them. Timestamps written here use the fixed-width UTC
+		// layout of ingested_at so they compare chronologically as text; days are Seoul
+		// calendar days. See work_intel*.go.
+		//
+		// The policy: one editable draft guarded by a revision, and the published
+		// snapshots the worker classifies with.
+		`CREATE TABLE IF NOT EXISTS work_intel_policy (
+			id TEXT PRIMARY KEY,
+			config_json TEXT NOT NULL,
+			revision INTEGER NOT NULL DEFAULT 1,
+			updated_by TEXT,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS work_intel_policy_versions (
+			version INTEGER PRIMARY KEY,
+			config_json TEXT NOT NULL,
+			note TEXT,
+			published_by TEXT,
+			published_at TEXT NOT NULL
+		)`,
+		// One row per classified request. It holds no prompt text: the title and tags
+		// are redacted labels. Purged with request_logs.
+		`CREATE TABLE IF NOT EXISTS work_classifications (
+			request_id TEXT PRIMARY KEY,
+			created_at TEXT NOT NULL,
+			ingested_at TEXT NOT NULL DEFAULT '',
+			day TEXT NOT NULL,
+			session_id TEXT NOT NULL DEFAULT '',
+			session_kind TEXT NOT NULL DEFAULT '',
+			team TEXT NOT NULL DEFAULT '',
+			user_key TEXT NOT NULL DEFAULT '',
+			api_key_id TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			client TEXT NOT NULL DEFAULT '',
+			endpoint TEXT NOT NULL DEFAULT '',
+			category_id TEXT NOT NULL,
+			top_category_id TEXT NOT NULL,
+			action_type TEXT NOT NULL DEFAULT 'unknown',
+			difficulty TEXT NOT NULL DEFAULT '',
+			confidence REAL NOT NULL DEFAULT 0,
+			method TEXT NOT NULL DEFAULT 'rule',
+			classifier_model TEXT NOT NULL DEFAULT '',
+			policy_version INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'classified',
+			tags TEXT NOT NULL DEFAULT '[]',
+			technologies TEXT NOT NULL DEFAULT '[]',
+			target_system TEXT NOT NULL DEFAULT '',
+			work_title TEXT NOT NULL DEFAULT '',
+			new_category_hint TEXT NOT NULL DEFAULT '',
+			language TEXT NOT NULL DEFAULT '',
+			fingerprint TEXT NOT NULL DEFAULT '',
+			tokens_in BIGINT NOT NULL DEFAULT 0,
+			tokens_out BIGINT NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			latency_ms BIGINT NOT NULL DEFAULT 0,
+			is_error INTEGER NOT NULL DEFAULT 0,
+			is_retry INTEGER NOT NULL DEFAULT 0,
+			mcp_calls INTEGER NOT NULL DEFAULT 0,
+			tool_sig TEXT NOT NULL DEFAULT '',
+			policy_flags TEXT NOT NULL DEFAULT '',
+			needs_llm INTEGER NOT NULL DEFAULT 0,
+			llm_attempts INTEGER NOT NULL DEFAULT 0,
+			corrected_by TEXT NOT NULL DEFAULT '',
+			corrected_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_classifications_day ON work_classifications(day, top_category_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_classifications_pending ON work_classifications(needs_llm, llm_attempts, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_classifications_session ON work_classifications(session_id, ingested_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_classifications_fingerprint ON work_classifications(fingerprint, day)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_classifications_status ON work_classifications(status, day)`,
+		// The session head: one row per session and team, holding what can only be said
+		// of the session as a whole. A session id is chosen by the client, so two teams
+		// can use the same one; keeping the team in the key means no row ever mixes them.
+		`CREATE TABLE IF NOT EXISTS work_sessions (
+			session_id TEXT NOT NULL,
+			team TEXT NOT NULL,
+			session_kind TEXT NOT NULL DEFAULT '',
+			user_key TEXT NOT NULL DEFAULT '',
+			client TEXT NOT NULL DEFAULT '',
+			day TEXT NOT NULL,
+			first_at TEXT NOT NULL,
+			last_at TEXT NOT NULL,
+			requests BIGINT NOT NULL DEFAULT 0,
+			mcp_calls BIGINT NOT NULL DEFAULT 0,
+			tokens_in BIGINT NOT NULL DEFAULT 0,
+			tokens_out BIGINT NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			latency_ms BIGINT NOT NULL DEFAULT 0,
+			errors BIGINT NOT NULL DEFAULT 0,
+			retries BIGINT NOT NULL DEFAULT 0,
+			models TEXT NOT NULL DEFAULT '[]',
+			model_switches BIGINT NOT NULL DEFAULT 0,
+			last_model TEXT NOT NULL DEFAULT '',
+			last_fingerprint TEXT NOT NULL DEFAULT '',
+			last_error INTEGER NOT NULL DEFAULT 0,
+			last_ingested_at TEXT NOT NULL DEFAULT '',
+			policy_flags TEXT NOT NULL DEFAULT '',
+			positive_feedback INTEGER NOT NULL DEFAULT 0,
+			completion TEXT NOT NULL DEFAULT 'unknown',
+			category_counts TEXT NOT NULL DEFAULT '{}',
+			primary_category_id TEXT NOT NULL DEFAULT '',
+			primary_top_category_id TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (session_id, team)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_sessions_day ON work_sessions(day)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_sessions_last ON work_sessions(last_at)`,
+		// What a session did, per category and day. The day is part of the key so a
+		// session that runs for a week is counted on each day it was active rather than
+		// only on the day it began; the number of work sessions of a category in a period
+		// is COUNT(DISTINCT session_id) over these rows.
+		`CREATE TABLE IF NOT EXISTS work_session_segments (
+			session_id TEXT NOT NULL,
+			team TEXT NOT NULL,
+			category_id TEXT NOT NULL,
+			day TEXT NOT NULL,
+			top_category_id TEXT NOT NULL DEFAULT '',
+			user_key TEXT NOT NULL DEFAULT '',
+			client TEXT NOT NULL DEFAULT '',
+			first_at TEXT NOT NULL,
+			last_at TEXT NOT NULL,
+			requests BIGINT NOT NULL DEFAULT 0,
+			tokens_in BIGINT NOT NULL DEFAULT 0,
+			tokens_out BIGINT NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			mcp_calls BIGINT NOT NULL DEFAULT 0,
+			errors BIGINT NOT NULL DEFAULT 0,
+			latency_ms BIGINT NOT NULL DEFAULT 0,
+			PRIMARY KEY (session_id, team, category_id, day)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_session_segments_day ON work_session_segments(day, top_category_id)`,
+		// Additive daily aggregate. lat_b* is a latency histogram (bounds in
+		// workintel.LatencyBounds), m_* counts classification methods, s_* the statuses
+		// other than classified, conf_b* the confidence buckets.
+		`CREATE TABLE IF NOT EXISTS work_daily (
+			day TEXT NOT NULL,
+			category_id TEXT NOT NULL,
+			action_type TEXT NOT NULL,
+			team TEXT NOT NULL,
+			model TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			client TEXT NOT NULL,
+			top_category_id TEXT NOT NULL DEFAULT '',
+			requests BIGINT NOT NULL DEFAULT 0,
+			tokens_in BIGINT NOT NULL DEFAULT 0,
+			tokens_out BIGINT NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			mcp_calls BIGINT NOT NULL DEFAULT 0,
+			errors BIGINT NOT NULL DEFAULT 0,
+			retries BIGINT NOT NULL DEFAULT 0,
+			latency_ms BIGINT NOT NULL DEFAULT 0,
+			lat_b0 BIGINT NOT NULL DEFAULT 0,
+			lat_b1 BIGINT NOT NULL DEFAULT 0,
+			lat_b2 BIGINT NOT NULL DEFAULT 0,
+			lat_b3 BIGINT NOT NULL DEFAULT 0,
+			lat_b4 BIGINT NOT NULL DEFAULT 0,
+			lat_b5 BIGINT NOT NULL DEFAULT 0,
+			lat_b6 BIGINT NOT NULL DEFAULT 0,
+			lat_b7 BIGINT NOT NULL DEFAULT 0,
+			m_rule BIGINT NOT NULL DEFAULT 0,
+			m_llm BIGINT NOT NULL DEFAULT 0,
+			m_cache BIGINT NOT NULL DEFAULT 0,
+			m_manual BIGINT NOT NULL DEFAULT 0,
+			s_review BIGINT NOT NULL DEFAULT 0,
+			s_unclassified BIGINT NOT NULL DEFAULT 0,
+			s_failed BIGINT NOT NULL DEFAULT 0,
+			conf_b0 BIGINT NOT NULL DEFAULT 0,
+			conf_b1 BIGINT NOT NULL DEFAULT 0,
+			conf_b2 BIGINT NOT NULL DEFAULT 0,
+			conf_b3 BIGINT NOT NULL DEFAULT 0,
+			conf_b4 BIGINT NOT NULL DEFAULT 0,
+			PRIMARY KEY (day, category_id, action_type, team, model, provider, client)
+		)`,
+		// The set of users behind each day, category and team, for distinct counts.
+		`CREATE TABLE IF NOT EXISTS work_daily_users (
+			day TEXT NOT NULL,
+			category_id TEXT NOT NULL,
+			team TEXT NOT NULL,
+			user_key TEXT NOT NULL,
+			top_category_id TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (day, category_id, team, user_key)
+		)`,
+		// Results of the semantic step, reused for the same prompt fingerprint. The key
+		// is a digest of the policy version, the team and the fingerprint, so an entry
+		// is never shared between teams or across a policy change.
+		`CREATE TABLE IF NOT EXISTS work_class_cache (
+			cache_key TEXT PRIMARY KEY,
+			policy_version INTEGER NOT NULL DEFAULT 0,
+			team TEXT NOT NULL DEFAULT '',
+			category_id TEXT NOT NULL,
+			action_type TEXT NOT NULL DEFAULT 'unknown',
+			confidence REAL NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'classified',
+			tags TEXT NOT NULL DEFAULT '[]',
+			technologies TEXT NOT NULL DEFAULT '[]',
+			target_system TEXT NOT NULL DEFAULT '',
+			work_title TEXT NOT NULL DEFAULT '',
+			new_category_hint TEXT NOT NULL DEFAULT '',
+			classifier_model TEXT NOT NULL DEFAULT '',
+			hits BIGINT NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			last_hit_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_class_cache_version ON work_class_cache(policy_version)`,
+		// Administrator corrections, kept as the labelled sample that measures each
+		// method's accuracy. Purged with request_logs.
+		`CREATE TABLE IF NOT EXISTS work_corrections (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			from_category_id TEXT NOT NULL DEFAULT '',
+			to_category_id TEXT NOT NULL DEFAULT '',
+			from_action TEXT NOT NULL DEFAULT '',
+			to_action TEXT NOT NULL DEFAULT '',
+			from_method TEXT NOT NULL DEFAULT '',
+			from_confidence REAL NOT NULL DEFAULT 0,
+			policy_version INTEGER NOT NULL DEFAULT 0,
+			actor TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_corrections_request ON work_corrections(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_corrections_created ON work_corrections(created_at)`,
+		// Long-running administrator jobs (reclassification): one active at a time,
+		// owned through a lease.
+		`CREATE TABLE IF NOT EXISTS work_intel_jobs (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			status TEXT NOT NULL,
+			actor TEXT NOT NULL DEFAULT '',
+			worker_token TEXT NOT NULL DEFAULT '',
+			lease_until TEXT NOT NULL DEFAULT '',
+			params_json TEXT NOT NULL DEFAULT '{}',
+			progress_json TEXT NOT NULL DEFAULT '{}',
+			error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			finished_at TEXT NOT NULL DEFAULT ''
+		)`,
+		// The worker's single state row: the cursor into request_logs, the lease that
+		// picks one instance, a compact copy of its statistics, and the time before
+		// which facts were purged (days older than that cannot be rebuilt from facts).
+		`CREATE TABLE IF NOT EXISTS work_intel_state (
+			id TEXT PRIMARY KEY,
+			cursor_ingested_at TEXT NOT NULL DEFAULT '',
+			cursor_id TEXT NOT NULL DEFAULT '',
+			worker_token TEXT NOT NULL DEFAULT '',
+			lease_until TEXT NOT NULL DEFAULT '',
+			stats_json TEXT NOT NULL DEFAULT '{}',
+			facts_purged_before TEXT NOT NULL DEFAULT '',
+			periodic_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL
+		)`,
+		// Days and sessions whose aggregates no longer match their facts after a
+		// reassignment. Written with the reassignment and removed by the rebuild, so a
+		// restart between the two cannot leave the statistics wrong.
+		`CREATE TABLE IF NOT EXISTS work_intel_dirty (
+			kind TEXT NOT NULL,
+			ref TEXT NOT NULL,
+			marked_at TEXT NOT NULL,
+			PRIMARY KEY (kind, ref)
+		)`,
+		`CREATE TABLE IF NOT EXISTS work_automation_candidates (
+			id TEXT PRIMARY KEY,
+			payload_json TEXT NOT NULL DEFAULT '{}',
+			review_status TEXT NOT NULL DEFAULT 'new',
+			review_note TEXT NOT NULL DEFAULT '',
+			reviewed_by TEXT NOT NULL DEFAULT '',
+			reviewed_at TEXT NOT NULL DEFAULT '',
+			computed_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_automation_candidates_status ON work_automation_candidates(review_status, computed_at)`,
+		`CREATE TABLE IF NOT EXISTS work_insights (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			severity TEXT NOT NULL DEFAULT 'info',
+			title TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL DEFAULT '',
+			evidence_json TEXT NOT NULL DEFAULT '{}',
+			link_json TEXT NOT NULL DEFAULT '{}',
+			period_from TEXT NOT NULL DEFAULT '',
+			period_to TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_work_insights_created ON work_insights(created_at)`,
 	}
 }
 

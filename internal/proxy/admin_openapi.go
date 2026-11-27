@@ -512,6 +512,38 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/dw/text2sql-fact", []string{"post"}, "dw", "Ship Text2SQL facts", false},
 	{"/admin/dw/redteam", []string{"post"}, "dw", "Ship Red Team case-result facts to ClickHouse", false},
 
+	// ---- admin: work intelligence ----
+	{"/admin/work-intel/overview", []string{"get"}, "Work Intelligence", "Work usage summary with previous-period comparison", false},
+	{"/admin/work-intel/categories", []string{"get"}, "Work Intelligence", "Work category breakdown (top level, or children of ?parent=)", false},
+	{"/admin/work-intel/trend", []string{"get"}, "Work Intelligence", "Work category time series by day or week", false},
+	{"/admin/work-intel/matrix", []string{"get"}, "Work Intelligence", "Team by work category heatmap", false},
+	{"/admin/work-intel/flow", []string{"get"}, "Work Intelligence", "Team to work category to model flow", false},
+	{"/admin/work-intel/teams", []string{"get"}, "Work Intelligence", "Per-team work usage, diversity and rising categories", false},
+	{"/admin/work-intel/models", []string{"get"}, "Work Intelligence", "Model usage and efficiency by work category", false},
+	{"/admin/work-intel/trends", []string{"get"}, "Work Intelligence", "Rising, new, declining and concentrated work signals", false},
+	{"/admin/work-intel/automation", []string{"get"}, "Work Intelligence", "Automation candidates from repeated work", false},
+	{"/admin/work-intel/automation/{id}/review", []string{"post"}, "Work Intelligence", "Record a review decision on an automation candidate", false},
+	{"/admin/work-intel/insights", []string{"get"}, "Work Intelligence", "Generated work insights with their evidence", false},
+	{"/admin/work-intel/insights/run", []string{"post"}, "Work Intelligence", "Regenerate trends, automation candidates and insights now", false},
+	{"/admin/work-intel/sessions", []string{"get"}, "Work Intelligence", "Work sessions", false},
+	{"/admin/work-intel/sessions/{id}", []string{"get"}, "Work Intelligence", "Work session detail with segments and requests", false},
+	{"/admin/work-intel/requests", []string{"get"}, "Work Intelligence", "Classified requests", false},
+	{"/admin/work-intel/productivity", []string{"get"}, "Work Intelligence", "Estimated time and cost saved by work category", false},
+	{"/admin/work-intel/export.csv", []string{"get"}, "Work Intelligence", "Work analytics CSV export (current filter)", false},
+	{"/admin/work-intel/status", []string{"get"}, "Work Intelligence", "Classification worker status, lag and backlog", false},
+	{"/admin/work-intel/policy", []string{"get", "put"}, "Work Intelligence", "Classification policy draft: read/save", false},
+	{"/admin/work-intel/policy/versions", []string{"get"}, "Work Intelligence", "Published classification policy versions", false},
+	{"/admin/work-intel/policy/versions/{version}", []string{"get"}, "Work Intelligence", "One published classification policy version", false},
+	{"/admin/work-intel/policy/publish", []string{"post"}, "Work Intelligence", "Publish the classification policy draft as a new version", false},
+	{"/admin/work-intel/policy/rollback", []string{"post"}, "Work Intelligence", "Republish an earlier classification policy version", false},
+	{"/admin/work-intel/policy/test", []string{"post"}, "Work Intelligence", "Classify sample text with the draft or published policy", false},
+	{"/admin/work-intel/policy/evaluate", []string{"post"}, "Work Intelligence", "Measure policy accuracy against administrator corrections", false},
+	{"/admin/work-intel/review", []string{"get"}, "Work Intelligence", "Requests waiting for classification review", false},
+	{"/admin/work-intel/review/correct", []string{"post"}, "Work Intelligence", "Correct the work category of classified requests", false},
+	{"/admin/work-intel/reclassify", []string{"get", "post"}, "Work Intelligence", "Reclassification: preview / start a job", false},
+	{"/admin/work-intel/reclassify/jobs/{id}", []string{"get"}, "Work Intelligence", "Reclassification job status and progress", false},
+	{"/admin/work-intel/rebuild", []string{"post"}, "Work Intelligence", "Rebuild work aggregates for a period from classification facts", false},
+
 	// ---- admin: LLM observability ----
 	{"/admin/llm/traces", []string{"get"}, "llm", "LLM traces", false},
 	{"/admin/llm/traces/{id}", []string{"get"}, "llm", "LLM trace detail", false},
@@ -663,7 +695,7 @@ func successResponse(schema string) map[string]any {
 func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	key := strings.ToLower(method) + " " + route
 	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
-	if enrichDynamicRoutesOpenAPI(key, op, responses) || enrichDLPOpenAPI(key, op, responses) {
+	if enrichDynamicRoutesOpenAPI(key, op, responses) || enrichDLPOpenAPI(key, op, responses) || enrichWorkIntelOpenAPI(key, op, responses) {
 		op["responses"] = responses
 		return
 	}
@@ -1379,6 +1411,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range dlpOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range workIntelOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range routingLearningOpenAPISchemas() {

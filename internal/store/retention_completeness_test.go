@@ -62,6 +62,8 @@ var retentionDecisions = map[string]retentionDecision{
 	"code_verify_results":      {purgedWithRequest, "per-request code verification"},
 	"dynamic_route_requests":   {purgedWithRequest, "per-request dynamic route path and outcome"},
 	"dlp_events":               {purgedWithRequest, "per-request DLP matches with partial previews"},
+	"work_classifications":     {purgedWithRequest, "per-request work classification; the aggregates built from it carry no request content and are purged by PurgeWorkIntelOlderThan"},
+	"work_corrections":         {purgedWithRequest, "an administrator's correction of one request's classification"},
 
 	// Self-expiring rows: dead the moment their expiry passes.
 	"refresh_tokens":      {sweptByExpiry, "expired or long-revoked credentials"},

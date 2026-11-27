@@ -18721,6 +18721,8 @@
               "text2sql.overview",
               "data.warehouse",
               "data.products",
+              "insights.usage",
+              "insights.classification",
               "finops.overview",
               "security.overview",
               "security.dlp",
@@ -18790,6 +18792,8 @@
               "text2sql.overview",
               "data.warehouse",
               "data.products",
+              "insights.usage",
+              "insights.classification",
               "finops.overview",
               "security.overview",
               "security.dlp",
@@ -18851,7 +18855,7 @@
             "items": {
               "$ref": "#/components/schemas/UITelemetryFeatureCount"
             },
-            "maxItems": 41,
+            "maxItems": 43,
             "type": "array"
           },
           "from": {
@@ -19297,6 +19301,250 @@
           "team",
           "trace_id",
           "user_id"
+        ],
+        "type": "object"
+      },
+      "WorkIntelAutomationReview": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "review_status": {
+            "enum": [
+              "new",
+              "reviewing",
+              "accepted",
+              "dismissed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_status",
+          "note"
+        ],
+        "type": "object"
+      },
+      "WorkIntelCorrect": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "type": "string"
+          },
+          "category_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "request_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "request_ids",
+          "category_id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "WorkIntelEvaluate": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "use_draft": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "use_draft",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "WorkIntelObject": {
+        "additionalProperties": true,
+        "description": "A work intelligence response. Deliberately open: the members are described per operation and may gain fields without a contract change.",
+        "type": "object"
+      },
+      "WorkIntelPolicyRejection": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "error",
+          "issues"
+        ],
+        "type": "object"
+      },
+      "WorkIntelPolicyTest": {
+        "additionalProperties": false,
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mcp_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "model": {
+            "type": "string"
+          },
+          "task_type": {
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "use_draft": {
+            "type": "boolean"
+          },
+          "use_llm": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text",
+          "use_draft",
+          "use_llm"
+        ],
+        "type": "object"
+      },
+      "WorkIntelPolicyWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/WorkIntelObject"
+          },
+          "expected_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "config",
+          "expected_revision",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "WorkIntelPublish": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "note"
+        ],
+        "type": "object"
+      },
+      "WorkIntelRebuild": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "format": "date",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "to": {
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "WorkIntelReclassifyRun": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "reviewed_at": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "reviewed_at",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "WorkIntelRollback": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "note"
         ],
         "type": "object"
       },
@@ -43567,6 +43815,4455 @@
         "summary": "Request waterfall",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/admin/work-intel/automation": {
+      "get": {
+        "description": "Repeated work that could be automated: how often it repeats, in which teams, at what cost, the recommended form (prompt template, skill, MCP tool, workflow, agent or batch), feasibility and risk. Here status filters by review status. Nothing is registered or executed automatically. A view restricted to some teams describes a candidate (teams, volumes, tools, action, timing) by those teams' requests only; a caller who may not view raw prompts is not shown a candidate of too few users. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_automation",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Review status: new, reviewing, accepted or dismissed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Automation candidates from repeated work",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/automation/{id}/review": {
+      "post": {
+        "description": "Record the review status and a note for one automation candidate and return the updated row. This records the decision only; no automation is created or run. A team-scoped administrator may only review a candidate that no team outside their scope repeats (403 work_intel_team_forbidden).",
+        "operationId": "post__admin_work_intel_automation_id_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelAutomationReview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record a review decision on an automation candidate",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/categories": {
+      "get": {
+        "description": "Work categories one level at a time: the top level, or the children of parent. Each row carries current and previous metrics, its share and change, and whether it has children; unclassified and failed requests are totalled separately. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_categories",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Category ID whose children to list; omit for the top level.",
+            "in": "query",
+            "name": "parent",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Work category breakdown (top level, or children of ?parent=)",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/export.csv": {
+      "get": {
+        "description": "The chosen view as CSV with the current filter: UTF-8 with a byte order mark, cells guarded against formula injection, team scope and small-group suppression applied as in the JSON reads. The export is recorded in the audit log.",
+        "operationId": "get__admin_work_intel_export_csv",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Which table to export.",
+            "in": "query",
+            "name": "view",
+            "required": true,
+            "schema": {
+              "enum": [
+                "categories",
+                "teams",
+                "models",
+                "sessions",
+                "requests"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "UTF-8 CSV with a byte order mark."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Work analytics CSV export (current filter)",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/flow": {
+      "get": {
+        "description": "Nodes and links from team to work category to model for the largest entries of each kind, measured in metric. For a caller who may not view raw prompts, a team, category or model with too few users joins the remainder node of its column, a link of too few users is left out, and suppressed_links counts the links left out; node values are the sums of the links shown, and suppressed: true means every link was left out. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_flow",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "How many of the largest entries to include.",
+            "in": "query",
+            "name": "top",
+            "schema": {
+              "default": 6,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Team to work category to model flow",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/insights": {
+      "get": {
+        "description": "Insights generated from the aggregates, each with the evidence it rests on (period, comparison, sample and metrics) and a link into the matching analysis. A caller who may not view raw prompts gets insights computed for them on request, without those about too few users. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_insights",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Generated work insights with their evidence",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/insights/run": {
+      "post": {
+        "description": "Recompute trends, automation candidates and insights now instead of waiting for the next interval, and report how many insights were generated.",
+        "operationId": "post__admin_work_intel_insights_run",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Regenerate trends, automation candidates and insights now",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/matrix": {
+      "get": {
+        "description": "Teams by work category for the largest categories, measured in metric: the organization heatmap. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_matrix",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "How many of the largest entries to include.",
+            "in": "query",
+            "name": "top",
+            "schema": {
+              "default": 12,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Team by work category heatmap",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/models": {
+      "get": {
+        "description": "Which models serve which work: per category and model the share, tokens and cost per session, latency percentiles estimated from histograms, error, retry and model-switch rates and feedback counts, with suggestions for another model where the sample supports one. suppressed: true means every row is withheld from the caller and none is listed. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_models",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Model usage and efficiency by work category",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/overview": {
+      "get": {
+        "description": "Headline work usage for the period next to the previous period: sessions, requests, users, tokens, cost and MCP calls, the number of teams and active categories, the classified rate, and the distributions by confidence bucket, classification method and status. The three distributions are empty for a caller who may not view raw prompts. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_overview",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Work usage summary with previous-period comparison",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/policy": {
+      "get": {
+        "description": "The classification policy draft with its revision, the published version, whether the draft differs from it (dirty), and the default action types and thresholds.",
+        "operationId": "get__admin_work_intel_policy",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Classification policy draft: read/save",
+        "tags": [
+          "Work Intelligence"
+        ]
+      },
+      "put": {
+        "description": "Save the draft. expected_revision is the revision the edit started from; another administrator's save in between returns 409 and nothing is written. Classification does not change until the draft is published.",
+        "operationId": "put__admin_work_intel_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelPolicyWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "work_policy_conflict: the draft changed since it was loaded."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelPolicyRejection"
+                }
+              }
+            },
+            "description": "work_policy_invalid: the policy has errors; issues lists them by path."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Classification policy draft: read/save",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/policy/evaluate": {
+      "post": {
+        "description": "Measure the draft or the published policy against administrator corrections, used as the expected answers: overall and top-level accuracy, totals per category and the most frequent confusions.",
+        "operationId": "post__admin_work_intel_policy_evaluate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelEvaluate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Measure policy accuracy against administrator corrections",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/policy/publish": {
+      "post": {
+        "description": "Publish the draft as a new policy version, which the classifier uses from then on. Returns the version and its impact: categories removed and requests affected.",
+        "operationId": "post__admin_work_intel_policy_publish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelPublish"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish the classification policy draft as a new version",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/policy/rollback": {
+      "post": {
+        "description": "Publish the content of an earlier version as a new version and copy it into the draft.",
+        "operationId": "post__admin_work_intel_policy_rollback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelRollback"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Republish an earlier classification policy version",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/policy/test": {
+      "post": {
+        "description": "Classify sample text with the draft or the published policy, optionally with the LLM step, and return the result, the scored candidate categories with their evidence, and whether the LLM was used. The LLM call counts against the worker's per-minute budget; when it is spent the rule result is returned with llm.code llm_budget_exhausted.",
+        "operationId": "post__admin_work_intel_policy_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelPolicyTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Classify sample text with the draft or published policy",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/policy/versions": {
+      "get": {
+        "description": "Published policy versions with who published each and when, the number of categories, and what changed from the version before: categories added, removed, renamed or merged, and rules changed.",
+        "operationId": "get__admin_work_intel_policy_versions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Published classification policy versions",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/policy/versions/{version}": {
+      "get": {
+        "description": "The complete policy document of one published version, with its note, publisher and time.",
+        "operationId": "get__admin_work_intel_policy_versions_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "One published classification policy version",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/productivity": {
+      "get": {
+        "description": "Estimated minutes and cost saved per category, from the policy's baselines and the sessions confirmed as complete. Without a baseline or completion evidence the estimates are null and reason says why. suppressed: true means the scope is too small, or every row withheld, and no row is listed. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_productivity",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Estimated time and cost saved by work category",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/rebuild": {
+      "post": {
+        "description": "Rebuild the aggregates of a period from the classification facts. For repairing a mismatch between the two; classifications are not changed.",
+        "operationId": "post__admin_work_intel_rebuild",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelRebuild"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rebuild work aggregates for a period from classification facts",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/reclassify": {
+      "get": {
+        "description": "Preview of reclassifying the selected requests with the published policy: how many by status and method, how many manual corrections are kept, the estimated LLM calls, and the revision a run must present before it expires. Also reports the active job, if there is one.",
+        "operationId": "get__admin_work_intel_reclassify",
+        "parameters": [
+          {
+            "description": "First day to reclassify, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day to reclassify, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How the request was classified: rule, llm, cache or manual.",
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reclassification: preview / start a job",
+        "tags": [
+          "Work Intelligence"
+        ]
+      },
+      "post": {
+        "description": "Start the reclassification that was previewed and return the job. revision and reviewed_at come from the preview; an expired preview, a policy published since, a revision of another administrator or selection, or a job already running returns 409. Requests the worker classified after the preview are left out of the job; progress.previewed is what the preview counted next to progress.total.",
+        "operationId": "post__admin_work_intel_reclassify",
+        "parameters": [
+          {
+            "description": "Confirms that the preview was reviewed.",
+            "in": "query",
+            "name": "reviewed",
+            "required": true,
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelReclassifyRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "work_reclassify_expired, work_reclassify_conflict or work_job_active: preview again before starting."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reclassification: preview / start a job",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/reclassify/jobs/{id}": {
+      "get": {
+        "description": "Status and progress of one reclassification job: total, done, changed, failed, and the days rebuilt so far.",
+        "operationId": "get__admin_work_intel_reclassify_jobs_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reclassification job status and progress",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/requests": {
+      "get": {
+        "description": "Classified requests, one page at a time, with category, action type, confidence, method, status, the redacted work title, tags and technologies. The work title, tags and technologies summarise the prompt and are empty for a caller who may not view raw prompts, as is the user label when the deployment has no secret of its own to make pseudonyms with. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_requests",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Lowest confidence to include.",
+            "in": "query",
+            "name": "min_conf",
+            "schema": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "Highest confidence to include.",
+            "in": "query",
+            "name": "max_conf",
+            "schema": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "How the request was classified: rule, llm, cache or manual.",
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Classified requests",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/review": {
+      "get": {
+        "description": "Requests that need a decision (low confidence, unclassified or failed) as the same rows as /requests, with a summary of the queue and hints for categories the policy does not have yet. A team-scoped administrator sees only their own team. The hints, like the work titles, are model-written from prompts and empty for a caller who may not view raw prompts.",
+        "operationId": "get__admin_work_intel_review",
+        "parameters": [
+          {
+            "description": "Classification status to restrict to: review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Highest confidence to include.",
+            "in": "query",
+            "name": "max_conf",
+            "schema": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "Page size.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip; at most 100,000.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Requests waiting for classification review",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/review/correct": {
+      "post": {
+        "description": "Set the category, and optionally the action type, of up to 500 requests. The correction is kept as evaluation data and the aggregates of the affected days are rebuilt.",
+        "operationId": "post__admin_work_intel_review_correct",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkIntelCorrect"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a field or parameter is missing or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:write."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Correct the work category of classified requests",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/sessions": {
+      "get": {
+        "description": "Work sessions, one page at a time: primary and secondary categories, time span, requests, MCP calls, tokens, cost, errors, retries, models used and the completion state. A successful API response is not counted as completion. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_sessions",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Field to order the sessions by.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Session state to restrict to.",
+            "in": "query",
+            "name": "session_status",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Work sessions",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/sessions/{id}": {
+      "get": {
+        "description": "One work session with its segments by category and up to 200 of its requests. A team-scoped administrator can read only their own team's sessions.",
+        "operationId": "get__admin_work_intel_sessions_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Work session detail with segments and requests",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/status": {
+      "get": {
+        "description": "State of the classification worker: which features are enabled, the published policy version, cursor, lag and backlog, the last run and error, and the counts by method, failures, LLM calls and cache hits of the last 24 hours.",
+        "operationId": "get__admin_work_intel_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Classification worker status, lag and backlog",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/teams": {
+      "get": {
+        "description": "Per-team usage next to the previous period, sessions per user, category diversity, the team's largest and rising categories, and where its mix deviates from the whole organization. Per-user figures divide by active users, not headcount. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_teams",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Per-team work usage, diversity and rising categories",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/trend": {
+      "get": {
+        "description": "One series per work category over the period in day or week buckets, measured in metric. The largest categories get their own series and the rest are summed into other. A withheld point is null; for a caller who may not view raw prompts, a category with too few users over the period has no series of its own and is part of other, and suppressed: true means the whole scope is too small, with no series at all. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_trend",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width of one point on the time axis.",
+            "in": "query",
+            "name": "bucket",
+            "schema": {
+              "enum": [
+                "day",
+                "week"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many of the largest entries to include.",
+            "in": "query",
+            "name": "top",
+            "schema": {
+              "default": 8,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Work category time series by day or week",
+        "tags": [
+          "Work Intelligence"
+        ]
+      }
+    },
+    "/admin/work-intel/trends": {
+      "get": {
+        "description": "Signals computed from the aggregates: categories rising over 7 or 30 days, new or declining ones, cost spikes, dependence on one model, concentration in one team and spread across teams. Each signal carries its current and previous values and sample size, and the response states the thresholds that were applied. A caller who may not view raw prompts is not shown a signal about too few users. A team-scoped administrator sees only their own team. A caller who may not view raw prompts is not shown any number about fewer distinct users than min_group_size (and more than none): such a group comes back with every measure and every share, delta or rate derived from it null and suppressed: true. Where it is shown next to a total the caller can see, other numbers of that line are withheld as well (fewest users first) until the withheld part includes a group of at least min_group_size users, so that subtracting what is shown from the total does not describe a small group. When the whole scope is that small, the rows of categories or models it used are not listed. scope.small_groups_withheld says these rules apply to the caller.",
+        "operationId": "get__admin_work_intel_trends",
+        "parameters": [
+          {
+            "description": "First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period, a Seoul calendar date (YYYY-MM-DD).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to compute the previous period of the same length for comparison.",
+            "in": "query",
+            "name": "compare",
+            "schema": {
+              "default": "prev",
+              "enum": [
+                "prev",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Team to restrict to. A team-scoped administrator is always restricted to their own team.",
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User to restrict to.",
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Work category ID at any level.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action type ID, such as read, analyze, create, modify or verify.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model name.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider name.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client name, such as Claude Code or Cursor.",
+            "in": "query",
+            "name": "client",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP tool name.",
+            "in": "query",
+            "name": "tool",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Classification status: classified, review, unclassified or failed.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The measure that rankings, shares and chart values are computed in.",
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "sessions",
+              "enum": [
+                "sessions",
+                "requests",
+                "users",
+                "tokens",
+                "cost",
+                "mcp_calls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size for list reads.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkIntelObject"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "A parameter is malformed or out of range."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "invalid_api_key: the token is missing or invalid, or lacks admin:read."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rising, new, declining and concentrated work signals",
+        "tags": [
+          "Work Intelligence"
         ]
       }
     },

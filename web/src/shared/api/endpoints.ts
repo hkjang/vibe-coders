@@ -71,6 +71,8 @@ import { gatewayEndpoints } from "@/shared/api/domains/gateway";
 import { providerImpactEndpoint } from "@/shared/api/domains/provider-impact";
 import { governanceEndpoints } from "@/shared/api/domains/governance";
 import { governanceReportsEndpoints } from "@/shared/api/domains/governance-reports";
+import { insightsClassificationEndpoints } from "@/shared/api/domains/insights-classification";
+import { insightsUsageEndpoints } from "@/shared/api/domains/insights-usage";
 import { mcpEndpoints } from "@/shared/api/domains/mcp";
 import { observabilityEndpoints } from "@/shared/api/domains/observability";
 import { promptsEndpoints } from "@/shared/api/domains/prompts";
@@ -282,6 +284,8 @@ export const endpoints = {
     gateway: gatewayEndpoints,
     governance: governanceEndpoints,
     governanceReports: governanceReportsEndpoints,
+    insightsUsage: insightsUsageEndpoints,
+    insightsClassification: insightsClassificationEndpoints,
     mcp: mcpEndpoints,
     observability: observabilityEndpoints,
     prompts: promptsEndpoints,

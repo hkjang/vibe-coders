@@ -245,8 +245,16 @@ Docker 데이터는 호스트의 `data/` 디렉터리가 아니라 named volume 
 | `proxy_log_events_written_total` | DB 에 쓰인 감사 로그 |
 | `proxy_request_duration_ms` | 전체 요청 지연 히스토그램 |
 | `proxy_first_chunk_duration_ms` | upstream 첫 응답 청크 지연 히스토그램 |
+| `proxy_work_intel_processed_total{method}` | 업무 분류 워커가 분류한 요청 수 (방식별) |
+| `proxy_work_intel_backlog` | 분류를 기다리는 요청 수 (gauge, 상한까지만 셈) |
+| `proxy_work_intel_lag_seconds` | 가장 오래 기다린 요청의 대기 시간 (gauge) |
+| `proxy_work_intel_batch_seconds` | 분류 묶음 처리 시간 (합계·횟수) |
+| `proxy_work_intel_llm_calls_total` / `proxy_work_intel_cache_hits_total` | 분류 모델 호출 수 / 캐시로 분류한 요청 수 |
+| `proxy_work_intel_failures_total` | 분류 모델 호출 실패와 워커 주기 실패 |
 
 권장 알람: `proxy_log_events_dropped_total > 0` (5분 윈도우), `proxy_upstream_errors_total` 의 분당 증가, `proxy_log_queue_depth > 80% of LOG_QUEUE_SIZE`, `proxy_first_chunk_duration_ms` P95 급증.
+
+업무 분류 워커는 요청 처리 경로 밖에서 돕니다. `proxy_work_intel_lag_seconds` 가 계속 늘면 유입이 처리량보다 많은 것이므로 `work_intel.batch_size` 를 키우거나 `work_intel.interval` 을 줄입니다. 카운터는 임대를 잡고 분류하는 인스턴스에서만 올라갑니다 — [업무 활용 분석 가이드 8절](WORK_INTELLIGENCE_GUIDE.md#8-운영).
 
 ### 5.2 어드민 알림
 

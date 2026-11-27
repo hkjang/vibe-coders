@@ -79,6 +79,10 @@ var indexCoverageDecisions = map[string]string{
 	// Tables whose access is already indexed by a different column in the same query.
 	"text2sql_cache.schema_name":  "bounded by the number of registered schemas",
 	"tool_invocations.api_key_id": "analytics; the request_id index carries the request path and the purge",
+
+	// Named only inside the request_logs subquery of the retention purge, which this
+	// check attributes to the outer table. Facts are read by day, session or request.
+	"work_classifications.created_at": "not filtered on: the purge reads request_logs.created_at, and facts are read by day, session or request id",
 }
 
 var (

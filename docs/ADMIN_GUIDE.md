@@ -608,6 +608,7 @@ SSO 로 들어온 계정의 역할은 클레임 매핑(`SSO_KEYCLOAK_ROLE_CLAIM`
 - **백업·복구**: `/data` 볼륨이 전부입니다. `backup-volume-v0.86.16.sh` 로 tar 백업, 복구는 볼륨을 유지한 채 컨테이너만 교체합니다 — [OPERATIONS.md 6](OPERATIONS.md#6-백업--복구).
 - **업그레이드**: 새 tar.gz 를 `docker load` → `GATEWAY_VERSION` 만 올려 `docker compose up -d`. 마이그레이션은 기동 시 자동입니다. **되돌리기**: 업그레이드 전 백업을 복구하고 `GATEWAY_VERSION` 을 이전 값으로 되돌려 `up -d`. 새 버전이 추가한 컬럼은 이전 바이너리가 무시합니다.
 - **보존**: `RETENTION_*` 일수를 넘긴 요청·프롬프트·응답은 `RETENTION_INTERVAL` 마다 지워집니다. 콘솔 **시스템 설정 → 데이터 보존**에서 무엇이 함께 삭제되는지 볼 수 있습니다(9.3 절).
+- **업무 활용 분석**: AI가 어떤 업무에 쓰이는지 업무 유형·조직·모델별로 봅니다. 콘솔 **업무 활용 분석 → 업무 활용 분석**(`/app/insights/usage`)에서 비중·추이·조직 히트맵·자동화 후보·인사이트를, **업무 분류 관리**(`/app/insights/classification`)에서 분류 체계·규칙·정책 버전·검토·재분류를 다룹니다. 분류는 저장된 요청 로그를 워커가 뒤따라가며 수행하므로 요청 처리와 스트리밍에는 영향이 없고, 분류 모델 전송은 기본으로 꺼져 있습니다. 팀 관리자는 자기 팀만 보며, 사용자 수가 적은 셀은 가립니다 — [WORK_INTELLIGENCE_GUIDE.md](WORK_INTELLIGENCE_GUIDE.md).
 
 ![시스템 상태 — 프로세스·DB·업스트림 상태와 런타임 지표](images/guide/system-health.png)
 

@@ -5368,7 +5368,7 @@ export type UiTelemetryEventRequest = ({
     event?: 'page_load';
 }) & {
     event: 'visit' | 'legacy_fallback' | 'page_load';
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.dlp' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'insights.usage' | 'insights.classification' | 'finops.overview' | 'security.overview' | 'security.dlp' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     load_ms?: number;
     /**
      * 128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.
@@ -5377,7 +5377,7 @@ export type UiTelemetryEventRequest = ({
 };
 
 export type UiTelemetryFeatureCount = {
-    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.dlp' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'routing.dynamic' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.io' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'prompts.regression' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'insights.usage' | 'insights.classification' | 'finops.overview' | 'security.overview' | 'security.dlp' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.secrets' | 'system.settings';
     legacy_opens: number;
     load_max_ms?: number;
     load_samples?: number;
@@ -5497,6 +5497,79 @@ export type WorkAppRunMetadata = {
     team: string;
     trace_id: string;
     user_id: string;
+};
+
+export type WorkIntelAutomationReview = {
+    note: string;
+    review_status: 'new' | 'reviewing' | 'accepted' | 'dismissed';
+};
+
+export type WorkIntelCorrect = {
+    action_type?: string;
+    category_id: string;
+    reason: string;
+    request_ids: Array<string>;
+};
+
+export type WorkIntelEvaluate = {
+    limit: number;
+    use_draft: boolean;
+};
+
+/**
+ * A work intelligence response. Deliberately open: the members are described per operation and may gain fields without a contract change.
+ */
+export type WorkIntelObject = {
+    [key: string]: unknown;
+};
+
+export type WorkIntelPolicyRejection = {
+    error: {
+        [key: string]: unknown;
+    };
+    issues: Array<{
+        message: string;
+        path: string;
+    }>;
+};
+
+export type WorkIntelPolicyTest = {
+    client?: string;
+    languages?: Array<string>;
+    mcp_tools?: Array<string>;
+    model?: string;
+    task_type?: string;
+    text: string;
+    use_draft: boolean;
+    use_llm: boolean;
+};
+
+export type WorkIntelPolicyWrite = {
+    config: WorkIntelObject;
+    expected_revision: number;
+    reason: string;
+};
+
+export type WorkIntelPublish = {
+    expected_revision: number;
+    note: string;
+};
+
+export type WorkIntelRebuild = {
+    from: string;
+    reason: string;
+    to: string;
+};
+
+export type WorkIntelReclassifyRun = {
+    reason: string;
+    reviewed_at: string;
+    revision: string;
+};
+
+export type WorkIntelRollback = {
+    note: string;
+    version: number;
 };
 
 export type WorkflowDefinition = {
@@ -18503,6 +18576,2139 @@ export type GetAdminWaterfallResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminWorkIntelAutomationData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Review status: new, reviewing, accepted or dismissed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+    };
+    url: '/admin/work-intel/automation';
+};
+
+export type GetAdminWorkIntelAutomationErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelAutomationError = GetAdminWorkIntelAutomationErrors[keyof GetAdminWorkIntelAutomationErrors];
+
+export type GetAdminWorkIntelAutomationResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelAutomationResponse = GetAdminWorkIntelAutomationResponses[keyof GetAdminWorkIntelAutomationResponses];
+
+export type PostAdminWorkIntelAutomationIdReviewData = {
+    body: WorkIntelAutomationReview;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/work-intel/automation/{id}/review';
+};
+
+export type PostAdminWorkIntelAutomationIdReviewErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelAutomationIdReviewError = PostAdminWorkIntelAutomationIdReviewErrors[keyof PostAdminWorkIntelAutomationIdReviewErrors];
+
+export type PostAdminWorkIntelAutomationIdReviewResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelAutomationIdReviewResponse = PostAdminWorkIntelAutomationIdReviewResponses[keyof PostAdminWorkIntelAutomationIdReviewResponses];
+
+export type GetAdminWorkIntelCategoriesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+        /**
+         * Category ID whose children to list; omit for the top level.
+         */
+        parent?: string;
+    };
+    url: '/admin/work-intel/categories';
+};
+
+export type GetAdminWorkIntelCategoriesErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelCategoriesError = GetAdminWorkIntelCategoriesErrors[keyof GetAdminWorkIntelCategoriesErrors];
+
+export type GetAdminWorkIntelCategoriesResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelCategoriesResponse = GetAdminWorkIntelCategoriesResponses[keyof GetAdminWorkIntelCategoriesResponses];
+
+export type GetAdminWorkIntelExportCsvData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+        /**
+         * Which table to export.
+         */
+        view: 'categories' | 'teams' | 'models' | 'sessions' | 'requests';
+    };
+    url: '/admin/work-intel/export.csv';
+};
+
+export type GetAdminWorkIntelExportCsvErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelExportCsvError = GetAdminWorkIntelExportCsvErrors[keyof GetAdminWorkIntelExportCsvErrors];
+
+export type GetAdminWorkIntelExportCsvResponses = {
+    /**
+     * UTF-8 CSV with a byte order mark.
+     */
+    200: string;
+};
+
+export type GetAdminWorkIntelExportCsvResponse = GetAdminWorkIntelExportCsvResponses[keyof GetAdminWorkIntelExportCsvResponses];
+
+export type GetAdminWorkIntelFlowData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+        /**
+         * How many of the largest entries to include.
+         */
+        top?: number;
+    };
+    url: '/admin/work-intel/flow';
+};
+
+export type GetAdminWorkIntelFlowErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelFlowError = GetAdminWorkIntelFlowErrors[keyof GetAdminWorkIntelFlowErrors];
+
+export type GetAdminWorkIntelFlowResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelFlowResponse = GetAdminWorkIntelFlowResponses[keyof GetAdminWorkIntelFlowResponses];
+
+export type GetAdminWorkIntelInsightsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+    };
+    url: '/admin/work-intel/insights';
+};
+
+export type GetAdminWorkIntelInsightsErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelInsightsError = GetAdminWorkIntelInsightsErrors[keyof GetAdminWorkIntelInsightsErrors];
+
+export type GetAdminWorkIntelInsightsResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelInsightsResponse = GetAdminWorkIntelInsightsResponses[keyof GetAdminWorkIntelInsightsResponses];
+
+export type PostAdminWorkIntelInsightsRunData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/insights/run';
+};
+
+export type PostAdminWorkIntelInsightsRunErrors = {
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelInsightsRunError = PostAdminWorkIntelInsightsRunErrors[keyof PostAdminWorkIntelInsightsRunErrors];
+
+export type PostAdminWorkIntelInsightsRunResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelInsightsRunResponse = PostAdminWorkIntelInsightsRunResponses[keyof PostAdminWorkIntelInsightsRunResponses];
+
+export type GetAdminWorkIntelMatrixData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+        /**
+         * How many of the largest entries to include.
+         */
+        top?: number;
+    };
+    url: '/admin/work-intel/matrix';
+};
+
+export type GetAdminWorkIntelMatrixErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelMatrixError = GetAdminWorkIntelMatrixErrors[keyof GetAdminWorkIntelMatrixErrors];
+
+export type GetAdminWorkIntelMatrixResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelMatrixResponse = GetAdminWorkIntelMatrixResponses[keyof GetAdminWorkIntelMatrixResponses];
+
+export type GetAdminWorkIntelModelsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+    };
+    url: '/admin/work-intel/models';
+};
+
+export type GetAdminWorkIntelModelsErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelModelsError = GetAdminWorkIntelModelsErrors[keyof GetAdminWorkIntelModelsErrors];
+
+export type GetAdminWorkIntelModelsResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelModelsResponse = GetAdminWorkIntelModelsResponses[keyof GetAdminWorkIntelModelsResponses];
+
+export type GetAdminWorkIntelOverviewData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+    };
+    url: '/admin/work-intel/overview';
+};
+
+export type GetAdminWorkIntelOverviewErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelOverviewError = GetAdminWorkIntelOverviewErrors[keyof GetAdminWorkIntelOverviewErrors];
+
+export type GetAdminWorkIntelOverviewResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelOverviewResponse = GetAdminWorkIntelOverviewResponses[keyof GetAdminWorkIntelOverviewResponses];
+
+export type GetAdminWorkIntelPolicyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/policy';
+};
+
+export type GetAdminWorkIntelPolicyErrors = {
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelPolicyError = GetAdminWorkIntelPolicyErrors[keyof GetAdminWorkIntelPolicyErrors];
+
+export type GetAdminWorkIntelPolicyResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelPolicyResponse = GetAdminWorkIntelPolicyResponses[keyof GetAdminWorkIntelPolicyResponses];
+
+export type PutAdminWorkIntelPolicyData = {
+    body: WorkIntelPolicyWrite;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/policy';
+};
+
+export type PutAdminWorkIntelPolicyErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * work_policy_conflict: the draft changed since it was loaded.
+     */
+    409: AppError;
+    /**
+     * work_policy_invalid: the policy has errors; issues lists them by path.
+     */
+    422: WorkIntelPolicyRejection;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PutAdminWorkIntelPolicyError = PutAdminWorkIntelPolicyErrors[keyof PutAdminWorkIntelPolicyErrors];
+
+export type PutAdminWorkIntelPolicyResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PutAdminWorkIntelPolicyResponse = PutAdminWorkIntelPolicyResponses[keyof PutAdminWorkIntelPolicyResponses];
+
+export type PostAdminWorkIntelPolicyEvaluateData = {
+    body: WorkIntelEvaluate;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/policy/evaluate';
+};
+
+export type PostAdminWorkIntelPolicyEvaluateErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelPolicyEvaluateError = PostAdminWorkIntelPolicyEvaluateErrors[keyof PostAdminWorkIntelPolicyEvaluateErrors];
+
+export type PostAdminWorkIntelPolicyEvaluateResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelPolicyEvaluateResponse = PostAdminWorkIntelPolicyEvaluateResponses[keyof PostAdminWorkIntelPolicyEvaluateResponses];
+
+export type PostAdminWorkIntelPolicyPublishData = {
+    body: WorkIntelPublish;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/policy/publish';
+};
+
+export type PostAdminWorkIntelPolicyPublishErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelPolicyPublishError = PostAdminWorkIntelPolicyPublishErrors[keyof PostAdminWorkIntelPolicyPublishErrors];
+
+export type PostAdminWorkIntelPolicyPublishResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelPolicyPublishResponse = PostAdminWorkIntelPolicyPublishResponses[keyof PostAdminWorkIntelPolicyPublishResponses];
+
+export type PostAdminWorkIntelPolicyRollbackData = {
+    body: WorkIntelRollback;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/policy/rollback';
+};
+
+export type PostAdminWorkIntelPolicyRollbackErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelPolicyRollbackError = PostAdminWorkIntelPolicyRollbackErrors[keyof PostAdminWorkIntelPolicyRollbackErrors];
+
+export type PostAdminWorkIntelPolicyRollbackResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelPolicyRollbackResponse = PostAdminWorkIntelPolicyRollbackResponses[keyof PostAdminWorkIntelPolicyRollbackResponses];
+
+export type PostAdminWorkIntelPolicyTestData = {
+    body: WorkIntelPolicyTest;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/policy/test';
+};
+
+export type PostAdminWorkIntelPolicyTestErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelPolicyTestError = PostAdminWorkIntelPolicyTestErrors[keyof PostAdminWorkIntelPolicyTestErrors];
+
+export type PostAdminWorkIntelPolicyTestResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelPolicyTestResponse = PostAdminWorkIntelPolicyTestResponses[keyof PostAdminWorkIntelPolicyTestResponses];
+
+export type GetAdminWorkIntelPolicyVersionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/policy/versions';
+};
+
+export type GetAdminWorkIntelPolicyVersionsErrors = {
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelPolicyVersionsError = GetAdminWorkIntelPolicyVersionsErrors[keyof GetAdminWorkIntelPolicyVersionsErrors];
+
+export type GetAdminWorkIntelPolicyVersionsResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelPolicyVersionsResponse = GetAdminWorkIntelPolicyVersionsResponses[keyof GetAdminWorkIntelPolicyVersionsResponses];
+
+export type GetAdminWorkIntelPolicyVersionsVersionData = {
+    body?: never;
+    path: {
+        version: string;
+    };
+    query?: never;
+    url: '/admin/work-intel/policy/versions/{version}';
+};
+
+export type GetAdminWorkIntelPolicyVersionsVersionErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelPolicyVersionsVersionError = GetAdminWorkIntelPolicyVersionsVersionErrors[keyof GetAdminWorkIntelPolicyVersionsVersionErrors];
+
+export type GetAdminWorkIntelPolicyVersionsVersionResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelPolicyVersionsVersionResponse = GetAdminWorkIntelPolicyVersionsVersionResponses[keyof GetAdminWorkIntelPolicyVersionsVersionResponses];
+
+export type GetAdminWorkIntelProductivityData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+    };
+    url: '/admin/work-intel/productivity';
+};
+
+export type GetAdminWorkIntelProductivityErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelProductivityError = GetAdminWorkIntelProductivityErrors[keyof GetAdminWorkIntelProductivityErrors];
+
+export type GetAdminWorkIntelProductivityResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelProductivityResponse = GetAdminWorkIntelProductivityResponses[keyof GetAdminWorkIntelProductivityResponses];
+
+export type PostAdminWorkIntelRebuildData = {
+    body: WorkIntelRebuild;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/rebuild';
+};
+
+export type PostAdminWorkIntelRebuildErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelRebuildError = PostAdminWorkIntelRebuildErrors[keyof PostAdminWorkIntelRebuildErrors];
+
+export type PostAdminWorkIntelRebuildResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelRebuildResponse = PostAdminWorkIntelRebuildResponses[keyof PostAdminWorkIntelRebuildResponses];
+
+export type GetAdminWorkIntelReclassifyData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day to reclassify, a Seoul calendar date (YYYY-MM-DD).
+         */
+        from?: string;
+        /**
+         * Last day to reclassify, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * How the request was classified: rule, llm, cache or manual.
+         */
+        method?: string;
+    };
+    url: '/admin/work-intel/reclassify';
+};
+
+export type GetAdminWorkIntelReclassifyErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelReclassifyError = GetAdminWorkIntelReclassifyErrors[keyof GetAdminWorkIntelReclassifyErrors];
+
+export type GetAdminWorkIntelReclassifyResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelReclassifyResponse = GetAdminWorkIntelReclassifyResponses[keyof GetAdminWorkIntelReclassifyResponses];
+
+export type PostAdminWorkIntelReclassifyData = {
+    body: WorkIntelReclassifyRun;
+    path?: never;
+    query: {
+        /**
+         * Confirms that the preview was reviewed.
+         */
+        reviewed: '1';
+    };
+    url: '/admin/work-intel/reclassify';
+};
+
+export type PostAdminWorkIntelReclassifyErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * work_reclassify_expired, work_reclassify_conflict or work_job_active: preview again before starting.
+     */
+    409: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelReclassifyError = PostAdminWorkIntelReclassifyErrors[keyof PostAdminWorkIntelReclassifyErrors];
+
+export type PostAdminWorkIntelReclassifyResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelReclassifyResponse = PostAdminWorkIntelReclassifyResponses[keyof PostAdminWorkIntelReclassifyResponses];
+
+export type GetAdminWorkIntelReclassifyJobsIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/work-intel/reclassify/jobs/{id}';
+};
+
+export type GetAdminWorkIntelReclassifyJobsIdErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelReclassifyJobsIdError = GetAdminWorkIntelReclassifyJobsIdErrors[keyof GetAdminWorkIntelReclassifyJobsIdErrors];
+
+export type GetAdminWorkIntelReclassifyJobsIdResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelReclassifyJobsIdResponse = GetAdminWorkIntelReclassifyJobsIdResponses[keyof GetAdminWorkIntelReclassifyJobsIdResponses];
+
+export type GetAdminWorkIntelRequestsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+        /**
+         * Lowest confidence to include.
+         */
+        min_conf?: number;
+        /**
+         * Highest confidence to include.
+         */
+        max_conf?: number;
+        /**
+         * How the request was classified: rule, llm, cache or manual.
+         */
+        method?: string;
+    };
+    url: '/admin/work-intel/requests';
+};
+
+export type GetAdminWorkIntelRequestsErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelRequestsError = GetAdminWorkIntelRequestsErrors[keyof GetAdminWorkIntelRequestsErrors];
+
+export type GetAdminWorkIntelRequestsResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelRequestsResponse = GetAdminWorkIntelRequestsResponses[keyof GetAdminWorkIntelRequestsResponses];
+
+export type GetAdminWorkIntelReviewData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Classification status to restrict to: review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Highest confidence to include.
+         */
+        max_conf?: number;
+        /**
+         * Page size.
+         */
+        limit?: number;
+        /**
+         * Rows to skip; at most 100,000.
+         */
+        offset?: number;
+    };
+    url: '/admin/work-intel/review';
+};
+
+export type GetAdminWorkIntelReviewErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelReviewError = GetAdminWorkIntelReviewErrors[keyof GetAdminWorkIntelReviewErrors];
+
+export type GetAdminWorkIntelReviewResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelReviewResponse = GetAdminWorkIntelReviewResponses[keyof GetAdminWorkIntelReviewResponses];
+
+export type PostAdminWorkIntelReviewCorrectData = {
+    body: WorkIntelCorrect;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/review/correct';
+};
+
+export type PostAdminWorkIntelReviewCorrectErrors = {
+    /**
+     * The body is not valid JSON, or a field or parameter is missing or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:write.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminWorkIntelReviewCorrectError = PostAdminWorkIntelReviewCorrectErrors[keyof PostAdminWorkIntelReviewCorrectErrors];
+
+export type PostAdminWorkIntelReviewCorrectResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type PostAdminWorkIntelReviewCorrectResponse = PostAdminWorkIntelReviewCorrectResponses[keyof PostAdminWorkIntelReviewCorrectResponses];
+
+export type GetAdminWorkIntelSessionsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+        /**
+         * Field to order the sessions by.
+         */
+        sort?: string;
+        /**
+         * Session state to restrict to.
+         */
+        session_status?: string;
+    };
+    url: '/admin/work-intel/sessions';
+};
+
+export type GetAdminWorkIntelSessionsErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelSessionsError = GetAdminWorkIntelSessionsErrors[keyof GetAdminWorkIntelSessionsErrors];
+
+export type GetAdminWorkIntelSessionsResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelSessionsResponse = GetAdminWorkIntelSessionsResponses[keyof GetAdminWorkIntelSessionsResponses];
+
+export type GetAdminWorkIntelSessionsIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/work-intel/sessions/{id}';
+};
+
+export type GetAdminWorkIntelSessionsIdErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelSessionsIdError = GetAdminWorkIntelSessionsIdErrors[keyof GetAdminWorkIntelSessionsIdErrors];
+
+export type GetAdminWorkIntelSessionsIdResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelSessionsIdResponse = GetAdminWorkIntelSessionsIdResponses[keyof GetAdminWorkIntelSessionsIdResponses];
+
+export type GetAdminWorkIntelStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/work-intel/status';
+};
+
+export type GetAdminWorkIntelStatusErrors = {
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelStatusError = GetAdminWorkIntelStatusErrors[keyof GetAdminWorkIntelStatusErrors];
+
+export type GetAdminWorkIntelStatusResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelStatusResponse = GetAdminWorkIntelStatusResponses[keyof GetAdminWorkIntelStatusResponses];
+
+export type GetAdminWorkIntelTeamsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+    };
+    url: '/admin/work-intel/teams';
+};
+
+export type GetAdminWorkIntelTeamsErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelTeamsError = GetAdminWorkIntelTeamsErrors[keyof GetAdminWorkIntelTeamsErrors];
+
+export type GetAdminWorkIntelTeamsResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelTeamsResponse = GetAdminWorkIntelTeamsResponses[keyof GetAdminWorkIntelTeamsResponses];
+
+export type GetAdminWorkIntelTrendData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+        /**
+         * Width of one point on the time axis.
+         */
+        bucket?: 'day' | 'week';
+        /**
+         * How many of the largest entries to include.
+         */
+        top?: number;
+    };
+    url: '/admin/work-intel/trend';
+};
+
+export type GetAdminWorkIntelTrendErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelTrendError = GetAdminWorkIntelTrendErrors[keyof GetAdminWorkIntelTrendErrors];
+
+export type GetAdminWorkIntelTrendResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelTrendResponse = GetAdminWorkIntelTrendResponses[keyof GetAdminWorkIntelTrendResponses];
+
+export type GetAdminWorkIntelTrendsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * First day of the period, a Seoul calendar date (YYYY-MM-DD). The default period is the last 30 days.
+         */
+        from?: string;
+        /**
+         * Last day of the period, a Seoul calendar date (YYYY-MM-DD).
+         */
+        to?: string;
+        /**
+         * Whether to compute the previous period of the same length for comparison.
+         */
+        compare?: 'prev' | 'none';
+        /**
+         * Team to restrict to. A team-scoped administrator is always restricted to their own team.
+         */
+        team?: string;
+        /**
+         * User to restrict to.
+         */
+        user?: string;
+        /**
+         * Work category ID at any level.
+         */
+        category?: string;
+        /**
+         * Action type ID, such as read, analyze, create, modify or verify.
+         */
+        action?: string;
+        /**
+         * Model name.
+         */
+        model?: string;
+        /**
+         * Provider name.
+         */
+        provider?: string;
+        /**
+         * Client name, such as Claude Code or Cursor.
+         */
+        client?: string;
+        /**
+         * MCP tool name.
+         */
+        tool?: string;
+        /**
+         * Classification status: classified, review, unclassified or failed.
+         */
+        status?: string;
+        /**
+         * The measure that rankings, shares and chart values are computed in.
+         */
+        metric?: 'sessions' | 'requests' | 'users' | 'tokens' | 'cost' | 'mcp_calls';
+        /**
+         * Page size for list reads.
+         */
+        limit?: number;
+        /**
+         * Rows to skip for list reads. List counts stop at 100,000, and a larger offset returns 400 work_intel_offset_too_large.
+         */
+        offset?: number;
+    };
+    url: '/admin/work-intel/trends';
+};
+
+export type GetAdminWorkIntelTrendsErrors = {
+    /**
+     * A parameter is malformed or out of range.
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: the token is missing or invalid, or lacks admin:read.
+     */
+    401: AppError;
+    /**
+     * The caller may not perform this operation, or a team-scoped administrator asked for data outside their own team.
+     */
+    403: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminWorkIntelTrendsError = GetAdminWorkIntelTrendsErrors[keyof GetAdminWorkIntelTrendsErrors];
+
+export type GetAdminWorkIntelTrendsResponses = {
+    /**
+     * OK
+     */
+    200: WorkIntelObject;
+};
+
+export type GetAdminWorkIntelTrendsResponse = GetAdminWorkIntelTrendsResponses[keyof GetAdminWorkIntelTrendsResponses];
 
 export type GetAdminWorkMapData = {
     body?: never;

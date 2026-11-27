@@ -1,0 +1,581 @@
+/* Work-usage charts. Hand-built SVG and HTML: the console ships no chart library.
+
+   Categorical slots are the data-viz reference palette's eight hues in its fixed
+   order, validated on this console's light (#ffffff) and dark (#171d2a) card
+   surfaces: adjacent CVD ΔE 11.8 / 10.1, normal-vision ΔE 20.5 / 21.1. Four light
+   slots sit under 3:1 against the surface, so every chart also labels its marks
+   and offers a table. A ninth to eleventh category reuses a hue with a hatch
+   (palette.ts). The heat ramp is one hue; its ink is set per step (≥ 5.3:1). */
+.wi-viz {
+  --wi-cat-1: #257de0;
+  --wi-cat-2: #f47230;
+  --wi-cat-3: #00b894;
+  --wi-cat-4: #f2a600;
+  --wi-cat-5: #ee7fac;
+  --wi-cat-6: #008a17;
+  --wi-cat-7: #6a4ce2;
+  --wi-cat-8: #ec4647;
+  --wi-cat-neutral: #6b7689;
+  --wi-cat-unclassified: var(--color-muted);
+  --wi-cat-failed: var(--color-danger);
+  --wi-heat-1: #cce3fd;
+  --wi-heat-2: #9dc8f7;
+  --wi-heat-3: #519ced;
+  --wi-heat-4: #1b64be;
+  --wi-heat-ink-1: #172033;
+  --wi-heat-ink-2: #172033;
+  --wi-heat-ink-3: #0f1420;
+  --wi-heat-ink-4: #ffffff;
+  --wi-grid: var(--color-border);
+  --wi-axis: var(--color-muted);
+  min-width: 0;
+}
+
+:root[data-theme="dark"] .wi-viz {
+  --wi-cat-1: #338ced;
+  --wi-cat-2: #e76624;
+  --wi-cat-3: #00a888;
+  --wi-cat-4: #d28e05;
+  --wi-cat-5: #e24d8b;
+  --wi-cat-6: #0aac23;
+  --wi-cat-7: #9887ef;
+  --wi-cat-8: #eb6263;
+  --wi-cat-neutral: #8a94a6;
+  --wi-heat-1: #0e3d7e;
+  --wi-heat-2: #1757ac;
+  --wi-heat-3: #338ced;
+  --wi-heat-4: #84b9f3;
+  --wi-heat-ink-1: #e7eaf0;
+  --wi-heat-ink-2: #ffffff;
+  --wi-heat-ink-3: #0f1420;
+  --wi-heat-ink-4: #0f1420;
+}
+
+.wi-chart {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+}
+
+.wi-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.wi-chart-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.wi-chart-scroll:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.wi-chart-canvas {
+  position: relative;
+}
+
+.wi-chart-wide {
+  min-width: 34rem;
+}
+
+.wi-axis-text {
+  fill: var(--wi-axis);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wi-label-text {
+  fill: var(--color-foreground);
+  font-size: 12px;
+}
+
+.wi-grid-line {
+  stroke: var(--wi-grid);
+  stroke-width: 1;
+}
+
+.wi-mark {
+  cursor: default;
+}
+
+.wi-mark[data-selectable="true"] {
+  cursor: pointer;
+}
+
+.wi-mark[data-selectable="true"]:hover {
+  filter: brightness(1.08);
+}
+
+.wi-chart-note {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+/* Swatches: the colour key next to a label. Hatched paints repeat the SVG hatch. */
+.wi-swatch {
+  flex: none;
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  background-color: var(--wi-swatch, var(--wi-cat-neutral));
+}
+
+.wi-swatch[data-hatched="true"] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 2px, var(--color-card) 2px 4px);
+}
+
+/* Legend: always present for two or more series, with values, and the keyboard
+   route to "select this series" because an SVG picture cannot hold focusable marks. */
+.wi-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+}
+
+.wi-legend[data-layout="column"] {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 2px;
+}
+
+.wi-legend-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 1.75rem;
+  padding: 2px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.wi-legend[data-layout="row"] .wi-legend-entry {
+  display: inline-flex;
+  width: auto;
+}
+
+button.wi-legend-entry {
+  cursor: pointer;
+}
+
+button.wi-legend-entry:hover {
+  background: var(--color-muted-soft);
+}
+
+button.wi-legend-entry:focus-visible,
+.wi-hit:focus-visible,
+.wi-bar-row:focus-visible,
+.wi-heat-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.wi-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wi-legend-value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wi-legend-detail {
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Donut */
+.wi-donut {
+  display: grid;
+  grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.wi-donut-center-value {
+  fill: var(--color-foreground);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.wi-donut-center-label {
+  fill: var(--color-muted);
+  font-size: 11px;
+}
+
+/* Hit targets laid over SVG marks, in the same coordinates as the viewBox. */
+.wi-hit {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wi-hit[data-shape="circle"] {
+  border-radius: 50%;
+}
+
+.wi-hit:disabled {
+  cursor: default;
+}
+
+/* Treemap: tinted tiles with ink in the text colour; the accent bar carries the hue. */
+.wi-treemap-tile {
+  container-type: size;
+  display: grid;
+  align-content: start;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+}
+
+.wi-treemap-copy {
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px 4px 12px;
+  font-size: 0.8125rem;
+  line-height: 1.25;
+}
+
+.wi-treemap-copy strong,
+.wi-treemap-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wi-treemap-copy span {
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@container (max-width: 4.25rem) {
+  .wi-treemap-copy {
+    display: none;
+  }
+}
+
+@container (max-height: 1.9rem) {
+  .wi-treemap-copy {
+    display: none;
+  }
+}
+
+@container (max-height: 3rem) {
+  .wi-treemap-copy span {
+    display: none;
+  }
+}
+
+/* Heatmap: a real table; the fill is the intensity, the text is the value. */
+.wi-heatmap-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.wi-heatmap {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: 0.8125rem;
+}
+
+.wi-heatmap th {
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-muted);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wi-heatmap thead th {
+  max-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.wi-heatmap tbody th {
+  max-width: 10rem;
+  overflow: hidden;
+  color: var(--color-foreground);
+  text-overflow: ellipsis;
+}
+
+.wi-heat-cell {
+  min-width: 3.5rem;
+  padding: 0;
+  border-radius: var(--radius-small);
+  background: var(--color-muted-soft);
+  color: var(--color-foreground);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wi-heat-cell[data-level="1"] {
+  background: var(--wi-heat-1);
+  color: var(--wi-heat-ink-1);
+}
+.wi-heat-cell[data-level="2"] {
+  background: var(--wi-heat-2);
+  color: var(--wi-heat-ink-2);
+}
+.wi-heat-cell[data-level="3"] {
+  background: var(--wi-heat-3);
+  color: var(--wi-heat-ink-3);
+}
+.wi-heat-cell[data-level="4"] {
+  background: var(--wi-heat-4);
+  color: var(--wi-heat-ink-4);
+}
+
+.wi-heat-cell[data-suppressed="true"] {
+  background: repeating-linear-gradient(135deg, var(--color-muted-soft) 0 4px, var(--color-card) 4px 8px);
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.wi-heat-value,
+.wi-heat-button {
+  display: block;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  white-space: nowrap;
+}
+
+.wi-heat-button {
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.wi-heat-scale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.wi-heat-scale-step {
+  display: inline-block;
+  width: 1.25rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  background: var(--color-muted-soft);
+}
+
+.wi-heat-scale-step[data-level="1"] {
+  background: var(--wi-heat-1);
+}
+.wi-heat-scale-step[data-level="2"] {
+  background: var(--wi-heat-2);
+}
+.wi-heat-scale-step[data-level="3"] {
+  background: var(--wi-heat-3);
+}
+.wi-heat-scale-step[data-level="4"] {
+  background: var(--wi-heat-4);
+}
+
+/* Ranked bars: a list of rows; a selectable row is one button. */
+.wi-bars {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wi-bar-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 13rem) minmax(3rem, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 2rem;
+  padding: 2px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+button.wi-bar-row {
+  cursor: pointer;
+}
+
+button.wi-bar-row:hover {
+  background: var(--color-muted-soft);
+}
+
+.wi-bar-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.wi-bar-label span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wi-bar-track {
+  display: block;
+  height: 0.5rem;
+  border-radius: var(--radius-small);
+  background: var(--color-muted-soft);
+}
+
+.wi-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  background-color: var(--wi-swatch, var(--wi-cat-1));
+}
+
+.wi-bar-fill[data-hatched="true"] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 3px, var(--color-card) 3px 5px);
+}
+
+.wi-bar-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wi-bar-value small {
+  color: var(--color-muted);
+}
+
+/* "표로 보기": every chart's values as a table. */
+.wi-chart-table > summary {
+  width: fit-content;
+  padding: var(--space-1) 0;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.wi-chart-table > summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 40rem) {
+  .wi-donut {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .wi-donut svg {
+    max-width: 12rem;
+  }
+
+  .wi-donut .wi-legend {
+    width: 100%;
+  }
+
+  .wi-bar-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .wi-bar-row .wi-bar-track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.wi-treemap-canvas {
+  height: 18.75rem;
+}
+
+.wi-treemap-canvas svg {
+  height: 100%;
+}
+
+div.wi-treemap-tile {
+  cursor: default;
+}
+
+/* Stacked area hover read-out; the table carries the same numbers. */
+.wi-tooltip {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  min-width: 9rem;
+  max-width: 16rem;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-card-raised);
+  box-shadow: var(--shadow-small);
+  color: var(--color-foreground);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+
+.wi-tooltip strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.wi-tooltip ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wi-tooltip li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.wi-tooltip li span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wi-tooltip li span:last-child {
+  font-variant-numeric: tabular-nums;
+}

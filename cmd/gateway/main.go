@@ -72,6 +72,12 @@ func main() {
 	anomalies.Start()
 	defer anomalies.Stop()
 
+	// Work classification follows the request log in the background; it is started
+	// here and nowhere else, so nothing on the request path depends on it.
+	workIntel := proxy.NewWorkIntelWorker(srv)
+	workIntel.Start(db.LifecycleContext())
+	defer workIntel.Stop()
+
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Routes(),
