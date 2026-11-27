@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -342,8 +343,18 @@ func TestMattermostNotifyLogNeverIncludesWebhookURL(t *testing.T) {
 	s.client = &http.Client{Transport: modelsRoundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("raw-sensitive-driver-detail") })}
 	logs := make(mattermostLogSink, 8)
 	original := slog.Default()
+	// slog.SetDefault also points the standard logger at the new handler, and
+	// restoring the slog default does not undo that: the default slog handler
+	// writes through the standard logger. Without restoring both, every later
+	// log line of the package would go into this eight-slot channel and the
+	// ninth would block its caller forever.
+	standardOutput, standardFlags := log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
-	defer slog.SetDefault(original)
+	defer func() {
+		slog.SetDefault(original)
+		log.SetOutput(standardOutput)
+		log.SetFlags(standardFlags)
+	}()
 	s.notifyMattermost(t.Context(), "secret", "synthetic event")
 	select {
 	case line := <-logs:
